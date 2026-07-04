@@ -27,6 +27,7 @@ from kx.commands.state import StateCommand
 from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config
+from kx.errors import handle_errors
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
 from kx.index import IndexService
@@ -91,6 +92,7 @@ _index = IndexService()
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def get(
     ctx: typer.Context,
     resource: str,
@@ -100,11 +102,7 @@ def get(
 ):
     """List resources and assign index numbers for use with other commands."""
     command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
-    try:
-        result = command.execute(resource, match, ctx.args)
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    result = command.execute(resource, match, ctx.args)
     all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in ctx.args)
     if all_namespaces:
         namespace = "all namespaces"
@@ -120,6 +118,7 @@ def get(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def describe(ctx: typer.Context, indexes: list[int]):
     """Show full kubectl describe output for one or more indexed resources."""
     command = DescribeCommand(state=_state, kubectl=_kubectl)
@@ -130,6 +129,7 @@ def describe(ctx: typer.Context, indexes: list[int]):
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def events(indexes: list[int]):
     """Show Kubernetes events for one or more indexed resources."""
     command = EventsCommand(state=_state, events=_events)
@@ -149,19 +149,17 @@ def events(indexes: list[int]):
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def logs(ctx: typer.Context, index: int):
     """Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services."""
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
     command = LogsCommand(state=_state, kubectl=_kubectl)
-    try:
-        command.execute(index, ctx.args)
-    except (ValueError, RuntimeError) as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    command.execute(index, ctx.args)
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def labels(
     indexes: list[int],
     selector: bool = typer.Option(
@@ -171,13 +169,7 @@ def labels(
     """Show labels for one or more indexed resources; --selector formats output as a label selector."""
     command = LabelsCommand(state=_state, kubectl=_kubectl)
     for position, index in enumerate(indexes):
-        try:
-            label_map = command.execute(index)
-        except typer.Exit:
-            raise
-        except RuntimeError as e:
-            console.print_error(str(e))
-            raise typer.Exit(1)
+        label_map = command.execute(index)
         name, ns, kind = _state.fields(index)
         count = len(label_map)
         extra = f"{count} {'item' if count == 1 else 'items'}"
@@ -193,6 +185,7 @@ def labels(
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def yaml(
     indexes: list[int],
     show: Optional[str] = typer.Option(
@@ -207,14 +200,11 @@ def yaml(
     for index in indexes:
         name, ns, kind = _state.fields(index)
         console.print_banner(kind, name, namespace=ns)
-        try:
-            console.print_raw(command.execute(index, fields))
-        except RuntimeError as e:
-            console.print_error(str(e))
-            raise typer.Exit(1)
+        console.print_raw(command.execute(index, fields))
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def delete(
     indexes: list[int],
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
@@ -226,19 +216,14 @@ def delete(
         confirm=lambda msg: typer.confirm(msg, abort=True),
     )
     for index in indexes:
-        try:
-            console.print_success(command.execute(index, yes))
-        except typer.Exit:
-            raise
-        except RuntimeError as e:
-            console.print_error(str(e))
-            raise typer.Exit(1)
+        console.print_success(command.execute(index, yes))
 
 
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def edit(ctx: typer.Context, index: int):
     """Open an indexed resource in your editor via kubectl edit."""
     name, ns, kind = _state.fields(index)
@@ -252,6 +237,7 @@ def edit(ctx: typer.Context, index: int):
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def exec_cmd(
     ctx: typer.Context,
     index: int,
@@ -263,14 +249,11 @@ def exec_cmd(
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
     command = ExecCommand(state=_state, kubectl=_kubectl, shells=_config.shells)
-    try:
-        command.execute(index, cmd, ctx.args)
-    except ValueError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    command.execute(index, cmd, ctx.args)
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def tree(
     index: int,
     indexed: bool = typer.Option(
@@ -290,32 +273,26 @@ def tree(
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def rollout(action: RolloutAction, index: int):
     """Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet."""
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
     command = RolloutCommand(kubectl=_kubectl, state=_state)
-    try:
-        result = command.execute(index, action)
-        if result:
-            if action == RolloutAction.history:
-                console.print_raw(result)
-            else:
-                console.print_success(result)
-    except ValueError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    result = command.execute(index, action)
+    if result:
+        if action == RolloutAction.history:
+            console.print_raw(result)
+        else:
+            console.print_success(result)
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def scale(index: int, replicas: int):
     """Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count."""
     command = ScaleCommand(kubectl=_kubectl, state=_state)
-    try:
-        console.print_success(command.execute(index, replicas))
-    except ValueError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    console.print_success(command.execute(index, replicas))
 
 
 @app.command(
@@ -323,44 +300,33 @@ def scale(index: int, replicas: int):
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def port_forward(ctx: typer.Context, index: int, port: str):
     """Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service)."""
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns, extra=port)
     command = PortForwardCommand(kubectl=_kubectl, state=_state)
-    try:
-        command.execute(index, port, ctx.args)
-    except ValueError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    command.execute(index, port, ctx.args)
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def namespace(index: int):
     """Switch to an indexed namespace; alias: kx ns (run kx get namespaces first)."""
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    try:
-        console.print_success(f"Switched to '{command.execute(index)}'")
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
-
-
-namespace._aliases = ["ns"]
+    console.print_success(f"Switched to '{command.execute(index)}'")
 
 
 @app.command(name="ns", cls=StyledCommand, hidden=True)
+@handle_errors
 def namespace_alias(index: int):
     """Alias for namespace."""
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    try:
-        console.print_success(f"Switched to '{command.execute(index)}'")
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    console.print_success(f"Switched to '{command.execute(index)}'")
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def state(
     position: Optional[int] = typer.Argument(
         default=None, help="Jump to a history position."
@@ -370,48 +336,33 @@ def state(
     ),
 ):
     """Show current state, jump to a history position, or list all entries with --all."""
-    try:
-        if all_entries:
-            console.render_state_history(_state.load_history())
-        elif position is not None:
-            console.render_state(
-                json.dumps(asdict(_state.navigate_to(position)), indent=2)
-            )
-        else:
-            console.render_state(StateCommand(state=_state).execute())
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    if all_entries:
+        console.render_state_history(_state.load_history())
+    elif position is not None:
+        console.render_state(json.dumps(asdict(_state.navigate_to(position)), indent=2))
+    else:
+        console.render_state(StateCommand(state=_state).execute())
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def drop(position: int):
     """Remove a history entry by position (shown in kx state --all)."""
-    try:
-        console.render_state_history(DropCommand(state=_state).execute(position))
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    console.render_state_history(DropCommand(state=_state).execute(position))
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def back():
     """Navigate to the previous kx get result."""
-    try:
-        console.render_state(BackCommand(state=_state).execute())
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    console.render_state(BackCommand(state=_state).execute())
 
 
 @app.command(cls=StyledCommand)
+@handle_errors
 def forward():
     """Navigate to the next kx get result."""
-    try:
-        console.render_state(ForwardCommand(state=_state).execute())
-    except RuntimeError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1)
+    console.render_state(ForwardCommand(state=_state).execute())
 
 
 if __name__ == "__main__":
