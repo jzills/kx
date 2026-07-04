@@ -21,6 +21,7 @@ dev = [
     "ruff",
     "pre-commit",
     "pytest",
+    "pytest-cov",
 ]
 
 [project.scripts]
