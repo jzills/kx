@@ -11,7 +11,8 @@ class DescribeCommand:
         self.state = state
         self.kubectl = kubectl
 
-    def execute(self, index: int, extra_args: list[str] = []) -> None:
+    def execute(self, index: int, extra_args: list[str] | None = None) -> None:
+        extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         self.kubectl.run_interactive(
             ["describe", kind, name, "-n", namespace, *extra_args]

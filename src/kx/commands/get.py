@@ -28,8 +28,9 @@ class GetCommand:
         self,
         resource: str,
         filter_term: str | None = None,
-        extra_args: list[str] = [],
+        extra_args: list[str] | None = None,
     ) -> str:
+        extra_args = extra_args or []
         output = self.kubectl.run(["get", resource, *extra_args])
         if filter_term:
             output = self.index.filter(output, filter_term)

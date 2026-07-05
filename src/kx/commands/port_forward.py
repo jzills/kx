@@ -17,7 +17,10 @@ class PortForwardCommand:
         self.kubectl = kubectl
         self.state = state
 
-    def execute(self, index: int, port: str, extra_args: list[str] = []) -> None:
+    def execute(
+        self, index: int, port: str, extra_args: list[str] | None = None
+    ) -> None:
+        extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         if kind not in _SUPPORTED_KINDS:
             raise ValueError(f"port-forward is not supported for '{kind}'.")
