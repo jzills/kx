@@ -62,7 +62,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest -v --cov=kx --cov-report=term-missing --cov-fail-under=65
+        run: pytest -v --cov=kx --cov-report=term-missing --cov-fail-under=78
 
   build:
     name: Build distribution
