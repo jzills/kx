@@ -12,7 +12,8 @@ class LogsCommand:
         self.state = state
         self.kubectl = kubectl
 
-    def execute(self, index: int, extra_args: list[str] = []) -> None:
+    def execute(self, index: int, extra_args: list[str] | None = None) -> None:
+        extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         if kind == Kind.Pod:
             self.kubectl.run_interactive(["logs", name, "-n", namespace, *extra_args])

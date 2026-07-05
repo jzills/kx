@@ -17,8 +17,9 @@ class ExecCommand:
         self.shells = shells
 
     def execute(
-        self, index: int, cmd: list[str] | None, extra_args: list[str] = []
+        self, index: int, cmd: list[str] | None, extra_args: list[str] | None = None
     ) -> None:
+        extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         if kind != Kind.Pod:
             raise ValueError("exec is only supported for pods.")
