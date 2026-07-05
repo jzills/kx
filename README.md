@@ -108,7 +108,7 @@ kx delete 3
 
 ## State
 
-`kx` maintains a history of up to 10 `kx get` results in `~/.kx_state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor.
+`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor.
 
 ```
 $ kx get pods          # saves a new entry, cursor advances
