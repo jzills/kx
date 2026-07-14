@@ -39,4 +39,8 @@ def load_config() -> Config:
     if "KX_SHELLS" in os.environ:
         kwargs["shells"] = tuple(os.environ["KX_SHELLS"].split(","))
 
+    if "KX_NO_COLOR" in os.environ:
+        value = os.environ["KX_NO_COLOR"].lower()
+        kwargs["no_color"] = value in {"1", "true", "yes", "on"}
+
     return Config(**kwargs)
