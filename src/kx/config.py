@@ -22,7 +22,7 @@ def load_config() -> Config:
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as e:
             raise SystemExit(f"kx: error reading {_CONFIG_FILE}: {e}")
-        
+
         if "max_history" in data:
             kwargs["max_history"] = data["max_history"]
         if "shells" in data:
