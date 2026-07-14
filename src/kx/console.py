@@ -4,6 +4,7 @@ import json
 from rich.console import Console
 from rich.table import Table
 
+from kx.diagnostics import Severity
 from kx.kinds import plural_display
 from kx.state import StateHistory
 
@@ -32,6 +33,18 @@ _STATUS_RED = {
     "ImagePullBackOff",
     "ErrImagePull",
     "InvalidImageName",
+}
+
+_SEVERITY_ICON = {Severity.OK: "✓", Severity.WARNING: "!", Severity.CRITICAL: "✗"}
+_SEVERITY_COLOR = {
+    Severity.OK: COLOR_HEADER,
+    Severity.WARNING: COLOR_WARNING,
+    Severity.CRITICAL: COLOR_ERROR,
+}
+_VERDICT_LABEL = {
+    Severity.OK: "Healthy",
+    Severity.WARNING: "Warnings",
+    Severity.CRITICAL: "Critical",
 }
 
 _console = Console(force_terminal=True)
@@ -194,6 +207,123 @@ def render_events_table(text: str) -> None:
             message,
         )
 
+    _console.print(table)
+
+
+def render_diagnostic(report) -> None:
+    verdict = report.verdict
+    color = _SEVERITY_COLOR[verdict]
+    icon = _SEVERITY_ICON[verdict]
+    count = len(report.findings)
+    label = "issue" if count == 1 else "issues"
+    suffix = f" — {count} {label} found" if count else ""
+    _console.print(
+        f"[bold {color}]{icon} {_VERDICT_LABEL[verdict]}[/bold {color}]"
+        f"[{COLOR_DIM}]{suffix}[/{COLOR_DIM}]"
+    )
+
+    _console.print()
+    if report.findings:
+        for finding in report.findings:
+            f_color = _SEVERITY_COLOR[finding.severity]
+            f_icon = _SEVERITY_ICON[finding.severity]
+            _console.print(
+                f"  [{f_color}]{f_icon}[/{f_color}] [{COLOR_BODY}]{finding.summary}[/{COLOR_BODY}]"
+            )
+    else:
+        _console.print(f"  [{COLOR_DIM}]No issues detected.[/{COLOR_DIM}]")
+
+    if report.replicas is not None:
+        _render_replica_health(report.replicas)
+    _render_pod_table(report.pods)
+    _render_warning_events(report.warning_events)
+
+
+def _replica_color(value: int, desired: int) -> str:
+    if value >= desired:
+        return COLOR_HEADER
+    if value == 0 and desired > 0:
+        return COLOR_ERROR
+    return COLOR_WARNING
+
+
+def _render_replica_health(replicas) -> None:
+    _console.print()
+    ready = f"[{_replica_color(replicas.ready, replicas.desired)}]{replicas.ready}[/]"
+    available = f"[{_replica_color(replicas.available, replicas.desired)}]{replicas.available}[/]"
+    parts = [
+        f"Desired {replicas.desired}",
+        f"Ready {ready}",
+        f"Available {available}",
+        f"Updated {replicas.updated}",
+    ]
+    if replicas.generation is not None or replicas.observed_generation is not None:
+        parts.append(f"Gen {replicas.generation}/{replicas.observed_generation}")
+    _console.print(f"[{COLOR_DIM}]{' · '.join(parts)}[/{COLOR_DIM}]")
+
+
+def _render_pod_table(pods) -> None:
+    if not pods:
+        return
+    _console.print()
+    table = Table(
+        show_header=True,
+        header_style=f"bold {COLOR_HEADER}",
+        box=None,
+        padding=(0, 2),
+    )
+    table.add_column("POD")
+    table.add_column("PHASE")
+    table.add_column("READY", justify="right")
+    table.add_column("RESTARTS", justify="right")
+    table.add_column("CONTAINER")
+    table.add_column("STATE")
+    table.add_column("REASON")
+
+    for pod in pods:
+        ready = f"{pod.ready_containers}/{pod.total_containers}"
+        phase = f"[{_status_color(pod.phase)}]{pod.phase}[/]"
+        if not pod.containers:
+            table.add_row(pod.name, phase, ready, "", "", "", "")
+            continue
+        for offset, container in enumerate(pod.containers):
+            reason = container.waiting_reason or container.terminated_reason or ""
+            table.add_row(
+                pod.name if offset == 0 else "",
+                phase if offset == 0 else "",
+                ready if offset == 0 else "",
+                str(container.restart_count),
+                container.name,
+                f"[{_status_color(container.state)}]{container.state}[/]",
+                f"[{_status_color(reason)}]{reason}[/]" if reason else "",
+            )
+    _console.print(table)
+
+
+def _render_warning_events(events) -> None:
+    _console.print()
+    if not events:
+        _console.print(f"[{COLOR_DIM}]No warning events.[/{COLOR_DIM}]")
+        return
+    table = Table(
+        show_header=True,
+        header_style=f"bold {COLOR_HEADER}",
+        box=None,
+        padding=(0, 2),
+    )
+    table.add_column("REASON")
+    table.add_column("KIND/NAME")
+    table.add_column("COUNT", justify="right")
+    table.add_column("LAST")
+    table.add_column("MESSAGE")
+    for event in events:
+        table.add_row(
+            f"[{_status_color(event.reason)}]{event.reason}[/]",
+            f"{event.kind}/{event.name}",
+            str(event.count),
+            f"[{COLOR_DIM}]{event.last_timestamp or ''}[/]",
+            event.message,
+        )
     _console.print(table)
 
 

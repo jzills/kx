@@ -200,3 +200,72 @@ def test_render_state_singular_item(capture_console):
     single = '{"resources": {"nginx": "Pod"}, "namespace": "default"}'
     kx_console.render_state(single)
     assert "1 item" in capture_console.getvalue()
+
+
+def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=None):
+    from kx.diagnostics import DiagnosticReport
+
+    return DiagnosticReport(
+        kind="Deployment",
+        name="web",
+        namespace="default",
+        verdict=verdict,
+        findings=findings,
+        replicas=replicas,
+        pods=pods or [],
+        warning_events=warning_events or [],
+    )
+
+
+def test_render_diagnostic_healthy_shows_verdict(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "Healthy" in out
+    assert "No issues detected." in out
+
+
+def test_render_diagnostic_lists_findings_and_verdict(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(
+        Severity.CRITICAL,
+        [Finding(Severity.CRITICAL, "CrashLoopBackOff in pod web-abc (12 restarts)")],
+    )
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "Critical" in out
+    assert "CrashLoopBackOff in pod web-abc" in out
+
+
+def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        ReplicaHealth,
+        SchedulingInfo,
+        Severity,
+    )
+
+    pod = PodDiagnostic(
+        name="web-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=1,
+        total_containers=1,
+        containers=[
+            ContainerDiagnostic(
+                name="app", ready=True, started=True, restart_count=0, state="Running"
+            )
+        ],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    report = _diag_report(
+        Severity.OK, [], pods=[pod], replicas=ReplicaHealth(3, 3, 3, 3)
+    )
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "Desired 3" in out
+    assert "web-1" in out
+    assert "No warning events." in out

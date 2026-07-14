@@ -159,3 +159,33 @@ def _add_containers(pod, parent_node):
 def _owned_by(resource, uid: str) -> bool:
     refs = resource.metadata.owner_references or []
     return any(ref.uid == uid for ref in refs)
+
+
+def resolve_workload_pods(kind: str, name: str, namespace: str, apps, core) -> list:
+    """Resolve the pods belonging to a workload via ownership references.
+
+    Deployment is a two-hop walk (Deployment → owned ReplicaSets → owned pods,
+    which includes surge/old pods mid-rollout); StatefulSet/DaemonSet own their
+    pods directly; Pod resolves to itself. Reuses `_owned_by` and fetches pods
+    once per namespace, filtering client-side (mirrors the tree builders)."""
+    if kind == Kind.Pod:
+        return [core.read_namespaced_pod(name, namespace)]
+
+    pods = core.list_namespaced_pod(namespace).items
+    match kind:
+        case Kind.Deployment:
+            deploy = apps.read_namespaced_deployment(name, namespace)
+            rs_uids = {
+                rs.metadata.uid
+                for rs in apps.list_namespaced_replica_set(namespace).items
+                if _owned_by(rs, deploy.metadata.uid)
+            }
+            return [pod for pod in pods if any(_owned_by(pod, uid) for uid in rs_uids)]
+        case Kind.StatefulSet:
+            sts = apps.read_namespaced_stateful_set(name, namespace)
+            return [pod for pod in pods if _owned_by(pod, sts.metadata.uid)]
+        case Kind.DaemonSet:
+            ds = apps.read_namespaced_daemon_set(name, namespace)
+            return [pod for pod in pods if _owned_by(pod, ds.metadata.uid)]
+        case _:
+            return []
