@@ -69,7 +69,7 @@ def callback(
         False, "--help", is_eager=True, help="Show this message and exit."
     ),
 ) -> None:
-    if no_color:
+    if no_color or _config.no_color:
         console.configure(plain=True)
     if show_help or ctx.invoked_subcommand is None:
         commands = [
