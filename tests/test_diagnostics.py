@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
-from kx.diagnostics import DiagnosticsService
+from kx.diagnostics import DiagnosticsService, filter_severity_lines
 from kx.kinds import Kind
 
 
@@ -62,6 +62,12 @@ def _pod(name, uid="", owner=None, phase="Running", statuses=None, conditions=No
 
 def _items(*objs):
     return NS(items=list(objs))
+
+
+def _log(text):
+    """Fake the raw HTTP response returned by read_namespaced_pod_log with
+    _preload_content=False (a .data bytes attribute)."""
+    return NS(data=text.encode("utf-8"))
 
 
 @contextmanager
@@ -206,6 +212,7 @@ class TestPodExtraction:
             ),
         )
         core = MagicMock()
+        core.read_namespaced_pod_log.return_value = _log("boot\nfailure\n")
         core.list_namespaced_pod.return_value = _items(
             _pod("db-0", "p0", owner="stsU", statuses=statuses)
         )
@@ -276,3 +283,128 @@ class TestWarningEvents:
         summary = data.warning_events[0]
         assert summary.reason == "BackOff"
         assert summary.count == 8  # 3 + 5, deduped
+
+
+# --- OTEL severity filtering (pure) -----------------------------------------
+
+
+class TestFilterSeverityLines:
+    def test_keeps_only_severity_lines(self):
+        lines, matched = filter_severity_lines(
+            [
+                "INFO starting up",
+                "ERROR connection refused",
+                "DEBUG retrying",
+                "FATAL giving up",
+            ]
+        )
+        assert matched is True
+        assert lines == ["ERROR connection refused", "FATAL giving up"]
+
+    def test_caps_to_last_matches(self):
+        raw = [f"ERROR line {i}" for i in range(20)]
+        lines, matched = filter_severity_lines(raw, max_matches=3)
+        assert lines == ["ERROR line 17", "ERROR line 18", "ERROR line 19"]
+
+    def test_falls_back_to_raw_tail_when_nothing_matches(self):
+        lines, matched = filter_severity_lines(
+            ["one", "two", "three", "four"], fallback=2
+        )
+        assert matched is False
+        assert lines == ["three", "four"]
+
+    def test_matches_are_case_insensitive_and_varied(self):
+        raw = ["a warn here", "Traceback (most recent call last):", "panic: boom"]
+        lines, matched = filter_severity_lines(raw)
+        assert matched is True
+        assert lines == raw
+
+
+# --- log attachment (service) -----------------------------------------------
+
+
+def _crashloop_statuses():
+    return [
+        _cstatus(
+            name="app",
+            ready=False,
+            restart_count=4,
+            state=_cstate(waiting=NS(reason="CrashLoopBackOff", message="back-off")),
+            last_terminated=NS(reason="Error", exit_code=1),
+        )
+    ]
+
+
+def _sts(name="db", uid="stsU"):
+    apps = MagicMock()
+    apps.read_namespaced_stateful_set.return_value = NS(
+        metadata=_meta(name, uid, generation=1),
+        spec=NS(replicas=1),
+        status=NS(
+            ready_replicas=0,
+            available_replicas=0,
+            updated_replicas=1,
+            observed_generation=1,
+        ),
+    )
+    return apps
+
+
+class TestLogAttachment:
+    def test_crashloop_fetches_previous_instance_logs(self):
+        apps = _sts()
+        core = MagicMock()
+        core.read_namespaced_pod_log.return_value = _log("boot\nERROR fatal crash\n")
+        core.list_namespaced_pod.return_value = _items(
+            _pod("db-0", "p0", owner="stsU", statuses=_crashloop_statuses())
+        )
+        with _mocked(apps=apps, core=core):
+            data = _service().gather(Kind.StatefulSet, "db", "default")
+        container = data.pods[0].containers[0]
+        assert container.log_lines == ["ERROR fatal crash"]
+        assert container.log_source == "previous"
+        # a waiting/crashed container must ask for the previous instance first
+        assert core.read_namespaced_pod_log.call_args.kwargs["previous"] is True
+
+    def test_running_not_ready_fetches_current_logs(self):
+        statuses = [
+            _cstatus(
+                name="app",
+                ready=False,
+                restart_count=0,
+                state=_cstate(running=NS()),
+            )
+        ]
+        apps = _sts()
+        core = MagicMock()
+        core.read_namespaced_pod_log.return_value = _log(
+            "GET /healthz 404\nGET /healthz 404\n"
+        )
+        core.list_namespaced_pod.return_value = _items(
+            _pod("db-0", "p0", owner="stsU", statuses=statuses)
+        )
+        with _mocked(apps=apps, core=core):
+            data = _service().gather(Kind.StatefulSet, "db", "default")
+        container = data.pods[0].containers[0]
+        assert container.log_source == "current"
+        assert container.log_filtered is False  # no severity token → raw fallback
+        assert core.read_namespaced_pod_log.call_args.kwargs["previous"] is False
+
+    def test_healthy_container_is_not_queried_for_logs(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")  # default: ready+running
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        assert data.pods[0].containers[0].log_lines == []
+        core.read_namespaced_pod_log.assert_not_called()
+
+    def test_log_api_error_is_swallowed(self):
+        apps = _sts()
+        core = MagicMock()
+        core.read_namespaced_pod_log.side_effect = Exception("no previous logs")
+        core.list_namespaced_pod.return_value = _items(
+            _pod("db-0", "p0", owner="stsU", statuses=_crashloop_statuses())
+        )
+        with _mocked(apps=apps, core=core):
+            data = _service().gather(Kind.StatefulSet, "db", "default")
+        assert data.pods[0].containers[0].log_lines == []

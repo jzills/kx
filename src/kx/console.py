@@ -2,9 +2,10 @@ import re
 import json
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from kx.diagnostics import Severity
+from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
 from kx.state import StateHistory
 
@@ -236,6 +237,7 @@ def render_diagnostic(report) -> None:
     if report.replicas is not None:
         _render_replica_health(report.replicas)
     _render_pod_table(report.pods)
+    _render_logs(report.pods)
     _render_warning_events(report.warning_events)
 
 
@@ -298,6 +300,49 @@ def _render_pod_table(pods) -> None:
                 f"[{_status_color(reason)}]{reason}[/]" if reason else "",
             )
     _console.print(table)
+
+
+_LOG_ERROR_TOKENS = {
+    "FATAL",
+    "CRITICAL",
+    "ERROR",
+    "ERR",
+    "EXCEPTION",
+    "TRACEBACK",
+    "PANIC",
+}
+
+
+def _highlight_severity(line: str) -> str:
+    """Escape a raw log line for Rich, then color its OTEL severity tokens."""
+
+    def repl(match):
+        token = match.group(0)
+        color = COLOR_ERROR if token.upper() in _LOG_ERROR_TOKENS else COLOR_WARNING
+        return f"[{color}]{token}[/{color}]"
+
+    return SEVERITY_PATTERN.sub(repl, escape(line))
+
+
+def _render_logs(pods) -> None:
+    entries = [
+        (pod, container)
+        for pod in pods
+        for container in pod.containers
+        if container.log_lines
+    ]
+    if not entries:
+        return
+    _console.print()
+    _console.print(f"[bold {COLOR_HEADER}]Logs[/bold {COLOR_HEADER}]")
+    for pod, container in entries:
+        source = f" ({container.log_source})" if container.log_source else ""
+        note = "" if container.log_filtered else " · recent output"
+        _console.print(
+            f"  [{COLOR_DIM}]{pod.name}/{container.name}{source}{note}[/{COLOR_DIM}]"
+        )
+        for line in container.log_lines:
+            _console.print(f"    {_highlight_severity(line)}")
 
 
 def _render_warning_events(events) -> None:

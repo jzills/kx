@@ -269,3 +269,74 @@ def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
     assert "Desired 3" in out
     assert "web-1" in out
     assert "No warning events." in out
+
+
+def test_render_diagnostic_shows_log_excerpt(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        SchedulingInfo,
+        Severity,
+    )
+
+    container = ContainerDiagnostic(
+        name="worker",
+        ready=False,
+        started=True,
+        restart_count=4,
+        state="Waiting",
+        waiting_reason="CrashLoopBackOff",
+        log_lines=["ERROR boot failed [config]", "FATAL exit"],
+        log_source="previous",
+        log_filtered=True,
+    )
+    pod = PodDiagnostic(
+        name="worker-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=0,
+        total_containers=1,
+        containers=[container],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    report = _diag_report(Severity.CRITICAL, [], pods=[pod])
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "Logs" in out
+    assert "worker-1/worker (previous)" in out
+    # markup-bearing log text must survive escaping intact
+    assert "ERROR boot failed [config]" in out
+    assert "FATAL exit" in out
+
+
+def test_render_diagnostic_logs_note_on_raw_fallback(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        SchedulingInfo,
+        Severity,
+    )
+
+    container = ContainerDiagnostic(
+        name="app",
+        ready=False,
+        started=True,
+        restart_count=0,
+        state="Running",
+        log_lines=["GET /healthz 404"],
+        log_source="current",
+        log_filtered=False,
+    )
+    pod = PodDiagnostic(
+        name="fe-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=0,
+        total_containers=1,
+        containers=[container],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [], pods=[pod]))
+    out = capture_console.getvalue()
+    assert "recent output" in out
+    assert "GET /healthz 404" in out
