@@ -25,9 +25,10 @@ from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
 from kx.commands.state import StateCommand
+from kx.commands.theme import ThemeCommand
 from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
-from kx.config import load_config
+from kx.config import load_config, save_theme
 from kx.diagnostics import DiagnosticsService
 from kx.errors import handle_errors
 from kx.events import EventsService
@@ -71,8 +72,8 @@ def callback(
         False, "--help", is_eager=True, help="Show this message and exit."
     ),
 ) -> None:
-    if no_color or _config.no_color:
-        console.configure(plain=True)
+    if no_color:
+        console.configure(plain=True, theme=_config.theme)
     if show_help or ctx.invoked_subcommand is None:
         commands = [
             (name, cmd.get_short_help_str(limit=55))
@@ -84,6 +85,7 @@ def callback(
 
 
 _config = load_config()
+console.configure(plain=_config.no_color, theme=_config.theme)
 _kubectl = KubectlService()
 _state = StateService(max_history=_config.max_history)
 _events = EventsService()
@@ -343,6 +345,19 @@ def namespace_alias(index: int):
     """Alias for namespace."""
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
     console.print_success(f"Switched to '{command.execute(index)}'")
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def theme(
+    name: Optional[str] = typer.Argument(default=None, help="Theme name to activate."),
+):
+    """List available color themes or persist a theme choice."""
+    if name is None:
+        console.render_theme_list(active=_config.theme)
+    else:
+        command = ThemeCommand(save=save_theme)
+        console.print_success(command.execute(name))
 
 
 @app.command(cls=StyledCommand)

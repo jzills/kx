@@ -2,7 +2,6 @@ import io
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from rich.console import Console
 import kx.console as kx_console
 
 
@@ -10,7 +9,7 @@ import kx.console as kx_console
 def capture_console():
     buf = io.StringIO()
     original = kx_console._console
-    kx_console._console = Console(file=buf, no_color=True, highlight=False)
+    kx_console._console = kx_console._build_console(plain=True, file=buf)
     yield buf
     kx_console._console = original
 
@@ -380,8 +379,8 @@ def test_render_diagnostic_logs_note_on_raw_fallback(capture_console):
 def test_render_diagnostic_findings_hang_indent(capture_console):
     from kx.diagnostics import Finding, Severity
 
-    kx_console._console = Console(
-        file=capture_console, width=60, no_color=True, highlight=False
+    kx_console._console = kx_console._build_console(
+        plain=True, file=capture_console, width=60
     )
     finding = Finding(
         severity=Severity.WARNING,
@@ -470,3 +469,23 @@ def test_render_diagnostic_warning_event_without_timestamp(capture_console):
     out = capture_console.getvalue()
     assert "BackOff · Pod/worker-1 · ×293" in out
     assert "ago" not in out
+
+
+def test_configure_swaps_console_with_theme():
+    original = kx_console._console
+    try:
+        kx_console.configure(theme="dracula")
+        style = kx_console._console.get_style("header")
+        assert style is not None
+    finally:
+        kx_console._console = original
+
+
+def test_render_theme_list_shows_all_themes_and_marks_active(capture_console):
+    from kx.themes import THEMES
+
+    kx_console.render_theme_list(active="nord")
+    out = capture_console.getvalue()
+    for name in THEMES:
+        assert name in out
+    assert "→" in out
