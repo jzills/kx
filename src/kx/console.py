@@ -1,9 +1,14 @@
 import re
 import json
+from datetime import datetime, timezone
 
 from rich.console import Console
+from rich.markup import escape
+from rich.padding import Padding
 from rich.table import Table
+from rich.text import Text
 
+from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
 from kx.state import StateHistory
 
@@ -32,6 +37,18 @@ _STATUS_RED = {
     "ImagePullBackOff",
     "ErrImagePull",
     "InvalidImageName",
+}
+
+_SEVERITY_ICON = {Severity.OK: "✓", Severity.WARNING: "!", Severity.CRITICAL: "✗"}
+_SEVERITY_COLOR = {
+    Severity.OK: COLOR_HEADER,
+    Severity.WARNING: COLOR_WARNING,
+    Severity.CRITICAL: COLOR_ERROR,
+}
+_VERDICT_LABEL = {
+    Severity.OK: "Healthy",
+    Severity.WARNING: "Warnings",
+    Severity.CRITICAL: "Critical",
 }
 
 _console = Console(force_terminal=True)
@@ -195,6 +212,189 @@ def render_events_table(text: str) -> None:
         )
 
     _console.print(table)
+
+
+def render_diagnostic(report) -> None:
+    verdict = report.verdict
+    color = _SEVERITY_COLOR[verdict]
+    # The verdict rides in the banner rather than on a line of its own; its
+    # color survives the banner's dim styling via the nested tag.
+    status = f"[{color}]{_SEVERITY_ICON[verdict]} {_VERDICT_LABEL[verdict]}[/{color}]"
+    count = len(report.findings)
+    label = "issue" if count == 1 else "issues"
+    print_banner(
+        report.kind,
+        report.name,
+        namespace=report.namespace,
+        extra=f"{status} · {count} {label}" if count else status,
+    )
+
+    _console.print()
+    if report.findings:
+        # A grid keeps the summary in its own wrap region, so continuation lines
+        # hang-indent under the text instead of collapsing under the icon.
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(width=1, no_wrap=True)
+        grid.add_column(overflow="fold")
+        for finding in report.findings:
+            f_color = _SEVERITY_COLOR[finding.severity]
+            f_icon = _SEVERITY_ICON[finding.severity]
+            grid.add_row(
+                Text(f_icon, style=f_color),
+                Text(finding.summary, style=COLOR_BODY),
+            )
+        _console.print(Padding(grid, (0, 0, 0, 2)))
+    else:
+        _console.print(f"  [{COLOR_DIM}]No issues detected.[/{COLOR_DIM}]")
+
+    if report.replicas is not None:
+        _render_replica_health(report.replicas)
+    _render_pod_table(report.pods)
+    _render_logs(report.pods)
+    _render_warning_events(report.warning_events)
+
+
+def _replica_color(value: int, desired: int) -> str:
+    if value >= desired:
+        return COLOR_HEADER
+    if value == 0 and desired > 0:
+        return COLOR_ERROR
+    return COLOR_WARNING
+
+
+def _render_replica_health(replicas) -> None:
+    _console.print()
+    ready = f"[{_replica_color(replicas.ready, replicas.desired)}]{replicas.ready}[/]"
+    available = f"[{_replica_color(replicas.available, replicas.desired)}]{replicas.available}[/]"
+    parts = [
+        f"Desired {replicas.desired}",
+        f"Ready {ready}",
+        f"Available {available}",
+        f"Updated {replicas.updated}",
+    ]
+    if replicas.generation is not None or replicas.observed_generation is not None:
+        parts.append(f"Gen {replicas.generation}/{replicas.observed_generation}")
+    _console.print(f"[{COLOR_DIM}]{' · '.join(parts)}[/{COLOR_DIM}]")
+
+
+def _render_pod_table(pods) -> None:
+    if not pods:
+        return
+    _console.print()
+    table = Table(
+        show_header=True,
+        header_style=f"bold {COLOR_HEADER}",
+        box=None,
+        padding=(0, 2),
+    )
+    table.add_column("POD")
+    table.add_column("PHASE")
+    table.add_column("READY")
+    table.add_column("RESTARTS")
+    table.add_column("CONTAINER")
+    table.add_column("STATE")
+    table.add_column("REASON")
+
+    for pod in pods:
+        ready = f"{pod.ready_containers}/{pod.total_containers}"
+        phase = f"[{_status_color(pod.phase)}]{pod.phase}[/]"
+        if not pod.containers:
+            table.add_row(pod.name, phase, ready, "", "", "", "")
+            continue
+        for offset, container in enumerate(pod.containers):
+            reason = container.waiting_reason or container.terminated_reason or ""
+            table.add_row(
+                pod.name if offset == 0 else "",
+                phase if offset == 0 else "",
+                ready if offset == 0 else "",
+                str(container.restart_count),
+                container.name,
+                f"[{_status_color(container.state)}]{container.state}[/]",
+                f"[{_status_color(reason)}]{reason}[/]" if reason else "",
+            )
+    _console.print(table)
+
+
+_LOG_ERROR_TOKENS = {
+    "FATAL",
+    "CRITICAL",
+    "ERROR",
+    "ERR",
+    "EXCEPTION",
+    "TRACEBACK",
+    "PANIC",
+}
+
+
+def _highlight_severity(line: str) -> str:
+    """Escape a raw log line for Rich, then color its OTEL severity tokens."""
+
+    def repl(match):
+        token = match.group(0)
+        color = COLOR_ERROR if token.upper() in _LOG_ERROR_TOKENS else COLOR_WARNING
+        return f"[{color}]{token}[/{color}]"
+
+    return SEVERITY_PATTERN.sub(repl, escape(line))
+
+
+def _render_logs(pods) -> None:
+    entries = [
+        (pod, container)
+        for pod in pods
+        for container in pod.containers
+        if container.log_lines
+    ]
+    if not entries:
+        return
+    _console.print()
+    # Align "LOGS" under the POD column header (the pod table pads content by 2).
+    _console.print(f"  [bold {COLOR_HEADER}]LOGS[/bold {COLOR_HEADER}]")
+    for pod, container in entries:
+        note = "" if container.log_filtered else " · recent output"
+        _console.print(
+            f"    [{COLOR_DIM}]{pod.name}/{container.name}{note}[/{COLOR_DIM}]"
+        )
+        for line in container.log_lines:
+            # Padding constrains the wrap region so wrapped lines hang-indent to
+            # column 6 instead of collapsing to the console's left edge.
+            styled = Text.from_markup(_highlight_severity(line))
+            _console.print(Padding(styled, (0, 0, 0, 6)))
+
+
+def _format_age(timestamp) -> str:
+    """Render an event timestamp as a compact age (e.g. "3m ago")."""
+    if not isinstance(timestamp, datetime):
+        return ""
+    now = datetime.now(timezone.utc) if timestamp.tzinfo else datetime.now()
+    seconds = int((now - timestamp).total_seconds())
+    if seconds < 0:
+        return "just now"
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return f"{seconds}s ago"
+
+
+def _render_warning_events(events) -> None:
+    _console.print()
+    if not events:
+        _console.print(f"[{COLOR_DIM}]No warning events.[/{COLOR_DIM}]")
+        return
+    # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
+    _console.print(f"  [bold {COLOR_HEADER}]WARNING EVENTS[/bold {COLOR_HEADER}]")
+    for event in events:
+        meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
+        age = _format_age(event.last_timestamp)
+        if age:
+            meta.append(age)
+        _console.print()
+        _console.print(
+            f"    [{_status_color(event.reason)}]{event.reason}[/]"
+            f"[{COLOR_DIM}] · {' · '.join(meta)}[/{COLOR_DIM}]"
+        )
+        # Padding constrains the wrap region so wrapped lines hang-indent to
+        # column 6 instead of collapsing to the console's left edge.
+        _console.print(Padding(Text(event.message), (0, 0, 0, 6)))
 
 
 def print_command_help(ctx) -> None:

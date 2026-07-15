@@ -10,6 +10,7 @@ from typer.core import TyperCommand
 from kx import console
 from kx.commands.back import BackCommand
 from kx.commands.delete import DeleteCommand
+from kx.commands.diagnostic import DiagnosticCommand
 from kx.commands.drop import DropCommand
 from kx.commands.labels import LabelsCommand
 from kx.commands.describe import DescribeCommand
@@ -27,6 +28,7 @@ from kx.commands.state import StateCommand
 from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config
+from kx.diagnostics import DiagnosticsService
 from kx.errors import handle_errors
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
@@ -86,6 +88,7 @@ _kubectl = KubectlService()
 _state = StateService(max_history=_config.max_history)
 _events = EventsService()
 _index = IndexService()
+_diagnostics = DiagnosticsService(events=_events)
 
 
 @app.command(
@@ -307,6 +310,23 @@ def port_forward(ctx: typer.Context, index: int, port: str):
     console.print_banner(kind, name, namespace=ns, extra=port)
     command = PortForwardCommand(kubectl=_kubectl, state=_state)
     command.execute(index, port, ctx.args)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def diagnostic(index: int):
+    """Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag."""
+    # render_diagnostic prints the banner: the issue count is only known post-report.
+    command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
+    console.render_diagnostic(command.execute(index))
+
+
+@app.command(name="diag", cls=StyledCommand, hidden=True)
+@handle_errors
+def diagnostic_alias(index: int):
+    """Alias for diagnostic."""
+    command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
+    console.render_diagnostic(command.execute(index))
 
 
 @app.command(cls=StyledCommand)
