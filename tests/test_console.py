@@ -1,4 +1,6 @@
 import io
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from rich.console import Console
 import kx.console as kx_console
@@ -217,16 +219,49 @@ def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=Non
     )
 
 
-def test_render_diagnostic_healthy_shows_verdict(capture_console):
+def test_render_diagnostic_healthy_reports_no_issues(capture_console):
     from kx.diagnostics import Severity
 
     kx_console.render_diagnostic(_diag_report(Severity.OK, []))
     out = capture_console.getvalue()
-    assert "Healthy" in out
     assert "No issues detected." in out
 
 
-def test_render_diagnostic_lists_findings_and_verdict(capture_console):
+def test_render_diagnostic_banner_carries_verdict_and_count(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(
+        Severity.CRITICAL,
+        [Finding(Severity.CRITICAL, "boom"), Finding(Severity.WARNING, "hmm")],
+    )
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "Deployment/web · default · ✗ Critical · 2 issues" in out
+    # the verdict lives in the banner only — no standalone line beneath it
+    assert "issues found" not in out
+    assert out.count("Critical") == 1
+
+
+def test_render_diagnostic_banner_uses_singular_issue(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(Severity.WARNING, [Finding(Severity.WARNING, "hmm")])
+    kx_console.render_diagnostic(report)
+    assert (
+        "Deployment/web · default · ! Warnings · 1 issue" in capture_console.getvalue()
+    )
+
+
+def test_render_diagnostic_banner_omits_count_when_healthy(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "Deployment/web · default · ✓ Healthy" in out
+    assert "0 issues" not in out
+
+
+def test_render_diagnostic_lists_findings(capture_console):
     from kx.diagnostics import Finding, Severity
 
     report = _diag_report(
@@ -235,7 +270,6 @@ def test_render_diagnostic_lists_findings_and_verdict(capture_console):
     )
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Critical" in out
     assert "CrashLoopBackOff in pod web-abc" in out
 
 
@@ -303,7 +337,8 @@ def test_render_diagnostic_shows_log_excerpt(capture_console):
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
     assert "LOGS" in out
-    assert "worker-1/worker (previous)" in out
+    assert "worker-1/worker" in out
+    assert "(previous)" not in out
     # markup-bearing log text must survive escaping intact
     assert "ERROR boot failed [config]" in out
     assert "FATAL exit" in out
@@ -340,3 +375,98 @@ def test_render_diagnostic_logs_note_on_raw_fallback(capture_console):
     out = capture_console.getvalue()
     assert "recent output" in out
     assert "GET /healthz 404" in out
+
+
+def test_render_diagnostic_findings_hang_indent(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    kx_console._console = Console(
+        file=capture_console, width=60, no_color=True, highlight=False
+    )
+    finding = Finding(
+        severity=Severity.WARNING,
+        summary="BackOff ×452 on Pod/worker-crashloop-bc7cb7b55-r7n8b: "
+        "Back-off restarting failed container worker",
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [finding]))
+    lines = [line for line in capture_console.getvalue().splitlines() if line.strip()]
+    wrapped = [line for line in lines if line.startswith("    ")]
+    # continuation lines align under the summary text, not the icon at column 2
+    assert wrapped, "expected the long summary to wrap"
+    assert all(not line.startswith("     ") for line in wrapped)
+
+
+def test_render_diagnostic_finding_summary_escapes_markup(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    finding = Finding(
+        severity=Severity.WARNING,
+        summary="FailedCreatePodSandBox on Pod/web-1: plugin [istio-cni] failed",
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [finding]))
+    assert "plugin [istio-cni] failed" in capture_console.getvalue()
+
+
+@pytest.mark.parametrize(
+    "delta, expected",
+    [
+        (timedelta(seconds=5), "5s ago"),
+        (timedelta(minutes=3), "3m ago"),
+        (timedelta(hours=5), "5h ago"),
+        (timedelta(days=2), "2d ago"),
+        (timedelta(days=2, hours=3), "2d ago"),
+        (timedelta(seconds=-30), "just now"),
+    ],
+)
+def test_format_age_buckets(delta, expected):
+    stamp = datetime.now(timezone.utc) - delta
+    assert kx_console._format_age(stamp) == expected
+
+
+def test_format_age_without_timestamp():
+    assert kx_console._format_age(None) == ""
+
+
+def test_render_diagnostic_warning_events_stacked(capture_console):
+    from kx.diagnostics import EventSummary, Severity
+
+    event = EventSummary(
+        reason="FailedCreatePodSandBox",
+        message='failed to setup network for sandbox "4aec" [istio-cni]',
+        kind="Pod",
+        name="worker-crashloop-bc7cb7b5-x8k2",
+        count=2,
+        last_timestamp=datetime.now(timezone.utc) - timedelta(minutes=29),
+    )
+    report = _diag_report(Severity.WARNING, [], warning_events=[event])
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "WARNING EVENTS" in out
+    # metadata collapses onto one scannable header line
+    assert (
+        "FailedCreatePodSandBox · Pod/worker-crashloop-bc7cb7b5-x8k2 · ×2 · 29m ago"
+        in out
+    )
+    # the message renders in full beneath, with markup-bearing text intact
+    assert 'failed to setup network for sandbox "4aec" [istio-cni]' in out
+    # the old squeezed column is gone
+    assert "MESSAGE" not in out
+
+
+def test_render_diagnostic_warning_event_without_timestamp(capture_console):
+    from kx.diagnostics import EventSummary, Severity
+
+    event = EventSummary(
+        reason="BackOff",
+        message="Back-off restarting failed container",
+        kind="Pod",
+        name="worker-1",
+        count=293,
+        last_timestamp=None,
+    )
+    kx_console.render_diagnostic(
+        _diag_report(Severity.WARNING, [], warning_events=[event])
+    )
+    out = capture_console.getvalue()
+    assert "BackOff · Pod/worker-1 · ×293" in out
+    assert "ago" not in out

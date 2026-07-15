@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import IntEnum
 from typing import Protocol
 
@@ -100,7 +101,7 @@ class EventSummary:
     kind: str
     name: str
     count: int
-    last_timestamp: str | None = None
+    last_timestamp: datetime | None = None
 
 
 @dataclass
@@ -269,13 +270,13 @@ class DiagnosticsService:
                         kind=obj.kind,
                         name=obj.name,
                         count=count,
-                        last_timestamp=str(timestamp) if timestamp else None,
+                        last_timestamp=timestamp,
                     )
                 else:
                     existing.count += count
                     existing.message = event.message
                     if timestamp:
-                        existing.last_timestamp = str(timestamp)
+                        existing.last_timestamp = timestamp
         return list(groups.values())
 
 

@@ -2,6 +2,7 @@
 extraction (replica counts, container states, scheduling, event dedup)."""
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
@@ -249,15 +250,19 @@ class TestPodExtraction:
 # --- warning events ---------------------------------------------------------
 
 
+_EVENT_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
 def _event(type_, reason, name, kind="Pod", message="msg", count=1):
+    # the k8s SDK hands back datetimes here, not strings
     return NS(
         type=type_,
         reason=reason,
         message=message,
         count=count,
-        last_timestamp="2024-01-01T00:00:00Z",
+        last_timestamp=_EVENT_TIME,
         involved_object=NS(kind=kind, name=name),
-        metadata=NS(creation_timestamp="2024-01-01T00:00:00Z"),
+        metadata=NS(creation_timestamp=_EVENT_TIME),
     )
 
 

@@ -185,10 +185,12 @@ def _container_findings(pod_name: str, container: ContainerDiagnostic) -> list[F
 
 
 def _event_findings(events) -> list[Finding]:
+    # The message is deliberately omitted: the WARNING EVENTS section renders it
+    # in full, so repeating it here only bloats the summary.
     return [
         Finding(
             Severity.WARNING,
-            f"{event.reason} ×{event.count} on {event.kind}/{event.name}: {event.message}",
+            f"{event.reason} ×{event.count} on {event.kind}/{event.name}",
         )
         for event in events
     ]

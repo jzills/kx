@@ -222,7 +222,9 @@ class TestBuildReport:
             )
         )
         assert report.verdict == Severity.WARNING
-        assert "BackOff ×8" in _summaries(report)
+        assert "BackOff ×8 on Pod/web-1" in _summaries(report)
+        # the message belongs to the WARNING EVENTS section, not the summary line
+        assert "Back-off restarting" not in _summaries(report)
 
     def test_findings_sorted_critical_before_warning(self):
         pod = _pod(

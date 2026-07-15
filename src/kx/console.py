@@ -1,5 +1,6 @@
 import re
 import json
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.markup import escape
@@ -216,23 +217,33 @@ def render_events_table(text: str) -> None:
 def render_diagnostic(report) -> None:
     verdict = report.verdict
     color = _SEVERITY_COLOR[verdict]
-    icon = _SEVERITY_ICON[verdict]
+    # The verdict rides in the banner rather than on a line of its own; its
+    # color survives the banner's dim styling via the nested tag.
+    status = f"[{color}]{_SEVERITY_ICON[verdict]} {_VERDICT_LABEL[verdict]}[/{color}]"
     count = len(report.findings)
     label = "issue" if count == 1 else "issues"
-    suffix = f" — {count} {label} found" if count else ""
-    _console.print(
-        f"[bold {color}]{icon} {_VERDICT_LABEL[verdict]}[/bold {color}]"
-        f"[{COLOR_DIM}]{suffix}[/{COLOR_DIM}]"
+    print_banner(
+        report.kind,
+        report.name,
+        namespace=report.namespace,
+        extra=f"{status} · {count} {label}" if count else status,
     )
 
     _console.print()
     if report.findings:
+        # A grid keeps the summary in its own wrap region, so continuation lines
+        # hang-indent under the text instead of collapsing under the icon.
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(width=1, no_wrap=True)
+        grid.add_column(overflow="fold")
         for finding in report.findings:
             f_color = _SEVERITY_COLOR[finding.severity]
             f_icon = _SEVERITY_ICON[finding.severity]
-            _console.print(
-                f"  [{f_color}]{f_icon}[/{f_color}] [{COLOR_BODY}]{finding.summary}[/{COLOR_BODY}]"
+            grid.add_row(
+                Text(f_icon, style=f_color),
+                Text(finding.summary, style=COLOR_BODY),
             )
+        _console.print(Padding(grid, (0, 0, 0, 2)))
     else:
         _console.print(f"  [{COLOR_DIM}]No issues detected.[/{COLOR_DIM}]")
 
@@ -339,10 +350,9 @@ def _render_logs(pods) -> None:
     # Align "LOGS" under the POD column header (the pod table pads content by 2).
     _console.print(f"  [bold {COLOR_HEADER}]LOGS[/bold {COLOR_HEADER}]")
     for pod, container in entries:
-        source = f" ({container.log_source})" if container.log_source else ""
         note = "" if container.log_filtered else " · recent output"
         _console.print(
-            f"    [{COLOR_DIM}]{pod.name}/{container.name}{source}{note}[/{COLOR_DIM}]"
+            f"    [{COLOR_DIM}]{pod.name}/{container.name}{note}[/{COLOR_DIM}]"
         )
         for line in container.log_lines:
             # Padding constrains the wrap region so wrapped lines hang-indent to
@@ -351,31 +361,40 @@ def _render_logs(pods) -> None:
             _console.print(Padding(styled, (0, 0, 0, 6)))
 
 
+def _format_age(timestamp) -> str:
+    """Render an event timestamp as a compact age (e.g. "3m ago")."""
+    if not isinstance(timestamp, datetime):
+        return ""
+    now = datetime.now(timezone.utc) if timestamp.tzinfo else datetime.now()
+    seconds = int((now - timestamp).total_seconds())
+    if seconds < 0:
+        return "just now"
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return f"{seconds}s ago"
+
+
 def _render_warning_events(events) -> None:
     _console.print()
     if not events:
         _console.print(f"[{COLOR_DIM}]No warning events.[/{COLOR_DIM}]")
         return
-    table = Table(
-        show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
-        box=None,
-        padding=(0, 2),
-    )
-    table.add_column("REASON")
-    table.add_column("KIND/NAME")
-    table.add_column("COUNT")
-    table.add_column("LAST")
-    table.add_column("MESSAGE")
+    # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
+    _console.print(f"  [bold {COLOR_HEADER}]WARNING EVENTS[/bold {COLOR_HEADER}]")
     for event in events:
-        table.add_row(
-            f"[{_status_color(event.reason)}]{event.reason}[/]",
-            f"{event.kind}/{event.name}",
-            str(event.count),
-            f"[{COLOR_DIM}]{event.last_timestamp or ''}[/]",
-            event.message,
+        meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
+        age = _format_age(event.last_timestamp)
+        if age:
+            meta.append(age)
+        _console.print()
+        _console.print(
+            f"    [{_status_color(event.reason)}]{event.reason}[/]"
+            f"[{COLOR_DIM}] · {' · '.join(meta)}[/{COLOR_DIM}]"
         )
-    _console.print(table)
+        # Padding constrains the wrap region so wrapped lines hang-indent to
+        # column 6 instead of collapsing to the console's left edge.
+        _console.print(Padding(Text(event.message), (0, 0, 0, 6)))
 
 
 def print_command_help(ctx) -> None:

@@ -316,8 +316,7 @@ def port_forward(ctx: typer.Context, index: int, port: str):
 @handle_errors
 def diagnostic(index: int):
     """Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag."""
-    name, ns, kind = _state.fields(index)
-    console.print_banner(kind, name, namespace=ns)
+    # render_diagnostic prints the banner: the issue count is only known post-report.
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
     console.render_diagnostic(command.execute(index))
 
@@ -326,8 +325,6 @@ def diagnostic(index: int):
 @handle_errors
 def diagnostic_alias(index: int):
     """Alias for diagnostic."""
-    name, ns, kind = _state.fields(index)
-    console.print_banner(kind, name, namespace=ns)
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
     console.render_diagnostic(command.execute(index))
 
