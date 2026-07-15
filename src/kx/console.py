@@ -3,7 +3,9 @@ import json
 
 from rich.console import Console
 from rich.markup import escape
+from rich.padding import Padding
 from rich.table import Table
+from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
@@ -334,15 +336,19 @@ def _render_logs(pods) -> None:
     if not entries:
         return
     _console.print()
-    _console.print(f"[bold {COLOR_HEADER}]Logs[/bold {COLOR_HEADER}]")
+    # Align "LOGS" under the POD column header (the pod table pads content by 2).
+    _console.print(f"  [bold {COLOR_HEADER}]LOGS[/bold {COLOR_HEADER}]")
     for pod, container in entries:
         source = f" ({container.log_source})" if container.log_source else ""
         note = "" if container.log_filtered else " · recent output"
         _console.print(
-            f"  [{COLOR_DIM}]{pod.name}/{container.name}{source}{note}[/{COLOR_DIM}]"
+            f"    [{COLOR_DIM}]{pod.name}/{container.name}{source}{note}[/{COLOR_DIM}]"
         )
         for line in container.log_lines:
-            _console.print(f"    {_highlight_severity(line)}")
+            # Padding constrains the wrap region so wrapped lines hang-indent to
+            # column 6 instead of collapsing to the console's left edge.
+            styled = Text.from_markup(_highlight_severity(line))
+            _console.print(Padding(styled, (0, 0, 0, 6)))
 
 
 def _render_warning_events(events) -> None:

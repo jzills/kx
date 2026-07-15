@@ -302,7 +302,7 @@ def test_render_diagnostic_shows_log_excerpt(capture_console):
     report = _diag_report(Severity.CRITICAL, [], pods=[pod])
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Logs" in out
+    assert "LOGS" in out
     assert "worker-1/worker (previous)" in out
     # markup-bearing log text must survive escaping intact
     assert "ERROR boot failed [config]" in out
