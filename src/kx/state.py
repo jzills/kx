@@ -8,9 +8,30 @@ from kx.kinds import Kind
 
 
 @dataclass
+class Query:
+    """The kx get invocation that produced a state entry, kept so a stale
+    entry can be re-run. None for entries not created by kx get (tree --index,
+    pre-existing state files)."""
+
+    resource: str
+    args: list[str]
+    match: str | None = None
+
+
+@dataclass
 class State:
     resources: dict[str, Kind | str]  # name → kind, insertion-ordered
     namespace: str = "default"
+    query: Query | None = None
+
+
+def _state_from_dict(data: dict) -> State:
+    query = data.get("query")
+    return State(
+        resources=data["resources"],
+        namespace=data.get("namespace", "default"),
+        query=Query(**query) if query else None,
+    )
 
 
 @dataclass
@@ -41,8 +62,8 @@ class StateService:
             raise RuntimeError("No state found. Run `kx get <resource>` first.")
         data = json.loads(_STATE_FILE.read_text())
         if "states" not in data:
-            return StateHistory(states=[State(**data)], cursor=0)
-        states = [State(**state_data) for state_data in data["states"]]
+            return StateHistory(states=[_state_from_dict(data)], cursor=0)
+        states = [_state_from_dict(state_data) for state_data in data["states"]]
         return StateHistory(states=states, cursor=data["cursor"])
 
     def _save_history(self, history: StateHistory) -> None:

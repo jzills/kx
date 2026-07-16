@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import patch
-from kx.state import State, StateService
+from kx.state import Query, State, StateService
 
 
 def _patched(tmp_path):
@@ -320,6 +320,55 @@ class TestStateServiceHistory:
             history = svc.drop(99)
         assert len(history.states) == 1
         assert state2 not in history.states
+
+
+class TestQueryPersistence:
+    def test_query_round_trips(self, tmp_path):
+        state = State(
+            resources={"nginx": "Pod"},
+            namespace="staging",
+            query=Query(resource="pods", args=["-n", "staging"], match="ngi"),
+        )
+        with _patched(tmp_path):
+            svc = StateService()
+            svc.save(state)
+            loaded = svc.load()
+        assert loaded == state
+        assert loaded.query == Query(
+            resource="pods", args=["-n", "staging"], match="ngi"
+        )
+
+    def test_state_without_query_defaults_to_none(self, tmp_path):
+        state = State(resources={"nginx": "Pod"})
+        with _patched(tmp_path):
+            svc = StateService()
+            svc.save(state)
+            loaded = svc.load()
+        assert loaded.query is None
+
+    def test_pre_query_state_file_loads_with_none(self, tmp_path):
+        state_file = tmp_path / "kx_state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "states": [{"resources": {"nginx": "Pod"}, "namespace": "prod"}],
+                    "cursor": 0,
+                }
+            )
+        )
+        with patch("kx.state._STATE_FILE", state_file):
+            loaded = StateService().load()
+        assert loaded == State(resources={"nginx": "Pod"}, namespace="prod")
+        assert loaded.query is None
+
+    def test_legacy_single_state_format_loads_with_none(self, tmp_path):
+        state_file = tmp_path / "kx_state.json"
+        state_file.write_text(
+            json.dumps({"resources": {"nginx": "Pod"}, "namespace": "staging"})
+        )
+        with patch("kx.state._STATE_FILE", state_file):
+            loaded = StateService().load()
+        assert loaded.query is None
 
 
 class TestStateServiceFields:
