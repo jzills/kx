@@ -552,3 +552,14 @@ def test_confirm_returns_when_accepted(monkeypatch):
 
     monkeypatch.setattr(RichConfirm, "ask", staticmethod(lambda *a, **k: True))
     kx_console.confirm("Delete Pod/nginx in default?")
+
+
+def test_render_theme_list_has_indexed_table_format(capture_console):
+    from kx.themes import THEMES
+
+    kx_console.render_theme_list(active="nord")
+    out = capture_console.getvalue()
+    assert f"Themes · {len(THEMES)} items" in out
+    for header in ("X", "THEME", "PREVIEW"):
+        assert header in out
+    assert "1" in out and str(len(THEMES)) in out

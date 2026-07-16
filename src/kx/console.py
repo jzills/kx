@@ -560,11 +560,16 @@ def render_theme_list(active: str) -> None:
 
     from kx.themes import THEMES
 
-    table = Table(show_header=False, box=None, padding=(0, 2))
+    count = len(THEMES)
+    _console.print(
+        f"[muted]Themes · {count} {'item' if count == 1 else 'items'}[/muted]"
+    )
+    table = Table(show_header=True, header_style="header", box=None, padding=(0, 2))
+    table.add_column("X", justify="right")
     table.add_column("")
     table.add_column("THEME")
     table.add_column("PREVIEW")
-    for name in THEMES:
+    for position, name in enumerate(THEMES, start=1):
         is_active = name == active
         marker = Text("→", style="header") if is_active else Text("")
         label = Text(name, style="body" if is_active else "muted")
@@ -574,7 +579,12 @@ def render_theme_list(active: str) -> None:
         swatch = Text("  ").join(
             Text(sample, style=Style.parse(theme[key])) for sample, key in _SWATCH_PARTS
         )
-        table.add_row(marker, label, swatch)
+        table.add_row(
+            Text(str(position), style="body" if is_active else "muted"),
+            marker,
+            label,
+            swatch,
+        )
     _console.print(table)
 
 

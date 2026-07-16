@@ -71,7 +71,7 @@ All subsequent commands reference resources by their `X` index from the last `kx
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx diagnostic <index>` | Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag. |
 | `kx namespace <index>` | Switch to an indexed namespace; alias: kx ns (run kx get namespaces first). |
-| `kx theme [<name>]` | List available color themes or persist a theme choice. |
+| `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
@@ -137,8 +137,9 @@ Styled output is emitted only when stdout is a terminal — piped or redirected 
 ### Themes
 
 ```bash
-kx theme        # list available themes with a preview of each
+kx theme        # list available themes (indexed) with a preview of each
 kx theme nord   # persist a theme to ~/.kx/config.toml
+kx theme 3      # same, selecting by index from the kx theme listing
 ```
 
 Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).

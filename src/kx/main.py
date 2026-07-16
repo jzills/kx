@@ -412,9 +412,11 @@ def namespace_alias(index: int):
 @app.command(cls=StyledCommand)
 @handle_errors
 def theme(
-    name: Optional[str] = typer.Argument(default=None, help="Theme name to activate."),
+    name: Optional[str] = typer.Argument(
+        default=None, help="Theme name or index (from kx theme) to activate."
+    ),
 ):
-    """List available color themes or persist a theme choice."""
+    """List available color themes or persist a choice by name or index."""
     if name is None:
         console.render_theme_list(active=_config.theme)
     else:
@@ -486,7 +488,7 @@ state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]
 back._examples = ["kx back"]
 forward._examples = ["kx forward"]
-theme._examples = ["kx theme", "kx theme nord"]
+theme._examples = ["kx theme", "kx theme nord", "kx theme 3"]
 
 if __name__ == "__main__":
     app()
