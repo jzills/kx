@@ -563,3 +563,12 @@ def test_render_theme_list_has_indexed_table_format(capture_console):
     for header in ("X", "THEME", "PREVIEW"):
         assert header in out
     assert "1" in out and str(len(THEMES)) in out
+
+
+def test_render_diagnostic_has_summary_header(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "SUMMARY" in out
+    assert out.index("SUMMARY") < out.index("No issues detected")

@@ -282,6 +282,8 @@ def render_diagnostic(report) -> None:
     )
 
     _console.print()
+    # Align "SUMMARY" with the LOGS and WARNING EVENTS section headers.
+    _console.print("  [header]SUMMARY[/header]")
     if report.findings:
         # A grid keeps the summary in its own wrap region, so continuation lines
         # hang-indent under the text instead of collapsing under the icon.
