@@ -193,7 +193,7 @@ def describe(ctx: typer.Context, indexes: list[int]):
 @handle_errors
 def events(indexes: list[int]):
     """Show Kubernetes events for one or more indexed resources."""
-    command = EventsCommand(state=_state, events=_events)
+    command = EventsCommand(state=_state, events=_events, kubectl=_kubectl)
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         with console.status("fetching events"):
