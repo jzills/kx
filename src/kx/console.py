@@ -1,10 +1,14 @@
 import re
 import json
+from contextlib import nullcontext
 from datetime import datetime, timezone
 
+import typer
+from rich import traceback
 from rich.console import Console
 from rich.markup import escape
 from rich.padding import Padding
+from rich.prompt import Confirm as RichConfirm
 from rich.table import Table
 from rich.text import Text
 
@@ -94,6 +98,28 @@ def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> 
     _console.print(f"[muted]{' · '.join(parts)}[/muted]")
 
 
+def status(message: str):
+    """Spinner shown while waiting on the cluster; a no-op off-terminal so
+    piped output and test captures never receive spinner frames."""
+    if not _console.is_terminal:
+        return nullcontext()
+    return _console.status(f"[muted]{message}…[/muted]", spinner_style="muted")
+
+
+def confirm(message: str) -> None:
+    """Themed yes/no prompt that aborts unless confirmed. kind/name tokens
+    (words containing '/') get the accent style, matching banners."""
+    styled = re.sub(r"(\S+/\S+)", "[accent]\\1[/accent]", escape(message))
+    if not RichConfirm.ask(f"[body]{styled}[/body]", console=_console, default=False):
+        raise typer.Abort()
+
+
+def install_traceback() -> None:
+    """Render uncaught exceptions (real bugs, not handled errors) as compact
+    themed tracebacks on the active console."""
+    traceback.install(console=_console, show_locals=False, word_wrap=True)
+
+
 def print_raw(text: str) -> None:
     _console.print(text, markup=False, highlight=False)
 
@@ -112,9 +138,19 @@ def _status_color(status: str) -> str:
     return "status.neutral"
 
 
+def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
+    label = "item" if count == 1 else "items"
+    _console.print(
+        f"[muted]{plural_display(resource_type)} · {namespace} · {count} {label}[/muted]"
+    )
+
+
 def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
+        # kubectl exits 0 with empty stdout when nothing matches ("No
+        # resources found" goes to stderr) — show the caption, not silence.
+        _print_get_caption(resource_type, namespace, 0)
         return
 
     header_line = lines[0]
@@ -131,6 +167,10 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
         cols = [line[start:end].strip() for start, end in spans]
         if cols:
             rows.append(cols)
+
+    if not rows:
+        _print_get_caption(resource_type, namespace, 0)
+        return
 
     restarts_col = headers.index("RESTARTS") if "RESTARTS" in headers else -1
     if restarts_col >= 0:
@@ -178,11 +218,7 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
                 styled.append(cell)
         table.add_row(*styled)
 
-    count = len(rows)
-    label = "item" if count == 1 else "items"
-    _console.print(
-        f"[muted]{plural_display(resource_type)} · {namespace} · {count} {label}[/muted]"
-    )
+    _print_get_caption(resource_type, namespace, len(rows))
     _console.print(table)
 
 
@@ -246,6 +282,8 @@ def render_diagnostic(report) -> None:
     )
 
     _console.print()
+    # Align "SUMMARY" with the LOGS and WARNING EVENTS section headers.
+    _console.print("  [header]SUMMARY[/header]")
     if report.findings:
         # A grid keeps the summary in its own wrap region, so continuation lines
         # hang-indent under the text instead of collapsing under the icon.
@@ -524,11 +562,16 @@ def render_theme_list(active: str) -> None:
 
     from kx.themes import THEMES
 
-    table = Table(show_header=False, box=None, padding=(0, 2))
+    count = len(THEMES)
+    _console.print(
+        f"[muted]Themes · {count} {'item' if count == 1 else 'items'}[/muted]"
+    )
+    table = Table(show_header=True, header_style="header", box=None, padding=(0, 2))
+    table.add_column("X", justify="right")
     table.add_column("")
     table.add_column("THEME")
     table.add_column("PREVIEW")
-    for name in THEMES:
+    for position, name in enumerate(THEMES, start=1):
         is_active = name == active
         marker = Text("→", style="header") if is_active else Text("")
         label = Text(name, style="body" if is_active else "muted")
@@ -538,7 +581,12 @@ def render_theme_list(active: str) -> None:
         swatch = Text("  ").join(
             Text(sample, style=Style.parse(theme[key])) for sample, key in _SWATCH_PARTS
         )
-        table.add_row(marker, label, swatch)
+        table.add_row(
+            Text(str(position), style="body" if is_active else "muted"),
+            marker,
+            label,
+            swatch,
+        )
     _console.print(table)
 
 

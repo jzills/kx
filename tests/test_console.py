@@ -109,9 +109,16 @@ def test_render_indexed_table_non_tabular_falls_through(capture_console):
     assert '{"items": []}' in capture_console.getvalue()
 
 
-def test_render_indexed_table_empty_string(capture_console):
+def test_render_indexed_table_empty_string_shows_zero_caption(capture_console):
     kx_console.render_indexed_table("", "pods", "default")
-    assert capture_console.getvalue() == ""
+    assert "Pods · default · 0 items" in capture_console.getvalue()
+
+
+def test_render_indexed_table_header_only_shows_zero_caption(capture_console):
+    kx_console.render_indexed_table("X   NAME   READY", "pods", "default")
+    out = capture_console.getvalue()
+    assert "Pods · default · 0 items" in out
+    assert "NAME" not in out
 
 
 EVENTS_OUTPUT = (
@@ -516,3 +523,52 @@ def test_render_events_table_unparseable_timestamp_falls_back(capture_console):
     line = "Normal   Pulling                        Pod        notadate garbage Pulling image"
     kx_console.render_events_table(line)
     assert "notadate garbage" in capture_console.getvalue()
+
+
+def test_status_is_noop_off_terminal(capture_console):
+    with kx_console.status("fetching pods"):
+        pass
+    assert capture_console.getvalue() == ""
+
+
+def test_confirm_accent_styles_resource_and_aborts_on_no(capture_console, monkeypatch):
+    import typer
+    from rich.prompt import Confirm as RichConfirm
+
+    asked = {}
+
+    def fake_ask(prompt, console=None, default=None):
+        asked["prompt"] = prompt
+        return False
+
+    monkeypatch.setattr(RichConfirm, "ask", staticmethod(fake_ask))
+    with pytest.raises(typer.Abort):
+        kx_console.confirm("Delete Pod/nginx in default?")
+    assert "[accent]Pod/nginx[/accent]" in asked["prompt"]
+
+
+def test_confirm_returns_when_accepted(monkeypatch):
+    from rich.prompt import Confirm as RichConfirm
+
+    monkeypatch.setattr(RichConfirm, "ask", staticmethod(lambda *a, **k: True))
+    kx_console.confirm("Delete Pod/nginx in default?")
+
+
+def test_render_theme_list_has_indexed_table_format(capture_console):
+    from kx.themes import THEMES
+
+    kx_console.render_theme_list(active="nord")
+    out = capture_console.getvalue()
+    assert f"Themes · {len(THEMES)} items" in out
+    for header in ("X", "THEME", "PREVIEW"):
+        assert header in out
+    assert "1" in out and str(len(THEMES)) in out
+
+
+def test_render_diagnostic_has_summary_header(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "SUMMARY" in out
+    assert out.index("SUMMARY") < out.index("No issues detected")
