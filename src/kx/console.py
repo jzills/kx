@@ -301,7 +301,9 @@ def render_diagnostic(report) -> None:
             )
         _console.print(Padding(grid, (0, 0, 0, 2)))
     else:
-        _console.print("  [muted]No issues detected[/muted]")
+        # Content indents to column 4 under the header, aligning with finding
+        # text and the other sections' empty states.
+        _console.print("    [muted]No issues detected[/muted]")
 
     _render_pod_table(report.pods)
     _render_logs(report.pods)

@@ -608,3 +608,15 @@ def test_render_diagnostic_warning_events_header_shown_when_empty(capture_consol
     out = capture_console.getvalue()
     assert "WARNING EVENTS" in out
     assert out.index("WARNING EVENTS") < out.index("No warning events")
+
+
+def test_render_diagnostic_empty_states_share_indent(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    lines = capture_console.getvalue().splitlines()
+    summary_empty = next(line for line in lines if "No issues detected" in line)
+    events_empty = next(line for line in lines if "No warning events" in line)
+    indent = len(summary_empty) - len(summary_empty.lstrip())
+    assert indent == 4
+    assert indent == len(events_empty) - len(events_empty.lstrip())
