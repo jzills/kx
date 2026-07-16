@@ -1,4 +1,5 @@
 from kx.kubectl import KubectlServiceProtocol
+from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
 
 
@@ -10,4 +11,8 @@ class EditCommand:
     def execute(self, index: int, extra_args: list[str] | None = None) -> None:
         extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
-        self.kubectl.run_interactive(["edit", kind, name, "-n", namespace, *extra_args])
+        rc = self.kubectl.run_interactive(
+            ["edit", kind, name, "-n", namespace, *extra_args]
+        )
+        if rc != 0:
+            ensure_exists(self.kubectl, kind, name, namespace)

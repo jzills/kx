@@ -3,6 +3,7 @@ from contextlib import nullcontext
 
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
+from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
 from kx.types import Status
 
@@ -24,7 +25,11 @@ class LogsCommand:
         extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         if kind == Kind.Pod:
-            self.kubectl.run_interactive(["logs", name, "-n", namespace, *extra_args])
+            rc = self.kubectl.run_interactive(
+                ["logs", name, "-n", namespace, *extra_args]
+            )
+            if rc != 0:
+                ensure_exists(self.kubectl, kind, name, namespace)
         elif kind in _AGGREGATE_KINDS:
             selector = self._selector(name, namespace, kind)
             self.kubectl.run_interactive(

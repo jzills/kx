@@ -2,6 +2,7 @@ import subprocess
 
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
+from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
 
 
@@ -29,6 +30,7 @@ class ExecCommand:
                 stderr=subprocess.DEVNULL,
             )
             if rc != 0:
+                ensure_exists(self.kubectl, str(Kind.Pod), name, namespace)
                 raise ValueError(f"Command failed in container (exit {rc}).")
         else:
             for shell in self.shells:
@@ -50,6 +52,7 @@ class ExecCommand:
                         ["exec", "-it", name, "-n", namespace, *extra_args, "--", shell]
                     )
                     return
+            ensure_exists(self.kubectl, str(Kind.Pod), name, namespace)
             raise ValueError(
                 "No shell found in container. Provide an explicit command: kx exec <index> -- /path/to/binary"
             )

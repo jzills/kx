@@ -3,6 +3,17 @@ import pytest
 from unittest.mock import MagicMock
 from kx.commands.exec import ExecCommand
 from kx.kinds import Kind
+from kx.refresh import StaleResourceError
+
+
+def _probe(shell_rc, get_rc):
+    """Answer shell-detection probes (exec …) and existence probes (get …)
+    separately."""
+
+    def side_effect(args):
+        return shell_rc if args[0] == "exec" else get_rc
+
+    return side_effect
 
 
 def _make_command(name="nginx", namespace="default", kind=Kind.Pod, shells=None):
@@ -40,10 +51,11 @@ class TestExecCommand:
 
     def test_error_when_both_shells_fail(self):
         cmd, _, kubectl = _make_command()
-        kubectl.probe.return_value = 1
+        kubectl.probe.side_effect = _probe(shell_rc=1, get_rc=0)
         with pytest.raises(ValueError, match="No shell found"):
             cmd.execute(1, None)
-        assert kubectl.probe.call_count == 2
+        # Two shell probes plus the existence check.
+        assert kubectl.probe.call_count == 3
         kubectl.run_interactive.assert_not_called()
 
     def test_explicit_cmd(self):
@@ -107,3 +119,25 @@ class TestExecCommand:
         kubectl.run_interactive.assert_called_once_with(
             ["exec", "-it", "nginx", "-n", "default", "--", "bash"]
         )
+
+
+class TestExecStaleDetection:
+    def test_explicit_cmd_failure_on_missing_pod_raises_stale(self):
+        cmd, _, kubectl = _make_command(name="web-1")
+        kubectl.run_interactive.return_value = 1
+        kubectl.probe.return_value = 1
+        with pytest.raises(StaleResourceError, match="Pod/web-1"):
+            cmd.execute(1, ["env"])
+
+    def test_explicit_cmd_failure_on_live_pod_raises_value_error(self):
+        cmd, _, kubectl = _make_command(name="web-1")
+        kubectl.run_interactive.return_value = 1
+        kubectl.probe.return_value = 0
+        with pytest.raises(ValueError, match="Command failed in container"):
+            cmd.execute(1, ["env"])
+
+    def test_no_shell_on_missing_pod_raises_stale(self):
+        cmd, _, kubectl = _make_command(name="web-1")
+        kubectl.probe.side_effect = _probe(shell_rc=1, get_rc=1)
+        with pytest.raises(StaleResourceError, match="Pod/web-1"):
+            cmd.execute(1, None)
