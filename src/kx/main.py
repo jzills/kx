@@ -190,7 +190,7 @@ def describe(ctx: typer.Context, indexes: list[int]):
 def events(indexes: list[int]):
     """Show Kubernetes events for one or more indexed resources."""
     command = EventsCommand(state=_state, events=_events)
-    for index in indexes:
+    for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         with console.status("fetching events"):
             result = command.execute(index)
@@ -199,6 +199,8 @@ def events(indexes: list[int]):
         else:
             count = len([line for line in result.splitlines() if line.strip()])
         extra = f"{count} {'item' if count == 1 else 'items'}" if count else ""
+        if position > 0:
+            console.print_raw("")
         console.print_banner(kind, name, namespace=ns, extra=extra)
         console.render_events_table(result)
 
@@ -212,7 +214,7 @@ def logs(ctx: typer.Context, index: int):
     """Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services."""
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
-    command = LogsCommand(state=_state, kubectl=_kubectl)
+    command = LogsCommand(state=_state, kubectl=_kubectl, status=console.status)
     command.execute(index, ctx.args)
 
 
@@ -256,8 +258,10 @@ def yaml(
     """Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."""
     command = YamlCommand(state=_state, kubectl=_kubectl)
     fields = [field.strip() for field in show.split(",")] if show else None
-    for index in indexes:
+    for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
+        if position > 0:
+            console.print_raw("")
         console.print_banner(kind, name, namespace=ns)
         with console.status("fetching manifest"):
             manifest = command.execute(index, fields)
@@ -275,6 +279,7 @@ def delete(
         state=_state,
         kubectl=_kubectl,
         confirm=console.confirm,
+        status=console.status,
     )
     for index in indexes:
         console.print_success(command.execute(index, yes))
@@ -342,7 +347,12 @@ def rollout(action: RolloutAction, index: int):
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
     command = RolloutCommand(kubectl=_kubectl, state=_state)
-    result = command.execute(index, action)
+    # rollout status streams interactively and must not run inside a spinner.
+    if action == RolloutAction.status:
+        result = command.execute(index, action)
+    else:
+        with console.status(f"rollout {action.value}"):
+            result = command.execute(index, action)
     if result:
         if action == RolloutAction.history:
             console.print_raw(result)
@@ -355,7 +365,9 @@ def rollout(action: RolloutAction, index: int):
 def scale(index: int, replicas: int):
     """Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count."""
     command = ScaleCommand(kubectl=_kubectl, state=_state)
-    console.print_success(command.execute(index, replicas))
+    with console.status("scaling"):
+        result = command.execute(index, replicas)
+    console.print_success(result)
 
 
 @app.command(
@@ -398,7 +410,9 @@ def diagnostic_alias(index: int):
 def namespace(index: int):
     """Switch to an indexed namespace; alias: kx ns (run kx get namespaces first)."""
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    console.print_success(f"Switched to '{command.execute(index)}'")
+    with console.status("switching namespace"):
+        name = command.execute(index)
+    console.print_success(f"Switched to '{name}'")
 
 
 @app.command(name="ns", cls=StyledCommand, hidden=True)
@@ -406,7 +420,9 @@ def namespace(index: int):
 def namespace_alias(index: int):
     """Alias for namespace."""
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    console.print_success(f"Switched to '{command.execute(index)}'")
+    with console.status("switching namespace"):
+        name = command.execute(index)
+    console.print_success(f"Switched to '{name}'")
 
 
 @app.command(cls=StyledCommand)
