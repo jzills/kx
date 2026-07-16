@@ -44,10 +44,12 @@ _SEVERITY_COLOR = {
     Severity.WARNING: "status.warn",
     Severity.CRITICAL: "status.bad",
 }
+# Lowercase to match the banner's metadata register ("diagnostics", "1 issue");
+# ALL CAPS is reserved for section and table headers.
 _VERDICT_LABEL = {
-    Severity.OK: "Healthy",
-    Severity.WARNING: "Warnings",
-    Severity.CRITICAL: "Critical",
+    Severity.OK: "healthy",
+    Severity.WARNING: "warnings",
+    Severity.CRITICAL: "critical",
 }
 
 

@@ -241,10 +241,10 @@ def test_render_diagnostic_banner_carries_verdict_and_count(capture_console):
     )
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Deployment/web · default · ✗ Critical · 2 issues" in out
+    assert "Deployment/web · default · ✗ critical · 2 issues" in out
     # the verdict lives in the banner only — no standalone line beneath it
     assert "issues found" not in out
-    assert out.count("Critical") == 1
+    assert out.count("critical") == 1
 
 
 def test_render_diagnostic_banner_uses_singular_issue(capture_console):
@@ -253,7 +253,7 @@ def test_render_diagnostic_banner_uses_singular_issue(capture_console):
     report = _diag_report(Severity.WARNING, [Finding(Severity.WARNING, "hmm")])
     kx_console.render_diagnostic(report)
     assert (
-        "Deployment/web · default · ! Warnings · 1 issue" in capture_console.getvalue()
+        "Deployment/web · default · ! warnings · 1 issue" in capture_console.getvalue()
     )
 
 
@@ -262,7 +262,7 @@ def test_render_diagnostic_banner_omits_count_when_healthy(capture_console):
 
     kx_console.render_diagnostic(_diag_report(Severity.OK, []))
     out = capture_console.getvalue()
-    assert "Deployment/web · default · ✓ Healthy" in out
+    assert "Deployment/web · default · ✓ healthy" in out
     assert "0 issues" not in out
 
 
