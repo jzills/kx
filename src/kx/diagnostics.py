@@ -124,14 +124,17 @@ class Finding:
 
 @dataclass
 class DiagnosticReport:
-    """Analysed report produced by the command from DiagnosticData."""
+    """Analysed report produced by the command from DiagnosticData.
+
+    Replica health is not carried here: _replica_findings distills it into
+    findings (ready/available/updated shortfalls, generation lag), so the
+    rendered report has no separate replica section."""
 
     kind: str
     name: str
     namespace: str
     verdict: Severity  # == max finding severity (OK if none)
     findings: list[Finding]  # sorted severity desc, stable
-    replicas: ReplicaHealth | None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 

@@ -43,13 +43,16 @@ Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespac
 
 ```
 $ kx get pods
-X  NAME                          READY  STATUS   RESTARTS  AGE
-1  api-7d9f4b8c6-xkp2q           1/1    Running  0         2d
-2  worker-6c8b5f7d9-mnt4r        1/1    Running  3         5h
-3  postgres-0                    1/1    Running  0         12d
+Pods · default · 3 items
+  X    NAME                      READY    STATUS     RESTARTS    AGE
+  1    api-7d9f4b8c6-xkp2q       1/1      Running    0            2d
+  2    worker-6c8b5f7d9-mnt4r    1/1      Running    3            5h
+  3    postgres-0                1/1      Running    0           12d
 ```
 
 All subsequent commands reference resources by their `X` index from the last `kx get`.
+
+Global flags: `--no-color` disables styled output, `--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
 
 ### Commands
 

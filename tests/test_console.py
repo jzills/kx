@@ -210,7 +210,7 @@ def test_render_state_singular_item(capture_console):
     assert "1 item" in capture_console.getvalue()
 
 
-def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=None):
+def _diag_report(verdict, findings, pods=None, warning_events=None):
     from kx.diagnostics import DiagnosticReport
 
     return DiagnosticReport(
@@ -219,7 +219,6 @@ def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=Non
         namespace="default",
         verdict=verdict,
         findings=findings,
-        replicas=replicas,
         pods=pods or [],
         warning_events=warning_events or [],
     )
@@ -242,10 +241,10 @@ def test_render_diagnostic_banner_carries_verdict_and_count(capture_console):
     )
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Deployment/web · default · ✗ Critical · 2 issues" in out
+    assert "Deployment/web · default · ✗ critical · 2 issues" in out
     # the verdict lives in the banner only — no standalone line beneath it
     assert "issues found" not in out
-    assert out.count("Critical") == 1
+    assert out.count("critical") == 1
 
 
 def test_render_diagnostic_banner_uses_singular_issue(capture_console):
@@ -254,7 +253,7 @@ def test_render_diagnostic_banner_uses_singular_issue(capture_console):
     report = _diag_report(Severity.WARNING, [Finding(Severity.WARNING, "hmm")])
     kx_console.render_diagnostic(report)
     assert (
-        "Deployment/web · default · ! Warnings · 1 issue" in capture_console.getvalue()
+        "Deployment/web · default · ! warnings · 1 issue" in capture_console.getvalue()
     )
 
 
@@ -263,7 +262,7 @@ def test_render_diagnostic_banner_omits_count_when_healthy(capture_console):
 
     kx_console.render_diagnostic(_diag_report(Severity.OK, []))
     out = capture_console.getvalue()
-    assert "Deployment/web · default · ✓ Healthy" in out
+    assert "Deployment/web · default · ✓ healthy" in out
     assert "0 issues" not in out
 
 
@@ -279,11 +278,10 @@ def test_render_diagnostic_lists_findings(capture_console):
     assert "CrashLoopBackOff in pod web-abc" in out
 
 
-def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
+def test_render_diagnostic_shows_pod_detail(capture_console):
     from kx.diagnostics import (
         ContainerDiagnostic,
         PodDiagnostic,
-        ReplicaHealth,
         SchedulingInfo,
         Severity,
     )
@@ -301,12 +299,9 @@ def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
         ],
         scheduling=SchedulingInfo(schedulable=True),
     )
-    report = _diag_report(
-        Severity.OK, [], pods=[pod], replicas=ReplicaHealth(3, 3, 3, 3)
-    )
+    report = _diag_report(Severity.OK, [], pods=[pod])
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Desired 3" in out
     assert "web-1" in out
     assert "No warning events" in out
 
@@ -343,7 +338,7 @@ def test_render_diagnostic_shows_log_excerpt(capture_console):
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
     assert "LOGS" in out
-    assert "worker-1/worker" in out
+    assert "Pod/worker-1 · container worker" in out
     assert "(previous)" not in out
     # markup-bearing log text must survive escaping intact
     assert "ERROR boot failed [config]" in out
@@ -450,7 +445,7 @@ def test_render_diagnostic_warning_events_stacked(capture_console):
     assert "WARNING EVENTS" in out
     # metadata collapses onto one scannable header line
     assert (
-        "FailedCreatePodSandBox · Pod/worker-crashloop-bc7cb7b5-x8k2 · ×2 · 29m ago"
+        "Pod/worker-crashloop-bc7cb7b5-x8k2 · FailedCreatePodSandBox ×2 · 29m ago"
         in out
     )
     # the message renders in full beneath, with markup-bearing text intact
@@ -474,7 +469,7 @@ def test_render_diagnostic_warning_event_without_timestamp(capture_console):
         _diag_report(Severity.WARNING, [], warning_events=[event])
     )
     out = capture_console.getvalue()
-    assert "BackOff · Pod/worker-1 · ×293" in out
+    assert "Pod/worker-1 · BackOff ×293" in out
     assert "ago" not in out
 
 
@@ -572,3 +567,56 @@ def test_render_diagnostic_has_summary_header(capture_console):
     out = capture_console.getvalue()
     assert "SUMMARY" in out
     assert out.index("SUMMARY") < out.index("No issues detected")
+
+
+def test_render_diagnostic_has_no_replica_line(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, []))
+    assert "Desired" not in capture_console.getvalue()
+
+
+def test_render_diagnostic_no_blank_between_events_header_and_first_event(
+    capture_console,
+):
+    from kx.diagnostics import EventSummary, Severity
+
+    events = [
+        EventSummary(
+            reason="BackOff",
+            message="Back-off restarting failed container",
+            kind="Pod",
+            name=f"worker-{n}",
+            count=n + 1,
+        )
+        for n in range(2)
+    ]
+    kx_console.render_diagnostic(
+        _diag_report(Severity.WARNING, [], warning_events=events)
+    )
+    lines = capture_console.getvalue().splitlines()
+    header_at = next(i for i, line in enumerate(lines) if "WARNING EVENTS" in line)
+    assert lines[header_at + 1].strip(), "first event should follow the header directly"
+    # the two events themselves stay separated by a blank line
+    assert any(not line.strip() for line in lines[header_at + 2 :])
+
+
+def test_render_diagnostic_warning_events_header_shown_when_empty(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "WARNING EVENTS" in out
+    assert out.index("WARNING EVENTS") < out.index("No warning events")
+
+
+def test_render_diagnostic_empty_states_share_indent(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    lines = capture_console.getvalue().splitlines()
+    summary_empty = next(line for line in lines if "No issues detected" in line)
+    events_empty = next(line for line in lines if "No warning events" in line)
+    indent = len(summary_empty) - len(summary_empty.lstrip())
+    assert indent == 4
+    assert indent == len(events_empty) - len(events_empty.lstrip())

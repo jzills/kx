@@ -44,10 +44,12 @@ _SEVERITY_COLOR = {
     Severity.WARNING: "status.warn",
     Severity.CRITICAL: "status.bad",
 }
+# Lowercase to match the banner's metadata register ("diagnostics", "1 issue");
+# ALL CAPS is reserved for section and table headers.
 _VERDICT_LABEL = {
-    Severity.OK: "Healthy",
-    Severity.WARNING: "Warnings",
-    Severity.CRITICAL: "Critical",
+    Severity.OK: "healthy",
+    Severity.WARNING: "warnings",
+    Severity.CRITICAL: "critical",
 }
 
 
@@ -299,36 +301,13 @@ def render_diagnostic(report) -> None:
             )
         _console.print(Padding(grid, (0, 0, 0, 2)))
     else:
-        _console.print("  [muted]No issues detected[/muted]")
+        # Content indents to column 4 under the header, aligning with finding
+        # text and the other sections' empty states.
+        _console.print("    [muted]No issues detected[/muted]")
 
-    if report.replicas is not None:
-        _render_replica_health(report.replicas)
     _render_pod_table(report.pods)
     _render_logs(report.pods)
     _render_warning_events(report.warning_events)
-
-
-def _replica_color(value: int, desired: int) -> str:
-    if value >= desired:
-        return "status.ok"
-    if value == 0 and desired > 0:
-        return "status.bad"
-    return "status.warn"
-
-
-def _render_replica_health(replicas) -> None:
-    _console.print()
-    ready = f"[{_replica_color(replicas.ready, replicas.desired)}]{replicas.ready}[/]"
-    available = f"[{_replica_color(replicas.available, replicas.desired)}]{replicas.available}[/]"
-    parts = [
-        f"Desired {replicas.desired}",
-        f"Ready {ready}",
-        f"Available {available}",
-        f"Updated {replicas.updated}",
-    ]
-    if replicas.generation is not None or replicas.observed_generation is not None:
-        parts.append(f"Gen {replicas.generation}/{replicas.observed_generation}")
-    _console.print(f"[muted]{' · '.join(parts)}[/muted]")
 
 
 def _render_pod_table(pods) -> None:
@@ -405,7 +384,9 @@ def _render_logs(pods) -> None:
     _console.print("  [header]LOGS[/header]")
     for pod, container in entries:
         note = "" if container.log_filtered else " · recent output"
-        _console.print(f"    [muted]{pod.name}/{container.name}{note}[/muted]")
+        _console.print(
+            f"    [muted]Pod/{pod.name} · container {container.name}{note}[/muted]"
+        )
         for line in container.log_lines:
             # Padding constrains the wrap region so wrapped lines hang-indent to
             # column 6 instead of collapsing to the console's left edge.
@@ -429,21 +410,26 @@ def _format_age(timestamp) -> str:
 
 def _render_warning_events(events) -> None:
     _console.print()
-    if not events:
-        _console.print("[muted]No warning events[/muted]")
-        return
     # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
     _console.print("  [header]WARNING EVENTS[/header]")
-    for event in events:
-        meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
+    if not events:
+        _console.print("    [muted]No warning events[/muted]")
+        return
+    for position, event in enumerate(events):
         age = _format_age(event.last_timestamp)
-        if age:
-            meta.append(age)
-        _console.print()
-        _console.print(
-            f"    [{_status_color(event.reason)}]{event.reason}[/]"
-            f"[muted] · {' · '.join(meta)}[/muted]"
+        # Blank line separates events from each other, not from the header.
+        if position:
+            _console.print()
+        # Object-first, matching the LOGS subheadings: Kind/name leads, the
+        # colored reason and its count follow, then the age.
+        line = (
+            f"    [muted]{event.kind}/{event.name} · [/muted]"
+            f"[{_status_color(event.reason)}]{event.reason}[/]"
+            f"[muted] ×{event.count}[/muted]"
         )
+        if age:
+            line += f"[muted] · {age}[/muted]"
+        _console.print(line)
         # Padding constrains the wrap region so wrapped lines hang-indent to
         # column 6 instead of collapsing to the console's left edge.
         _console.print(Padding(Text(event.message), (0, 0, 0, 6)))
