@@ -404,11 +404,11 @@ def _format_age(timestamp) -> str:
 
 def _render_warning_events(events) -> None:
     _console.print()
-    if not events:
-        _console.print("[muted]No warning events[/muted]")
-        return
     # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
     _console.print("  [header]WARNING EVENTS[/header]")
+    if not events:
+        _console.print("    [muted]No warning events[/muted]")
+        return
     for position, event in enumerate(events):
         meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
         age = _format_age(event.last_timestamp)

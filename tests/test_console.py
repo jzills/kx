@@ -599,3 +599,12 @@ def test_render_diagnostic_no_blank_between_events_header_and_first_event(
     assert lines[header_at + 1].strip(), "first event should follow the header directly"
     # the two events themselves stay separated by a blank line
     assert any(not line.strip() for line in lines[header_at + 2 :])
+
+
+def test_render_diagnostic_warning_events_header_shown_when_empty(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "WARNING EVENTS" in out
+    assert out.index("WARNING EVENTS") < out.index("No warning events")
