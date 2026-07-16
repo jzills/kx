@@ -572,3 +572,15 @@ def test_render_diagnostic_has_summary_header(capture_console):
     out = capture_console.getvalue()
     assert "SUMMARY" in out
     assert out.index("SUMMARY") < out.index("No issues detected")
+
+
+def test_render_diagnostic_replicas_section_header(capture_console):
+    from kx.diagnostics import ReplicaHealth, Severity
+
+    replicas = ReplicaHealth(
+        desired=3, ready=1, available=1, updated=3, generation=2, observed_generation=2
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [], replicas=replicas))
+    out = capture_console.getvalue()
+    assert "REPLICAS" in out
+    assert out.index("REPLICAS") < out.index("Desired 3")

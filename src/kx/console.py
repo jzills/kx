@@ -318,6 +318,8 @@ def _replica_color(value: int, desired: int) -> str:
 
 def _render_replica_health(replicas) -> None:
     _console.print()
+    # Align "REPLICAS" with the SUMMARY/LOGS/WARNING EVENTS section headers.
+    _console.print("  [header]REPLICAS[/header]")
     ready = f"[{_replica_color(replicas.ready, replicas.desired)}]{replicas.ready}[/]"
     available = f"[{_replica_color(replicas.available, replicas.desired)}]{replicas.available}[/]"
     parts = [
@@ -328,7 +330,7 @@ def _render_replica_health(replicas) -> None:
     ]
     if replicas.generation is not None or replicas.observed_generation is not None:
         parts.append(f"Gen {replicas.generation}/{replicas.observed_generation}")
-    _console.print(f"[muted]{' · '.join(parts)}[/muted]")
+    _console.print(f"    [muted]{' · '.join(parts)}[/muted]")
 
 
 def _render_pod_table(pods) -> None:
