@@ -1,6 +1,6 @@
 import re
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import typer
@@ -100,20 +100,27 @@ def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> 
     _console.print(f"[muted]{' · '.join(parts)}[/muted]")
 
 
+@contextmanager
 def status(message: str):
     """Spinner shown while waiting on the cluster; a no-op off-terminal so
     piped output and test captures never receive spinner frames."""
     if not _console.is_terminal:
-        return nullcontext()
+        yield
+        return
     # Low refresh with a matching spinner speed: roughly one frame per redraw,
     # so the line isn't rewritten faster than the animation advances (the
     # default 12.5 fps redraw flickers on some terminals).
-    return _console.status(
+    with _console.status(
         f"[muted]{message}…[/muted]",
         spinner_style="muted",
         refresh_per_second=4,
         speed=0.4,
-    )
+    ) as live_status:
+        # Status.start() schedules the first paint a full refresh interval out
+        # (250ms at 4 fps), which fast kubectl calls beat entirely; paint now
+        # so the spinner always appears.
+        live_status._live.refresh()
+        yield
 
 
 def confirm(message: str) -> None:
