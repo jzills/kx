@@ -113,6 +113,7 @@ def callback(
 ) -> None:
     if no_color:
         console.configure(plain=True, theme=_config.theme)
+        console.install_traceback()
     if show_version:
         console.print_version(_kx_version())
         raise typer.Exit()
@@ -135,6 +136,7 @@ def callback(
 
 _config = load_config()
 console.configure(plain=_config.no_color, theme=_config.theme)
+console.install_traceback()
 _kubectl = KubectlService()
 _state = StateService(max_history=_config.max_history)
 _events = EventsService()
@@ -156,7 +158,8 @@ def get(
 ):
     """List resources and assign index numbers for use with other commands."""
     command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
-    result = command.execute(resource, match, ctx.args)
+    with console.status(f"fetching {resource}"):
+        result = command.execute(resource, match, ctx.args)
     all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in ctx.args)
     if all_namespaces:
         namespace = "all namespaces"
@@ -189,7 +192,8 @@ def events(indexes: list[int]):
     command = EventsCommand(state=_state, events=_events)
     for index in indexes:
         name, ns, kind = _state.fields(index)
-        result = command.execute(index)
+        with console.status("fetching events"):
+            result = command.execute(index)
         if result.strip() == "No events found":
             count = 0
         else:
@@ -223,7 +227,8 @@ def labels(
     """Show labels for one or more indexed resources; --selector formats output as a label selector."""
     command = LabelsCommand(state=_state, kubectl=_kubectl)
     for position, index in enumerate(indexes):
-        label_map = command.execute(index)
+        with console.status("fetching labels"):
+            label_map = command.execute(index)
         name, ns, kind = _state.fields(index)
         count = len(label_map)
         extra = f"{count} {'item' if count == 1 else 'items'}"
@@ -254,7 +259,9 @@ def yaml(
     for index in indexes:
         name, ns, kind = _state.fields(index)
         console.print_banner(kind, name, namespace=ns)
-        console.print_raw(command.execute(index, fields))
+        with console.status("fetching manifest"):
+            manifest = command.execute(index, fields)
+        console.print_raw(manifest)
 
 
 @app.command(cls=StyledCommand)
@@ -267,7 +274,7 @@ def delete(
     command = DeleteCommand(
         state=_state,
         kubectl=_kubectl,
-        confirm=lambda msg: typer.confirm(msg, abort=True),
+        confirm=console.confirm,
     )
     for index in indexes:
         console.print_success(command.execute(index, yes))
@@ -323,7 +330,9 @@ def tree(
         build_tree=build_tree,
         build_indexed_tree=build_indexed_tree,
     )
-    console.print_rich(command.execute(index, indexed))
+    with console.status("resolving ownership graph"):
+        rendered = command.execute(index, indexed)
+    console.print_rich(rendered)
 
 
 @app.command(cls=StyledCommand)
@@ -369,7 +378,9 @@ def diagnostic(index: int):
     """Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag."""
     # render_diagnostic prints the banner: the issue count is only known post-report.
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
-    console.render_diagnostic(command.execute(index))
+    with console.status("running diagnostics"):
+        report = command.execute(index)
+    console.render_diagnostic(report)
 
 
 @app.command(name="diag", cls=StyledCommand, hidden=True)
@@ -377,7 +388,9 @@ def diagnostic(index: int):
 def diagnostic_alias(index: int):
     """Alias for diagnostic."""
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
-    console.render_diagnostic(command.execute(index))
+    with console.status("running diagnostics"):
+        report = command.execute(index)
+    console.render_diagnostic(report)
 
 
 @app.command(cls=StyledCommand)
