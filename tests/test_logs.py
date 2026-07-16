@@ -157,3 +157,28 @@ class TestLogsCommand:
         kubectl.run.return_value = json.dumps({"spec": {"selector": None}})
         with pytest.raises(ValueError, match="no pod selector"):
             cmd.execute(1)
+
+
+def test_aggregate_logs_wraps_selector_lookup_in_status():
+    state = MagicMock()
+    state.fields.return_value = ("web", "default", str(Kind.Deployment))
+    kubectl = MagicMock()
+    kubectl.run.return_value = _workload_json({"app": "web"})
+    kubectl.run_interactive.return_value = 0
+    entered = []
+
+    class FakeStatus:
+        def __init__(self, message):
+            self.message = message
+
+        def __enter__(self):
+            entered.append(self.message)
+            kubectl.run.assert_not_called()
+
+        def __exit__(self, *args):
+            kubectl.run.assert_called_once()
+
+    LogsCommand(state=state, kubectl=kubectl, status=FakeStatus).execute(1)
+
+    assert entered == ["resolving pod selector"]
+    kubectl.run_interactive.assert_called_once()

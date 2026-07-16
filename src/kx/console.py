@@ -88,7 +88,7 @@ def print_success(msg: str) -> None:
 
 def print_error(msg: str) -> None:
     styled = re.sub(r"'([^']+)'", "[accent]'\\1'[/accent]", msg)
-    _console.print(f"[header]✗[/header] [body]{styled}[/body]")
+    _console.print(f"[error]✗[/error] [body]{styled}[/body]")
 
 
 def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> None:
@@ -105,7 +105,15 @@ def status(message: str):
     piped output and test captures never receive spinner frames."""
     if not _console.is_terminal:
         return nullcontext()
-    return _console.status(f"[muted]{message}…[/muted]", spinner_style="muted")
+    # Low refresh with a matching spinner speed: roughly one frame per redraw,
+    # so the line isn't rewritten faster than the animation advances (the
+    # default 12.5 fps redraw flickers on some terminals).
+    return _console.status(
+        f"[muted]{message}…[/muted]",
+        spinner_style="muted",
+        refresh_per_second=4,
+        speed=0.4,
+    )
 
 
 def confirm(message: str) -> None:
