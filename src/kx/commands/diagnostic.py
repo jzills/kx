@@ -53,7 +53,6 @@ def build_report(data: DiagnosticData) -> DiagnosticReport:
         namespace=data.namespace,
         verdict=verdict,
         findings=findings,
-        replicas=data.replicas,
         pods=data.pods,
         warning_events=data.warning_events,
     )

@@ -210,7 +210,7 @@ def test_render_state_singular_item(capture_console):
     assert "1 item" in capture_console.getvalue()
 
 
-def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=None):
+def _diag_report(verdict, findings, pods=None, warning_events=None):
     from kx.diagnostics import DiagnosticReport
 
     return DiagnosticReport(
@@ -219,7 +219,6 @@ def _diag_report(verdict, findings, pods=None, replicas=None, warning_events=Non
         namespace="default",
         verdict=verdict,
         findings=findings,
-        replicas=replicas,
         pods=pods or [],
         warning_events=warning_events or [],
     )
@@ -279,11 +278,10 @@ def test_render_diagnostic_lists_findings(capture_console):
     assert "CrashLoopBackOff in pod web-abc" in out
 
 
-def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
+def test_render_diagnostic_shows_pod_detail(capture_console):
     from kx.diagnostics import (
         ContainerDiagnostic,
         PodDiagnostic,
-        ReplicaHealth,
         SchedulingInfo,
         Severity,
     )
@@ -301,12 +299,9 @@ def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
         ],
         scheduling=SchedulingInfo(schedulable=True),
     )
-    report = _diag_report(
-        Severity.OK, [], pods=[pod], replicas=ReplicaHealth(3, 3, 3, 3)
-    )
+    report = _diag_report(Severity.OK, [], pods=[pod])
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
-    assert "Desired 3" in out
     assert "web-1" in out
     assert "No warning events" in out
 
@@ -574,13 +569,8 @@ def test_render_diagnostic_has_summary_header(capture_console):
     assert out.index("SUMMARY") < out.index("No issues detected")
 
 
-def test_render_diagnostic_replicas_section_header(capture_console):
-    from kx.diagnostics import ReplicaHealth, Severity
+def test_render_diagnostic_has_no_replica_line(capture_console):
+    from kx.diagnostics import Severity
 
-    replicas = ReplicaHealth(
-        desired=3, ready=1, available=1, updated=3, generation=2, observed_generation=2
-    )
-    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [], replicas=replicas))
-    out = capture_console.getvalue()
-    assert "REPLICAS" in out
-    assert out.index("REPLICAS") < out.index("Desired 3")
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, []))
+    assert "Desired" not in capture_console.getvalue()

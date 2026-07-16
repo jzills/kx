@@ -301,36 +301,9 @@ def render_diagnostic(report) -> None:
     else:
         _console.print("  [muted]No issues detected[/muted]")
 
-    if report.replicas is not None:
-        _render_replica_health(report.replicas)
     _render_pod_table(report.pods)
     _render_logs(report.pods)
     _render_warning_events(report.warning_events)
-
-
-def _replica_color(value: int, desired: int) -> str:
-    if value >= desired:
-        return "status.ok"
-    if value == 0 and desired > 0:
-        return "status.bad"
-    return "status.warn"
-
-
-def _render_replica_health(replicas) -> None:
-    _console.print()
-    # Align "REPLICAS" with the SUMMARY/LOGS/WARNING EVENTS section headers.
-    _console.print("  [header]REPLICAS[/header]")
-    ready = f"[{_replica_color(replicas.ready, replicas.desired)}]{replicas.ready}[/]"
-    available = f"[{_replica_color(replicas.available, replicas.desired)}]{replicas.available}[/]"
-    parts = [
-        f"Desired {replicas.desired}",
-        f"Ready {ready}",
-        f"Available {available}",
-        f"Updated {replicas.updated}",
-    ]
-    if replicas.generation is not None or replicas.observed_generation is not None:
-        parts.append(f"Gen {replicas.generation}/{replicas.observed_generation}")
-    _console.print(f"    [muted]{' · '.join(parts)}[/muted]")
 
 
 def _render_pod_table(pods) -> None:
