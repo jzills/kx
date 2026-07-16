@@ -1,26 +1,20 @@
 import re
 from typing import TYPE_CHECKING, Protocol
 
-import typer
-
 if TYPE_CHECKING:
     from kx.state import State
 
 
 def resolve_index(state, index: int) -> str:
     names = list(state.resources.keys())
-    if index < 1:
-        from kx.console import print_error
-
-        print_error("Invalid index")
-        raise typer.Exit(1)
-    try:
-        return names[index - 1]
-    except IndexError:
-        from kx.console import print_error
-
-        print_error("Invalid index")
-        raise typer.Exit(1)
+    count = len(names)
+    if not 1 <= index <= count:
+        label = "item" if count == 1 else "items"
+        raise ValueError(
+            f"Index {index} is out of range — current state has {count} {label} "
+            f"(run 'kx state' to view)."
+        )
+    return names[index - 1]
 
 
 def _parse_output(output: str) -> tuple[list[str], list[list[str]], int]:

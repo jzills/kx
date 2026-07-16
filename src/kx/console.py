@@ -420,8 +420,6 @@ def print_command_help(ctx) -> None:
     if cmd.help:
         _console.print(f"[muted]{cmd.help}[/muted]")
     _console.print()
-    _console.rule(style="muted")
-    _console.print()
 
     args = [param for param in cmd.params if isinstance(param, TyperArgument)]
     opts = [
@@ -461,6 +459,13 @@ def print_command_help(ctx) -> None:
         for alias in aliases:
             _console.print(f"  [body]{alias}[/body]")
 
+    examples = getattr(ctx.command.callback, "_examples", [])
+    if examples:
+        _console.print()
+        _console.print("[header]Examples[/header]")
+        for example in examples:
+            _console.print(f"  [muted]$[/muted] {example}", highlight=False)
+
 
 _KX_ART = [
     "██╗  ██╗██╗  ██╗",
@@ -472,26 +477,32 @@ _KX_ART = [
 ]
 
 
-def print_help(commands: list[tuple[str, str]]) -> None:
+def print_version(version: str) -> None:
+    _console.print(f"kx {version}", markup=False, highlight=False)
+
+
+def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
     _console.print()
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
     _console.print("[muted]kubectl, indexed.[/muted]")
     _console.print()
-    _console.rule(style="muted")
-    _console.print()
     _console.print(
         "[muted]Usage[/muted]  kx [OPTIONS] COMMAND [ARGS]...",
         highlight=False,
     )
-    _console.print()
-    _console.print("[header]Commands[/header]")
-    for name, doc in commands:
-        _console.print(f"  [body]{name:<14}[/body]  [muted]{doc}[/muted]")
+    for title, commands in sections:
+        _console.print()
+        _console.print(f"[header]{title}[/header]")
+        for name, doc in commands:
+            _console.print(f"  [body]{name:<14}[/body]  [muted]{doc}[/muted]")
     _console.print()
     _console.print("[header]Options[/header]")
     _console.print(
         f"  [body]{'--no-color':<14}[/body]  [muted]Disable styled output.[/muted]"
+    )
+    _console.print(
+        f"  [body]{'--version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
     )
     _console.print(
         f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
