@@ -409,12 +409,14 @@ def _render_warning_events(events) -> None:
         return
     # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
     _console.print("  [header]WARNING EVENTS[/header]")
-    for event in events:
+    for position, event in enumerate(events):
         meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
         age = _format_age(event.last_timestamp)
         if age:
             meta.append(age)
-        _console.print()
+        # Blank line separates events from each other, not from the header.
+        if position:
+            _console.print()
         _console.print(
             f"    [{_status_color(event.reason)}]{event.reason}[/]"
             f"[muted] · {' · '.join(meta)}[/muted]"

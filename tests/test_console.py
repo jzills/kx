@@ -574,3 +574,28 @@ def test_render_diagnostic_has_no_replica_line(capture_console):
 
     kx_console.render_diagnostic(_diag_report(Severity.WARNING, []))
     assert "Desired" not in capture_console.getvalue()
+
+
+def test_render_diagnostic_no_blank_between_events_header_and_first_event(
+    capture_console,
+):
+    from kx.diagnostics import EventSummary, Severity
+
+    events = [
+        EventSummary(
+            reason="BackOff",
+            message="Back-off restarting failed container",
+            kind="Pod",
+            name=f"worker-{n}",
+            count=n + 1,
+        )
+        for n in range(2)
+    ]
+    kx_console.render_diagnostic(
+        _diag_report(Severity.WARNING, [], warning_events=events)
+    )
+    lines = capture_console.getvalue().splitlines()
+    header_at = next(i for i, line in enumerate(lines) if "WARNING EVENTS" in line)
+    assert lines[header_at + 1].strip(), "first event should follow the header directly"
+    # the two events themselves stay separated by a blank line
+    assert any(not line.strip() for line in lines[header_at + 2 :])
