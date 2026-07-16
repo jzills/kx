@@ -43,13 +43,16 @@ Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespac
 
 ```
 $ kx get pods
-X  NAME                          READY  STATUS   RESTARTS  AGE
-1  api-7d9f4b8c6-xkp2q           1/1    Running  0         2d
-2  worker-6c8b5f7d9-mnt4r        1/1    Running  3         5h
-3  postgres-0                    1/1    Running  0         12d
+Pods · default · 3 items
+  X    NAME                      READY    STATUS     RESTARTS    AGE
+  1    api-7d9f4b8c6-xkp2q       1/1      Running    0            2d
+  2    worker-6c8b5f7d9-mnt4r    1/1      Running    3            5h
+  3    postgres-0                1/1      Running    0           12d
 ```
 
 All subsequent commands reference resources by their `X` index from the last `kx get`.
+
+Global flags: `--no-color` disables styled output, `--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
 
 ### Commands
 
@@ -69,7 +72,9 @@ All subsequent commands reference resources by their `X` index from the last `kx
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| `kx diagnostic <index>` | Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag. |
 | `kx namespace <index>` | Switch to an indexed namespace; alias: kx ns (run kx get namespaces first). |
+| `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
@@ -108,7 +113,7 @@ kx delete 3
 
 ## State
 
-`kx` maintains a history of up to 10 `kx get` results in `~/.kx_state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor.
+`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor.
 
 ```
 $ kx get pods          # saves a new entry, cursor advances
@@ -118,6 +123,29 @@ $ kx state --all       # lists all history entries and the current position
 ```
 
 Use `kx state <position>` to jump directly to any history entry, and `kx drop <position>` to remove one.
+
+## Configuration
+
+`kx` reads `~/.kx/config.toml`; environment variables override file settings.
+
+| Key | Env var | Default | Description |
+| --- | --- | --- | --- |
+| `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
+| `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
+| `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
+| `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
+
+Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
+
+### Themes
+
+```bash
+kx theme        # list available themes (indexed) with a preview of each
+kx theme nord   # persist a theme to ~/.kx/config.toml
+kx theme 3      # same, selecting by index from the kx theme listing
+```
+
+Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).
 
 ## Development
 

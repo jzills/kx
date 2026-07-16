@@ -1,17 +1,21 @@
 import re
 import json
+from contextlib import nullcontext
+from datetime import datetime, timezone
 
+import typer
+from rich import traceback
 from rich.console import Console
+from rich.markup import escape
+from rich.padding import Padding
+from rich.prompt import Confirm as RichConfirm
 from rich.table import Table
+from rich.text import Text
 
+from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
 from kx.state import StateHistory
-
-COLOR_HEADER = "#3fb950"
-COLOR_DIM = "#7d8590"
-COLOR_BODY = "#e6edf3"
-COLOR_ERROR = "#f85149"
-COLOR_WARNING = "#e3b341"
+from kx.themes import DEFAULT_THEME, rich_theme, styles as theme_styles
 
 _STATUS_GREEN = {
     "Running",
@@ -34,27 +38,57 @@ _STATUS_RED = {
     "InvalidImageName",
 }
 
-_console = Console(force_terminal=True)
+_SEVERITY_ICON = {Severity.OK: "✓", Severity.WARNING: "!", Severity.CRITICAL: "✗"}
+_SEVERITY_COLOR = {
+    Severity.OK: "status.ok",
+    Severity.WARNING: "status.warn",
+    Severity.CRITICAL: "status.bad",
+}
+# Lowercase to match the banner's metadata register ("diagnostics", "1 issue");
+# ALL CAPS is reserved for section and table headers.
+_VERDICT_LABEL = {
+    Severity.OK: "healthy",
+    Severity.WARNING: "warnings",
+    Severity.CRITICAL: "critical",
+}
 
 
-def configure(plain: bool) -> None:
+# Width for piped/redirected output, where wrapping table rows at Rich's
+# 80-column non-terminal default would mangle grep/awk pipelines.
+_PIPE_WIDTH = 1000
+
+
+def _build_console(
+    plain: bool = False, theme: str = DEFAULT_THEME, **kwargs
+) -> Console:
+    # The plain console still carries the theme: semantic markup like [header]
+    # must resolve even when colors are stripped.
+    t = rich_theme(theme)
+    if plain:
+        return Console(no_color=True, highlight=False, theme=t, **kwargs)
+    console = Console(theme=t, highlight=False, **kwargs)
+    if not console.is_terminal:
+        kwargs.setdefault("width", _PIPE_WIDTH)
+        return Console(no_color=True, highlight=False, theme=t, **kwargs)
+    return console
+
+
+_console = _build_console()
+
+
+def configure(plain: bool = False, theme: str = DEFAULT_THEME) -> None:
     global _console
-    _console = (
-        Console(no_color=True, highlight=False)
-        if plain
-        else Console(force_terminal=True)
-    )
+    _console = _build_console(plain=plain, theme=theme)
 
 
 def print_success(msg: str) -> None:
-    _console.print(f"[bold {COLOR_HEADER}]✓[/bold {COLOR_HEADER}] {msg}")
+    styled = re.sub(r"'([^']+)'", "[accent]'\\1'[/accent]", msg)
+    _console.print(f"[success]✓[/success] {styled}")
 
 
 def print_error(msg: str) -> None:
-    styled = re.sub(r"'([^']+)'", f"[{COLOR_HEADER}]'\\1'[/{COLOR_HEADER}]", msg)
-    _console.print(
-        f"[bold {COLOR_HEADER}]✗[/bold {COLOR_HEADER}] [{COLOR_BODY}]{styled}[/{COLOR_BODY}]"
-    )
+    styled = re.sub(r"'([^']+)'", "[accent]'\\1'[/accent]", msg)
+    _console.print(f"[header]✗[/header] [body]{styled}[/body]")
 
 
 def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> None:
@@ -63,7 +97,29 @@ def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> 
         parts.append(namespace)
     if extra:
         parts.append(extra)
-    _console.print(f"[{COLOR_DIM}]{' · '.join(parts)}[/{COLOR_DIM}]")
+    _console.print(f"[muted]{' · '.join(parts)}[/muted]")
+
+
+def status(message: str):
+    """Spinner shown while waiting on the cluster; a no-op off-terminal so
+    piped output and test captures never receive spinner frames."""
+    if not _console.is_terminal:
+        return nullcontext()
+    return _console.status(f"[muted]{message}…[/muted]", spinner_style="muted")
+
+
+def confirm(message: str) -> None:
+    """Themed yes/no prompt that aborts unless confirmed. kind/name tokens
+    (words containing '/') get the accent style, matching banners."""
+    styled = re.sub(r"(\S+/\S+)", "[accent]\\1[/accent]", escape(message))
+    if not RichConfirm.ask(f"[body]{styled}[/body]", console=_console, default=False):
+        raise typer.Abort()
+
+
+def install_traceback() -> None:
+    """Render uncaught exceptions (real bugs, not handled errors) as compact
+    themed tracebacks on the active console."""
+    traceback.install(console=_console, show_locals=False, word_wrap=True)
 
 
 def print_raw(text: str) -> None:
@@ -76,17 +132,27 @@ def print_rich(renderable) -> None:
 
 def _status_color(status: str) -> str:
     if status in _STATUS_GREEN:
-        return COLOR_HEADER
+        return "status.ok"
     if status in _STATUS_RED:
-        return COLOR_ERROR
+        return "status.bad"
     if status in _STATUS_YELLOW or "Init" in status or status == "ContainerCreating":
-        return COLOR_WARNING
-    return COLOR_BODY
+        return "status.warn"
+    return "status.neutral"
+
+
+def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
+    label = "item" if count == 1 else "items"
+    _console.print(
+        f"[muted]{plural_display(resource_type)} · {namespace} · {count} {label}[/muted]"
+    )
 
 
 def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
+        # kubectl exits 0 with empty stdout when nothing matches ("No
+        # resources found" goes to stderr) — show the caption, not silence.
+        _print_get_caption(resource_type, namespace, 0)
         return
 
     header_line = lines[0]
@@ -103,6 +169,10 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
         cols = [line[start:end].strip() for start, end in spans]
         if cols:
             rows.append(cols)
+
+    if not rows:
+        _print_get_caption(resource_type, namespace, 0)
+        return
 
     restarts_col = headers.index("RESTARTS") if "RESTARTS" in headers else -1
     if restarts_col >= 0:
@@ -129,7 +199,7 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     table = Table(
         show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
+        header_style="header",
         box=None,
         padding=(0, 2),
     )
@@ -150,26 +220,22 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
                 styled.append(cell)
         table.add_row(*styled)
 
-    count = len(rows)
-    label = "item" if count == 1 else "items"
-    _console.print(
-        f"[{COLOR_DIM}]{plural_display(resource_type)} · {namespace} · {count} {label}[/{COLOR_DIM}]"
-    )
+    _print_get_caption(resource_type, namespace, len(rows))
     _console.print(table)
 
 
 def render_events_table(text: str) -> None:
     if text.strip() == "No events found":
-        _console.print(f"[{COLOR_DIM}]No events found[/{COLOR_DIM}]")
+        _console.print("[muted]No events found[/muted]")
         return
 
     table = Table(
         show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
+        header_style="header",
         box=None,
         padding=(0, 2),
     )
-    for col in ("TYPE", "REASON", "KIND", "TIMESTAMP", "MESSAGE"):
+    for col in ("TYPE", "REASON", "KIND", "AGE", "MESSAGE"):
         table.add_column(col)
 
     for line in text.splitlines():
@@ -185,16 +251,188 @@ def render_events_table(text: str) -> None:
         )
         message = parts[2] if len(parts) >= 3 else ""
 
-        type_color = COLOR_DIM if event_type == "Normal" else COLOR_WARNING
+        try:
+            age = _format_age(datetime.fromisoformat(timestamp))
+        except ValueError:
+            age = timestamp
+
+        type_color = "muted" if event_type == "Normal" else "warn"
         table.add_row(
             f"[{type_color}]{event_type}[/]",
             reason,
             kind,
-            f"[{COLOR_DIM}]{timestamp}[/]",
+            f"[muted]{age}[/]",
             message,
         )
 
     _console.print(table)
+
+
+def render_diagnostic(report) -> None:
+    verdict = report.verdict
+    color = _SEVERITY_COLOR[verdict]
+    # The verdict rides in the banner rather than on a line of its own; its
+    # color survives the banner's dim styling via the nested tag.
+    status = f"[{color}]{_SEVERITY_ICON[verdict]} {_VERDICT_LABEL[verdict]}[/{color}]"
+    count = len(report.findings)
+    label = "issue" if count == 1 else "issues"
+    print_banner(
+        report.kind,
+        report.name,
+        namespace=report.namespace,
+        extra=f"{status} · {count} {label}" if count else status,
+    )
+
+    _console.print()
+    # Align "SUMMARY" with the LOGS and WARNING EVENTS section headers.
+    _console.print("  [header]SUMMARY[/header]")
+    if report.findings:
+        # A grid keeps the summary in its own wrap region, so continuation lines
+        # hang-indent under the text instead of collapsing under the icon.
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(width=1, no_wrap=True)
+        grid.add_column(overflow="fold")
+        for finding in report.findings:
+            f_color = _SEVERITY_COLOR[finding.severity]
+            f_icon = _SEVERITY_ICON[finding.severity]
+            grid.add_row(
+                Text(f_icon, style=f_color),
+                Text(finding.summary, style="body"),
+            )
+        _console.print(Padding(grid, (0, 0, 0, 2)))
+    else:
+        # Content indents to column 4 under the header, aligning with finding
+        # text and the other sections' empty states.
+        _console.print("    [muted]No issues detected[/muted]")
+
+    _render_pod_table(report.pods)
+    _render_logs(report.pods)
+    _render_warning_events(report.warning_events)
+
+
+def _render_pod_table(pods) -> None:
+    if not pods:
+        return
+    _console.print()
+    table = Table(
+        show_header=True,
+        header_style="header",
+        box=None,
+        padding=(0, 2),
+    )
+    table.add_column("POD")
+    table.add_column("PHASE")
+    table.add_column("READY")
+    table.add_column("RESTARTS")
+    table.add_column("CONTAINER")
+    table.add_column("STATE")
+    table.add_column("REASON")
+
+    for pod in pods:
+        ready = f"{pod.ready_containers}/{pod.total_containers}"
+        phase = f"[{_status_color(pod.phase)}]{pod.phase}[/]"
+        if not pod.containers:
+            table.add_row(pod.name, phase, ready, "", "", "", "")
+            continue
+        for offset, container in enumerate(pod.containers):
+            reason = container.waiting_reason or container.terminated_reason or ""
+            table.add_row(
+                pod.name if offset == 0 else "",
+                phase if offset == 0 else "",
+                ready if offset == 0 else "",
+                str(container.restart_count),
+                container.name,
+                f"[{_status_color(container.state)}]{container.state}[/]",
+                f"[{_status_color(reason)}]{reason}[/]" if reason else "",
+            )
+    _console.print(table)
+
+
+_LOG_ERROR_TOKENS = {
+    "FATAL",
+    "CRITICAL",
+    "ERROR",
+    "ERR",
+    "EXCEPTION",
+    "TRACEBACK",
+    "PANIC",
+}
+
+
+def _highlight_severity(line: str) -> str:
+    """Escape a raw log line for Rich, then color its OTEL severity tokens."""
+
+    def repl(match):
+        token = match.group(0)
+        color = "error" if token.upper() in _LOG_ERROR_TOKENS else "warn"
+        return f"[{color}]{token}[/{color}]"
+
+    return SEVERITY_PATTERN.sub(repl, escape(line))
+
+
+def _render_logs(pods) -> None:
+    entries = [
+        (pod, container)
+        for pod in pods
+        for container in pod.containers
+        if container.log_lines
+    ]
+    if not entries:
+        return
+    _console.print()
+    # Align "LOGS" under the POD column header (the pod table pads content by 2).
+    _console.print("  [header]LOGS[/header]")
+    for pod, container in entries:
+        note = "" if container.log_filtered else " · recent output"
+        _console.print(
+            f"    [muted]Pod/{pod.name} · container {container.name}{note}[/muted]"
+        )
+        for line in container.log_lines:
+            # Padding constrains the wrap region so wrapped lines hang-indent to
+            # column 6 instead of collapsing to the console's left edge.
+            styled = Text.from_markup(_highlight_severity(line))
+            _console.print(Padding(styled, (0, 0, 0, 6)))
+
+
+def _format_age(timestamp) -> str:
+    """Render an event timestamp as a compact age (e.g. "3m ago")."""
+    if not isinstance(timestamp, datetime):
+        return ""
+    now = datetime.now(timezone.utc) if timestamp.tzinfo else datetime.now()
+    seconds = int((now - timestamp).total_seconds())
+    if seconds < 0:
+        return "just now"
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return f"{seconds}s ago"
+
+
+def _render_warning_events(events) -> None:
+    _console.print()
+    # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
+    _console.print("  [header]WARNING EVENTS[/header]")
+    if not events:
+        _console.print("    [muted]No warning events[/muted]")
+        return
+    for position, event in enumerate(events):
+        age = _format_age(event.last_timestamp)
+        # Blank line separates events from each other, not from the header.
+        if position:
+            _console.print()
+        # Object-first, matching the LOGS subheadings: Kind/name leads, the
+        # colored reason and its count follow, then the age.
+        line = (
+            f"    [muted]{event.kind}/{event.name} · [/muted]"
+            f"[{_status_color(event.reason)}]{event.reason}[/]"
+            f"[muted] ×{event.count}[/muted]"
+        )
+        if age:
+            line += f"[muted] · {age}[/muted]"
+        _console.print(line)
+        # Padding constrains the wrap region so wrapped lines hang-indent to
+        # column 6 instead of collapsing to the console's left edge.
+        _console.print(Padding(Text(event.message), (0, 0, 0, 6)))
 
 
 def print_command_help(ctx) -> None:
@@ -202,11 +440,9 @@ def print_command_help(ctx) -> None:
 
     cmd = ctx.command
     _console.print()
-    _console.print(f"[bold {COLOR_HEADER}]{ctx.command_path}[/bold {COLOR_HEADER}]")
+    _console.print(f"[header]{ctx.command_path}[/header]")
     if cmd.help:
-        _console.print(f"[{COLOR_DIM}]{cmd.help}[/{COLOR_DIM}]")
-    _console.print()
-    _console.rule(style=COLOR_DIM)
+        _console.print(f"[muted]{cmd.help}[/muted]")
     _console.print()
 
     args = [param for param in cmd.params if isinstance(param, TyperArgument)]
@@ -220,34 +456,39 @@ def print_command_help(ctx) -> None:
     usage = f"{ctx.command_path} [OPTIONS]"
     if args_str:
         usage += f" {args_str}"
-    _console.print(f"[{COLOR_DIM}]Usage[/{COLOR_DIM}]  {usage}", highlight=False)
+    _console.print(f"[muted]Usage[/muted]  {usage}", highlight=False)
 
     if args:
         _console.print()
-        _console.print(f"[bold {COLOR_HEADER}]Arguments[/bold {COLOR_HEADER}]")
+        _console.print("[header]Arguments[/header]")
         for arg in args:
             label = "required" if arg.required else "optional"
             _console.print(
-                f"  [{COLOR_BODY}]{arg.human_readable_name:<20}[/{COLOR_BODY}]  [{COLOR_DIM}]{label}[/{COLOR_DIM}]"
+                f"  [body]{arg.human_readable_name:<20}[/body]  [muted]{label}[/muted]"
             )
 
     _console.print()
-    _console.print(f"[bold {COLOR_HEADER}]Options[/bold {COLOR_HEADER}]")
+    _console.print("[header]Options[/header]")
     for opt in opts:
         names = "  ".join(opt.opts)
-        _console.print(
-            f"  [{COLOR_BODY}]{names:<20}[/{COLOR_BODY}]  [{COLOR_DIM}]{opt.help or ''}[/{COLOR_DIM}]"
-        )
+        _console.print(f"  [body]{names:<20}[/body]  [muted]{opt.help or ''}[/muted]")
     _console.print(
-        f"  [{COLOR_BODY}]{'--help':<20}[/{COLOR_BODY}]  [{COLOR_DIM}]Show this message and exit.[/{COLOR_DIM}]"
+        f"  [body]{'--help':<20}[/body]  [muted]Show this message and exit.[/muted]"
     )
 
     aliases = getattr(ctx.command.callback, "_aliases", [])
     if aliases:
         _console.print()
-        _console.print(f"[bold {COLOR_HEADER}]Aliases[/bold {COLOR_HEADER}]")
+        _console.print("[header]Aliases[/header]")
         for alias in aliases:
-            _console.print(f"  [{COLOR_BODY}]{alias}[/{COLOR_BODY}]")
+            _console.print(f"  [body]{alias}[/body]")
+
+    examples = getattr(ctx.command.callback, "_examples", [])
+    if examples:
+        _console.print()
+        _console.print("[header]Examples[/header]")
+        for example in examples:
+            _console.print(f"  [muted]$[/muted] {example}", highlight=False)
 
 
 _KX_ART = [
@@ -260,41 +501,88 @@ _KX_ART = [
 ]
 
 
-def print_help(commands: list[tuple[str, str]]) -> None:
+def print_version(version: str) -> None:
+    _console.print(f"kx {version}", markup=False, highlight=False)
+
+
+def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
     _console.print()
     for line in _KX_ART:
-        _console.print(line, style=COLOR_HEADER, markup=False, highlight=False)
-    _console.print(f"[{COLOR_DIM}]kubectl, indexed.[/{COLOR_DIM}]")
-    _console.print()
-    _console.rule(style=COLOR_DIM)
+        _console.print(line, style="header", markup=False, highlight=False)
+    _console.print("[muted]kubectl, indexed.[/muted]")
     _console.print()
     _console.print(
-        f"[{COLOR_DIM}]Usage[/{COLOR_DIM}]  kx [OPTIONS] COMMAND [ARGS]...",
+        "[muted]Usage[/muted]  kx [OPTIONS] COMMAND [ARGS]...",
         highlight=False,
     )
+    for title, commands in sections:
+        _console.print()
+        _console.print(f"[header]{title}[/header]")
+        for name, doc in commands:
+            _console.print(f"  [body]{name:<14}[/body]  [muted]{doc}[/muted]")
     _console.print()
-    _console.print(f"[bold {COLOR_HEADER}]Commands[/bold {COLOR_HEADER}]")
-    for name, doc in commands:
-        _console.print(
-            f"  [{COLOR_BODY}]{name:<14}[/{COLOR_BODY}]  [{COLOR_DIM}]{doc}[/{COLOR_DIM}]"
+    _console.print("[header]Options[/header]")
+    _console.print(
+        f"  [body]{'--no-color':<14}[/body]  [muted]Disable styled output.[/muted]"
+    )
+    _console.print(
+        f"  [body]{'--version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
+    )
+    _console.print(
+        f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
+    )
+
+
+_SWATCH_PARTS = (
+    ("✓ ok", "status.ok"),
+    ("! warn", "status.warn"),
+    ("✗ error", "status.bad"),
+    ("header", "header"),
+    ("body", "body"),
+    ("muted", "muted"),
+)
+
+
+def render_theme_list(active: str) -> None:
+    from rich.style import Style
+
+    from kx.themes import THEMES
+
+    count = len(THEMES)
+    _console.print(
+        f"[muted]Themes · {count} {'item' if count == 1 else 'items'}[/muted]"
+    )
+    table = Table(show_header=True, header_style="header", box=None, padding=(0, 2))
+    table.add_column("X", justify="right")
+    table.add_column("")
+    table.add_column("THEME")
+    table.add_column("PREVIEW")
+    for position, name in enumerate(THEMES, start=1):
+        is_active = name == active
+        marker = Text("→", style="header") if is_active else Text("")
+        label = Text(name, style="body" if is_active else "muted")
+        # Preview each theme with its own literal style values (not the active
+        # theme's semantic styles), so every row shows its own palette.
+        theme = theme_styles(name)
+        swatch = Text("  ").join(
+            Text(sample, style=Style.parse(theme[key])) for sample, key in _SWATCH_PARTS
         )
-    _console.print()
-    _console.print(f"[bold {COLOR_HEADER}]Options[/bold {COLOR_HEADER}]")
-    _console.print(
-        f"  [{COLOR_BODY}]{'--no-color':<14}[/{COLOR_BODY}]  [{COLOR_DIM}]Disable styled output.[/{COLOR_DIM}]"
-    )
-    _console.print(
-        f"  [{COLOR_BODY}]{'--help':<14}[/{COLOR_BODY}]  [{COLOR_DIM}]Show this message and exit.[/{COLOR_DIM}]"
-    )
+        table.add_row(
+            Text(str(position), style="body" if is_active else "muted"),
+            marker,
+            label,
+            swatch,
+        )
+    _console.print(table)
 
 
 def render_state_history(history: StateHistory) -> None:
     total = len(history.states)
     label = "entry" if total == 1 else "entries"
-    _console.print(f"[{COLOR_DIM}]History · {total} {label}[/{COLOR_DIM}]")
+    _console.print(f"[muted]History · {total} {label}[/muted]")
     table = Table(
         show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
+        header_style="header",
         box=None,
         padding=(0, 2),
     )
@@ -305,7 +593,7 @@ def render_state_history(history: StateHistory) -> None:
     table.add_column("ITEMS", justify="right")
     for position, state in enumerate(history.states, start=1):
         is_current = (position - 1) == history.cursor
-        marker = f"[bold {COLOR_HEADER}]→[/bold {COLOR_HEADER}]" if is_current else ""
+        marker = "[header]→[/header]" if is_current else ""
         unique_kinds = set(state.resources.values())
         kind_label = (
             plural_display(next(iter(unique_kinds)))
@@ -313,7 +601,7 @@ def render_state_history(history: StateHistory) -> None:
             else "Mixed"
         )
         count = len(state.resources)
-        row_color = COLOR_BODY if is_current else COLOR_DIM
+        row_color = "body" if is_current else "muted"
         table.add_row(
             f"[{row_color}]{position}[/{row_color}]",
             marker,
@@ -326,16 +614,16 @@ def render_state_history(history: StateHistory) -> None:
 
 def render_labels(labels: dict[str, str]) -> None:
     if not labels:
-        _console.print(f"[{COLOR_DIM}]No labels.[/{COLOR_DIM}]")
+        _console.print("[muted]No labels[/muted]")
         return
     table = Table(
         show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
+        header_style="header",
         box=None,
         padding=(0, 2),
     )
     table.add_column("LABEL")
-    table.add_column("VALUE", style=COLOR_DIM)
+    table.add_column("VALUE", style="muted")
     for key, value in labels.items():
         table.add_row(key, value)
     _console.print(table)
@@ -351,12 +639,10 @@ def render_state(json_str: str) -> None:
     kind_label = (
         plural_display(next(iter(unique_kinds))) if len(unique_kinds) == 1 else "Mixed"
     )
-    _console.print(
-        f"[{COLOR_DIM}]{kind_label} · {namespace} · {count} {label}[/{COLOR_DIM}]"
-    )
+    _console.print(f"[muted]{kind_label} · {namespace} · {count} {label}[/muted]")
     table = Table(
         show_header=True,
-        header_style=f"bold {COLOR_HEADER}",
+        header_style="header",
         box=None,
         padding=(0, 2),
     )

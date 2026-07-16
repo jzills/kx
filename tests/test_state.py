@@ -1,6 +1,5 @@
 import json
 import pytest
-from typer import Exit as ClickExit
 from unittest.mock import patch
 from kx.state import State, StateService
 
@@ -361,7 +360,7 @@ class TestStateServiceFields:
         with _patched(tmp_path):
             svc = StateService()
             svc.save(state)
-            with pytest.raises(ClickExit):
+            with pytest.raises(ValueError, match="out of range"):
                 svc.fields(0)
 
     def test_fields_out_of_bounds_raises(self, tmp_path):
@@ -369,5 +368,5 @@ class TestStateServiceFields:
         with _patched(tmp_path):
             svc = StateService()
             svc.save(state)
-            with pytest.raises(ClickExit):
+            with pytest.raises(ValueError, match="out of range"):
                 svc.fields(5)

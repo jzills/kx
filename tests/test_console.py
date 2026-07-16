@@ -1,6 +1,7 @@
 import io
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from rich.console import Console
 import kx.console as kx_console
 
 
@@ -8,7 +9,7 @@ import kx.console as kx_console
 def capture_console():
     buf = io.StringIO()
     original = kx_console._console
-    kx_console._console = Console(file=buf, no_color=True, highlight=False)
+    kx_console._console = kx_console._build_console(plain=True, file=buf)
     yield buf
     kx_console._console = original
 
@@ -108,9 +109,16 @@ def test_render_indexed_table_non_tabular_falls_through(capture_console):
     assert '{"items": []}' in capture_console.getvalue()
 
 
-def test_render_indexed_table_empty_string(capture_console):
+def test_render_indexed_table_empty_string_shows_zero_caption(capture_console):
     kx_console.render_indexed_table("", "pods", "default")
-    assert capture_console.getvalue() == ""
+    assert "Pods · default · 0 items" in capture_console.getvalue()
+
+
+def test_render_indexed_table_header_only_shows_zero_caption(capture_console):
+    kx_console.render_indexed_table("X   NAME   READY", "pods", "default")
+    out = capture_console.getvalue()
+    assert "Pods · default · 0 items" in out
+    assert "NAME" not in out
 
 
 EVENTS_OUTPUT = (
@@ -200,3 +208,415 @@ def test_render_state_singular_item(capture_console):
     single = '{"resources": {"nginx": "Pod"}, "namespace": "default"}'
     kx_console.render_state(single)
     assert "1 item" in capture_console.getvalue()
+
+
+def _diag_report(verdict, findings, pods=None, warning_events=None):
+    from kx.diagnostics import DiagnosticReport
+
+    return DiagnosticReport(
+        kind="Deployment",
+        name="web",
+        namespace="default",
+        verdict=verdict,
+        findings=findings,
+        pods=pods or [],
+        warning_events=warning_events or [],
+    )
+
+
+def test_render_diagnostic_healthy_reports_no_issues(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "No issues detected" in out
+
+
+def test_render_diagnostic_banner_carries_verdict_and_count(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(
+        Severity.CRITICAL,
+        [Finding(Severity.CRITICAL, "boom"), Finding(Severity.WARNING, "hmm")],
+    )
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "Deployment/web · default · ✗ critical · 2 issues" in out
+    # the verdict lives in the banner only — no standalone line beneath it
+    assert "issues found" not in out
+    assert out.count("critical") == 1
+
+
+def test_render_diagnostic_banner_uses_singular_issue(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(Severity.WARNING, [Finding(Severity.WARNING, "hmm")])
+    kx_console.render_diagnostic(report)
+    assert (
+        "Deployment/web · default · ! warnings · 1 issue" in capture_console.getvalue()
+    )
+
+
+def test_render_diagnostic_banner_omits_count_when_healthy(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "Deployment/web · default · ✓ healthy" in out
+    assert "0 issues" not in out
+
+
+def test_render_diagnostic_lists_findings(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    report = _diag_report(
+        Severity.CRITICAL,
+        [Finding(Severity.CRITICAL, "CrashLoopBackOff in pod web-abc (12 restarts)")],
+    )
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "CrashLoopBackOff in pod web-abc" in out
+
+
+def test_render_diagnostic_shows_pod_detail(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        SchedulingInfo,
+        Severity,
+    )
+
+    pod = PodDiagnostic(
+        name="web-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=1,
+        total_containers=1,
+        containers=[
+            ContainerDiagnostic(
+                name="app", ready=True, started=True, restart_count=0, state="Running"
+            )
+        ],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    report = _diag_report(Severity.OK, [], pods=[pod])
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "web-1" in out
+    assert "No warning events" in out
+
+
+def test_render_diagnostic_shows_log_excerpt(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        SchedulingInfo,
+        Severity,
+    )
+
+    container = ContainerDiagnostic(
+        name="worker",
+        ready=False,
+        started=True,
+        restart_count=4,
+        state="Waiting",
+        waiting_reason="CrashLoopBackOff",
+        log_lines=["ERROR boot failed [config]", "FATAL exit"],
+        log_source="previous",
+        log_filtered=True,
+    )
+    pod = PodDiagnostic(
+        name="worker-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=0,
+        total_containers=1,
+        containers=[container],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    report = _diag_report(Severity.CRITICAL, [], pods=[pod])
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "LOGS" in out
+    assert "Pod/worker-1 · container worker" in out
+    assert "(previous)" not in out
+    # markup-bearing log text must survive escaping intact
+    assert "ERROR boot failed [config]" in out
+    assert "FATAL exit" in out
+
+
+def test_render_diagnostic_logs_note_on_raw_fallback(capture_console):
+    from kx.diagnostics import (
+        ContainerDiagnostic,
+        PodDiagnostic,
+        SchedulingInfo,
+        Severity,
+    )
+
+    container = ContainerDiagnostic(
+        name="app",
+        ready=False,
+        started=True,
+        restart_count=0,
+        state="Running",
+        log_lines=["GET /healthz 404"],
+        log_source="current",
+        log_filtered=False,
+    )
+    pod = PodDiagnostic(
+        name="fe-1",
+        phase="Running",
+        node="node-1",
+        ready_containers=0,
+        total_containers=1,
+        containers=[container],
+        scheduling=SchedulingInfo(schedulable=True),
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [], pods=[pod]))
+    out = capture_console.getvalue()
+    assert "recent output" in out
+    assert "GET /healthz 404" in out
+
+
+def test_render_diagnostic_findings_hang_indent(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    kx_console._console = kx_console._build_console(
+        plain=True, file=capture_console, width=60
+    )
+    finding = Finding(
+        severity=Severity.WARNING,
+        summary="BackOff ×452 on Pod/worker-crashloop-bc7cb7b55-r7n8b: "
+        "Back-off restarting failed container worker",
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [finding]))
+    lines = [line for line in capture_console.getvalue().splitlines() if line.strip()]
+    wrapped = [line for line in lines if line.startswith("    ")]
+    # continuation lines align under the summary text, not the icon at column 2
+    assert wrapped, "expected the long summary to wrap"
+    assert all(not line.startswith("     ") for line in wrapped)
+
+
+def test_render_diagnostic_finding_summary_escapes_markup(capture_console):
+    from kx.diagnostics import Finding, Severity
+
+    finding = Finding(
+        severity=Severity.WARNING,
+        summary="FailedCreatePodSandBox on Pod/web-1: plugin [istio-cni] failed",
+    )
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, [finding]))
+    assert "plugin [istio-cni] failed" in capture_console.getvalue()
+
+
+@pytest.mark.parametrize(
+    "delta, expected",
+    [
+        (timedelta(seconds=5), "5s ago"),
+        (timedelta(minutes=3), "3m ago"),
+        (timedelta(hours=5), "5h ago"),
+        (timedelta(days=2), "2d ago"),
+        (timedelta(days=2, hours=3), "2d ago"),
+        (timedelta(seconds=-30), "just now"),
+    ],
+)
+def test_format_age_buckets(delta, expected):
+    stamp = datetime.now(timezone.utc) - delta
+    assert kx_console._format_age(stamp) == expected
+
+
+def test_format_age_without_timestamp():
+    assert kx_console._format_age(None) == ""
+
+
+def test_render_diagnostic_warning_events_stacked(capture_console):
+    from kx.diagnostics import EventSummary, Severity
+
+    event = EventSummary(
+        reason="FailedCreatePodSandBox",
+        message='failed to setup network for sandbox "4aec" [istio-cni]',
+        kind="Pod",
+        name="worker-crashloop-bc7cb7b5-x8k2",
+        count=2,
+        last_timestamp=datetime.now(timezone.utc) - timedelta(minutes=29),
+    )
+    report = _diag_report(Severity.WARNING, [], warning_events=[event])
+    kx_console.render_diagnostic(report)
+    out = capture_console.getvalue()
+    assert "WARNING EVENTS" in out
+    # metadata collapses onto one scannable header line
+    assert (
+        "Pod/worker-crashloop-bc7cb7b5-x8k2 · FailedCreatePodSandBox ×2 · 29m ago"
+        in out
+    )
+    # the message renders in full beneath, with markup-bearing text intact
+    assert 'failed to setup network for sandbox "4aec" [istio-cni]' in out
+    # the old squeezed column is gone
+    assert "MESSAGE" not in out
+
+
+def test_render_diagnostic_warning_event_without_timestamp(capture_console):
+    from kx.diagnostics import EventSummary, Severity
+
+    event = EventSummary(
+        reason="BackOff",
+        message="Back-off restarting failed container",
+        kind="Pod",
+        name="worker-1",
+        count=293,
+        last_timestamp=None,
+    )
+    kx_console.render_diagnostic(
+        _diag_report(Severity.WARNING, [], warning_events=[event])
+    )
+    out = capture_console.getvalue()
+    assert "Pod/worker-1 · BackOff ×293" in out
+    assert "ago" not in out
+
+
+def test_configure_swaps_console_with_theme():
+    original = kx_console._console
+    try:
+        kx_console.configure(theme="dracula")
+        style = kx_console._console.get_style("header")
+        assert style is not None
+    finally:
+        kx_console._console = original
+
+
+def test_render_theme_list_shows_all_themes_and_marks_active(capture_console):
+    from kx.themes import THEMES
+
+    kx_console.render_theme_list(active="nord")
+    out = capture_console.getvalue()
+    for name in THEMES:
+        assert name in out
+    assert "→" in out
+
+
+def test_build_console_non_terminal_strips_color_and_widens():
+    import io
+
+    console = kx_console._build_console(file=io.StringIO())
+    assert console.no_color
+    assert console.width == kx_console._PIPE_WIDTH
+
+
+def test_print_success_passes_quoted_names_through(capture_console):
+    kx_console.print_success("Theme set to 'nord'")
+    assert "Theme set to 'nord'" in capture_console.getvalue()
+
+
+def test_render_events_table_shows_compact_age(capture_console):
+    kx_console.render_events_table(EVENTS_OUTPUT)
+    out = capture_console.getvalue()
+    assert "AGE" in out
+    assert "ago" in out
+    assert "2024-01-01 12:00:00+00:00" not in out
+
+
+def test_render_events_table_unparseable_timestamp_falls_back(capture_console):
+    line = "Normal   Pulling                        Pod        notadate garbage Pulling image"
+    kx_console.render_events_table(line)
+    assert "notadate garbage" in capture_console.getvalue()
+
+
+def test_status_is_noop_off_terminal(capture_console):
+    with kx_console.status("fetching pods"):
+        pass
+    assert capture_console.getvalue() == ""
+
+
+def test_confirm_accent_styles_resource_and_aborts_on_no(capture_console, monkeypatch):
+    import typer
+    from rich.prompt import Confirm as RichConfirm
+
+    asked = {}
+
+    def fake_ask(prompt, console=None, default=None):
+        asked["prompt"] = prompt
+        return False
+
+    monkeypatch.setattr(RichConfirm, "ask", staticmethod(fake_ask))
+    with pytest.raises(typer.Abort):
+        kx_console.confirm("Delete Pod/nginx in default?")
+    assert "[accent]Pod/nginx[/accent]" in asked["prompt"]
+
+
+def test_confirm_returns_when_accepted(monkeypatch):
+    from rich.prompt import Confirm as RichConfirm
+
+    monkeypatch.setattr(RichConfirm, "ask", staticmethod(lambda *a, **k: True))
+    kx_console.confirm("Delete Pod/nginx in default?")
+
+
+def test_render_theme_list_has_indexed_table_format(capture_console):
+    from kx.themes import THEMES
+
+    kx_console.render_theme_list(active="nord")
+    out = capture_console.getvalue()
+    assert f"Themes · {len(THEMES)} items" in out
+    for header in ("X", "THEME", "PREVIEW"):
+        assert header in out
+    assert "1" in out and str(len(THEMES)) in out
+
+
+def test_render_diagnostic_has_summary_header(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "SUMMARY" in out
+    assert out.index("SUMMARY") < out.index("No issues detected")
+
+
+def test_render_diagnostic_has_no_replica_line(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.WARNING, []))
+    assert "Desired" not in capture_console.getvalue()
+
+
+def test_render_diagnostic_no_blank_between_events_header_and_first_event(
+    capture_console,
+):
+    from kx.diagnostics import EventSummary, Severity
+
+    events = [
+        EventSummary(
+            reason="BackOff",
+            message="Back-off restarting failed container",
+            kind="Pod",
+            name=f"worker-{n}",
+            count=n + 1,
+        )
+        for n in range(2)
+    ]
+    kx_console.render_diagnostic(
+        _diag_report(Severity.WARNING, [], warning_events=events)
+    )
+    lines = capture_console.getvalue().splitlines()
+    header_at = next(i for i, line in enumerate(lines) if "WARNING EVENTS" in line)
+    assert lines[header_at + 1].strip(), "first event should follow the header directly"
+    # the two events themselves stay separated by a blank line
+    assert any(not line.strip() for line in lines[header_at + 2 :])
+
+
+def test_render_diagnostic_warning_events_header_shown_when_empty(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    out = capture_console.getvalue()
+    assert "WARNING EVENTS" in out
+    assert out.index("WARNING EVENTS") < out.index("No warning events")
+
+
+def test_render_diagnostic_empty_states_share_indent(capture_console):
+    from kx.diagnostics import Severity
+
+    kx_console.render_diagnostic(_diag_report(Severity.OK, []))
+    lines = capture_console.getvalue().splitlines()
+    summary_empty = next(line for line in lines if "No issues detected" in line)
+    events_empty = next(line for line in lines if "No warning events" in line)
+    indent = len(summary_empty) - len(summary_empty.lstrip())
+    assert indent == 4
+    assert indent == len(events_empty) - len(events_empty.lstrip())
