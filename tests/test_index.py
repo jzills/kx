@@ -1,5 +1,4 @@
 import pytest
-from typer import Exit as ClickExit
 from kx.index import _parse_output, IndexService, resolve_index
 from kx.state import State
 
@@ -140,15 +139,15 @@ class TestResolveIndex:
 
     def test_index_zero_raises(self):
         state = State(resources={"nginx": "Pod"})
-        with pytest.raises(ClickExit):
+        with pytest.raises(ValueError, match="out of range"):
             resolve_index(state, 0)
 
     def test_index_beyond_length_raises(self):
         state = State(resources={"nginx": "Pod"})
-        with pytest.raises(ClickExit):
+        with pytest.raises(ValueError, match="has 1 item "):
             resolve_index(state, 2)
 
     def test_index_negative_raises(self):
         state = State(resources={"nginx": "Pod"})
-        with pytest.raises(ClickExit):
+        with pytest.raises(ValueError, match="Index -1"):
             resolve_index(state, -1)

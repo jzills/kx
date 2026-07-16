@@ -64,23 +64,72 @@ app = typer.Typer(
 )
 
 
+# kx --help groups commands into these sections (definition order within each).
+_HELP_SECTIONS = (
+    (
+        "Resources",
+        (
+            "get",
+            "describe",
+            "events",
+            "logs",
+            "labels",
+            "yaml",
+            "delete",
+            "edit",
+            "exec",
+            "tree",
+            "rollout",
+            "scale",
+            "port-forward",
+            "diagnostic",
+            "namespace",
+        ),
+    ),
+    ("History", ("state", "drop", "back", "forward")),
+    ("Configuration", ("theme",)),
+)
+
+
+def _kx_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("kx-cli")
+    except PackageNotFoundError:
+        return "dev"
+
+
 @app.callback(invoke_without_command=True)
 def callback(
     ctx: typer.Context,
     no_color: bool = typer.Option(False, "--no-color", help="Disable styled output."),
+    show_version: bool = typer.Option(
+        False, "--version", is_eager=True, help="Show the kx version and exit."
+    ),
     show_help: bool = typer.Option(
         False, "--help", is_eager=True, help="Show this message and exit."
     ),
 ) -> None:
     if no_color:
         console.configure(plain=True, theme=_config.theme)
+    if show_version:
+        console.print_version(_kx_version())
+        raise typer.Exit()
     if show_help or ctx.invoked_subcommand is None:
-        commands = [
-            (name, cmd.get_short_help_str(limit=55))
+        docs = {
+            name: cmd.get_short_help_str(limit=55)
             for name, cmd in ctx.command.commands.items()
             if not cmd.hidden
-        ]
-        console.print_help(commands)
+        }
+        sections = []
+        for title, names in _HELP_SECTIONS:
+            rows = [(name, docs.pop(name)) for name in names if name in docs]
+            if rows:
+                sections.append((title, rows))
+        if docs:
+            sections.append(("Other", list(docs.items())))
+        console.print_help(sections)
         raise typer.Exit()
 
 
@@ -399,6 +448,32 @@ def forward():
     """Navigate to the next kx get result."""
     console.render_state(ForwardCommand(state=_state).execute())
 
+
+# Help-screen metadata: print_command_help reads _aliases/_examples off the
+# command callback to render the Aliases and Examples sections.
+diagnostic._aliases = ["kx diag"]
+namespace._aliases = ["kx ns"]
+
+get._examples = ["kx get pods", "kx get deploy -n kube-system --match api"]
+describe._examples = ["kx describe 2"]
+events._examples = ["kx events 2"]
+logs._examples = ["kx logs 1 -f"]
+labels._examples = ["kx labels 1 --selector"]
+yaml._examples = ["kx yaml 1 --show metadata,spec"]
+delete._examples = ["kx delete 3 --yes"]
+edit._examples = ["kx edit 1"]
+exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
+tree._examples = ["kx tree 2 --index"]
+rollout._examples = ["kx rollout restart 2"]
+scale._examples = ["kx scale 2 5"]
+port_forward._examples = ["kx port-forward 2 8080:80"]
+diagnostic._examples = ["kx diag 2"]
+namespace._examples = ["kx get namespaces", "kx ns 3"]
+state._examples = ["kx state --all", "kx state 2"]
+drop._examples = ["kx drop 2"]
+back._examples = ["kx back"]
+forward._examples = ["kx forward"]
+theme._examples = ["kx theme", "kx theme nord"]
 
 if __name__ == "__main__":
     app()
