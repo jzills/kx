@@ -1,9 +1,12 @@
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kx.commands.events import EventsCommand
 from kx.events import EventsService
 from kx.kinds import Kind
+from kx.refresh import StaleResourceError
 
 
 def _event(type_, reason, kind, ts, message, name="web"):
@@ -24,7 +27,9 @@ class TestEventsCommand:
         events.get.return_value = []
         events.filter.return_value = []
 
-        result = EventsCommand(state=state, events=events).execute(1)
+        kubectl = MagicMock()
+        kubectl.probe.return_value = 0
+        result = EventsCommand(state=state, events=events, kubectl=kubectl).execute(1)
 
         assert result == "No events found"
         events.get.assert_called_once_with("default")
@@ -40,12 +45,50 @@ class TestEventsCommand:
         events.get.return_value = [ev]
         events.filter.return_value = [ev]
 
-        result = EventsCommand(state=state, events=events).execute(1)
+        result = EventsCommand(state=state, events=events, kubectl=MagicMock()).execute(
+            1
+        )
 
         assert "Normal" in result
         assert "Scheduled" in result
         assert "Pod" in result
         assert "Assigned to node-1" in result
+
+
+class TestEventsStaleDetection:
+    def _command(self, events_list, probe_rc):
+        state = MagicMock()
+        state.fields.return_value = ("web-1", "default", "Pod")
+        events_svc = MagicMock()
+        events_svc.get.return_value = events_list
+        events_svc.filter.return_value = events_list
+        kubectl = MagicMock()
+        kubectl.probe.return_value = probe_rc
+        cmd = EventsCommand(state=state, events=events_svc, kubectl=kubectl)
+        return cmd, kubectl
+
+    def test_no_events_and_missing_resource_raises_stale(self):
+        cmd, kubectl = self._command([], probe_rc=1)
+        with pytest.raises(StaleResourceError, match="Pod/web-1"):
+            cmd.execute(1)
+        kubectl.probe.assert_called_once_with(["get", "Pod", "web-1", "-n", "default"])
+
+    def test_no_events_and_live_resource_returns_no_events(self):
+        cmd, _ = self._command([], probe_rc=0)
+        assert cmd.execute(1) == "No events found"
+
+    def test_matched_events_skip_probe(self):
+        event = _event(
+            "Warning",
+            "Killing",
+            "Pod",
+            "2024-01-01T00:00:00Z",
+            "Stopping",
+            name="web-1",
+        )
+        cmd, kubectl = self._command([event], probe_rc=1)
+        cmd.execute(1)
+        kubectl.probe.assert_not_called()
 
 
 class TestEventsService:

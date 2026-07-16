@@ -1,7 +1,7 @@
 from kx.index import IndexServiceProtocol
 from kx.kinds import normalize_kind
 from kx.kubectl import KubectlServiceProtocol
-from kx.state import State, StateServiceProtocol
+from kx.state import Query, State, StateServiceProtocol
 
 
 def _extract_namespace(extra_args: list[str]) -> str | None:
@@ -42,6 +42,10 @@ class GetCommand:
             )
             kind = normalize_kind(resource)
             self.state.save(
-                State(resources={name: kind for name in names}, namespace=namespace)
+                State(
+                    resources={name: kind for name in names},
+                    namespace=namespace,
+                    query=Query(resource=resource, args=extra_args, match=filter_term),
+                )
             )
         return indexed_output

@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 from kx.commands.get import GetCommand, _extract_namespace
 from kx.kinds import Kind
+from kx.state import Query
 
 
 def _make_command(kubectl_output="NAME\nnginx"):
@@ -107,6 +108,22 @@ class TestExtractNamespace:
 
     def test_short_flag_at_end_ignored(self):
         assert _extract_namespace(["-n"]) is None
+
+
+class TestGetCommandRecordsQuery:
+    def test_query_saved_with_state(self):
+        cmd, state, _ = _make_command()
+        cmd.execute("pods", filter_term="ngi", extra_args=["-n", "staging"])
+        saved = state.save.call_args[0][0]
+        assert saved.query == Query(
+            resource="pods", args=["-n", "staging"], match="ngi"
+        )
+
+    def test_query_defaults(self):
+        cmd, state, _ = _make_command()
+        cmd.execute("pods")
+        saved = state.save.call_args[0][0]
+        assert saved.query == Query(resource="pods", args=[], match=None)
 
 
 class TestGetCommandNormalizesKind:

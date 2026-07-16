@@ -30,11 +30,12 @@ from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config, save_theme
 from kx.diagnostics import DiagnosticsService
-from kx.errors import handle_errors
+from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
 from kx.index import IndexService
 from kx.kubectl import KubectlService
+from kx.refresh import RefreshService
 from kx.state import StateService
 
 
@@ -142,6 +143,9 @@ _state = StateService(max_history=_config.max_history)
 _events = EventsService()
 _index = IndexService()
 _diagnostics = DiagnosticsService(events=_events)
+# A lambda, not an instance: it reads the module globals at call time so tests
+# that patch kx.main._state/_kubectl are honored.
+set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
 @app.command(
@@ -189,7 +193,7 @@ def describe(ctx: typer.Context, indexes: list[int]):
 @handle_errors
 def events(indexes: list[int]):
     """Show Kubernetes events for one or more indexed resources."""
-    command = EventsCommand(state=_state, events=_events)
+    command = EventsCommand(state=_state, events=_events, kubectl=_kubectl)
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         with console.status("fetching events"):
