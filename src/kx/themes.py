@@ -98,6 +98,16 @@ THEMES: dict[str, Palette] = {
         warn="#9a6700",
         success="#1a7f37",
     ),
+    # Every style resolves to the terminal default: no colors, no attributes.
+    "plain": Palette(
+        accent="default",
+        muted="default",
+        body="default",
+        error="default",
+        warn="default",
+        success="default",
+        header="default",
+    ),
 }
 
 STYLE_KEYS = (

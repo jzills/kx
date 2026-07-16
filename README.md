@@ -141,7 +141,7 @@ kx theme        # list available themes with a preview of each
 kx theme nord   # persist a theme to ~/.kx/config.toml
 ```
 
-Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, and `light` (for light terminal backgrounds).
+Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).
 
 ## Development
 
