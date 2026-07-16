@@ -48,6 +48,8 @@ ruff check src/
 
 **Kubernetes SDK usage** (`events.py`, `graph.py`): `load_config()` in `k8s.py` tries `load_kube_config()` then falls back to `load_incluster_config()`. The `tree` command uses the Python SDK directly (not kubectl) to walk ownership references across Deployment → ReplicaSet → Pod → Container.
 
+**Theming:** `themes.py` defines a registry of prefab color palettes expanded into `rich.theme.Theme` objects with semantic style names (`header`, `muted`, `body`, `status.ok`, …). All styling flows through the themed module-global console in `console.py` (`configure(plain, theme)` swaps it); render code uses semantic markup like `[header]…[/header]`, never hex values. Theme selection: `theme` key in `~/.kx/config.toml`, `KX_THEME` env, or `kx theme <name>` (which persists via `config.save_theme`).
+
 **`normalize_kind()`** in `kinds.py` maps kubectl shorthand (e.g. `pods`, `deploy`, `svc`) to canonical Kubernetes kind names used in event `involved_object.kind` comparisons.
 
 ## Release

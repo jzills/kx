@@ -4,11 +4,6 @@ from rich.tree import Tree
 from kx.k8s import load_config
 from kx.kinds import Kind
 
-_COLOR_ROOT = "#3fb950"
-_COLOR_MID = "#3fb950"
-_COLOR_POD = "#e6edf3"
-_COLOR_DIM = "#7d8590"
-
 
 def build_tree(kind: str, name: str, namespace: str) -> Tree:
     root, _ = _build(kind, name, namespace, indexed=False)
@@ -26,9 +21,9 @@ def _build(
 ) -> tuple[Tree, list[tuple[str, str]]]:
     load_config()
     resources: list[tuple[str, str]] = [(name, kind)] if indexed else []
-    label = f"[bold {_COLOR_ROOT}]{kind}/{name}[/bold {_COLOR_ROOT}]"
+    label = f"[header]{kind}/{name}[/header]"
     if indexed:
-        label = f"[{_COLOR_DIM}]1[/{_COLOR_DIM}] {label}"
+        label = f"[muted]1[/muted] {label}"
     root = Tree(label)
 
     apps = client.AppsV1Api()
@@ -54,7 +49,7 @@ def _build(
             pod = core.read_namespaced_pod(name, namespace)
             _add_containers(pod, root)
         case _:
-            root.add(f"[dim](no ownership graph for {kind})[/dim]")
+            root.add(f"[muted](no ownership graph for {kind})[/muted]")
 
     return root, resources
 
@@ -64,7 +59,7 @@ def _add_node(parent, resources, indexed, color, prefix, name, kind):
     record `(name, kind)` in `resources`."""
     label = f"[{color}]{prefix}/{name}[/{color}]"
     if indexed:
-        label = f"[{_COLOR_DIM}]{len(resources) + 1}[/{_COLOR_DIM}] {label}"
+        label = f"[muted]{len(resources) + 1}[/muted] {label}"
         resources.append((name, kind))
     return parent.add(label)
 
@@ -82,7 +77,7 @@ def _tree_deployment(name, namespace, node, apps, pods, resources, indexed):
             node,
             resources,
             indexed,
-            _COLOR_MID,
+            "accent",
             "rs",
             rs.metadata.name,
             Kind.ReplicaSet,
@@ -113,7 +108,7 @@ def _tree_cron_job(name, namespace, node, batch, pods, resources, indexed):
     ]
     for job in jobs:
         job_node = _add_node(
-            node, resources, indexed, _COLOR_MID, "job", job.metadata.name, Kind.Job
+            node, resources, indexed, "accent", "job", job.metadata.name, Kind.Job
         )
         _add_pods_for_owner(job.metadata.uid, pods, job_node, resources, indexed)
 
@@ -122,16 +117,16 @@ def _tree_service(name, namespace, node, core, resources, indexed):
     svc = core.read_namespaced_service(name, namespace)
     selector = svc.spec.selector
     if not selector:
-        node.add(f"[{_COLOR_DIM}](no selector)[/{_COLOR_DIM}]")
+        node.add("[muted](no selector)[/muted]")
         return
     label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
     pods = core.list_namespaced_pod(namespace, label_selector=label_selector).items
     if not pods:
-        node.add(f"[{_COLOR_DIM}](no matching pods)[/{_COLOR_DIM}]")
+        node.add("[muted](no matching pods)[/muted]")
         return
     for pod in pods:
         pod_node = _add_node(
-            node, resources, indexed, _COLOR_POD, "pod", pod.metadata.name, Kind.Pod
+            node, resources, indexed, "body", "pod", pod.metadata.name, Kind.Pod
         )
         _add_containers(pod, pod_node)
 
@@ -143,7 +138,7 @@ def _add_pods_for_owner(owner_uid, pods, parent_node, resources, indexed):
             parent_node,
             resources,
             indexed,
-            _COLOR_POD,
+            "body",
             "pod",
             pod.metadata.name,
             Kind.Pod,
@@ -153,7 +148,7 @@ def _add_pods_for_owner(owner_uid, pods, parent_node, resources, indexed):
 
 def _add_containers(pod, parent_node):
     for container in pod.spec.containers:
-        parent_node.add(f"[{_COLOR_DIM}]container: {container.name}[/{_COLOR_DIM}]")
+        parent_node.add(f"[muted]container: {container.name}[/muted]")
 
 
 def _owned_by(resource, uid: str) -> bool:

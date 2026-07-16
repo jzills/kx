@@ -71,6 +71,7 @@ All subsequent commands reference resources by their `X` index from the last `kx
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx diagnostic <index>` | Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag. |
 | `kx namespace <index>` | Switch to an indexed namespace; alias: kx ns (run kx get namespaces first). |
+| `kx theme [<name>]` | List available color themes or persist a theme choice. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
@@ -119,6 +120,26 @@ $ kx state --all       # lists all history entries and the current position
 ```
 
 Use `kx state <position>` to jump directly to any history entry, and `kx drop <position>` to remove one.
+
+## Configuration
+
+`kx` reads `~/.kx/config.toml`; environment variables override file settings.
+
+| Key | Env var | Default | Description |
+| --- | --- | --- | --- |
+| `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
+| `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
+| `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
+| `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
+
+### Themes
+
+```bash
+kx theme        # list available themes with a preview of each
+kx theme nord   # persist a theme to ~/.kx/config.toml
+```
+
+Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, and `light` (for light terminal backgrounds).
 
 ## Development
 
