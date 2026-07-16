@@ -382,7 +382,9 @@ def _render_logs(pods) -> None:
     _console.print("  [header]LOGS[/header]")
     for pod, container in entries:
         note = "" if container.log_filtered else " · recent output"
-        _console.print(f"    [muted]{pod.name}/{container.name}{note}[/muted]")
+        _console.print(
+            f"    [muted]Pod/{pod.name} · container {container.name}{note}[/muted]"
+        )
         for line in container.log_lines:
             # Padding constrains the wrap region so wrapped lines hang-indent to
             # column 6 instead of collapsing to the console's left edge.
@@ -412,17 +414,20 @@ def _render_warning_events(events) -> None:
         _console.print("    [muted]No warning events[/muted]")
         return
     for position, event in enumerate(events):
-        meta = [f"{event.kind}/{event.name}", f"×{event.count}"]
         age = _format_age(event.last_timestamp)
-        if age:
-            meta.append(age)
         # Blank line separates events from each other, not from the header.
         if position:
             _console.print()
-        _console.print(
-            f"    [{_status_color(event.reason)}]{event.reason}[/]"
-            f"[muted] · {' · '.join(meta)}[/muted]"
+        # Object-first, matching the LOGS subheadings: Kind/name leads, the
+        # colored reason and its count follow, then the age.
+        line = (
+            f"    [muted]{event.kind}/{event.name} · [/muted]"
+            f"[{_status_color(event.reason)}]{event.reason}[/]"
+            f"[muted] ×{event.count}[/muted]"
         )
+        if age:
+            line += f"[muted] · {age}[/muted]"
+        _console.print(line)
         # Padding constrains the wrap region so wrapped lines hang-indent to
         # column 6 instead of collapsing to the console's left edge.
         _console.print(Padding(Text(event.message), (0, 0, 0, 6)))

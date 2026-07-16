@@ -338,7 +338,7 @@ def test_render_diagnostic_shows_log_excerpt(capture_console):
     kx_console.render_diagnostic(report)
     out = capture_console.getvalue()
     assert "LOGS" in out
-    assert "worker-1/worker" in out
+    assert "Pod/worker-1 · container worker" in out
     assert "(previous)" not in out
     # markup-bearing log text must survive escaping intact
     assert "ERROR boot failed [config]" in out
@@ -445,7 +445,7 @@ def test_render_diagnostic_warning_events_stacked(capture_console):
     assert "WARNING EVENTS" in out
     # metadata collapses onto one scannable header line
     assert (
-        "FailedCreatePodSandBox · Pod/worker-crashloop-bc7cb7b5-x8k2 · ×2 · 29m ago"
+        "Pod/worker-crashloop-bc7cb7b5-x8k2 · FailedCreatePodSandBox ×2 · 29m ago"
         in out
     )
     # the message renders in full beneath, with markup-bearing text intact
@@ -469,7 +469,7 @@ def test_render_diagnostic_warning_event_without_timestamp(capture_console):
         _diag_report(Severity.WARNING, [], warning_events=[event])
     )
     out = capture_console.getvalue()
-    assert "BackOff · Pod/worker-1 · ×293" in out
+    assert "Pod/worker-1 · BackOff ×293" in out
     assert "ago" not in out
 
 
