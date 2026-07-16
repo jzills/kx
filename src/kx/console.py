@@ -47,6 +47,11 @@ _VERDICT_LABEL = {
 }
 
 
+# Width for piped/redirected output, where wrapping table rows at Rich's
+# 80-column non-terminal default would mangle grep/awk pipelines.
+_PIPE_WIDTH = 1000
+
+
 def _build_console(
     plain: bool = False, theme: str = DEFAULT_THEME, **kwargs
 ) -> Console:
@@ -55,7 +60,11 @@ def _build_console(
     t = rich_theme(theme)
     if plain:
         return Console(no_color=True, highlight=False, theme=t, **kwargs)
-    return Console(force_terminal=True, theme=t, **kwargs)
+    console = Console(theme=t, highlight=False, **kwargs)
+    if not console.is_terminal:
+        kwargs.setdefault("width", _PIPE_WIDTH)
+        return Console(no_color=True, highlight=False, theme=t, **kwargs)
+    return console
 
 
 _console = _build_console()
@@ -67,7 +76,8 @@ def configure(plain: bool = False, theme: str = DEFAULT_THEME) -> None:
 
 
 def print_success(msg: str) -> None:
-    _console.print(f"[success]✓[/success] {msg}")
+    styled = re.sub(r"'([^']+)'", "[accent]'\\1'[/accent]", msg)
+    _console.print(f"[success]✓[/success] {styled}")
 
 
 def print_error(msg: str) -> None:
@@ -187,7 +197,7 @@ def render_events_table(text: str) -> None:
         box=None,
         padding=(0, 2),
     )
-    for col in ("TYPE", "REASON", "KIND", "TIMESTAMP", "MESSAGE"):
+    for col in ("TYPE", "REASON", "KIND", "AGE", "MESSAGE"):
         table.add_column(col)
 
     for line in text.splitlines():
@@ -203,12 +213,17 @@ def render_events_table(text: str) -> None:
         )
         message = parts[2] if len(parts) >= 3 else ""
 
+        try:
+            age = _format_age(datetime.fromisoformat(timestamp))
+        except ValueError:
+            age = timestamp
+
         type_color = "muted" if event_type == "Normal" else "warn"
         table.add_row(
             f"[{type_color}]{event_type}[/]",
             reason,
             kind,
-            f"[muted]{timestamp}[/]",
+            f"[muted]{age}[/]",
             message,
         )
 
@@ -246,7 +261,7 @@ def render_diagnostic(report) -> None:
             )
         _console.print(Padding(grid, (0, 0, 0, 2)))
     else:
-        _console.print("  [muted]No issues detected.[/muted]")
+        _console.print("  [muted]No issues detected[/muted]")
 
     if report.replicas is not None:
         _render_replica_health(report.replicas)
@@ -377,7 +392,7 @@ def _format_age(timestamp) -> str:
 def _render_warning_events(events) -> None:
     _console.print()
     if not events:
-        _console.print("[muted]No warning events.[/muted]")
+        _console.print("[muted]No warning events[/muted]")
         return
     # Align "WARNING EVENTS" under the POD column header (content is padded by 2).
     _console.print("  [header]WARNING EVENTS[/header]")
@@ -554,7 +569,7 @@ def render_state_history(history: StateHistory) -> None:
 
 def render_labels(labels: dict[str, str]) -> None:
     if not labels:
-        _console.print("[muted]No labels.[/muted]")
+        _console.print("[muted]No labels[/muted]")
         return
     table = Table(
         show_header=True,
