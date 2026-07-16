@@ -223,7 +223,7 @@ def test_render_diagnostic_healthy_reports_no_issues(capture_console):
 
     kx_console.render_diagnostic(_diag_report(Severity.OK, []))
     out = capture_console.getvalue()
-    assert "No issues detected." in out
+    assert "No issues detected" in out
 
 
 def test_render_diagnostic_banner_carries_verdict_and_count(capture_console):
@@ -301,7 +301,7 @@ def test_render_diagnostic_shows_replica_and_pod_detail(capture_console):
     out = capture_console.getvalue()
     assert "Desired 3" in out
     assert "web-1" in out
-    assert "No warning events." in out
+    assert "No warning events" in out
 
 
 def test_render_diagnostic_shows_log_excerpt(capture_console):
@@ -489,3 +489,30 @@ def test_render_theme_list_shows_all_themes_and_marks_active(capture_console):
     for name in THEMES:
         assert name in out
     assert "→" in out
+
+
+def test_build_console_non_terminal_strips_color_and_widens():
+    import io
+
+    console = kx_console._build_console(file=io.StringIO())
+    assert console.no_color
+    assert console.width == kx_console._PIPE_WIDTH
+
+
+def test_print_success_passes_quoted_names_through(capture_console):
+    kx_console.print_success("Theme set to 'nord'")
+    assert "Theme set to 'nord'" in capture_console.getvalue()
+
+
+def test_render_events_table_shows_compact_age(capture_console):
+    kx_console.render_events_table(EVENTS_OUTPUT)
+    out = capture_console.getvalue()
+    assert "AGE" in out
+    assert "ago" in out
+    assert "2024-01-01 12:00:00+00:00" not in out
+
+
+def test_render_events_table_unparseable_timestamp_falls_back(capture_console):
+    line = "Normal   Pulling                        Pod        notadate garbage Pulling image"
+    kx_console.render_events_table(line)
+    assert "notadate garbage" in capture_console.getvalue()

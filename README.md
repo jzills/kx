@@ -132,6 +132,8 @@ Use `kx state <position>` to jump directly to any history entry, and `kx drop <p
 | `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
 
+Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
+
 ### Themes
 
 ```bash
