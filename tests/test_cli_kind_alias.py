@@ -79,6 +79,28 @@ class TestKindShorthand:
             ["config", "set-context", "--current", "--namespace=dev"]
         )
 
+    def test_bare_integer_after_kind_errors_with_guidance(self):
+        result = runner.invoke(app, ["po", "3"])
+        assert result.exit_code != 0
+        assert "doesn't take an index" in result.output
+        assert "kx describe 3" in result.output
+
+    def test_integer_guard_covers_flag_forms(self):
+        result = runner.invoke(app, ["deploy", "-n", "kube-system", "3"])
+        assert result.exit_code != 0
+        assert "doesn't take an index" in result.output
+
+    def test_explicit_get_with_integer_passes_through(self):
+        kubectl, state, index = _make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["get", "po", "3"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "po", "3"])
+
     def test_unknown_token_still_errors(self):
         result = runner.invoke(app, ["nonsense"])
         assert result.exit_code != 0

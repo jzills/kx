@@ -72,6 +72,16 @@ class KindAliasGroup(TyperGroup):
             return super().resolve_command(ctx, args)
         except click.exceptions.UsageError:
             if args and is_kind_spelling(args[0]):
+                indexes = [arg for arg in args[1:] if arg.isdigit()]
+                if indexes:
+                    # `kx po 3` is a mistaken index, not a resource named "3";
+                    # `kx get po 3` stays available for literal all-digit names.
+                    raise click.exceptions.UsageError(
+                        f"'kx {args[0]}' lists resources — it doesn't take an "
+                        f"index. Use an indexed command like 'kx describe "
+                        f"{indexes[0]}', or 'kx get {args[0]} {indexes[0]}' if "
+                        f"you mean a resource named '{indexes[0]}'."
+                    ) from None
                 return "get", self.get_command(ctx, "get"), args
             raise
 
@@ -170,7 +180,7 @@ set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index)
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-@handle_errors
+@handle_errors(refresh=False)
 def get(
     ctx: typer.Context,
     resource: str,
@@ -427,24 +437,39 @@ def diagnostic_alias(index: int):
     console.render_diagnostic(report)
 
 
-@app.command(cls=StyledCommand)
-@handle_errors
-def namespace(index: int):
-    """Switch to an indexed namespace; alias: kx ns (run kx get namespaces first)."""
+def _namespace(index: Optional[int]) -> None:
+    if index is None:
+        command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
+        with console.status("fetching namespaces"):
+            result = command.execute("namespaces", None, [])
+        console.render_indexed_table(result, "namespaces", _state.load().namespace)
+        return
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
     with console.status("switching namespace"):
         name = command.execute(index)
     console.print_success(f"Switched to '{name}'")
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def namespace(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Namespace index to switch to; omit to list namespaces."
+    ),
+):
+    """List namespaces, or switch to an indexed one; alias: kx ns."""
+    _namespace(index)
 
 
 @app.command(name="ns", cls=StyledCommand, hidden=True)
 @handle_errors
-def namespace_alias(index: int):
+def namespace_alias(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Namespace index to switch to; omit to list namespaces."
+    ),
+):
     """Alias for namespace."""
-    command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    with console.status("switching namespace"):
-        name = command.execute(index)
-    console.print_success(f"Switched to '{name}'")
+    _namespace(index)
 
 
 @app.command(cls=StyledCommand)
@@ -525,7 +550,7 @@ rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag 2"]
-namespace._examples = ["kx get namespaces", "kx ns 3"]
+namespace._examples = ["kx ns", "kx ns 3"]
 state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]
 back._examples = ["kx back"]

@@ -159,3 +159,17 @@ class TestStaleStateRefresh:
         assert result.exit_code == 1
         assert "pick a new index" not in _plain(result.output)
         kubectl.run.assert_called_once()
+
+    def test_get_not_found_does_not_refresh(self):
+        """`get` consumes no index, so a NotFound from it never means stale state."""
+        state = self._stale_state(Query(resource="namespaces", args=[]))
+        kubectl = MagicMock()
+        kubectl.run.side_effect = RuntimeError(
+            'Error from server (NotFound): pods "3" not found'
+        )
+        with patch("kx.main._state", state), patch("kx.main._kubectl", kubectl):
+            result = runner.invoke(app, ["get", "po", "3"])
+        assert result.exit_code == 1
+        assert "not found" in _plain(result.output)
+        assert "pick a new index" not in _plain(result.output)
+        kubectl.run.assert_called_once()
