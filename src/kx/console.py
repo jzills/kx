@@ -192,7 +192,9 @@ def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
     )
 
 
-def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
+def render_indexed_table(
+    text: str, resource_type: str, namespace: str, note: str | None = None
+) -> None:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         # kubectl exits 0 with empty stdout when nothing matches ("No
@@ -202,7 +204,7 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     header_line = lines[0]
     first_col = header_line.split()[0] if header_line.split() else ""
-    if first_col != "X":
+    if first_col != "X" and note is None:
         _console.print(text, markup=False, highlight=False)
         return
 
@@ -267,6 +269,8 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     _print_get_caption(resource_type, namespace, len(rows))
     _console.print(table)
+    if note:
+        _console.print(f"[muted]{note}[/muted]")
 
 
 def render_events_table(text: str) -> None:
@@ -550,7 +554,9 @@ def print_version(version: str) -> None:
     _console.print(f"kx {version}", markup=False, highlight=False)
 
 
-def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
+def print_help(
+    sections: list[tuple[str, list[tuple[str, str]]]], version: str | None = None
+) -> None:
     _console.print()
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
@@ -571,11 +577,14 @@ def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
         f"  [body]{'--no-color':<14}[/body]  [muted]Disable styled output.[/muted]"
     )
     _console.print(
-        f"  [body]{'--version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
+        f"  [body]{'-v, --version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
     )
     _console.print(
         f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
     )
+    if version:
+        _console.print()
+        _console.print(f"[muted]v{version}[/muted]")
 
 
 _SWATCH_PARTS = (

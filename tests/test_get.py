@@ -60,6 +60,14 @@ class TestGetCommandNamespaceArgs:
         kubectl.run.assert_called_once_with(["get", "pods", "--all-namespaces"])
         state.save.assert_not_called()
 
+    def test_all_namespaces_output_is_not_indexed(self):
+        """Names aren't unique across namespaces — no dead X column."""
+        cmd, state, kubectl = _make_command()
+        kubectl.run.return_value = "NAMESPACE  NAME\ndefault    nginx"
+        result = cmd.execute("pods", extra_args=["-A"])
+        assert result == "NAMESPACE  NAME\ndefault    nginx"
+        cmd.index.add.assert_not_called()
+
     def test_explicit_namespace_short_used_for_state(self):
         cmd, state, kubectl = _make_command()
         cmd.execute("pods", extra_args=["-n", "kube-system"])

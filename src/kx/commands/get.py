@@ -34,9 +34,14 @@ class GetCommand:
         output = self.kubectl.run(["get", resource, *extra_args])
         if filter_term:
             output = self.index.filter(output, filter_term)
-        indexed_output, names = self.index.add(output)
         all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra_args)
-        if names and not all_namespaces:
+        if all_namespaces:
+            # Names aren't unique across namespaces, so `-A` results are never
+            # indexed — returning unindexed output keeps dead X numbers off
+            # the screen.
+            return output
+        indexed_output, names = self.index.add(output)
+        if names:
             namespace = (
                 _extract_namespace(extra_args) or self.kubectl.current_namespace()
             )
