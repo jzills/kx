@@ -20,7 +20,8 @@ def test_version_short_flag():
 def test_help_banner_shows_version():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "kubectl, indexed · v" in result.output
+    assert "kubectl, indexed." in result.output
+    assert "\nv" in result.output
 
 
 def test_help_groups_commands_into_sections():
