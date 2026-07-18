@@ -560,9 +560,7 @@ def print_help(
     _console.print()
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
-    tagline = "kubectl, indexed."
-    if version:
-        tagline += f" · v{version}"
+    tagline = f"kubectl, indexed · v{version}" if version else "kubectl, indexed."
     _console.print(f"[muted]{tagline}[/muted]")
     _console.print()
     _console.print(
