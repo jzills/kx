@@ -1,6 +1,11 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from typer.testing import CliRunner
 
 from kx.commands.namespace import NamespaceCommand
+from kx.main import app
+
+runner = CliRunner()
 
 
 def _make_command(namespace_name="production"):
@@ -49,3 +54,52 @@ class TestNamespaceCommandExecute:
             assert False, "expected RuntimeError"
         except RuntimeError:
             pass
+
+
+class TestNamespaceCliBareForm:
+    def _make_mocks(self):
+        kubectl = MagicMock()
+        kubectl.run.return_value = "NAME      STATUS\ndefault   Active"
+        kubectl.current_namespace.return_value = "default"
+        state = MagicMock()
+        state.load.return_value.namespace = "default"
+        index = MagicMock()
+        index.add.return_value = ("1  default", ["default"])
+        return kubectl, state, index
+
+    def test_bare_namespace_lists_namespaces(self):
+        kubectl, state, index = self._make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["namespace"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "namespaces"])
+        state.save.assert_called_once()
+
+    def test_bare_ns_alias_lists_namespaces(self):
+        kubectl, state, index = self._make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["ns"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "namespaces"])
+
+    def test_ns_with_index_still_switches(self):
+        kubectl, state, index = self._make_mocks()
+        state.fields.return_value = ("dev", None, "Namespace")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["ns", "3"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(
+            ["config", "set-context", "--current", "--namespace=dev"]
+        )
