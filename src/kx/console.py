@@ -584,7 +584,7 @@ def print_help(
     )
     if version:
         _console.print()
-        _console.print(f"[muted]kx v{version}[/muted]")
+        _console.print(f"[muted]v{version}[/muted]")
 
 
 _SWATCH_PARTS = (

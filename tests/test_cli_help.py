@@ -20,7 +20,7 @@ def test_version_short_flag():
 def test_help_footer_shows_version():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert result.output.strip().splitlines()[-1].startswith("kx v")
+    assert result.output.strip().splitlines()[-1].startswith("v")
 
 
 def test_help_groups_commands_into_sections():
