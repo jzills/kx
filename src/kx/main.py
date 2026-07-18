@@ -5,7 +5,8 @@ from typing import Optional
 
 import typer
 import typer.rich_utils
-from typer.core import TyperCommand
+from typer import _click as click
+from typer.core import TyperCommand, TyperGroup
 
 from kx import console
 from kx.commands.back import BackCommand
@@ -34,6 +35,7 @@ from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
 from kx.index import IndexService
+from kx.kinds import is_kind_spelling
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService
 from kx.state import StateService
@@ -59,7 +61,23 @@ def _styled_error(error) -> None:
 
 typer.rich_utils.rich_format_error = _styled_error  # type: ignore[assignment]
 
+
+class KindAliasGroup(TyperGroup):
+    # Registered commands always win; only free kind spellings reach the alias,
+    # so `kx ns 3` keeps its namespace-switch meaning.
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.exceptions.UsageError:
+            if args and is_kind_spelling(args[0]):
+                return "get", self.get_command(ctx, "get"), args
+            raise
+
+
 app = typer.Typer(
+    cls=KindAliasGroup,
     add_help_option=False,
     add_completion=False,
 )
@@ -160,7 +178,7 @@ def get(
         None, "--match", "-m", help="Match by name (substring, case-insensitive)"
     ),
 ):
-    """List resources and assign index numbers for use with other commands."""
+    """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods)."""
     command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
     with console.status(f"fetching {resource}"):
         result = command.execute(resource, match, ctx.args)
@@ -489,7 +507,11 @@ def forward():
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
 
-get._examples = ["kx get pods", "kx get deploy -n kube-system --match api"]
+get._examples = [
+    "kx get pods",
+    "kx get deploy -n kube-system --match api",
+    "kx pods",
+]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
