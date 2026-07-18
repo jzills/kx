@@ -54,7 +54,7 @@ Pods · default · 3 items
 
 All subsequent commands reference resources by their `X` index from the last `kx get`.
 
-Global flags: `--no-color` disables styled output, `--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
+Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
 
 ### Commands
 

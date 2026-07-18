@@ -124,7 +124,7 @@ def callback(
     ctx: typer.Context,
     no_color: bool = typer.Option(False, "--no-color", help="Disable styled output."),
     show_version: bool = typer.Option(
-        False, "--version", is_eager=True, help="Show the kx version and exit."
+        False, "--version", "-v", is_eager=True, help="Show the kx version and exit."
     ),
     show_help: bool = typer.Option(
         False, "--help", is_eager=True, help="Show this message and exit."
@@ -149,7 +149,7 @@ def callback(
                 sections.append((title, rows))
         if docs:
             sections.append(("Other", list(docs.items())))
-        console.print_help(sections)
+        console.print_help(sections, version=_kx_version())
         raise typer.Exit()
 
 

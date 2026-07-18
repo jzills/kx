@@ -554,11 +554,16 @@ def print_version(version: str) -> None:
     _console.print(f"kx {version}", markup=False, highlight=False)
 
 
-def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
+def print_help(
+    sections: list[tuple[str, list[tuple[str, str]]]], version: str | None = None
+) -> None:
     _console.print()
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
-    _console.print("[muted]kubectl, indexed.[/muted]")
+    tagline = "kubectl, indexed."
+    if version:
+        tagline += f" · v{version}"
+    _console.print(f"[muted]{tagline}[/muted]")
     _console.print()
     _console.print(
         "[muted]Usage[/muted]  kx [OPTIONS] COMMAND [ARGS]...",
@@ -575,7 +580,7 @@ def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
         f"  [body]{'--no-color':<14}[/body]  [muted]Disable styled output.[/muted]"
     )
     _console.print(
-        f"  [body]{'--version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
+        f"  [body]{'-v, --version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
     )
     _console.print(
         f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"

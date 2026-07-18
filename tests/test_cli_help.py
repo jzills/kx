@@ -11,6 +11,18 @@ def test_version_flag():
     assert result.output.strip().startswith("kx ")
 
 
+def test_version_short_flag():
+    result = runner.invoke(app, ["-v"])
+    assert result.exit_code == 0
+    assert result.output.strip().startswith("kx ")
+
+
+def test_help_banner_shows_version():
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "kubectl, indexed. · v" in result.output
+
+
 def test_help_groups_commands_into_sections():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
