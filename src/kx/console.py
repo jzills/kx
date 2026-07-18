@@ -561,8 +561,6 @@ def print_help(
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
     _console.print("[muted]kubectl, indexed.[/muted]")
-    if version:
-        _console.print(f"[muted]v{version}[/muted]")
     _console.print()
     _console.print(
         "[muted]Usage[/muted]  kx [OPTIONS] COMMAND [ARGS]...",
@@ -584,6 +582,9 @@ def print_help(
     _console.print(
         f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
     )
+    if version:
+        _console.print()
+        _console.print(f"[muted]kx v{version}[/muted]")
 
 
 _SWATCH_PARTS = (
