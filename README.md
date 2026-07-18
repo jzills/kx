@@ -41,6 +41,8 @@ kx get <resource> [--match|-m <substring>] [kubectl flags...]
 
 Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive).
 
+Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (use `kx namespaces` to list them). CRDs and other resource types still use `kx get <resource>`.
+
 ```
 $ kx get pods
 Pods · default · 3 items
@@ -59,7 +61,7 @@ Global flags: `--no-color` disables styled output, `--version` prints the instal
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands. |
+| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods). |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |

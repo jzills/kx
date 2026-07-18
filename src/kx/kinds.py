@@ -81,6 +81,10 @@ _PLURAL_DISPLAY: dict[Kind, str] = {
 }
 
 
+def is_kind_spelling(token: str) -> bool:
+    return token.lower() in _KIND_MAP
+
+
 def normalize_kind(resource_type: str) -> Kind | str:
     return _KIND_MAP.get(resource_type.lower(), resource_type)
 
