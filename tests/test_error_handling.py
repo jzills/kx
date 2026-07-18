@@ -160,16 +160,34 @@ class TestStaleStateRefresh:
         assert "pick a new index" not in _plain(result.output)
         kubectl.run.assert_called_once()
 
-    def test_get_not_found_does_not_refresh(self):
-        """`get` consumes no index, so a NotFound from it never means stale state."""
+    def test_name_based_get_not_found_does_not_refresh(self):
+        """A NotFound for a literal name isn't stale state — no index was resolved."""
         state = self._stale_state(Query(resource="namespaces", args=[]))
         kubectl = MagicMock()
         kubectl.run.side_effect = RuntimeError(
-            'Error from server (NotFound): pods "3" not found'
+            'Error from server (NotFound): pods "missing" not found'
         )
         with patch("kx.main._state", state), patch("kx.main._kubectl", kubectl):
-            result = runner.invoke(app, ["get", "po", "3"])
+            result = runner.invoke(app, ["get", "po", "missing"])
         assert result.exit_code == 1
         assert "not found" in _plain(result.output)
         assert "pick a new index" not in _plain(result.output)
         kubectl.run.assert_called_once()
+
+    def test_index_based_get_not_found_refreshes(self):
+        """A NotFound after resolving an index means the entry is stale."""
+        state = self._stale_state(Query(resource="pods", args=[]))
+        kubectl = MagicMock()
+        kubectl.run.side_effect = [
+            RuntimeError('Error from server (NotFound): pods "web-1" not found'),
+            "NAME   READY\nweb-2  1/1",
+        ]
+        kubectl.current_namespace.return_value = "default"
+        with patch("kx.main._state", state), patch("kx.main._kubectl", kubectl):
+            result = runner.invoke(app, ["get", "po", "1"])
+        assert result.exit_code == 1
+        output = _plain(result.output)
+        assert "pick a new index" in output
+        assert "web-2" in output
+        kubectl.run.assert_any_call(["get", "po", "web-1", "-n", "default"])
+        kubectl.run.assert_any_call(["get", "pods"])

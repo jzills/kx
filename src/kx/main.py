@@ -35,9 +35,9 @@ from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
 from kx.index import IndexService
-from kx.kinds import is_kind_spelling
+from kx.kinds import is_kind_spelling, normalize_kind
 from kx.kubectl import KubectlService
-from kx.refresh import RefreshService
+from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.state import StateService
 
 
@@ -72,16 +72,6 @@ class KindAliasGroup(TyperGroup):
             return super().resolve_command(ctx, args)
         except click.exceptions.UsageError:
             if args and is_kind_spelling(args[0]):
-                indexes = [arg for arg in args[1:] if arg.isdigit()]
-                if indexes:
-                    # `kx po 3` is a mistaken index, not a resource named "3";
-                    # `kx get po 3` stays available for literal all-digit names.
-                    raise click.exceptions.UsageError(
-                        f"'kx {args[0]}' lists resources — it doesn't take an "
-                        f"index. Use an indexed command like 'kx describe "
-                        f"{indexes[0]}', or 'kx get {args[0]} {indexes[0]}' if "
-                        f"you mean a resource named '{indexes[0]}'."
-                    ) from None
                 return "get", self.get_command(ctx, "get"), args
             raise
 
@@ -188,11 +178,41 @@ def get(
         None, "--match", "-m", help="Match by name (substring, case-insensitive)"
     ),
 ):
-    """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods)."""
+    """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
+    args = list(ctx.args)
+    indexes = [int(arg) for arg in args if arg.isdigit()]
+    extra = [arg for arg in args if not arg.isdigit()]
+    if indexes:
+        expected = normalize_kind(resource)
+        names = []
+        namespace = None
+        for idx in indexes:
+            name, ns, kind = _state.fields(idx)
+            if str(kind) != str(expected):
+                raise ValueError(
+                    f"Index {idx} is {kind}/{name}, not {expected} — "
+                    f"run 'kx get {resource}' to relist."
+                )
+            names.append(name)
+            namespace = ns
+        has_namespace_flag = any(
+            arg in ("-n", "--namespace") or arg.startswith("--namespace=")
+            for arg in extra
+        )
+        if namespace and not has_namespace_flag:
+            extra += ["-n", namespace]
+        extra = [*names, *extra]
     command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
-    with console.status(f"fetching {resource}"):
-        result = command.execute(resource, match, ctx.args)
-    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in ctx.args)
+    try:
+        with console.status(f"fetching {resource}"):
+            result = command.execute(resource, match, extra)
+    except RuntimeError as e:
+        # A NotFound after resolving an index means the state entry is stale;
+        # name-based gets stay outside the refresh path (refresh=False above).
+        if indexes and is_not_found(e):
+            raise StaleResourceError(str(e)) from e
+        raise
+    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
     if all_namespaces:
         namespace = "all namespaces"
     else:
@@ -536,6 +556,7 @@ get._examples = [
     "kx get pods",
     "kx get deploy -n kube-system --match api",
     "kx pods",
+    "kx po 3",
 ]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]

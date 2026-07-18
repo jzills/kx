@@ -79,19 +79,22 @@ class TestKindShorthand:
             ["config", "set-context", "--current", "--namespace=dev"]
         )
 
-    def test_bare_integer_after_kind_errors_with_guidance(self):
-        result = runner.invoke(app, ["po", "3"])
-        assert result.exit_code != 0
-        assert "doesn't take an index" in result.output
-        assert "kx describe 3" in result.output
-
-    def test_integer_guard_covers_flag_forms(self):
-        result = runner.invoke(app, ["deploy", "-n", "kube-system", "3"])
-        assert result.exit_code != 0
-        assert "doesn't take an index" in result.output
-
-    def test_explicit_get_with_integer_passes_through(self):
+    def test_index_after_kind_resolves_to_name(self):
         kubectl, state, index = _make_mocks()
+        state.fields.return_value = ("curl", "default", "Pod")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["po", "3"])
+        assert result.exit_code == 0
+        state.fields.assert_called_once_with(3)
+        kubectl.run.assert_called_once_with(["get", "po", "curl", "-n", "default"])
+
+    def test_explicit_get_with_index_resolves_too(self):
+        kubectl, state, index = _make_mocks()
+        state.fields.return_value = ("curl", "default", "Pod")
         with (
             patch("kx.main._kubectl", kubectl),
             patch("kx.main._state", state),
@@ -99,7 +102,49 @@ class TestKindShorthand:
         ):
             result = runner.invoke(app, ["get", "po", "3"])
         assert result.exit_code == 0
-        kubectl.run.assert_called_once_with(["get", "po", "3"])
+        kubectl.run.assert_called_once_with(["get", "po", "curl", "-n", "default"])
+
+    def test_multiple_indexes_resolve_to_names(self):
+        kubectl, state, index = _make_mocks()
+        state.fields.side_effect = [
+            ("curl", "default", "Pod"),
+            ("echo", "default", "Pod"),
+        ]
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["po", "1", "2"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(
+            ["get", "po", "curl", "echo", "-n", "default"]
+        )
+
+    def test_explicit_namespace_flag_not_overridden(self):
+        kubectl, state, index = _make_mocks()
+        state.fields.return_value = ("curl", "default", "Pod")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["po", "3", "-n", "other"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "po", "curl", "-n", "other"])
+
+    def test_kind_mismatch_errors(self):
+        kubectl, state, index = _make_mocks()
+        state.fields.return_value = ("web-healthy", "default", "Deployment")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["po", "3"])
+        assert result.exit_code == 1
+        assert "Deployment/web-healthy" in result.output
+        kubectl.run.assert_not_called()
 
     def test_unknown_token_still_errors(self):
         result = runner.invoke(app, ["nonsense"])

@@ -21,6 +21,11 @@ class StaleResourceError(RuntimeError):
 _NOT_FOUND_MARKERS = ("(NotFound)", "not found")
 
 
+def is_not_found(error: BaseException) -> bool:
+    message = str(error)
+    return any(marker in message for marker in _NOT_FOUND_MARKERS)
+
+
 def ensure_exists(
     kubectl: KubectlServiceProtocol, kind: str, name: str, namespace: str
 ) -> None:
@@ -45,8 +50,7 @@ class RefreshService:
         if isinstance(error, ApiException):
             return error.status == 404
         if isinstance(error, RuntimeError):
-            message = str(error)
-            return any(marker in message for marker in _NOT_FOUND_MARKERS)
+            return is_not_found(error)
         return False
 
     def recover(self) -> tuple[str, str, str] | None:

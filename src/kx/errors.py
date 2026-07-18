@@ -5,7 +5,7 @@ import typer
 from kubernetes.client.exceptions import ApiException
 
 from kx import console
-from kx.refresh import RefreshService
+from kx.refresh import RefreshService, StaleResourceError
 
 _refresh_provider: Callable[[], RefreshService] | None = None
 
@@ -54,8 +54,9 @@ def handle_errors(func=None, *, refresh: bool = True):
     Kubernetes SDK's `ApiException` are shown via `console.print_error` instead of
     surfacing as a traceback. When the error signals a stale state entry (the
     indexed resource no longer exists), the entry's saved query is re-run and the
-    refreshed list rendered. Commands that don't consume an index (`get`) pass
-    `refresh=False` — a NotFound from them can never mean stale state. `typer.Exit`
+    refreshed list rendered. Commands that don't always consume an index (`get`)
+    pass `refresh=False` — message-sniffed NotFounds are then ignored, but an
+    explicit `StaleResourceError` still triggers the refresh. `typer.Exit`
     and `typer.Abort` are not caught, so control-flow exits and confirmation
     aborts pass through untouched. `functools.wraps` preserves `__wrapped__` so
     Typer still reads the original signature.
@@ -68,7 +69,7 @@ def handle_errors(func=None, *, refresh: bool = True):
                 return inner(*args, **kwargs)
             except (RuntimeError, ValueError, ApiException) as e:
                 console.print_error(_message(e))
-                if refresh:
+                if refresh or isinstance(e, StaleResourceError):
                     _try_refresh(e)
                 raise typer.Exit(1)
 

@@ -41,7 +41,7 @@ kx get <resource> [--match|-m <substring>] [kubectl flags...]
 
 Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive).
 
-Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (bare `kx ns` lists them). CRDs and other resource types still use `kx get <resource>`. A bare number after a shorthand (`kx po 3`) is rejected as a mistaken index — use an indexed command like `kx describe 3`, or `kx get po 3` if you really mean a resource named `3`.
+Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (bare `kx ns` lists them). CRDs and other resource types still use `kx get <resource>`. An integer after a kind is an index into the current state: `kx po 3` (or `kx get po 3`) relists just that pod, erroring if index 3 isn't a pod. Multiple indexes work too: `kx po 1 3`.
 
 ```
 $ kx get pods
@@ -61,7 +61,7 @@ Global flags: `--no-color` disables styled output, `--version` prints the instal
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods). |
+| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
