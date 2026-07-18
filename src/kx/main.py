@@ -215,12 +215,14 @@ def get(
     all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
     if all_namespaces:
         namespace = "all namespaces"
+        note = "indexes not saved for all-namespace listings — scope to a namespace (-n or kx ns) to select"
     else:
+        note = None
         try:
             namespace = _state.load().namespace
         except RuntimeError:
             namespace = "default"
-    console.render_indexed_table(result, resource, namespace)
+    console.render_indexed_table(result, resource, namespace, note=note)
 
 
 @app.command(

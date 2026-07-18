@@ -64,6 +64,20 @@ class TestGetCliIntegration:
         kubectl.run.assert_called_once_with(["get", "po", "-A"])
         state.save.assert_not_called()
 
+    def test_all_namespaces_shows_signpost_without_indexes(self):
+        kubectl, state, index = _make_mocks(
+            kubectl_output="NAMESPACE   NAME\ndefault     nginx"
+        )
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["get", "po", "-A"])
+        assert result.exit_code == 0
+        index.add.assert_not_called()
+        assert "indexes not saved for all-namespace listings" in result.output
+
     def test_filter_and_extra_args_combined(self):
         kubectl, state, index = _make_mocks()
         with (

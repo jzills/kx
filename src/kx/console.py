@@ -192,7 +192,9 @@ def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
     )
 
 
-def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
+def render_indexed_table(
+    text: str, resource_type: str, namespace: str, note: str | None = None
+) -> None:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         # kubectl exits 0 with empty stdout when nothing matches ("No
@@ -202,7 +204,7 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     header_line = lines[0]
     first_col = header_line.split()[0] if header_line.split() else ""
-    if first_col != "X":
+    if first_col != "X" and note is None:
         _console.print(text, markup=False, highlight=False)
         return
 
@@ -267,6 +269,8 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     _print_get_caption(resource_type, namespace, len(rows))
     _console.print(table)
+    if note:
+        _console.print(f"[muted]{note}[/muted]")
 
 
 def render_events_table(text: str) -> None:

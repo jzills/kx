@@ -109,6 +109,29 @@ def test_render_indexed_table_non_tabular_falls_through(capture_console):
     assert '{"items": []}' in capture_console.getvalue()
 
 
+ALL_NAMESPACES_OUTPUT = """\
+NAMESPACE     NAME        READY   STATUS    AGE
+default       nginx-abc   1/1     Running   2d
+kube-system   coredns-1   1/1     Running   93d"""
+
+
+def test_render_indexed_table_note_styles_unindexed_output(capture_console):
+    kx_console.render_indexed_table(
+        ALL_NAMESPACES_OUTPUT, "pods", "all namespaces", note="indexes not saved"
+    )
+    out = capture_console.getvalue()
+    assert "Pods" in out
+    assert "all namespaces" in out
+    assert "2 items" in out
+    assert "nginx-abc" in out
+    assert "indexes not saved" in out
+
+
+def test_render_indexed_table_no_note_after_indexed_output(capture_console):
+    kx_console.render_indexed_table(INDEXED_OUTPUT, "pods", "default")
+    assert "indexes not saved" not in capture_console.getvalue()
+
+
 def test_render_indexed_table_empty_string_shows_zero_caption(capture_console):
     kx_console.render_indexed_table("", "pods", "default")
     assert "Pods · default · 0 items" in capture_console.getvalue()

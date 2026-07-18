@@ -39,7 +39,7 @@ pip install kx-cli
 kx get <resource> [--match|-m <substring>] [kubectl flags...]
 ```
 
-Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive).
+Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive). All-namespace listings (`-A`) are display-only — rows aren't indexed, since names aren't unique across namespaces; scope to a namespace to select.
 
 Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (bare `kx ns` lists them). CRDs and other resource types still use `kx get <resource>`. An integer after a kind is an index into the current state: `kx po 3` (or `kx get po 3`) relists just that pod, erroring if index 3 isn't a pod. Multiple indexes work too: `kx po 1 3`.
 
