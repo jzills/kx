@@ -27,8 +27,31 @@
 
 ## Install
 
+Requires Python 3.11+ and `kubectl` on your PATH.
+
+With [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv tool install kx-cli
+```
+
+With [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install kx-cli
+```
+
+With pip:
+
 ```bash
 pip install kx-cli
+```
+
+Or try it without installing (the package is `kx-cli`, the command is `kx`):
+
+```bash
+uvx --from kx-cli kx get pods
+pipx run --spec kx-cli kx get pods
 ```
 
 ## Usage
