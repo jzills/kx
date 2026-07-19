@@ -6,8 +6,9 @@ name: Krew
 # krew-release-bot derive the version from GITHUB_REF.
 #
 # The bot renders .krew.yaml with the release-asset URLs and sha256s and
-# opens a PR against kubernetes-sigs/krew-index. The first kx submission
-# must be made manually; the bot only updates existing plugins.
+# opens a PR against kubernetes-sigs/krew-index, where the plugin is
+# published as "idx". The first submission must be made manually; the
+# bot only updates existing plugins.
 on:
   workflow_dispatch:
 

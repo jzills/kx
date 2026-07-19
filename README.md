@@ -47,11 +47,11 @@ With pip:
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/) (no Python required; pending krew-index acceptance):
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required; pending krew-index acceptance):
 
 ```bash
-kubectl krew install kx
-alias kx="kubectl kx"
+kubectl krew install idx
+alias kx="kubectl idx"
 ```
 
 Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
