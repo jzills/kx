@@ -59,7 +59,19 @@ jobs:
           test "$ACTUAL" = "kx ${{ inputs.version }}" || { echo "expected 'kx ${{ inputs.version }}', got '$ACTUAL'"; exit 1; }
 
       - name: Package
-        run: tar -C dist -czf "kx_v${{ inputs.version || 'dev' }}_${{ matrix.os_name }}_${{ matrix.arch }}.tar.gz" kx
+        # --dereference: krew's extractor rejects symlinks (macOS bundles
+        # contain them, e.g. _internal/Python -> Python.framework/...)
+        run: tar -C dist --dereference -czf "kx_v${{ inputs.version || 'dev' }}_${{ matrix.os_name }}_${{ matrix.arch }}.tar.gz" kx
+
+      - name: Verify archive is krew-installable
+        run: |
+          EXTRACT="$RUNNER_TEMP/kx-archive-check"
+          mkdir -p "$EXTRACT"
+          tar -C "$EXTRACT" -xzf kx_v*.tar.gz
+          if [ -n "$(find "$EXTRACT" -type l)" ]; then
+            echo "archive contains symlinks, which krew cannot extract:"; find "$EXTRACT" -type l; exit 1
+          fi
+          "$EXTRACT/kx/kx" --version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
