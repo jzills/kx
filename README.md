@@ -84,12 +84,12 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [--match/-m str] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | `kx labels <indexes>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx yaml <indexes>... [--show text]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
+| `kx yaml <indexes>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx exec <index> [<cmd>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
