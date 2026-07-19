@@ -1,0 +1,69 @@
+name: Binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (e.g. 1.2.3); archives are named kx_v<version>_<os>_<arch>.tar.gz
+        required: true
+        type: string
+      ref:
+        description: Git ref to build (the version-bumped release branch)
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - kx.spec
+      - scripts/pyinstaller_entry.py
+      - .github/workflows/binaries.yml
+
+jobs:
+  build:
+    name: Build ${{ matrix.os_name }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, os_name: linux, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, os_name: linux, arch: arm64 }
+          - { runner: macos-13, os_name: darwin, arch: amd64 }
+          - { runner: macos-latest, os_name: darwin, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package and PyInstaller
+        run: pip install ".[build]"
+
+      - name: Build
+        run: pyinstaller kx.spec --noconfirm
+
+      - name: Smoke test
+        run: |
+          ./dist/kx/kx --version
+          ./dist/kx/kx --help > /dev/null
+          ./dist/kx/kx theme > /dev/null
+
+      - name: Check bundled version matches release
+        if: inputs.version != ''
+        run: |
+          ACTUAL="$(./dist/kx/kx --version)"
+          test "$ACTUAL" = "kx ${{ inputs.version }}" || { echo "expected 'kx ${{ inputs.version }}', got '$ACTUAL'"; exit 1; }
+
+      - name: Package
+        run: tar -C dist -czf "kx_v${{ inputs.version || 'dev' }}_${{ matrix.os_name }}_${{ matrix.arch }}.tar.gz" kx
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kx_${{ matrix.os_name }}_${{ matrix.arch }}
+          path: kx_v*.tar.gz
+          if-no-files-found: error
