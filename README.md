@@ -47,6 +47,15 @@ With pip:
 pip install kx-cli
 ```
 
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/) (no Python required; pending krew-index acceptance):
+
+```bash
+kubectl krew install kx
+alias kx="kubectl kx"
+```
+
+Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
+
 Or try it without installing (the package is `kx-cli`, the command is `kx`):
 
 ```bash

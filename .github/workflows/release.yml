@@ -87,6 +87,7 @@ jobs:
     needs: [build-and-publish, binaries, tag]
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Download binary archives
         uses: actions/download-artifact@v4
@@ -105,6 +106,17 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "v${{ needs.build-and-publish.outputs.version }}" \
             --generate-notes
+
+      # Runs the Krew workflow at the tag so krew-release-bot picks the
+      # version from GITHUB_REF. Explicit dispatch because GITHUB_TOKEN-created
+      # releases never fire release: triggers.
+      - name: Trigger krew-index update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run krew.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "v${{ needs.build-and-publish.outputs.version }}"
 
   merge:
     name: Open PR to Main
