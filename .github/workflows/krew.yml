@@ -1,0 +1,23 @@
+name: Krew
+
+# Dispatched by release.yml at the new version tag after the GitHub Release
+# is published (a release: trigger would never fire — events created with
+# GITHUB_TOKEN don't start workflows). Running at the tag ref lets
+# krew-release-bot derive the version from GITHUB_REF.
+#
+# The bot renders .krew.yaml with the release-asset URLs and sha256s and
+# opens a PR against kubernetes-sigs/krew-index. The first kx submission
+# must be made manually; the bot only updates existing plugins.
+on:
+  workflow_dispatch:
+
+jobs:
+  krew-release:
+    name: Update krew-index
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish manifest to krew-index
+        uses: rajatjindal/krew-release-bot@v0.0.51
