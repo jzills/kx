@@ -136,7 +136,9 @@ jobs:
             --body "Automated release PR for v${{ needs.build-and-publish.outputs.version }}. Package published to PyPI successfully." \
             --base main \
             --head "${{ github.ref_name }}")
-          gh pr merge "$PR_URL" --merge --auto
+          # --auto errors when the PR is already in clean status (nothing
+          # pending to wait on); merge directly in that case.
+          gh pr merge "$PR_URL" --merge --auto || gh pr merge "$PR_URL" --merge
 
   merge-back:
     name: Merge Release Back to Develop
@@ -161,4 +163,6 @@ jobs:
             --body "Automated post-release merge. Brings release fixes from \`${{ github.ref_name }}\` back into \`develop\` to keep branches in sync." \
             --base develop \
             --head "${{ github.ref_name }}")
-          gh pr merge "$PR_URL" --merge --auto
+          # --auto errors when the PR is already in clean status (nothing
+          # pending to wait on); merge directly in that case.
+          gh pr merge "$PR_URL" --merge --auto || gh pr merge "$PR_URL" --merge
