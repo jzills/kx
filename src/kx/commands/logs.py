@@ -1,22 +1,35 @@
 import json
+from contextlib import nullcontext
 
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
+from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
+from kx.types import Status
 
 _AGGREGATE_KINDS = {Kind.Deployment, Kind.StatefulSet, Kind.DaemonSet, Kind.Service}
 
 
 class LogsCommand:
-    def __init__(self, state: StateServiceProtocol, kubectl: KubectlServiceProtocol):
+    def __init__(
+        self,
+        state: StateServiceProtocol,
+        kubectl: KubectlServiceProtocol,
+        status: Status | None = None,
+    ):
         self.state = state
         self.kubectl = kubectl
+        self.status = status or (lambda _msg: nullcontext())
 
     def execute(self, index: int, extra_args: list[str] | None = None) -> None:
         extra_args = extra_args or []
         name, namespace, kind = self.state.fields(index)
         if kind == Kind.Pod:
-            self.kubectl.run_interactive(["logs", name, "-n", namespace, *extra_args])
+            rc = self.kubectl.run_interactive(
+                ["logs", name, "-n", namespace, *extra_args]
+            )
+            if rc != 0:
+                ensure_exists(self.kubectl, kind, name, namespace)
         elif kind in _AGGREGATE_KINDS:
             selector = self._selector(name, namespace, kind)
             self.kubectl.run_interactive(
@@ -26,7 +39,8 @@ class LogsCommand:
             raise ValueError(f"Logs are not supported for '{kind}'.")
 
     def _selector(self, name: str, namespace: str, kind: str) -> str:
-        raw = self.kubectl.run(["get", kind, name, "-n", namespace, "-o", "json"])
+        with self.status("resolving pod selector"):
+            raw = self.kubectl.run(["get", kind, name, "-n", namespace, "-o", "json"])
         obj = json.loads(raw)
         labels = self._extract_labels(obj, kind)
         if not labels:

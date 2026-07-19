@@ -27,8 +27,40 @@
 
 ## Install
 
+Requires Python 3.11+ and `kubectl` on your PATH.
+
+With [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv tool install kx-cli
+```
+
+With [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install kx-cli
+```
+
+With pip:
+
 ```bash
 pip install kx-cli
+```
+
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/) (no Python required; pending krew-index acceptance):
+
+```bash
+kubectl krew install kx
+alias kx="kubectl kx"
+```
+
+Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
+
+Or try it without installing (the package is `kx-cli`, the command is `kx`):
+
+```bash
+uvx --from kx-cli kx get pods
+pipx run --spec kx-cli kx get pods
 ```
 
 ## Usage
@@ -39,7 +71,9 @@ pip install kx-cli
 kx get <resource> [--match|-m <substring>] [kubectl flags...]
 ```
 
-Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive).
+Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive). All-namespace listings (`-A`) are display-only — rows aren't indexed, since names aren't unique across namespaces; scope to a namespace to select.
+
+Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (bare `kx ns` lists them). CRDs and other resource types still use `kx get <resource>`. An integer after a kind is an index into the current state: `kx po 3` (or `kx get po 3`) relists just that pod, erroring if index 3 isn't a pod. Multiple indexes work too: `kx po 1 3`.
 
 ```
 $ kx get pods
@@ -52,19 +86,19 @@ Pods · default · 3 items
 
 All subsequent commands reference resources by their `X` index from the last `kx get`.
 
-Global flags: `--no-color` disables styled output, `--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
+Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
 
 ### Commands
 
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m text] [kubectl flags...]` | List resources and assign index numbers for use with other commands. |
+| `kx get <resource> [--match/-m str] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | `kx labels <indexes>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx yaml <indexes>... [--show text]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
+| `kx yaml <indexes>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx exec <index> [<cmd>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
@@ -73,7 +107,7 @@ Global flags: `--no-color` disables styled output, `--version` prints the instal
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx diagnostic <index>` | Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag. |
-| `kx namespace <index>` | Switch to an indexed namespace; alias: kx ns (run kx get namespaces first). |
+| `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |

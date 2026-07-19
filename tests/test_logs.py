@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import MagicMock
 from kx.commands.logs import LogsCommand
 from kx.kinds import Kind
+from kx.refresh import StaleResourceError
 
 
 def _make_command(name="nginx", namespace="default", kind=str(Kind.Pod)):
@@ -157,3 +158,51 @@ class TestLogsCommand:
         kubectl.run.return_value = json.dumps({"spec": {"selector": None}})
         with pytest.raises(ValueError, match="no pod selector"):
             cmd.execute(1)
+
+
+def test_aggregate_logs_wraps_selector_lookup_in_status():
+    state = MagicMock()
+    state.fields.return_value = ("web", "default", str(Kind.Deployment))
+    kubectl = MagicMock()
+    kubectl.run.return_value = _workload_json({"app": "web"})
+    kubectl.run_interactive.return_value = 0
+    entered = []
+
+    class FakeStatus:
+        def __init__(self, message):
+            self.message = message
+
+        def __enter__(self):
+            entered.append(self.message)
+            kubectl.run.assert_not_called()
+
+        def __exit__(self, *args):
+            kubectl.run.assert_called_once()
+
+    LogsCommand(state=state, kubectl=kubectl, status=FakeStatus).execute(1)
+
+    assert entered == ["resolving pod selector"]
+    kubectl.run_interactive.assert_called_once()
+
+
+class TestLogsStaleDetection:
+    def _command(self, rc, probe_rc):
+        cmd, _, kubectl = _make_command(name="web-1")
+        kubectl.run_interactive.return_value = rc
+        kubectl.probe.return_value = probe_rc
+        return cmd, kubectl
+
+    def test_nonzero_exit_with_missing_pod_raises_stale(self):
+        cmd, kubectl = self._command(rc=1, probe_rc=1)
+        with pytest.raises(StaleResourceError, match="Pod/web-1"):
+            cmd.execute(1)
+        kubectl.probe.assert_called_once_with(["get", "Pod", "web-1", "-n", "default"])
+
+    def test_nonzero_exit_with_live_pod_stays_silent(self):
+        cmd, _ = self._command(rc=1, probe_rc=0)
+        cmd.execute(1)
+
+    def test_zero_exit_skips_probe(self):
+        cmd, kubectl = self._command(rc=0, probe_rc=1)
+        cmd.execute(1)
+        kubectl.probe.assert_not_called()

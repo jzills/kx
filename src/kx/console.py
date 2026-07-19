@@ -1,6 +1,7 @@
 import re
 import json
-from contextlib import nullcontext
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import typer
@@ -88,7 +89,7 @@ def print_success(msg: str) -> None:
 
 def print_error(msg: str) -> None:
     styled = re.sub(r"'([^']+)'", "[accent]'\\1'[/accent]", msg)
-    _console.print(f"[header]✗[/header] [body]{styled}[/body]")
+    _console.print(f"[error]✗[/error] [body]{styled}[/body]")
 
 
 def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> None:
@@ -100,12 +101,56 @@ def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> 
     _console.print(f"[muted]{' · '.join(parts)}[/muted]")
 
 
+# How long a command runs silently before the spinner appears. Quick commands
+# intentionally show nothing — a spinner that flashes for a fraction of a
+# second is noise, not feedback.
+_SPINNER_DELAY = 0.2
+
+
+@contextmanager
 def status(message: str):
-    """Spinner shown while waiting on the cluster; a no-op off-terminal so
-    piped output and test captures never receive spinner frames."""
+    """Spinner shown while waiting on the cluster, only once the command has
+    run for _SPINNER_DELAY. A no-op off-terminal so piped output and test
+    captures never receive spinner frames."""
     if not _console.is_terminal:
-        return nullcontext()
-    return _console.status(f"[muted]{message}…[/muted]", spinner_style="muted")
+        yield
+        return
+    # Low refresh with a matching spinner speed: roughly one frame per redraw,
+    # so the line isn't rewritten faster than the animation advances (the
+    # default 12.5 fps redraw flickers on some terminals).
+    live_status = _console.status(
+        f"[muted]{message}…[/muted]",
+        spinner_style="muted",
+        refresh_per_second=4,
+        speed=0.4,
+    )
+    lock = threading.Lock()
+    started = False
+    finished = False
+
+    def show() -> None:
+        nonlocal started
+        with lock:
+            if finished:
+                return
+            started = True
+            live_status.start()
+            # Status.start() schedules the first paint a full refresh interval
+            # out (250ms at 4 fps); paint now — the delay has already passed.
+            live_status._live.refresh()
+
+    timer = threading.Timer(_SPINNER_DELAY, show)
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
+        # The lock closes the race where the timer has fired but show() hasn't
+        # started the spinner yet, which would otherwise leave it running.
+        with lock:
+            finished = True
+            if started:
+                live_status.stop()
 
 
 def confirm(message: str) -> None:
@@ -147,7 +192,9 @@ def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
     )
 
 
-def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
+def render_indexed_table(
+    text: str, resource_type: str, namespace: str, note: str | None = None
+) -> None:
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         # kubectl exits 0 with empty stdout when nothing matches ("No
@@ -157,7 +204,7 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     header_line = lines[0]
     first_col = header_line.split()[0] if header_line.split() else ""
-    if first_col != "X":
+    if first_col != "X" and note is None:
         _console.print(text, markup=False, highlight=False)
         return
 
@@ -222,6 +269,8 @@ def render_indexed_table(text: str, resource_type: str, namespace: str) -> None:
 
     _print_get_caption(resource_type, namespace, len(rows))
     _console.print(table)
+    if note:
+        _console.print(f"[muted]{note}[/muted]")
 
 
 def render_events_table(text: str) -> None:
@@ -505,7 +554,9 @@ def print_version(version: str) -> None:
     _console.print(f"kx {version}", markup=False, highlight=False)
 
 
-def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
+def print_help(
+    sections: list[tuple[str, list[tuple[str, str]]]], version: str | None = None
+) -> None:
     _console.print()
     for line in _KX_ART:
         _console.print(line, style="header", markup=False, highlight=False)
@@ -526,11 +577,14 @@ def print_help(sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
         f"  [body]{'--no-color':<14}[/body]  [muted]Disable styled output.[/muted]"
     )
     _console.print(
-        f"  [body]{'--version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
+        f"  [body]{'-v, --version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
     )
     _console.print(
         f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
     )
+    if version:
+        _console.print()
+        _console.print(f"[muted]v{version}[/muted]")
 
 
 _SWATCH_PARTS = (

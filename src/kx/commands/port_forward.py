@@ -1,5 +1,6 @@
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
+from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
 
 _SUPPORTED_KINDS = {
@@ -24,6 +25,8 @@ class PortForwardCommand:
         name, namespace, kind = self.state.fields(index)
         if kind not in _SUPPORTED_KINDS:
             raise ValueError(f"port-forward is not supported for '{kind}'.")
-        self.kubectl.run_interactive(
+        rc = self.kubectl.run_interactive(
             ["port-forward", f"{kind}/{name}", port, "-n", namespace, *extra_args]
         )
+        if rc != 0:
+            ensure_exists(self.kubectl, kind, name, namespace)

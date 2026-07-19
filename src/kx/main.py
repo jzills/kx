@@ -5,7 +5,8 @@ from typing import Optional
 
 import typer
 import typer.rich_utils
-from typer.core import TyperCommand
+from typer import _click as click
+from typer.core import TyperCommand, TyperGroup
 
 from kx import console
 from kx.commands.back import BackCommand
@@ -30,11 +31,13 @@ from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config, save_theme
 from kx.diagnostics import DiagnosticsService
-from kx.errors import handle_errors
+from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
 from kx.graph import build_indexed_tree, build_tree
 from kx.index import IndexService
+from kx.kinds import is_kind_spelling, normalize_kind
 from kx.kubectl import KubectlService
+from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.state import StateService
 
 
@@ -58,7 +61,23 @@ def _styled_error(error) -> None:
 
 typer.rich_utils.rich_format_error = _styled_error  # type: ignore[assignment]
 
+
+class KindAliasGroup(TyperGroup):
+    # Registered commands always win; only free kind spellings reach the alias,
+    # so `kx ns 3` keeps its namespace-switch meaning.
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.exceptions.UsageError:
+            if args and is_kind_spelling(args[0]):
+                return "get", self.get_command(ctx, "get"), args
+            raise
+
+
 app = typer.Typer(
+    cls=KindAliasGroup,
     add_help_option=False,
     add_completion=False,
 )
@@ -105,7 +124,7 @@ def callback(
     ctx: typer.Context,
     no_color: bool = typer.Option(False, "--no-color", help="Disable styled output."),
     show_version: bool = typer.Option(
-        False, "--version", is_eager=True, help="Show the kx version and exit."
+        False, "--version", "-v", is_eager=True, help="Show the kx version and exit."
     ),
     show_help: bool = typer.Option(
         False, "--help", is_eager=True, help="Show this message and exit."
@@ -130,7 +149,7 @@ def callback(
                 sections.append((title, rows))
         if docs:
             sections.append(("Other", list(docs.items())))
-        console.print_help(sections)
+        console.print_help(sections, version=_kx_version())
         raise typer.Exit()
 
 
@@ -142,13 +161,16 @@ _state = StateService(max_history=_config.max_history)
 _events = EventsService()
 _index = IndexService()
 _diagnostics = DiagnosticsService(events=_events)
+# A lambda, not an instance: it reads the module globals at call time so tests
+# that patch kx.main._state/_kubectl are honored.
+set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-@handle_errors
+@handle_errors(refresh=False)
 def get(
     ctx: typer.Context,
     resource: str,
@@ -156,19 +178,51 @@ def get(
         None, "--match", "-m", help="Match by name (substring, case-insensitive)"
     ),
 ):
-    """List resources and assign index numbers for use with other commands."""
+    """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
+    args = list(ctx.args)
+    indexes = [int(arg) for arg in args if arg.isdigit()]
+    extra = [arg for arg in args if not arg.isdigit()]
+    if indexes:
+        expected = normalize_kind(resource)
+        names = []
+        namespace = None
+        for idx in indexes:
+            name, ns, kind = _state.fields(idx)
+            if str(kind) != str(expected):
+                raise ValueError(
+                    f"Index {idx} is {kind}/{name}, not {expected} — "
+                    f"run 'kx get {resource}' to relist."
+                )
+            names.append(name)
+            namespace = ns
+        has_namespace_flag = any(
+            arg in ("-n", "--namespace") or arg.startswith("--namespace=")
+            for arg in extra
+        )
+        if namespace and not has_namespace_flag:
+            extra += ["-n", namespace]
+        extra = [*names, *extra]
     command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
-    with console.status(f"fetching {resource}"):
-        result = command.execute(resource, match, ctx.args)
-    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in ctx.args)
+    try:
+        with console.status(f"fetching {resource}"):
+            result = command.execute(resource, match, extra)
+    except RuntimeError as e:
+        # A NotFound after resolving an index means the state entry is stale;
+        # name-based gets stay outside the refresh path (refresh=False above).
+        if indexes and is_not_found(e):
+            raise StaleResourceError(str(e)) from e
+        raise
+    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
     if all_namespaces:
         namespace = "all namespaces"
+        note = "indexes not saved for all-namespace listings — scope to a namespace (-n or kx ns) to select"
     else:
+        note = None
         try:
             namespace = _state.load().namespace
         except RuntimeError:
             namespace = "default"
-    console.render_indexed_table(result, resource, namespace)
+    console.render_indexed_table(result, resource, namespace, note=note)
 
 
 @app.command(
@@ -189,8 +243,8 @@ def describe(ctx: typer.Context, indexes: list[int]):
 @handle_errors
 def events(indexes: list[int]):
     """Show Kubernetes events for one or more indexed resources."""
-    command = EventsCommand(state=_state, events=_events)
-    for index in indexes:
+    command = EventsCommand(state=_state, events=_events, kubectl=_kubectl)
+    for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         with console.status("fetching events"):
             result = command.execute(index)
@@ -199,6 +253,8 @@ def events(indexes: list[int]):
         else:
             count = len([line for line in result.splitlines() if line.strip()])
         extra = f"{count} {'item' if count == 1 else 'items'}" if count else ""
+        if position > 0:
+            console.print_raw("")
         console.print_banner(kind, name, namespace=ns, extra=extra)
         console.render_events_table(result)
 
@@ -212,7 +268,7 @@ def logs(ctx: typer.Context, index: int):
     """Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services."""
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
-    command = LogsCommand(state=_state, kubectl=_kubectl)
+    command = LogsCommand(state=_state, kubectl=_kubectl, status=console.status)
     command.execute(index, ctx.args)
 
 
@@ -256,8 +312,10 @@ def yaml(
     """Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."""
     command = YamlCommand(state=_state, kubectl=_kubectl)
     fields = [field.strip() for field in show.split(",")] if show else None
-    for index in indexes:
+    for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
+        if position > 0:
+            console.print_raw("")
         console.print_banner(kind, name, namespace=ns)
         with console.status("fetching manifest"):
             manifest = command.execute(index, fields)
@@ -275,6 +333,7 @@ def delete(
         state=_state,
         kubectl=_kubectl,
         confirm=console.confirm,
+        status=console.status,
     )
     for index in indexes:
         console.print_success(command.execute(index, yes))
@@ -342,7 +401,12 @@ def rollout(action: RolloutAction, index: int):
     name, ns, kind = _state.fields(index)
     console.print_banner(kind, name, namespace=ns)
     command = RolloutCommand(kubectl=_kubectl, state=_state)
-    result = command.execute(index, action)
+    # rollout status streams interactively and must not run inside a spinner.
+    if action == RolloutAction.status:
+        result = command.execute(index, action)
+    else:
+        with console.status(f"rollout {action.value}"):
+            result = command.execute(index, action)
     if result:
         if action == RolloutAction.history:
             console.print_raw(result)
@@ -355,7 +419,9 @@ def rollout(action: RolloutAction, index: int):
 def scale(index: int, replicas: int):
     """Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count."""
     command = ScaleCommand(kubectl=_kubectl, state=_state)
-    console.print_success(command.execute(index, replicas))
+    with console.status("scaling"):
+        result = command.execute(index, replicas)
+    console.print_success(result)
 
 
 @app.command(
@@ -393,20 +459,39 @@ def diagnostic_alias(index: int):
     console.render_diagnostic(report)
 
 
+def _namespace(index: Optional[int]) -> None:
+    if index is None:
+        command = GetCommand(kubectl=_kubectl, state=_state, index=_index)
+        with console.status("fetching namespaces"):
+            result = command.execute("namespaces", None, [])
+        console.render_indexed_table(result, "namespaces", _state.load().namespace)
+        return
+    command = NamespaceCommand(state=_state, kubectl=_kubectl)
+    with console.status("switching namespace"):
+        name = command.execute(index)
+    console.print_success(f"Switched to '{name}'")
+
+
 @app.command(cls=StyledCommand)
 @handle_errors
-def namespace(index: int):
-    """Switch to an indexed namespace; alias: kx ns (run kx get namespaces first)."""
-    command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    console.print_success(f"Switched to '{command.execute(index)}'")
+def namespace(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Namespace index to switch to; omit to list namespaces."
+    ),
+):
+    """List namespaces, or switch to an indexed one; alias: kx ns."""
+    _namespace(index)
 
 
 @app.command(name="ns", cls=StyledCommand, hidden=True)
 @handle_errors
-def namespace_alias(index: int):
+def namespace_alias(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Namespace index to switch to; omit to list namespaces."
+    ),
+):
     """Alias for namespace."""
-    command = NamespaceCommand(state=_state, kubectl=_kubectl)
-    console.print_success(f"Switched to '{command.execute(index)}'")
+    _namespace(index)
 
 
 @app.command(cls=StyledCommand)
@@ -469,7 +554,12 @@ def forward():
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
 
-get._examples = ["kx get pods", "kx get deploy -n kube-system --match api"]
+get._examples = [
+    "kx get pods",
+    "kx get deploy -n kube-system --match api",
+    "kx pods",
+    "kx po 3",
+]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
@@ -483,7 +573,7 @@ rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag 2"]
-namespace._examples = ["kx get namespaces", "kx ns 3"]
+namespace._examples = ["kx ns", "kx ns 3"]
 state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]
 back._examples = ["kx back"]

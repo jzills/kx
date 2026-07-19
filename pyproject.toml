@@ -1,6 +1,6 @@
 [project]
 name = "kx-cli"
-version = "0.0.6"
+version = "0.0.7"
 description = "kubectl wrapper with index-based resource selection"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "typer==0.26.8",
+    "typer==0.27.0",
     "kubernetes",
     "rich",
 ]
@@ -22,6 +22,9 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
+]
+build = [
+    "pyinstaller",
 ]
 
 [project.scripts]

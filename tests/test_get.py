@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 from kx.commands.get import GetCommand, _extract_namespace
 from kx.kinds import Kind
+from kx.state import Query
 
 
 def _make_command(kubectl_output="NAME\nnginx"):
@@ -59,6 +60,14 @@ class TestGetCommandNamespaceArgs:
         kubectl.run.assert_called_once_with(["get", "pods", "--all-namespaces"])
         state.save.assert_not_called()
 
+    def test_all_namespaces_output_is_not_indexed(self):
+        """Names aren't unique across namespaces — no dead X column."""
+        cmd, state, kubectl = _make_command()
+        kubectl.run.return_value = "NAMESPACE  NAME\ndefault    nginx"
+        result = cmd.execute("pods", extra_args=["-A"])
+        assert result == "NAMESPACE  NAME\ndefault    nginx"
+        cmd.index.add.assert_not_called()
+
     def test_explicit_namespace_short_used_for_state(self):
         cmd, state, kubectl = _make_command()
         cmd.execute("pods", extra_args=["-n", "kube-system"])
@@ -107,6 +116,22 @@ class TestExtractNamespace:
 
     def test_short_flag_at_end_ignored(self):
         assert _extract_namespace(["-n"]) is None
+
+
+class TestGetCommandRecordsQuery:
+    def test_query_saved_with_state(self):
+        cmd, state, _ = _make_command()
+        cmd.execute("pods", filter_term="ngi", extra_args=["-n", "staging"])
+        saved = state.save.call_args[0][0]
+        assert saved.query == Query(
+            resource="pods", args=["-n", "staging"], match="ngi"
+        )
+
+    def test_query_defaults(self):
+        cmd, state, _ = _make_command()
+        cmd.execute("pods")
+        saved = state.save.call_args[0][0]
+        assert saved.query == Query(resource="pods", args=[], match=None)
 
 
 class TestGetCommandNormalizesKind:
