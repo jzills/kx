@@ -8,6 +8,7 @@ from kx.commands.diagnostic import DiagnosticCommand, TriageCommand, build_repor
 from kx.diagnostics import (
     ContainerDiagnostic,
     DiagnosticData,
+    JobHealth,
     PodDiagnostic,
     ReplicaHealth,
     SchedulingInfo,
@@ -45,14 +46,37 @@ def _pod(name="web-1", phase="Running", containers=None, schedulable=True, **kwa
     )
 
 
-def _data(kind=Kind.Deployment, replicas=None, pods=None, warning_events=None):
+def _data(
+    kind=Kind.Deployment, replicas=None, pods=None, warning_events=None, job=None
+):
     return DiagnosticData(
         kind=kind,
         name="web",
         namespace="default",
         replicas=replicas,
+        job=job,
         pods=pods or [],
         warning_events=warning_events or [],
+    )
+
+
+def _job_health(
+    succeeded=0,
+    failed=0,
+    active=0,
+    suspended=False,
+    backoff_limit=6,
+    backoff_limit_exceeded=False,
+    deadline_exceeded=False,
+):
+    return JobHealth(
+        succeeded=succeeded,
+        failed=failed,
+        active=active,
+        suspended=suspended,
+        backoff_limit=backoff_limit,
+        backoff_limit_exceeded=backoff_limit_exceeded,
+        deadline_exceeded=deadline_exceeded,
     )
 
 
@@ -87,6 +111,19 @@ class TestDiagnosticCommand:
             DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
 
         diagnostics.gather.assert_not_called()
+
+    def test_job_is_a_supported_kind(self):
+        state = MagicMock()
+        state.fields.return_value = ("nightly", "default", Kind.Job)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.Job, job=_job_health(active=1)
+        )
+
+        report = DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
+
+        assert report.verdict == Severity.OK
+        diagnostics.gather.assert_called_once_with(Kind.Job, "nightly", "default")
 
 
 # --- namespace triage --------------------------------------------------------
@@ -242,6 +279,27 @@ class TestDiagnosticCli:
         diagnostics.gather.assert_called_once_with(Kind.Deployment, "web", "default")
         diagnostics.sweep.assert_not_called()
 
+    def test_indexed_diag_gathers_a_job(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        state = MagicMock()
+        state.fields.return_value = ("nightly", "default", Kind.Job)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.Job, job=_job_health(active=1)
+        )
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._diagnostics", diagnostics),
+        ):
+            result = CliRunner().invoke(app, ["diag", "1"])
+        assert result.exit_code == 0
+        diagnostics.gather.assert_called_once_with(Kind.Job, "nightly", "default")
+
 
 # --- build_report (pure) ----------------------------------------------------
 
@@ -357,6 +415,58 @@ class TestBuildReport:
         report = build_report(_data(kind=Kind.Pod, replicas=None, pods=[_pod()]))
         assert report.findings == []
         assert report.verdict == Severity.OK
+
+    def test_active_job_has_no_findings(self):
+        report = build_report(
+            _data(kind=Kind.Job, job=_job_health(active=1), pods=[_pod()])
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_suspended_job_has_no_findings(self):
+        report = build_report(_data(kind=Kind.Job, job=_job_health(suspended=True)))
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_completed_successful_job_has_no_findings(self):
+        report = build_report(
+            _data(kind=Kind.Job, job=_job_health(succeeded=1), pods=[_pod()])
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_backoff_limit_exceeded_is_critical(self):
+        report = build_report(
+            _data(
+                kind=Kind.Job,
+                job=_job_health(failed=3, backoff_limit=3, backoff_limit_exceeded=True),
+            )
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "BackoffLimitExceeded" in _summaries(report)
+        assert "3/3" in _summaries(report)
+
+    def test_deadline_exceeded_is_critical(self):
+        report = build_report(
+            _data(kind=Kind.Job, job=_job_health(deadline_exceeded=True))
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "DeadlineExceeded" in _summaries(report)
+
+    def test_job_pod_crashloop_still_surfaces_alongside_job_findings(self):
+        pod = _pod(
+            "nightly-x1",
+            containers=[
+                _container(
+                    ready=False, state="Waiting", waiting_reason="CrashLoopBackOff"
+                )
+            ],
+        )
+        report = build_report(
+            _data(kind=Kind.Job, job=_job_health(active=1), pods=[pod])
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "CrashLoopBackOff" in _summaries(report)
 
     def test_warning_events_become_warning_findings(self):
         from kx.diagnostics import EventSummary

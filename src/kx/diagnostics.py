@@ -95,6 +95,20 @@ class ReplicaHealth:
 
 
 @dataclass
+class JobHealth:
+    """Doesn't reuse ReplicaHealth: a Job has no desired/ready replica concept
+    — completion/failure counts and a backoff limit instead."""
+
+    succeeded: int
+    failed: int
+    active: int
+    suspended: bool
+    backoff_limit: int
+    backoff_limit_exceeded: bool
+    deadline_exceeded: bool
+
+
+@dataclass
 class EventSummary:
     reason: str
     message: str
@@ -112,6 +126,7 @@ class DiagnosticData:
     name: str
     namespace: str
     replicas: ReplicaHealth | None
+    job: JobHealth | None = None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 
@@ -155,9 +170,11 @@ class DiagnosticsService:
         load_config()
         apps = client.AppsV1Api()
         core = client.CoreV1Api()
+        batch = client.BatchV1Api()
 
         replicas = self._replica_health(kind, name, namespace, apps)
-        pods_raw = resolve_workload_pods(kind, name, namespace, apps, core)
+        job = self._job_health(kind, name, namespace, batch)
+        pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
         self._attach_logs(pods, namespace, core)
         warning_events = self._warning_events(kind, name, namespace, pods_raw)
@@ -167,6 +184,7 @@ class DiagnosticsService:
             name=name,
             namespace=namespace,
             replicas=replicas,
+            job=job,
             pods=pods,
             warning_events=warning_events,
         )
@@ -179,6 +197,7 @@ class DiagnosticsService:
         load_config()
         apps = client.AppsV1Api()
         core = client.CoreV1Api()
+        batch = client.BatchV1Api()
 
         pods = core.list_namespaced_pod(namespace).items
         replica_sets = apps.list_namespaced_replica_set(namespace).items
@@ -196,6 +215,8 @@ class DiagnosticsService:
             workloads.append((Kind.StatefulSet, sts, {sts.metadata.uid}))
         for ds in apps.list_namespaced_daemon_set(namespace).items:
             workloads.append((Kind.DaemonSet, ds, {ds.metadata.uid}))
+        for job in batch.list_namespaced_job(namespace).items:
+            workloads.append((Kind.Job, job, {job.metadata.uid}))
 
         results: list[DiagnosticData] = []
         claimed: set[str] = set()
@@ -226,7 +247,10 @@ class DiagnosticsService:
             kind=kind,
             name=name,
             namespace=namespace,
+            # Both extractors already return None for kinds they don't handle
+            # (Job has no ReplicaHealth; anything else has no JobHealth).
             replicas=_replica_health_from(kind, obj) if obj is not None else None,
+            job=_job_health_from(obj) if obj is not None and kind == Kind.Job else None,
             pods=[_pod_diagnostic(pod) for pod in pods_raw],
             warning_events=self._warning_events(
                 kind, name, namespace, pods_raw, all_events=all_events
@@ -247,6 +271,11 @@ class DiagnosticsService:
                 kind, apps.read_namespaced_daemon_set(name, namespace)
             )
         return None
+
+    def _job_health(self, kind, name, namespace, batch) -> JobHealth | None:
+        if kind != Kind.Job:
+            return None
+        return _job_health_from(batch.read_namespaced_job(name, namespace))
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,
@@ -355,6 +384,24 @@ def _replica_health_from(kind, obj) -> ReplicaHealth | None:
             observed_generation=status.observed_generation,
         )
     return None
+
+
+def _job_health_from(obj) -> JobHealth:
+    """Extract job health from an already-fetched Job object."""
+    status = obj.status
+    conditions = getattr(status, "conditions", None) or []
+    failed_reasons = {
+        c.reason for c in conditions if getattr(c, "type", None) == "Failed"
+    }
+    return JobHealth(
+        succeeded=_int(status.succeeded),
+        failed=_int(status.failed),
+        active=_int(status.active),
+        suspended=bool(obj.spec.suspend),
+        backoff_limit=_int(obj.spec.backoff_limit),
+        backoff_limit_exceeded="BackoffLimitExceeded" in failed_reasons,
+        deadline_exceeded="DeadlineExceeded" in failed_reasons,
+    )
 
 
 def _container_needs_logs(container: ContainerDiagnostic) -> bool:
