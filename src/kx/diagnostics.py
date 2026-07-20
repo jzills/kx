@@ -7,7 +7,7 @@ from typing import Protocol
 from kubernetes import client
 
 from kx.events import EventsServiceProtocol
-from kx.graph import _owned_by, resolve_workload_pods
+from kx.graph import _owned_by, most_recent_job, resolve_workload_pods
 from kx.k8s import load_config
 from kx.kinds import Kind
 
@@ -127,6 +127,17 @@ class JobHealth:
 
 
 @dataclass
+class CronJobHealth:
+    """No cron-expression parsing (no dependency for it, and the semantics
+    are easy to get subtly wrong — timezones, concurrencyPolicy). Health is
+    instead a rollup of the most recently-run owned Job, reusing JobHealth
+    and _job_findings rather than inventing a new heuristic."""
+
+    suspended: bool
+    most_recent_job: JobHealth | None
+
+
+@dataclass
 class EventSummary:
     reason: str
     message: str
@@ -147,6 +158,7 @@ class DiagnosticData:
     job: JobHealth | None = None
     service: ServiceHealth | None = None
     pvc: PVCHealth | None = None
+    cronjob: CronJobHealth | None = None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 
@@ -196,6 +208,7 @@ class DiagnosticsService:
         job = self._job_health(kind, name, namespace, batch)
         service = self._service_health(kind, name, namespace, core)
         pvc = self._pvc_health(kind, name, namespace, core)
+        cronjob = self._cronjob_health(kind, name, namespace, batch)
         pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
         self._attach_logs(pods, namespace, core)
@@ -208,6 +221,7 @@ class DiagnosticsService:
             replicas=replicas,
             job=job,
             service=service,
+            cronjob=cronjob,
             pvc=pvc,
             pods=pods,
             warning_events=warning_events,
@@ -225,7 +239,58 @@ class DiagnosticsService:
 
         pods = core.list_namespaced_pod(namespace).items
         replica_sets = apps.list_namespaced_replica_set(namespace).items
+        jobs = batch.list_namespaced_job(namespace).items
         all_events = self.events.get(namespace)
+
+        # CronJobs own Jobs (not pods), so they get their own pass — like
+        # Services, not the pod-owner-claiming workloads loop below. Their
+        # owned Jobs' UIDs are excluded from the standalone Job listing so a
+        # CronJob-owned Job is never double-reported (once under its CronJob,
+        # once as its own row) — the same exclusion pattern the workloads
+        # loop already applies to pods, one level up the ownership chain.
+        results: list[DiagnosticData] = []
+        claimed: set[str] = set()
+        claimed_job_uids: set[str] = set()
+        for cj in batch.list_namespaced_cron_job(namespace).items:
+            owned_jobs = [job for job in jobs if _owned_by(job, cj.metadata.uid)]
+            owned_job_uids = {job.metadata.uid for job in owned_jobs}
+            claimed_job_uids.update(owned_job_uids)
+            # Every owned Job's pods are claimed here, not just the displayed
+            # (most-recent) Job's — every owned Job is excluded from the
+            # standalone Job listing below, so all of their pods must be
+            # excluded from the orphan-pod pass too, or old runs' pods leak
+            # through as unlabeled orphans.
+            claimed.update(
+                pod.metadata.uid
+                for pod in pods
+                if any(_owned_by(pod, uid) for uid in owned_job_uids)
+            )
+            recent = most_recent_job(cj.metadata.uid, jobs)
+            recent_pods = (
+                [pod for pod in pods if _owned_by(pod, recent.metadata.uid)]
+                if recent
+                else []
+            )
+            results.append(
+                DiagnosticData(
+                    kind=Kind.CronJob,
+                    name=cj.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    cronjob=CronJobHealth(
+                        suspended=bool(cj.spec.suspend),
+                        most_recent_job=_job_health_from(recent) if recent else None,
+                    ),
+                    pods=[_pod_diagnostic(pod) for pod in recent_pods],
+                    warning_events=self._warning_events(
+                        Kind.CronJob,
+                        cj.metadata.name,
+                        namespace,
+                        recent_pods,
+                        all_events=all_events,
+                    ),
+                )
+            )
 
         workloads: list[tuple[Kind, object, set[str]]] = []
         for deploy in apps.list_namespaced_deployment(namespace).items:
@@ -239,11 +304,11 @@ class DiagnosticsService:
             workloads.append((Kind.StatefulSet, sts, {sts.metadata.uid}))
         for ds in apps.list_namespaced_daemon_set(namespace).items:
             workloads.append((Kind.DaemonSet, ds, {ds.metadata.uid}))
-        for job in batch.list_namespaced_job(namespace).items:
+        for job in jobs:
+            if job.metadata.uid in claimed_job_uids:
+                continue
             workloads.append((Kind.Job, job, {job.metadata.uid}))
 
-        results: list[DiagnosticData] = []
-        claimed: set[str] = set()
         for kind, obj, owner_uids in workloads:
             owned = [
                 pod for pod in pods if any(_owned_by(pod, uid) for uid in owner_uids)
@@ -371,6 +436,18 @@ class DiagnosticsService:
             return None
         claim = core.read_namespaced_persistent_volume_claim(name, namespace)
         return PVCHealth(phase=getattr(claim.status, "phase", None) or "Unknown")
+
+    def _cronjob_health(self, kind, name, namespace, batch) -> CronJobHealth | None:
+        if kind != Kind.CronJob:
+            return None
+        cj = batch.read_namespaced_cron_job(name, namespace)
+        most_recent = most_recent_job(
+            cj.metadata.uid, batch.list_namespaced_job(namespace).items
+        )
+        return CronJobHealth(
+            suspended=bool(cj.spec.suspend),
+            most_recent_job=_job_health_from(most_recent) if most_recent else None,
+        )
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,

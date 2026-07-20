@@ -106,7 +106,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
-| `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag. |
+| `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
