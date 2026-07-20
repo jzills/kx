@@ -237,12 +237,15 @@ def top(
     match: Optional[str] = typer.Option(
         None, "--match", "-m", help="Match by name (substring, case-insensitive)"
     ),
+    no_limits: bool = typer.Option(
+        False, "--no-limits", help="Skip the CPU%/MEM% columns (one fewer kubectl call)"
+    ),
 ):
-    """List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get."""
+    """List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits."""
     extra = list(ctx.args)
     command = TopCommand(kubectl=_kubectl, state=_state, index=_index)
     with console.status("fetching pod usage"):
-        result = command.execute(match, extra)
+        result = command.execute(match, extra, no_limits=no_limits)
     all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
     if all_namespaces:
         namespace = "all namespaces"
@@ -611,7 +614,7 @@ get._examples = [
     "kx pods",
     "kx po 3",
 ]
-top._examples = ["kx top", "kx top --sort-by=cpu"]
+top._examples = ["kx top", "kx top --sort-by=cpu", "kx top --no-limits"]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]

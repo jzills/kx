@@ -185,6 +185,35 @@ def _status_color(status: str) -> str:
     return "status.neutral"
 
 
+# kx top's usage-percentage columns. Mirrors _MEMORY_WARN_THRESHOLD (0.75),
+# _MEMORY_CRITICAL_THRESHOLD (0.90), and _CPU_WARN_THRESHOLD (0.90) in
+# commands/diagnostic.py, re-expressed as plain percentages here rather than
+# imported — console.py is a lower-level rendering module the commands
+# import from, not the reverse. A red 94% in kx top means exactly what a
+# critical finding means in kx diag; keep these two in sync by hand.
+_MEM_WARN_PCT = 75
+_MEM_CRITICAL_PCT = 90
+_CPU_WARN_PCT = 90  # CPU never reaches critical: throttling, not a crash.
+
+
+def _usage_pct_color(cell: str, resource: str) -> str | None:
+    if not cell.endswith("%"):
+        return None
+    try:
+        pct = int(cell[:-1])
+    except ValueError:
+        return None
+    if resource == "memory":
+        if pct >= _MEM_CRITICAL_PCT:
+            return "status.bad"
+        if pct >= _MEM_WARN_PCT:
+            return "status.warn"
+        return None
+    if pct >= _CPU_WARN_PCT:
+        return "status.warn"
+    return None
+
+
 def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
     label = "item" if count == 1 else "items"
     _console.print(
@@ -250,19 +279,25 @@ def render_indexed_table(
         box=None,
         padding=(0, 2),
     )
-    _right_aligned = {"X", "AGE"}
+    _right_aligned = {"X", "AGE", "CPU%", "MEM%"}
     for header in headers:
         table.add_column(
             header, justify="right" if header in _right_aligned else "left"
         )
 
     status_col = headers.index("STATUS") if "STATUS" in headers else -1
+    cpu_pct_col = headers.index("CPU%") if "CPU%" in headers else -1
+    mem_pct_col = headers.index("MEM%") if "MEM%" in headers else -1
 
     for row in rows:
         styled = []
         for index, cell in enumerate(row):
             if index == status_col:
                 styled.append(f"[{_status_color(cell)}]{cell}[/]")
+            elif index in (cpu_pct_col, mem_pct_col):
+                resource = "cpu" if index == cpu_pct_col else "memory"
+                color = _usage_pct_color(cell, resource)
+                styled.append(f"[{color}]{cell}[/]" if color else cell)
             else:
                 styled.append(cell)
         table.add_row(*styled)

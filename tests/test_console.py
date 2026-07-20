@@ -109,6 +109,45 @@ def test_render_indexed_table_non_tabular_falls_through(capture_console):
     assert '{"items": []}' in capture_console.getvalue()
 
 
+USAGE_OUTPUT = """\
+X   NAME      CPU(cores)   CPU%   MEMORY(bytes)   MEM%
+1   web-1     50m          50%    38Mi             77%
+2   web-2     5m           —      100Mi            —"""
+
+
+def test_render_indexed_table_shows_usage_percent_columns(capture_console):
+    kx_console.render_indexed_table(USAGE_OUTPUT, "pods", "default")
+    out = capture_console.getvalue()
+    assert "CPU%" in out
+    assert "MEM%" in out
+    assert "50%" in out
+    assert "77%" in out
+    assert "—" in out
+
+
+class TestUsagePctColor:
+    def test_memory_below_warning_is_uncolored(self):
+        assert kx_console._usage_pct_color("50%", "memory") is None
+
+    def test_memory_at_warning_threshold(self):
+        assert kx_console._usage_pct_color("75%", "memory") == "status.warn"
+
+    def test_memory_at_critical_threshold(self):
+        assert kx_console._usage_pct_color("90%", "memory") == "status.bad"
+
+    def test_cpu_below_warning_is_uncolored(self):
+        assert kx_console._usage_pct_color("50%", "cpu") is None
+
+    def test_cpu_at_warning_threshold(self):
+        assert kx_console._usage_pct_color("90%", "cpu") == "status.warn"
+
+    def test_cpu_never_reaches_critical(self):
+        assert kx_console._usage_pct_color("150%", "cpu") == "status.warn"
+
+    def test_dash_is_uncolored(self):
+        assert kx_console._usage_pct_color("—", "memory") is None
+
+
 ALL_NAMESPACES_OUTPUT = """\
 NAMESPACE     NAME        READY   STATUS    AGE
 default       nginx-abc   1/1     Running   2d
