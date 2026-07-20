@@ -6,6 +6,7 @@ from kx.diagnostics import (
     DiagnosticReport,
     DiagnosticsServiceProtocol,
     Finding,
+    JobHealth,
     PodDiagnostic,
     ReplicaHealth,
     Severity,
@@ -13,7 +14,13 @@ from kx.diagnostics import (
 from kx.kinds import Kind
 from kx.state import State, StateServiceProtocol
 
-_SUPPORTED_KINDS = {Kind.Deployment, Kind.StatefulSet, Kind.DaemonSet, Kind.Pod}
+_SUPPORTED_KINDS = {
+    Kind.Deployment,
+    Kind.StatefulSet,
+    Kind.DaemonSet,
+    Kind.Pod,
+    Kind.Job,
+}
 _RESTART_WARN_THRESHOLD = 5
 
 _IMAGE_PULL_REASONS = {"ImagePullBackOff", "ErrImagePull", "InvalidImageName"}
@@ -88,6 +95,8 @@ def build_report(data: DiagnosticData) -> DiagnosticReport:
 
     if data.replicas is not None:
         findings.extend(_replica_findings(data.replicas))
+    if data.job is not None:
+        findings.extend(_job_findings(data.job))
     for pod in data.pods:
         findings.extend(_pod_findings(pod))
     findings.extend(_event_findings(data.warning_events))
@@ -144,6 +153,24 @@ def _replica_findings(replicas: ReplicaHealth) -> list[Finding]:
                 f"Rollout in progress: {replicas.updated}/{replicas.desired} replicas updated",
             )
         )
+    return findings
+
+
+def _job_findings(job: JobHealth) -> list[Finding]:
+    """Suspended, active, and successfully-completed Jobs are all OK — the
+    same treatment a Deployment scaled to 0 replicas already gets from
+    _replica_findings. Any trouble in the Job's own pods (CrashLoopBackOff,
+    ImagePullBackOff, ...) surfaces separately via _pod_findings."""
+    findings: list[Finding] = []
+    if job.backoff_limit_exceeded:
+        findings.append(
+            Finding(
+                Severity.CRITICAL,
+                f"BackoffLimitExceeded ({job.failed}/{job.backoff_limit} failed)",
+            )
+        )
+    if job.deadline_exceeded:
+        findings.append(Finding(Severity.CRITICAL, "DeadlineExceeded"))
     return findings
 
 

@@ -72,10 +72,11 @@ def _log(text):
 
 
 @contextmanager
-def _mocked(apps=None, core=None):
+def _mocked(apps=None, core=None, batch=None):
     client = MagicMock()
     client.AppsV1Api.return_value = apps or MagicMock()
     client.CoreV1Api.return_value = core or MagicMock()
+    client.BatchV1Api.return_value = batch or MagicMock()
     with patch("kx.diagnostics.client", client), patch("kx.diagnostics.load_config"):
         yield
 
@@ -290,6 +291,115 @@ class TestWarningEvents:
         assert summary.count == 8  # 3 + 5, deduped
 
 
+def _job(
+    name,
+    uid="",
+    succeeded=0,
+    failed=0,
+    active=0,
+    suspended=False,
+    backoff_limit=6,
+    conditions=(),
+):
+    return NS(
+        metadata=_meta(name, uid),
+        spec=NS(suspend=suspended, backoff_limit=backoff_limit),
+        status=NS(
+            succeeded=succeeded,
+            failed=failed,
+            active=active,
+            conditions=list(conditions),
+        ),
+    )
+
+
+def _condition(cond_type, reason=None):
+    return NS(type=cond_type, reason=reason)
+
+
+class TestJobHealth:
+    def test_active_job_has_no_failure_flags(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU", active=1)
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.active == 1
+        assert data.job.backoff_limit_exceeded is False
+        assert data.job.deadline_exceeded is False
+        assert data.replicas is None
+
+    def test_backoff_limit_exceeded_condition_is_flagged(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "nightly",
+            "jU",
+            failed=3,
+            backoff_limit=3,
+            conditions=[_condition("Failed", "BackoffLimitExceeded")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.backoff_limit_exceeded is True
+        assert data.job.failed == 3
+        assert data.job.backoff_limit == 3
+
+    def test_deadline_exceeded_condition_is_flagged(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "nightly", "jU", conditions=[_condition("Failed", "DeadlineExceeded")]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.deadline_exceeded is True
+        assert data.job.backoff_limit_exceeded is False
+
+    def test_suspended_job_is_extracted(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU", suspended=True)
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.suspended is True
+
+    def test_completed_job_reports_succeeded_count(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "backup", "jU", succeeded=1, conditions=[_condition("Complete")]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "backup", "default")
+        assert data.job.succeeded == 1
+        assert data.job.backoff_limit_exceeded is False
+        assert data.job.deadline_exceeded is False
+
+    def test_job_pods_resolved_by_owner_uid(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU")
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-x1", "p1", owner="jU"),
+            _pod("other", "p2", owner="unrelated"),
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert [p.name for p in data.pods] == ["nightly-x1"]
+
+
 # --- namespace sweep ---------------------------------------------------------
 
 
@@ -341,6 +451,12 @@ def _sweep_apps(deploys=(), stss=(), dss=(), replica_sets=()):
     apps.list_namespaced_daemon_set.return_value = _items(*dss)
     apps.list_namespaced_replica_set.return_value = _items(*replica_sets)
     return apps
+
+
+def _sweep_batch(jobs=()):
+    batch = MagicMock()
+    batch.list_namespaced_job.return_value = _items(*jobs)
+    return batch
 
 
 class TestSweep:
@@ -436,6 +552,39 @@ class TestSweep:
         web, solo = results
         assert [e.name for e in web.warning_events] == ["web-1"]
         assert [e.name for e in solo.warning_events] == ["solo"]
+
+    def test_sweeps_jobs_and_excludes_their_pods_from_orphans(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(jobs=[_job("nightly", "jU", succeeded=1)])
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-x1", "p1", owner="jU"),
+            _pod("solo", "p2"),
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Job, "nightly"),
+            (Kind.Pod, "solo"),
+        ]
+        job_result = results[0]
+        assert [p.name for p in job_result.pods] == ["nightly-x1"]
+        assert job_result.job.succeeded == 1
+        assert job_result.replicas is None
+
+    def test_sweep_includes_completed_job_as_healthy(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job("backup", "jU", succeeded=1, conditions=[_condition("Complete")])
+            ]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert results[0].job.backoff_limit_exceeded is False
+        assert results[0].job.deadline_exceeded is False
 
     def test_empty_namespace_returns_no_results(self):
         core = MagicMock()

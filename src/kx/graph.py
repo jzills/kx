@@ -156,13 +156,16 @@ def _owned_by(resource, uid: str) -> bool:
     return any(ref.uid == uid for ref in refs)
 
 
-def resolve_workload_pods(kind: str, name: str, namespace: str, apps, core) -> list:
+def resolve_workload_pods(
+    kind: str, name: str, namespace: str, apps, core, batch=None
+) -> list:
     """Resolve the pods belonging to a workload via ownership references.
 
     Deployment is a two-hop walk (Deployment → owned ReplicaSets → owned pods,
-    which includes surge/old pods mid-rollout); StatefulSet/DaemonSet own their
-    pods directly; Pod resolves to itself. Reuses `_owned_by` and fetches pods
-    once per namespace, filtering client-side (mirrors the tree builders)."""
+    which includes surge/old pods mid-rollout); StatefulSet/DaemonSet/Job own
+    their pods directly; Pod resolves to itself. Reuses `_owned_by` and fetches
+    pods once per namespace, filtering client-side (mirrors the tree
+    builders). `batch` is required for Job, unused otherwise."""
     if kind == Kind.Pod:
         return [core.read_namespaced_pod(name, namespace)]
 
@@ -182,5 +185,8 @@ def resolve_workload_pods(kind: str, name: str, namespace: str, apps, core) -> l
         case Kind.DaemonSet:
             ds = apps.read_namespaced_daemon_set(name, namespace)
             return [pod for pod in pods if _owned_by(pod, ds.metadata.uid)]
+        case Kind.Job:
+            job = batch.read_namespaced_job(name, namespace)
+            return [pod for pod in pods if _owned_by(pod, job.metadata.uid)]
         case _:
             return []

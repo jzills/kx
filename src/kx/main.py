@@ -463,7 +463,7 @@ def diagnostic(
         help="Resource index to diagnose; omit to triage the whole namespace.",
     ),
 ):
-    """Diagnose an indexed Deployment, StatefulSet, DaemonSet, or Pod, or triage the whole namespace when no index is given; alias: kx diag."""
+    """Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, or Pod, or triage the whole namespace when no index is given; alias: kx diag."""
     _diagnostic(index)
 
 
