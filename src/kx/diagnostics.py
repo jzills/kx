@@ -7,7 +7,7 @@ from typing import Protocol
 from kubernetes import client
 
 from kx.events import EventsServiceProtocol
-from kx.graph import resolve_workload_pods
+from kx.graph import _owned_by, resolve_workload_pods
 from kx.k8s import load_config
 from kx.kinds import Kind
 
@@ -144,6 +144,7 @@ class DiagnosticReport:
 
 class DiagnosticsServiceProtocol(Protocol):
     def gather(self, kind: str, name: str, namespace: str) -> DiagnosticData: ...
+    def sweep(self, namespace: str) -> list[DiagnosticData]: ...
 
 
 class DiagnosticsService:
@@ -170,39 +171,80 @@ class DiagnosticsService:
             warning_events=warning_events,
         )
 
+    def sweep(self, namespace: str) -> list[DiagnosticData]:
+        """Diagnose every workload in the namespace plus orphan pods (pods not
+        owned by a swept workload — bare pods, Job pods). One list call per
+        kind, one events fetch, and no log tails: logs feed the detailed LOGS
+        section only, never findings, so the sweep skips them for speed."""
+        load_config()
+        apps = client.AppsV1Api()
+        core = client.CoreV1Api()
+
+        pods = core.list_namespaced_pod(namespace).items
+        replica_sets = apps.list_namespaced_replica_set(namespace).items
+        all_events = self.events.get(namespace)
+
+        workloads: list[tuple[Kind, object, set[str]]] = []
+        for deploy in apps.list_namespaced_deployment(namespace).items:
+            rs_uids = {
+                rs.metadata.uid
+                for rs in replica_sets
+                if _owned_by(rs, deploy.metadata.uid)
+            }
+            workloads.append((Kind.Deployment, deploy, rs_uids))
+        for sts in apps.list_namespaced_stateful_set(namespace).items:
+            workloads.append((Kind.StatefulSet, sts, {sts.metadata.uid}))
+        for ds in apps.list_namespaced_daemon_set(namespace).items:
+            workloads.append((Kind.DaemonSet, ds, {ds.metadata.uid}))
+
+        results: list[DiagnosticData] = []
+        claimed: set[str] = set()
+        for kind, obj, owner_uids in workloads:
+            owned = [
+                pod for pod in pods if any(_owned_by(pod, uid) for uid in owner_uids)
+            ]
+            claimed.update(pod.metadata.uid for pod in owned)
+            results.append(
+                self._build_data(
+                    kind, obj.metadata.name, namespace, obj, owned, all_events
+                )
+            )
+        for pod in pods:
+            if pod.metadata.uid in claimed:
+                continue
+            results.append(
+                self._build_data(
+                    Kind.Pod, pod.metadata.name, namespace, None, [pod], all_events
+                )
+            )
+        return results
+
+    def _build_data(
+        self, kind, name, namespace, obj, pods_raw, all_events
+    ) -> DiagnosticData:
+        return DiagnosticData(
+            kind=kind,
+            name=name,
+            namespace=namespace,
+            replicas=_replica_health_from(kind, obj) if obj is not None else None,
+            pods=[_pod_diagnostic(pod) for pod in pods_raw],
+            warning_events=self._warning_events(
+                kind, name, namespace, pods_raw, all_events=all_events
+            ),
+        )
+
     def _replica_health(self, kind, name, namespace, apps) -> ReplicaHealth | None:
         if kind == Kind.Deployment:
-            obj = apps.read_namespaced_deployment(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(obj.spec.replicas),
-                ready=_int(status.ready_replicas),
-                available=_int(status.available_replicas),
-                updated=_int(status.updated_replicas),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_deployment(name, namespace)
             )
         if kind == Kind.StatefulSet:
-            obj = apps.read_namespaced_stateful_set(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(obj.spec.replicas),
-                ready=_int(status.ready_replicas),
-                available=_int(getattr(status, "available_replicas", None)),
-                updated=_int(status.updated_replicas),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_stateful_set(name, namespace)
             )
         if kind == Kind.DaemonSet:
-            obj = apps.read_namespaced_daemon_set(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(status.desired_number_scheduled),
-                ready=_int(status.number_ready),
-                available=_int(status.number_available),
-                updated=_int(status.updated_number_scheduled),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_daemon_set(name, namespace)
             )
         return None
 
@@ -247,8 +289,11 @@ class DiagnosticsService:
                 return text.splitlines(), ("previous" if previous else "current")
         return [], None
 
-    def _warning_events(self, kind, name, namespace, pods_raw) -> list[EventSummary]:
-        all_events = self.events.get(namespace)
+    def _warning_events(
+        self, kind, name, namespace, pods_raw, all_events=None
+    ) -> list[EventSummary]:
+        if all_events is None:
+            all_events = self.events.get(namespace)
         groups: dict[tuple[str, str, str], EventSummary] = {}
 
         # dedup: for a bare Pod the workload target equals its pod target.
@@ -286,6 +331,30 @@ class DiagnosticsService:
 def _int(value) -> int:
     """The SDK returns None (not 0) for zero counters."""
     return value or 0
+
+
+def _replica_health_from(kind, obj) -> ReplicaHealth | None:
+    """Extract replica health from an already-fetched workload object."""
+    status = obj.status
+    if kind in (Kind.Deployment, Kind.StatefulSet):
+        return ReplicaHealth(
+            desired=_int(obj.spec.replicas),
+            ready=_int(status.ready_replicas),
+            available=_int(getattr(status, "available_replicas", None)),
+            updated=_int(status.updated_replicas),
+            generation=obj.metadata.generation,
+            observed_generation=status.observed_generation,
+        )
+    if kind == Kind.DaemonSet:
+        return ReplicaHealth(
+            desired=_int(status.desired_number_scheduled),
+            ready=_int(status.number_ready),
+            available=_int(status.number_available),
+            updated=_int(status.updated_number_scheduled),
+            generation=obj.metadata.generation,
+            observed_generation=status.observed_generation,
+        )
+    return None
 
 
 def _container_needs_logs(container: ContainerDiagnostic) -> bool:

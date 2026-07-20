@@ -11,7 +11,7 @@ from typer.core import TyperCommand, TyperGroup
 from kx import console
 from kx.commands.back import BackCommand
 from kx.commands.delete import DeleteCommand
-from kx.commands.diagnostic import DiagnosticCommand
+from kx.commands.diagnostic import DiagnosticCommand, TriageCommand
 from kx.commands.drop import DropCommand
 from kx.commands.labels import LabelsCommand
 from kx.commands.describe import DescribeCommand
@@ -438,10 +438,16 @@ def port_forward(ctx: typer.Context, index: int, port: str):
     command.execute(index, port, ctx.args)
 
 
-@app.command(cls=StyledCommand)
-@handle_errors
-def diagnostic(index: int):
-    """Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag."""
+def _diagnostic(index: Optional[int]) -> None:
+    if index is None:
+        # Bare invocation: triage sweep of the current namespace. The result
+        # is indexed (unhealthy rows saved as state) so kx diag <i> drills in.
+        command = TriageCommand(state=_state, diagnostics=_diagnostics)
+        namespace = _kubectl.current_namespace()
+        with console.status(f"sweeping {namespace}"):
+            result = command.execute(namespace)
+        console.render_triage(result)
+        return
     # render_diagnostic prints the banner: the issue count is only known post-report.
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
     with console.status("running diagnostics"):
@@ -449,14 +455,28 @@ def diagnostic(index: int):
     console.render_diagnostic(report)
 
 
+@app.command(cls=StyledCommand)
+@handle_errors
+def diagnostic(
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to diagnose; omit to triage the whole namespace.",
+    ),
+):
+    """Diagnose an indexed Deployment, StatefulSet, DaemonSet, or Pod, or triage the whole namespace when no index is given; alias: kx diag."""
+    _diagnostic(index)
+
+
 @app.command(name="diag", cls=StyledCommand, hidden=True)
 @handle_errors
-def diagnostic_alias(index: int):
+def diagnostic_alias(
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to diagnose; omit to triage the whole namespace.",
+    ),
+):
     """Alias for diagnostic."""
-    command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
-    with console.status("running diagnostics"):
-        report = command.execute(index)
-    console.render_diagnostic(report)
+    _diagnostic(index)
 
 
 def _namespace(index: Optional[int]) -> None:
@@ -572,7 +592,7 @@ tree._examples = ["kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
-diagnostic._examples = ["kx diag 2"]
+diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]
 state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]

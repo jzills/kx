@@ -359,6 +359,79 @@ def render_diagnostic(report) -> None:
     _render_warning_events(report.warning_events)
 
 
+def render_triage(result) -> None:
+    """Namespace triage table: one row per unhealthy resource (indexed to match
+    the saved state), healthy resources collapsed into the footer."""
+    if result.checked == 0:
+        _console.print(
+            f"[muted]NAMESPACE {result.namespace} · 0 resources checked[/muted]"
+        )
+        return
+    if not result.reports:
+        _console.print(
+            f"[muted]NAMESPACE {result.namespace} ·[/muted] "
+            f"[success]{result.checked} resources checked · all healthy[/success]"
+        )
+        return
+
+    _console.print(
+        f"[muted]NAMESPACE {result.namespace} · "
+        f"{result.checked} resources checked[/muted]"
+    )
+    _console.print()
+    # Expanded on a terminal so TOP FINDING (the one ratio column) absorbs the
+    # width pressure and ellipsizes. Off-terminal (the 1000-col pipe console)
+    # expansion would stretch trailing padding across the full pipe width, so
+    # the table hugs its content there.
+    table = Table(
+        show_header=True,
+        header_style="header",
+        box=None,
+        padding=(0, 2),
+        expand=_console.is_terminal,
+    )
+    table.add_column("", justify="right", style="muted", no_wrap=True)
+    table.add_column("KIND", no_wrap=True)
+    table.add_column("NAME", no_wrap=True)
+    table.add_column("VERDICT", no_wrap=True)
+    # One resource per line keeps the table scannable; the full finding is one
+    # `kx diag <index>` away.
+    table.add_column(
+        "TOP FINDING", no_wrap=True, overflow="ellipsis", ratio=1, min_width=10
+    )
+    # Long names are truncated by hand: with every column no_wrap, Rich's
+    # last-resort overflow handling shrinks all columns evenly (min_width is
+    # ignored), which can erase the index and verdict cells on narrow
+    # terminals. The budget is the console width minus the fixed columns
+    # (index 2, KIND ≤11, VERDICT 8, TOP FINDING ≥10, 5×4 padding).
+    name_budget = max(8, _console.width - 51)
+    for position, report in enumerate(result.reports, start=1):
+        color = _SEVERITY_COLOR[report.verdict]
+        top = report.findings[0].summary if report.findings else ""
+        name = report.name
+        if len(name) > name_budget:
+            name = name[: name_budget - 1] + "…"
+        table.add_row(
+            str(position),
+            report.kind,
+            name,
+            f"[{color}]{_VERDICT_LABEL[report.verdict]}[/]",
+            Text(top, style="body"),
+        )
+    _console.print(table)
+    _console.print()
+    label = "resource" if result.healthy == 1 else "resources"
+    _console.print(
+        f"[muted]{result.healthy} healthy {label} not shown · "
+        f"kx diag <index> for detail[/muted]"
+    )
+    for name in result.dropped:
+        _console.print(
+            f"[muted]{name} shares a name with an indexed resource "
+            f"and was omitted[/muted]"
+        )
+
+
 def _render_pod_table(pods) -> None:
     if not pods:
         return

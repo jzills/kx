@@ -290,6 +290,160 @@ class TestWarningEvents:
         assert summary.count == 8  # 3 + 5, deduped
 
 
+# --- namespace sweep ---------------------------------------------------------
+
+
+def _deploy(name, uid, ready=1, desired=1):
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        spec=NS(replicas=desired),
+        status=NS(
+            ready_replicas=ready,
+            available_replicas=ready,
+            updated_replicas=ready,
+            observed_generation=1,
+        ),
+    )
+
+
+def _sweep_sts(name, uid, ready=1, desired=1):
+    # Not named _sts: a later helper of that name (MagicMock apps for the
+    # log-attachment tests) would shadow it at runtime.
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        spec=NS(replicas=desired),
+        status=NS(
+            ready_replicas=ready,
+            available_replicas=ready,
+            updated_replicas=ready,
+            observed_generation=1,
+        ),
+    )
+
+
+def _ds(name, uid, ready=1, desired=1):
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        status=NS(
+            desired_number_scheduled=desired,
+            number_ready=ready,
+            number_available=ready,
+            updated_number_scheduled=desired,
+            observed_generation=1,
+        ),
+    )
+
+
+def _sweep_apps(deploys=(), stss=(), dss=(), replica_sets=()):
+    apps = MagicMock()
+    apps.list_namespaced_deployment.return_value = _items(*deploys)
+    apps.list_namespaced_stateful_set.return_value = _items(*stss)
+    apps.list_namespaced_daemon_set.return_value = _items(*dss)
+    apps.list_namespaced_replica_set.return_value = _items(*replica_sets)
+    return apps
+
+
+class TestSweep:
+    def test_orders_workloads_then_orphan_pods(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            stss=[_sweep_sts("db", "sU")],
+            dss=[_ds("agent", "aU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("job-pod-1", "p4", owner="jobU"),
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("db-0", "p2", owner="sU"),
+            _pod("agent-x", "p3", owner="aU"),
+            _pod("solo", "p5"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Deployment, "web"),
+            (Kind.StatefulSet, "db"),
+            (Kind.DaemonSet, "agent"),
+            (Kind.Pod, "job-pod-1"),
+            (Kind.Pod, "solo"),
+        ]
+
+    def test_workload_data_carries_owned_pods_and_replicas(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU", ready=1, desired=3)],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("web-2", "p2", owner="rsU"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert len(results) == 1
+        data = results[0]
+        assert [p.name for p in data.pods] == ["web-1", "web-2"]
+        assert data.replicas.desired == 3
+        assert data.replicas.ready == 1
+        assert data.namespace == "default"
+        # Replica health comes from the listed object, not a per-resource read.
+        apps.read_namespaced_deployment.assert_not_called()
+
+    def test_orphan_pod_has_no_replica_health(self):
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(_pod("solo", "p1"))
+        with _mocked(apps=_sweep_apps(), core=core):
+            results = _service().sweep("default")
+        assert results[0].replicas is None
+        assert [p.name for p in results[0].pods] == ["solo"]
+
+    def test_sweep_never_fetches_logs(self):
+        crashing = _cstatus(
+            ready=False,
+            restart_count=7,
+            state=_cstate(waiting=NS(reason="CrashLoopBackOff", message=None)),
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("solo", "p1", statuses=[crashing])
+        )
+        with _mocked(apps=_sweep_apps(), core=core):
+            _service().sweep("default")
+        core.read_namespaced_pod_log.assert_not_called()
+
+    def test_sweep_fetches_events_once_and_partitions(self):
+        events = MagicMock()
+        events.get.return_value = [
+            _event("Warning", "BackOff", "web-1"),
+            _event("Warning", "FailedScheduling", "solo"),
+        ]
+        events.filter.side_effect = lambda evs, name, kind: [
+            e for e in evs if e.involved_object.name == name
+        ]
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("solo", "p2"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service(events=events).sweep("default")
+        events.get.assert_called_once_with("default")
+        web, solo = results
+        assert [e.name for e in web.warning_events] == ["web-1"]
+        assert [e.name for e in solo.warning_events] == ["solo"]
+
+    def test_empty_namespace_returns_no_results(self):
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=_sweep_apps(), core=core):
+            assert _service().sweep("default") == []
+
+
 # --- OTEL severity filtering (pure) -----------------------------------------
 
 

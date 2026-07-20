@@ -4,7 +4,7 @@ The DiagnosticsService is mocked, so DiagnosticData is built directly."""
 import pytest
 from unittest.mock import MagicMock
 
-from kx.commands.diagnostic import DiagnosticCommand, build_report
+from kx.commands.diagnostic import DiagnosticCommand, TriageCommand, build_report
 from kx.diagnostics import (
     ContainerDiagnostic,
     DiagnosticData,
@@ -87,6 +87,160 @@ class TestDiagnosticCommand:
             DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
 
         diagnostics.gather.assert_not_called()
+
+
+# --- namespace triage --------------------------------------------------------
+
+
+def _named_data(name, kind=Kind.Deployment, pods=None, replicas=None):
+    return DiagnosticData(
+        kind=kind,
+        name=name,
+        namespace="default",
+        replicas=replicas,
+        pods=pods or [],
+        warning_events=[],
+    )
+
+
+def _critical_pod():
+    return _pod(
+        containers=[
+            _container(ready=False, state="Waiting", waiting_reason="ImagePullBackOff")
+        ]
+    )
+
+
+def _warning_pod():
+    return _pod(containers=[_container(restart_count=6)])
+
+
+class TestTriageCommand:
+    def test_sorts_unhealthy_by_severity_and_counts_healthy(self):
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = [
+            _named_data("ok-deploy", pods=[_pod()]),
+            _named_data("warn-pod", kind=Kind.Pod, pods=[_warning_pod()]),
+            _named_data("bad-deploy", pods=[_critical_pod()]),
+        ]
+        result = TriageCommand(state=MagicMock(), diagnostics=diagnostics).execute(
+            "default"
+        )
+        assert result.namespace == "default"
+        assert result.checked == 3
+        assert result.healthy == 1
+        assert [(r.name, r.verdict) for r in result.reports] == [
+            ("bad-deploy", Severity.CRITICAL),
+            ("warn-pod", Severity.WARNING),
+        ]
+
+    def test_stable_order_within_severity(self):
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = [
+            _named_data("bad-a", pods=[_critical_pod()]),
+            _named_data("bad-b", pods=[_critical_pod()]),
+        ]
+        result = TriageCommand(state=MagicMock(), diagnostics=diagnostics).execute(
+            "default"
+        )
+        assert [r.name for r in result.reports] == ["bad-a", "bad-b"]
+
+    def test_saves_state_with_displayed_rows_in_table_order(self):
+        state = MagicMock()
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = [
+            _named_data("ok-deploy", pods=[_pod()]),
+            _named_data("warn-pod", kind=Kind.Pod, pods=[_warning_pod()]),
+            _named_data("bad-deploy", pods=[_critical_pod()]),
+        ]
+        TriageCommand(state=state, diagnostics=diagnostics).execute("team-a")
+        state.save.assert_called_once()
+        saved = state.save.call_args.args[0]
+        assert saved.resources == {
+            "bad-deploy": Kind.Deployment,
+            "warn-pod": Kind.Pod,
+        }
+        assert list(saved.resources) == ["bad-deploy", "warn-pod"]
+        assert saved.namespace == "team-a"
+
+    def test_no_state_saved_when_all_healthy(self):
+        state = MagicMock()
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = [_named_data("ok-deploy", pods=[_pod()])]
+        result = TriageCommand(state=state, diagnostics=diagnostics).execute("default")
+        assert result.reports == []
+        assert result.healthy == 1
+        state.save.assert_not_called()
+
+    def test_name_collision_first_row_wins_and_is_reported(self):
+        state = MagicMock()
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = [
+            _named_data("web", kind=Kind.Deployment, pods=[_critical_pod()]),
+            _named_data("web", kind=Kind.Pod, pods=[_warning_pod()]),
+        ]
+        result = TriageCommand(state=state, diagnostics=diagnostics).execute("default")
+        assert [(r.name, r.kind) for r in result.reports] == [("web", Kind.Deployment)]
+        assert result.dropped == ["Pod/web"]
+        saved = state.save.call_args.args[0]
+        assert saved.resources == {"web": Kind.Deployment}
+
+    def test_empty_namespace(self):
+        state = MagicMock()
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = []
+        result = TriageCommand(state=state, diagnostics=diagnostics).execute("default")
+        assert result.checked == 0
+        assert result.reports == []
+        state.save.assert_not_called()
+
+
+# --- CLI wiring ---------------------------------------------------------------
+
+
+class TestDiagnosticCli:
+    def test_bare_diag_sweeps_current_namespace(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        kubectl = MagicMock()
+        kubectl.current_namespace.return_value = "team-a"
+        diagnostics = MagicMock()
+        diagnostics.sweep.return_value = []
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._diagnostics", diagnostics),
+            patch("kx.main._state", MagicMock()),
+        ):
+            result = CliRunner().invoke(app, ["diag"])
+        assert result.exit_code == 0
+        diagnostics.sweep.assert_called_once_with("team-a")
+        assert "0 resources checked" in result.output
+
+    def test_indexed_diag_still_gathers_single_resource(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        state = MagicMock()
+        state.fields.return_value = ("web", "default", Kind.Deployment)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            replicas=ReplicaHealth(1, 1, 1, 1), pods=[_pod()]
+        )
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._diagnostics", diagnostics),
+        ):
+            result = CliRunner().invoke(app, ["diag", "2"])
+        assert result.exit_code == 0
+        diagnostics.gather.assert_called_once_with(Kind.Deployment, "web", "default")
+        diagnostics.sweep.assert_not_called()
 
 
 # --- build_report (pure) ----------------------------------------------------
