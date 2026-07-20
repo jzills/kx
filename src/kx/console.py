@@ -361,22 +361,26 @@ def render_diagnostic(report) -> None:
 
 def render_triage(result) -> None:
     """Namespace triage table: one row per unhealthy resource (indexed to match
-    the saved state), healthy resources collapsed into the footer."""
+    the saved state), healthy resources collapsed into the footer.
+
+    Caption follows the same "{kind label} · {namespace} · {count} {noun}"
+    shape as kx get and kx state — "Mixed" as the kind label, matching
+    render_state's convention for cross-kind listings, since a sweep spans
+    whatever kinds exist in the namespace. "checked" (not "items") because
+    the count is resources examined, not rows in the table below it — most
+    checked resources are healthy and never appear as a row."""
     if result.checked == 0:
-        _console.print(
-            f"[muted]NAMESPACE {result.namespace} · 0 resources checked[/muted]"
-        )
+        _console.print(f"[muted]Mixed · {result.namespace} · 0 checked[/muted]")
         return
     if not result.reports:
         _console.print(
-            f"[muted]NAMESPACE {result.namespace} ·[/muted] "
-            f"[success]{result.checked} resources checked · all healthy[/success]"
+            f"[muted]Mixed · {result.namespace} ·[/muted] "
+            f"[success]{result.checked} checked · all healthy[/success]"
         )
         return
 
     _console.print(
-        f"[muted]NAMESPACE {result.namespace} · "
-        f"{result.checked} resources checked[/muted]"
+        f"[muted]Mixed · {result.namespace} · {result.checked} checked[/muted]"
     )
     _console.print()
     # Expanded on a terminal so TOP FINDING (the one ratio column) absorbs the

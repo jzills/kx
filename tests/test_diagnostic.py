@@ -325,7 +325,7 @@ class TestDiagnosticCli:
             result = CliRunner().invoke(app, ["diag"])
         assert result.exit_code == 0
         diagnostics.sweep.assert_called_once_with("team-a")
-        assert "0 resources checked" in result.output
+        assert "0 checked" in result.output
 
     def test_indexed_diag_still_gathers_single_resource(self):
         from unittest.mock import patch
