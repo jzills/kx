@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from kx.diagnostics import (
     ContainerDiagnostic,
@@ -28,6 +29,11 @@ _SUPPORTED_KINDS = {
     Kind.CronJob,
 }
 _RESTART_WARN_THRESHOLD = 5
+_MEMORY_WARN_THRESHOLD = Decimal("0.75")
+_MEMORY_CRITICAL_THRESHOLD = Decimal("0.90")
+_CPU_WARN_THRESHOLD = Decimal("0.90")  # CPU never reaches critical: throttling
+# degrades performance, it doesn't take the container down like a memory
+# limit breach does.
 
 _IMAGE_PULL_REASONS = {"ImagePullBackOff", "ErrImagePull", "InvalidImageName"}
 _CONFIG_ERROR_REASONS = {"CreateContainerConfigError", "CreateContainerError"}
@@ -322,7 +328,60 @@ def _container_findings(pod_name: str, container: ContainerDiagnostic) -> list[F
                 f"restarted {container.restart_count} times",
             )
         )
+    findings.extend(_usage_findings(container))
     return findings
+
+
+def _usage_findings(container: ContainerDiagnostic) -> list[Finding]:
+    """No limit set means nothing to compare usage against — the same
+    reasoning already applied elsewhere (e.g. a suspended Job): no finding is
+    possible, not a defect. No usage data (metrics-server unavailable, or
+    this container just isn't in the metrics response) is likewise silent."""
+    findings: list[Finding] = []
+    if container.memory_usage is not None and container.memory_limit:
+        ratio = container.memory_usage / container.memory_limit
+        if ratio >= _MEMORY_CRITICAL_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.CRITICAL,
+                    f"Memory at {_pct(ratio)}% of limit "
+                    f"({_format_memory(container.memory_usage)}/"
+                    f"{_format_memory(container.memory_limit)}) — OOMKill risk",
+                )
+            )
+        elif ratio >= _MEMORY_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    f"Memory at {_pct(ratio)}% of limit "
+                    f"({_format_memory(container.memory_usage)}/"
+                    f"{_format_memory(container.memory_limit)})",
+                )
+            )
+    if container.cpu_usage is not None and container.cpu_limit:
+        ratio = container.cpu_usage / container.cpu_limit
+        if ratio >= _CPU_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    f"CPU at {_pct(ratio)}% of limit "
+                    f"({_format_cpu(container.cpu_usage)}/"
+                    f"{_format_cpu(container.cpu_limit)}) — likely throttling",
+                )
+            )
+    return findings
+
+
+def _pct(ratio: Decimal) -> int:
+    return int(ratio * 100)
+
+
+def _format_memory(value: Decimal) -> str:
+    return f"{int(value / (1024 * 1024))}Mi"
+
+
+def _format_cpu(value: Decimal) -> str:
+    return f"{int(value * 1000)}m"
 
 
 def _event_findings(events) -> list[Finding]:

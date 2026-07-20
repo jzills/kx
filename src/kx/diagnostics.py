@@ -1,10 +1,12 @@
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import IntEnum
 from typing import Protocol
 
 from kubernetes import client
+from kubernetes.utils import get_pods_metrics, parse_quantity
 
 from kx.events import EventsServiceProtocol
 from kx.graph import _owned_by, most_recent_job, resolve_workload_pods
@@ -64,6 +66,10 @@ class ContainerDiagnostic:
     log_lines: list[str] = field(default_factory=list)
     log_source: str | None = None  # "previous" | "current"
     log_filtered: bool = True  # False when log_lines is a raw fallback tail
+    cpu_usage: Decimal | None = None
+    cpu_limit: Decimal | None = None
+    memory_usage: Decimal | None = None
+    memory_limit: Decimal | None = None
 
 
 @dataclass
@@ -211,6 +217,7 @@ class DiagnosticsService:
         cronjob = self._cronjob_health(kind, name, namespace, batch)
         pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
+        self._attach_usage(pods, self._usage_lookup(namespace))
         self._attach_logs(pods, namespace, core)
         warning_events = self._warning_events(kind, name, namespace, pods_raw)
 
@@ -241,6 +248,10 @@ class DiagnosticsService:
         replica_sets = apps.list_namespaced_replica_set(namespace).items
         jobs = batch.list_namespaced_job(namespace).items
         all_events = self.events.get(namespace)
+        # One metrics-server call for the whole sweep, unlike logs (skipped
+        # entirely here) — usage actually drives a finding, so every entry
+        # below needs it, but still just one API call total.
+        usage_lookup = self._usage_lookup(namespace)
 
         # CronJobs own Jobs (not pods), so they get their own pass — like
         # Services, not the pod-owner-claiming workloads loop below. Their
@@ -271,6 +282,8 @@ class DiagnosticsService:
                 if recent
                 else []
             )
+            cronjob_pods = [_pod_diagnostic(pod) for pod in recent_pods]
+            self._attach_usage(cronjob_pods, usage_lookup)
             results.append(
                 DiagnosticData(
                     kind=Kind.CronJob,
@@ -281,7 +294,7 @@ class DiagnosticsService:
                         suspended=bool(cj.spec.suspend),
                         most_recent_job=_job_health_from(recent) if recent else None,
                     ),
-                    pods=[_pod_diagnostic(pod) for pod in recent_pods],
+                    pods=cronjob_pods,
                     warning_events=self._warning_events(
                         Kind.CronJob,
                         cj.metadata.name,
@@ -316,7 +329,13 @@ class DiagnosticsService:
             claimed.update(pod.metadata.uid for pod in owned)
             results.append(
                 self._build_data(
-                    kind, obj.metadata.name, namespace, obj, owned, all_events
+                    kind,
+                    obj.metadata.name,
+                    namespace,
+                    obj,
+                    owned,
+                    all_events,
+                    usage_lookup,
                 )
             )
 
@@ -332,6 +351,8 @@ class DiagnosticsService:
             svc_pods = [
                 pod for pod in pods if selector and _matches_selector(pod, selector)
             ]
+            service_pods = [_pod_diagnostic(pod) for pod in svc_pods]
+            self._attach_usage(service_pods, usage_lookup)
             results.append(
                 DiagnosticData(
                     kind=Kind.Service,
@@ -341,7 +362,7 @@ class DiagnosticsService:
                     service=_service_health_from(
                         svc, endpoints_by_name.get(svc.metadata.name)
                     ),
-                    pods=[_pod_diagnostic(pod) for pod in svc_pods],
+                    pods=service_pods,
                     warning_events=self._warning_events(
                         Kind.Service,
                         svc.metadata.name,
@@ -379,14 +400,22 @@ class DiagnosticsService:
                 continue
             results.append(
                 self._build_data(
-                    Kind.Pod, pod.metadata.name, namespace, None, [pod], all_events
+                    Kind.Pod,
+                    pod.metadata.name,
+                    namespace,
+                    None,
+                    [pod],
+                    all_events,
+                    usage_lookup,
                 )
             )
         return results
 
     def _build_data(
-        self, kind, name, namespace, obj, pods_raw, all_events
+        self, kind, name, namespace, obj, pods_raw, all_events, usage_lookup
     ) -> DiagnosticData:
+        pods = [_pod_diagnostic(pod) for pod in pods_raw]
+        self._attach_usage(pods, usage_lookup)
         return DiagnosticData(
             kind=kind,
             name=name,
@@ -395,7 +424,7 @@ class DiagnosticsService:
             # (Job has no ReplicaHealth; anything else has no JobHealth).
             replicas=_replica_health_from(kind, obj) if obj is not None else None,
             job=_job_health_from(obj) if obj is not None and kind == Kind.Job else None,
-            pods=[_pod_diagnostic(pod) for pod in pods_raw],
+            pods=pods,
             warning_events=self._warning_events(
                 kind, name, namespace, pods_raw, all_events=all_events
             ),
@@ -448,6 +477,35 @@ class DiagnosticsService:
             suspended=bool(cj.spec.suspend),
             most_recent_job=_job_health_from(most_recent) if most_recent else None,
         )
+
+    def _usage_lookup(
+        self, namespace
+    ) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
+        """One metrics-server call per namespace. Swallows failure (e.g.
+        metrics-server not installed — the same failure kx top surfaces to
+        the user directly) so the rest of kx diag is unaffected; usage-based
+        findings simply don't appear."""
+        try:
+            metrics = get_pods_metrics(client.ApiClient(), namespace)
+        except Exception:
+            return {}
+        lookup = {}
+        for item in metrics.get("items", []):
+            pod_name = item["metadata"]["name"]
+            for c in item.get("containers", []):
+                usage = c["usage"]
+                lookup[(pod_name, c["name"])] = (
+                    parse_quantity(usage["cpu"]),
+                    parse_quantity(usage["memory"]),
+                )
+        return lookup
+
+    def _attach_usage(self, pods, usage_lookup) -> None:
+        for pod in pods:
+            for container in pod.containers:
+                usage = usage_lookup.get((pod.name, container.name))
+                if usage:
+                    container.cpu_usage, container.memory_usage = usage
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,
@@ -611,7 +669,10 @@ def _container_needs_logs(container: ContainerDiagnostic) -> bool:
 def _pod_diagnostic(pod) -> PodDiagnostic:
     status = pod.status
     statuses = getattr(status, "container_statuses", None) or []
-    containers = [_container_diagnostic(cs) for cs in statuses]
+    spec_containers = {c.name: c for c in (pod.spec.containers or [])}
+    containers = [
+        _container_diagnostic(cs, spec_containers.get(cs.name)) for cs in statuses
+    ]
     return PodDiagnostic(
         name=pod.metadata.name,
         phase=getattr(status, "phase", None) or "Unknown",
@@ -623,11 +684,15 @@ def _pod_diagnostic(pod) -> PodDiagnostic:
     )
 
 
-def _container_diagnostic(cs) -> ContainerDiagnostic:
+def _container_diagnostic(cs, spec_container=None) -> ContainerDiagnostic:
     state = cs.state
     waiting = getattr(state, "waiting", None)
     running = getattr(state, "running", None)
     terminated = getattr(state, "terminated", None)
+
+    limits = getattr(getattr(spec_container, "resources", None), "limits", None) or {}
+    cpu_limit = parse_quantity(limits["cpu"]) if "cpu" in limits else None
+    memory_limit = parse_quantity(limits["memory"]) if "memory" in limits else None
 
     if running is not None:
         state_str = "Running"
@@ -656,6 +721,8 @@ def _container_diagnostic(cs) -> ContainerDiagnostic:
         last_exit_code=(
             getattr(last_terminated, "exit_code", None) if last_terminated else None
         ),
+        cpu_limit=cpu_limit,
+        memory_limit=memory_limit,
     )
 
 
