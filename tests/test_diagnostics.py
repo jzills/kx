@@ -483,6 +483,48 @@ class TestServiceHealth:
         core.list_namespaced_pod.assert_not_called()
 
 
+def _pvc(name, uid="", phase="Bound"):
+    return NS(metadata=_meta(name, uid), status=NS(phase=phase))
+
+
+class TestPvcHealth:
+    def test_bound_pvc_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Bound"
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.PersistentVolumeClaim, "data", "default")
+        assert data.pvc.phase == "Bound"
+        assert data.pods == []
+        assert data.replicas is None
+
+    def test_pending_pvc_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Pending"
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.PersistentVolumeClaim, "data", "default")
+        assert data.pvc.phase == "Pending"
+
+    def test_pvc_warning_events_flow_through_generic_path(self):
+        events = MagicMock()
+        events.get.return_value = [_event("Warning", "ProvisioningFailed", "data")]
+        events.filter.side_effect = lambda evs, name, kind: [
+            e for e in evs if e.involved_object.name == name
+        ]
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Pending"
+        )
+        with _mocked(core=core):
+            data = _service(events=events).gather(
+                Kind.PersistentVolumeClaim, "data", "default"
+            )
+        assert [e.reason for e in data.warning_events] == ["ProvisioningFailed"]
+
+
 # --- namespace sweep ---------------------------------------------------------
 
 
@@ -703,6 +745,20 @@ class TestSweep:
             results = _service().sweep("default")
         assert results[0].service.ready_addresses == 0
         assert results[0].service.not_ready_addresses == 0
+
+    def test_sweeps_pvcs(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        core.list_namespaced_persistent_volume_claim.return_value = _items(
+            _pvc("data", "pvcU", phase="Pending")
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.PersistentVolumeClaim, "data")
+        ]
+        assert results[0].pvc.phase == "Pending"
 
     def test_empty_namespace_returns_no_results(self):
         core = MagicMock()

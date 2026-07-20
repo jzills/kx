@@ -8,6 +8,7 @@ from kx.diagnostics import (
     Finding,
     JobHealth,
     PodDiagnostic,
+    PVCHealth,
     ReplicaHealth,
     ServiceHealth,
     Severity,
@@ -22,6 +23,7 @@ _SUPPORTED_KINDS = {
     Kind.Pod,
     Kind.Job,
     Kind.Service,
+    Kind.PersistentVolumeClaim,
 }
 _RESTART_WARN_THRESHOLD = 5
 
@@ -101,6 +103,8 @@ def build_report(data: DiagnosticData) -> DiagnosticReport:
         findings.extend(_job_findings(data.job))
     if data.service is not None:
         findings.extend(_service_findings(data.service))
+    if data.pvc is not None:
+        findings.extend(_pvc_findings(data.pvc))
     for pod in data.pods:
         findings.extend(_pod_findings(pod))
     findings.extend(_event_findings(data.warning_events))
@@ -198,6 +202,21 @@ def _service_findings(svc: ServiceHealth) -> list[Finding]:
     if svc.not_ready_addresses > 0:
         return [
             Finding(Severity.WARNING, f"{svc.ready_addresses}/{total} endpoints ready")
+        ]
+    return []
+
+
+def _pvc_findings(pvc: PVCHealth) -> list[Finding]:
+    """No duration threshold — Pending is flagged immediately, mirroring the
+    unconditional "Pod pending" finding rather than a time-gated heuristic."""
+    if pvc.phase == "Pending":
+        return [Finding(Severity.WARNING, "PersistentVolumeClaim pending")]
+    if pvc.phase == "Lost":
+        return [
+            Finding(
+                Severity.CRITICAL,
+                "PersistentVolumeClaim lost: backing volume no longer available",
+            )
         ]
     return []
 

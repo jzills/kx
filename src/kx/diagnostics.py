@@ -106,6 +106,13 @@ class ServiceHealth:
 
 
 @dataclass
+class PVCHealth:
+    """No pod fan-out, no ownership — a PVC's status is self-contained."""
+
+    phase: str  # "Pending" | "Bound" | "Lost" | "Unknown"
+
+
+@dataclass
 class JobHealth:
     """Doesn't reuse ReplicaHealth: a Job has no desired/ready replica concept
     — completion/failure counts and a backoff limit instead."""
@@ -139,6 +146,7 @@ class DiagnosticData:
     replicas: ReplicaHealth | None
     job: JobHealth | None = None
     service: ServiceHealth | None = None
+    pvc: PVCHealth | None = None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 
@@ -187,6 +195,7 @@ class DiagnosticsService:
         replicas = self._replica_health(kind, name, namespace, apps)
         job = self._job_health(kind, name, namespace, batch)
         service = self._service_health(kind, name, namespace, core)
+        pvc = self._pvc_health(kind, name, namespace, core)
         pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
         self._attach_logs(pods, namespace, core)
@@ -199,6 +208,7 @@ class DiagnosticsService:
             replicas=replicas,
             job=job,
             service=service,
+            pvc=pvc,
             pods=pods,
             warning_events=warning_events,
         )
@@ -277,6 +287,28 @@ class DiagnosticsService:
                 )
             )
 
+        # PVCs have no pods and no ownership relationships — simplest of the
+        # sweep's additions, just a listing and a phase check.
+        for claim in core.list_namespaced_persistent_volume_claim(namespace).items:
+            results.append(
+                DiagnosticData(
+                    kind=Kind.PersistentVolumeClaim,
+                    name=claim.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    pvc=PVCHealth(
+                        phase=getattr(claim.status, "phase", None) or "Unknown"
+                    ),
+                    warning_events=self._warning_events(
+                        Kind.PersistentVolumeClaim,
+                        claim.metadata.name,
+                        namespace,
+                        [],
+                        all_events=all_events,
+                    ),
+                )
+            )
+
         for pod in pods:
             if pod.metadata.uid in claimed:
                 continue
@@ -333,6 +365,12 @@ class DiagnosticsService:
         except Exception:
             endpoints = None
         return _service_health_from(svc, endpoints)
+
+    def _pvc_health(self, kind, name, namespace, core) -> PVCHealth | None:
+        if kind != Kind.PersistentVolumeClaim:
+            return None
+        claim = core.read_namespaced_persistent_volume_claim(name, namespace)
+        return PVCHealth(phase=getattr(claim.status, "phase", None) or "Unknown")
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,
