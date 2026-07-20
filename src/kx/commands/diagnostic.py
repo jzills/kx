@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+
 from kx.diagnostics import (
     ContainerDiagnostic,
     DiagnosticData,
@@ -9,7 +11,7 @@ from kx.diagnostics import (
     Severity,
 )
 from kx.kinds import Kind
-from kx.state import StateServiceProtocol
+from kx.state import State, StateServiceProtocol
 
 _SUPPORTED_KINDS = {Kind.Deployment, Kind.StatefulSet, Kind.DaemonSet, Kind.Pod}
 _RESTART_WARN_THRESHOLD = 5
@@ -32,6 +34,53 @@ class DiagnosticCommand:
         if kind not in _SUPPORTED_KINDS:
             raise ValueError(f"diagnostic is not supported for '{kind}'.")
         return build_report(self.diagnostics.gather(kind, name, namespace))
+
+
+@dataclass
+class TriageResult:
+    namespace: str
+    checked: int  # total resources swept
+    reports: list[DiagnosticReport]  # non-OK only, sorted critical → warning
+    healthy: int  # OK resources, collapsed out of the table
+    dropped: list[str] = field(default_factory=list)  # rows lost to name collisions
+
+
+class TriageCommand:
+    def __init__(
+        self,
+        state: StateServiceProtocol,
+        diagnostics: DiagnosticsServiceProtocol,
+    ):
+        self.state = state
+        self.diagnostics = diagnostics
+
+    def execute(self, namespace: str) -> TriageResult:
+        reports = [build_report(data) for data in self.diagnostics.sweep(namespace)]
+        unhealthy = sorted(
+            (r for r in reports if r.verdict != Severity.OK),
+            key=lambda r: r.verdict,
+            reverse=True,  # stable: sweep order preserved within a severity
+        )
+        # State.resources is keyed by name alone, so a rare cross-kind name
+        # collision keeps the earlier (more severe) row and drops the later one.
+        resources: dict[str, Kind | str] = {}
+        displayed: list[DiagnosticReport] = []
+        dropped: list[str] = []
+        for report in unhealthy:
+            if report.name in resources:
+                dropped.append(f"{report.kind}/{report.name}")
+                continue
+            resources[report.name] = report.kind
+            displayed.append(report)
+        if displayed:
+            self.state.save(State(resources=resources, namespace=namespace))
+        return TriageResult(
+            namespace=namespace,
+            checked=len(reports),
+            reports=displayed,
+            healthy=len(reports) - len(unhealthy),
+            dropped=dropped,
+        )
 
 
 def build_report(data: DiagnosticData) -> DiagnosticReport:
