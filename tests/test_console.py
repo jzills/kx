@@ -284,7 +284,7 @@ def test_render_triage_table_rows_and_caption(capture_console):
     )
     kx_console.render_triage(result)
     out = capture_console.getvalue()
-    assert "NAMESPACE default · 12 resources checked" in out
+    assert "Mixed · default · 12 checked" in out
     assert "KIND" in out and "VERDICT" in out and "TOP FINDING" in out
     assert "1" in out and "Deployment" in out and "checkout" in out
     assert "critical" in out and "ImagePullBackOff: api:v9" in out
@@ -297,7 +297,7 @@ def test_render_triage_all_healthy(capture_console):
     result = _triage_result([], checked=5, healthy=5)
     kx_console.render_triage(result)
     out = capture_console.getvalue()
-    assert "5 resources checked · all healthy" in out
+    assert "Mixed · default · 5 checked · all healthy" in out
     assert "TOP FINDING" not in out
 
 
@@ -305,7 +305,7 @@ def test_render_triage_empty_namespace(capture_console):
     result = _triage_result([], checked=0)
     kx_console.render_triage(result)
     out = capture_console.getvalue()
-    assert "0 resources checked" in out
+    assert "Mixed · default · 0 checked" in out
     assert "healthy" not in out
 
 
