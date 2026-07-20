@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from kx.diagnostics import (
     ContainerDiagnostic,
+    CronJobHealth,
     DiagnosticData,
     DiagnosticReport,
     DiagnosticsServiceProtocol,
@@ -24,6 +25,7 @@ _SUPPORTED_KINDS = {
     Kind.Job,
     Kind.Service,
     Kind.PersistentVolumeClaim,
+    Kind.CronJob,
 }
 _RESTART_WARN_THRESHOLD = 5
 
@@ -105,6 +107,8 @@ def build_report(data: DiagnosticData) -> DiagnosticReport:
         findings.extend(_service_findings(data.service))
     if data.pvc is not None:
         findings.extend(_pvc_findings(data.pvc))
+    if data.cronjob is not None:
+        findings.extend(_cronjob_findings(data.cronjob))
     for pod in data.pods:
         findings.extend(_pod_findings(pod))
     findings.extend(_event_findings(data.warning_events))
@@ -204,6 +208,21 @@ def _service_findings(svc: ServiceHealth) -> list[Finding]:
             Finding(Severity.WARNING, f"{svc.ready_addresses}/{total} endpoints ready")
         ]
     return []
+
+
+def _cronjob_findings(cj: CronJobHealth) -> list[Finding]:
+    """No 'missed schedule' detection (would need cron-expression parsing,
+    not a dependency here). Instead a rollup of the most recently-run owned
+    Job, reusing _job_findings directly so a CronJob whose last run hit
+    BackoffLimitExceeded/DeadlineExceeded shows up the same way a standalone
+    failed Job does. Suspended and never-run are both OK — not enough signal
+    to call a fresh or paused CronJob broken."""
+    if cj.suspended or cj.most_recent_job is None:
+        return []
+    return [
+        Finding(finding.severity, f"Most recent run: {finding.summary}")
+        for finding in _job_findings(cj.most_recent_job)
+    ]
 
 
 def _pvc_findings(pvc: PVCHealth) -> list[Finding]:

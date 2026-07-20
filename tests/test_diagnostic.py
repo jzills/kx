@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from kx.commands.diagnostic import DiagnosticCommand, TriageCommand, build_report
 from kx.diagnostics import (
     ContainerDiagnostic,
+    CronJobHealth,
     DiagnosticData,
     JobHealth,
     PodDiagnostic,
@@ -56,6 +57,7 @@ def _data(
     job=None,
     service=None,
     pvc=None,
+    cronjob=None,
 ):
     return DiagnosticData(
         kind=kind,
@@ -65,6 +67,7 @@ def _data(
         job=job,
         service=service,
         pvc=pvc,
+        cronjob=cronjob,
         pods=pods or [],
         warning_events=warning_events or [],
     )
@@ -72,6 +75,10 @@ def _data(
 
 def _pvc_health(phase="Bound"):
     return PVCHealth(phase=phase)
+
+
+def _cronjob_health(suspended=False, most_recent_job=None):
+    return CronJobHealth(suspended=suspended, most_recent_job=most_recent_job)
 
 
 def _service_health(has_selector=True, ready_addresses=0, not_ready_addresses=0):
@@ -174,6 +181,19 @@ class TestDiagnosticCommand:
         diagnostics.gather.assert_called_once_with(
             Kind.PersistentVolumeClaim, "data", "default"
         )
+
+    def test_cronjob_is_a_supported_kind(self):
+        state = MagicMock()
+        state.fields.return_value = ("nightly", "default", Kind.CronJob)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.CronJob, cronjob=_cronjob_health()
+        )
+
+        report = DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
+
+        assert report.verdict == Severity.OK
+        diagnostics.gather.assert_called_once_with(Kind.CronJob, "nightly", "default")
 
 
 # --- namespace triage --------------------------------------------------------
@@ -393,6 +413,27 @@ class TestDiagnosticCli:
         diagnostics.gather.assert_called_once_with(
             Kind.PersistentVolumeClaim, "data", "default"
         )
+
+    def test_indexed_diag_gathers_a_cronjob(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        state = MagicMock()
+        state.fields.return_value = ("nightly", "default", Kind.CronJob)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.CronJob, cronjob=_cronjob_health()
+        )
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._diagnostics", diagnostics),
+        ):
+            result = CliRunner().invoke(app, ["diag", "1"])
+        assert result.exit_code == 0
+        diagnostics.gather.assert_called_once_with(Kind.CronJob, "nightly", "default")
 
 
 # --- build_report (pure) ----------------------------------------------------
@@ -639,6 +680,44 @@ class TestBuildReport:
         )
         assert report.verdict == Severity.CRITICAL
         assert "lost" in _summaries(report)
+
+    def test_suspended_cronjob_has_no_findings(self):
+        report = build_report(
+            _data(kind=Kind.CronJob, cronjob=_cronjob_health(suspended=True))
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_never_run_cronjob_has_no_findings(self):
+        report = build_report(_data(kind=Kind.CronJob, cronjob=_cronjob_health()))
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_cronjob_successful_most_recent_run_has_no_findings(self):
+        report = build_report(
+            _data(
+                kind=Kind.CronJob,
+                cronjob=_cronjob_health(most_recent_job=_job_health(succeeded=1)),
+            )
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_cronjob_failed_most_recent_run_is_critical_with_prefix(self):
+        report = build_report(
+            _data(
+                kind=Kind.CronJob,
+                cronjob=_cronjob_health(
+                    most_recent_job=_job_health(
+                        failed=3, backoff_limit=3, backoff_limit_exceeded=True
+                    )
+                ),
+            )
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "Most recent run: BackoffLimitExceeded (3/3 failed)" in _summaries(
+            report
+        )
 
     def test_warning_events_become_warning_findings(self):
         from kx.diagnostics import EventSummary

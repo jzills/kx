@@ -156,6 +156,17 @@ def _owned_by(resource, uid: str) -> bool:
     return any(ref.uid == uid for ref in refs)
 
 
+def most_recent_job(owner_uid: str, jobs):
+    """The most recently-created Job owned by `owner_uid` (a CronJob's uid),
+    by `metadata.creation_timestamp`; None if it has never run. Shared by
+    resolve_workload_pods and DiagnosticsService — CronJob health and pods
+    are both scoped to the latest run, not the full retained history."""
+    owned = [job for job in jobs if _owned_by(job, owner_uid)]
+    if not owned:
+        return None
+    return max(owned, key=lambda job: job.metadata.creation_timestamp)
+
+
 def resolve_workload_pods(
     kind: str, name: str, namespace: str, apps, core, batch=None
 ) -> list:
@@ -195,5 +206,13 @@ def resolve_workload_pods(
         case Kind.Job:
             job = batch.read_namespaced_job(name, namespace)
             return [pod for pod in pods if _owned_by(pod, job.metadata.uid)]
+        case Kind.CronJob:
+            cj = batch.read_namespaced_cron_job(name, namespace)
+            recent = most_recent_job(
+                cj.metadata.uid, batch.list_namespaced_job(namespace).items
+            )
+            if recent is None:
+                return []
+            return [pod for pod in pods if _owned_by(pod, recent.metadata.uid)]
         case _:
             return []

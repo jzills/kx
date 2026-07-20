@@ -13,13 +13,16 @@ from kx.kinds import Kind
 # --- fake kubernetes objects ------------------------------------------------
 
 
-def _meta(name, uid="", owners=(), generation=None, labels=None):
+def _meta(
+    name, uid="", owners=(), generation=None, labels=None, creation_timestamp=None
+):
     return NS(
         name=name,
         uid=uid,
         owner_references=[NS(uid=o) for o in owners],
         generation=generation,
         labels=labels or {},
+        creation_timestamp=creation_timestamp,
     )
 
 
@@ -309,9 +312,12 @@ def _job(
     suspended=False,
     backoff_limit=6,
     conditions=(),
+    owner=None,
+    created=None,
 ):
+    owners = (owner,) if owner else ()
     return NS(
-        metadata=_meta(name, uid),
+        metadata=_meta(name, uid, owners, creation_timestamp=created),
         spec=NS(suspend=suspended, backoff_limit=backoff_limit),
         status=NS(
             succeeded=succeeded,
@@ -525,6 +531,68 @@ class TestPvcHealth:
         assert [e.reason for e in data.warning_events] == ["ProvisioningFailed"]
 
 
+def _cronjob(name, uid="", suspended=False):
+    return NS(metadata=_meta(name, uid), spec=NS(suspend=suspended))
+
+
+class TestCronJobHealth:
+    def test_suspended_cronjob_is_extracted(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob(
+            "nightly", "cjU", suspended=True
+        )
+        batch.list_namespaced_job.return_value = _items()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.suspended is True
+        assert data.cronjob.most_recent_job is None
+
+    def test_never_run_cronjob_has_no_most_recent_job(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob("nightly", "cjU")
+        batch.list_namespaced_job.return_value = _items()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.most_recent_job is None
+        assert data.pods == []
+
+    def test_most_recent_job_by_creation_timestamp_is_used(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob("nightly", "cjU")
+        batch.list_namespaced_job.return_value = _items(
+            _job(
+                "nightly-old",
+                "jOld",
+                owner="cjU",
+                created=datetime(2026, 7, 1, tzinfo=timezone.utc),
+                succeeded=1,
+            ),
+            _job(
+                "nightly-new",
+                "jNew",
+                owner="cjU",
+                created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                failed=3,
+                backoff_limit=3,
+                conditions=[_condition("Failed", "BackoffLimitExceeded")],
+            ),
+            _job("unrelated", "jOther", owner="somethingElse"),
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-new-x1", "p1", owner="jNew"),
+            _pod("nightly-old-x1", "p2", owner="jOld"),
+        )
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.most_recent_job.backoff_limit_exceeded is True
+        assert [p.name for p in data.pods] == ["nightly-new-x1"]
+
+
 # --- namespace sweep ---------------------------------------------------------
 
 
@@ -578,9 +646,10 @@ def _sweep_apps(deploys=(), stss=(), dss=(), replica_sets=()):
     return apps
 
 
-def _sweep_batch(jobs=()):
+def _sweep_batch(jobs=(), cronjobs=()):
     batch = MagicMock()
     batch.list_namespaced_job.return_value = _items(*jobs)
+    batch.list_namespaced_cron_job.return_value = _items(*cronjobs)
     return batch
 
 
@@ -759,6 +828,81 @@ class TestSweep:
             (Kind.PersistentVolumeClaim, "data")
         ]
         assert results[0].pvc.phase == "Pending"
+
+    def test_sweep_cronjob_excludes_its_owned_job_from_standalone_rows(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    succeeded=1,
+                ),
+                _job("standalone", "jStandalone", succeeded=1),
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.CronJob, "nightly"),
+            (Kind.Job, "standalone"),
+        ]
+        assert results[0].cronjob.most_recent_job.succeeded == 1
+
+    def test_sweep_cronjob_owned_job_pods_are_not_orphaned(self):
+        # A pod belonging to a CronJob-owned Job must not leak through as a
+        # standalone orphan-pod row just because its Job was excluded from
+        # the standalone Job listing.
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    failed=3,
+                    backoff_limit=3,
+                    conditions=[_condition("Failed", "BackoffLimitExceeded")],
+                )
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-abc-x1", "p1", owner="jU")
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [(Kind.CronJob, "nightly")]
+        assert [p.name for p in results[0].pods] == ["nightly-abc-x1"]
+
+    def test_sweep_cronjob_with_failed_most_recent_job(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    failed=3,
+                    backoff_limit=3,
+                    conditions=[_condition("Failed", "BackoffLimitExceeded")],
+                )
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert results[0].cronjob.most_recent_job.backoff_limit_exceeded is True
 
     def test_empty_namespace_returns_no_results(self):
         core = MagicMock()
