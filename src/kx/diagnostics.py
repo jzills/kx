@@ -95,6 +95,17 @@ class ReplicaHealth:
 
 
 @dataclass
+class ServiceHealth:
+    """The Service's own spec/status carries no health signal — this is built
+    from its Endpoints object, the same source kubectl and the cluster use to
+    decide where traffic actually routes."""
+
+    has_selector: bool
+    ready_addresses: int
+    not_ready_addresses: int
+
+
+@dataclass
 class JobHealth:
     """Doesn't reuse ReplicaHealth: a Job has no desired/ready replica concept
     — completion/failure counts and a backoff limit instead."""
@@ -127,6 +138,7 @@ class DiagnosticData:
     namespace: str
     replicas: ReplicaHealth | None
     job: JobHealth | None = None
+    service: ServiceHealth | None = None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 
@@ -174,6 +186,7 @@ class DiagnosticsService:
 
         replicas = self._replica_health(kind, name, namespace, apps)
         job = self._job_health(kind, name, namespace, batch)
+        service = self._service_health(kind, name, namespace, core)
         pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
         self._attach_logs(pods, namespace, core)
@@ -185,6 +198,7 @@ class DiagnosticsService:
             namespace=namespace,
             replicas=replicas,
             job=job,
+            service=service,
             pods=pods,
             warning_events=warning_events,
         )
@@ -230,6 +244,39 @@ class DiagnosticsService:
                     kind, obj.metadata.name, namespace, obj, owned, all_events
                 )
             )
+
+        # Services are matched by label selector, not ownership: their pods
+        # are independently owned (or genuinely unowned) elsewhere and are
+        # never excluded from the orphan pass below on a Service's account.
+        endpoints_by_name = {
+            ep.metadata.name: ep
+            for ep in core.list_namespaced_endpoints(namespace).items
+        }
+        for svc in core.list_namespaced_service(namespace).items:
+            selector = svc.spec.selector or {}
+            svc_pods = [
+                pod for pod in pods if selector and _matches_selector(pod, selector)
+            ]
+            results.append(
+                DiagnosticData(
+                    kind=Kind.Service,
+                    name=svc.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    service=_service_health_from(
+                        svc, endpoints_by_name.get(svc.metadata.name)
+                    ),
+                    pods=[_pod_diagnostic(pod) for pod in svc_pods],
+                    warning_events=self._warning_events(
+                        Kind.Service,
+                        svc.metadata.name,
+                        namespace,
+                        svc_pods,
+                        all_events=all_events,
+                    ),
+                )
+            )
+
         for pod in pods:
             if pod.metadata.uid in claimed:
                 continue
@@ -276,6 +323,16 @@ class DiagnosticsService:
         if kind != Kind.Job:
             return None
         return _job_health_from(batch.read_namespaced_job(name, namespace))
+
+    def _service_health(self, kind, name, namespace, core) -> ServiceHealth | None:
+        if kind != Kind.Service:
+            return None
+        svc = core.read_namespaced_service(name, namespace)
+        try:
+            endpoints = core.read_namespaced_endpoints(name, namespace)
+        except Exception:
+            endpoints = None
+        return _service_health_from(svc, endpoints)
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,
@@ -401,6 +458,26 @@ def _job_health_from(obj) -> JobHealth:
         backoff_limit=_int(obj.spec.backoff_limit),
         backoff_limit_exceeded="BackoffLimitExceeded" in failed_reasons,
         deadline_exceeded="DeadlineExceeded" in failed_reasons,
+    )
+
+
+def _matches_selector(pod, selector: dict) -> bool:
+    labels = getattr(pod.metadata, "labels", None) or {}
+    return all(labels.get(key) == value for key, value in selector.items())
+
+
+def _service_health_from(svc, endpoints) -> ServiceHealth:
+    """Extract service health from an already-fetched Service and its
+    Endpoints object (None if the Endpoints read failed/404ed)."""
+    ready = 0
+    not_ready = 0
+    for subset in getattr(endpoints, "subsets", None) or []:
+        ready += len(getattr(subset, "addresses", None) or [])
+        not_ready += len(getattr(subset, "not_ready_addresses", None) or [])
+    return ServiceHealth(
+        has_selector=bool(svc.spec.selector),
+        ready_addresses=ready,
+        not_ready_addresses=not_ready,
     )
 
 

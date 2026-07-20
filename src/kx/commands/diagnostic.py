@@ -9,6 +9,7 @@ from kx.diagnostics import (
     JobHealth,
     PodDiagnostic,
     ReplicaHealth,
+    ServiceHealth,
     Severity,
 )
 from kx.kinds import Kind
@@ -20,6 +21,7 @@ _SUPPORTED_KINDS = {
     Kind.DaemonSet,
     Kind.Pod,
     Kind.Job,
+    Kind.Service,
 }
 _RESTART_WARN_THRESHOLD = 5
 
@@ -97,6 +99,8 @@ def build_report(data: DiagnosticData) -> DiagnosticReport:
         findings.extend(_replica_findings(data.replicas))
     if data.job is not None:
         findings.extend(_job_findings(data.job))
+    if data.service is not None:
+        findings.extend(_service_findings(data.service))
     for pod in data.pods:
         findings.extend(_pod_findings(pod))
     findings.extend(_event_findings(data.warning_events))
@@ -172,6 +176,30 @@ def _job_findings(job: JobHealth) -> list[Finding]:
     if job.deadline_exceeded:
         findings.append(Finding(Severity.CRITICAL, "DeadlineExceeded"))
     return findings
+
+
+def _service_findings(svc: ServiceHealth) -> list[Finding]:
+    """No selector (ExternalName, headless, manually-managed Endpoints) is a
+    legitimate configuration, not a defect — no finding either way. Any real
+    trouble in the Service's backing pods surfaces separately via
+    _pod_findings, same as for any other kind."""
+    if not svc.has_selector:
+        return []
+    total = svc.ready_addresses + svc.not_ready_addresses
+    if total == 0:
+        return [Finding(Severity.CRITICAL, "No endpoints: no pods match the selector")]
+    if svc.ready_addresses == 0:
+        return [
+            Finding(
+                Severity.CRITICAL,
+                f"{svc.not_ready_addresses} endpoint(s) not ready, 0 ready",
+            )
+        ]
+    if svc.not_ready_addresses > 0:
+        return [
+            Finding(Severity.WARNING, f"{svc.ready_addresses}/{total} endpoints ready")
+        ]
+    return []
 
 
 def _pod_findings(pod: PodDiagnostic) -> list[Finding]:

@@ -168,6 +168,13 @@ def resolve_workload_pods(
     builders). `batch` is required for Job, unused otherwise."""
     if kind == Kind.Pod:
         return [core.read_namespaced_pod(name, namespace)]
+    if kind == Kind.Service:
+        svc = core.read_namespaced_service(name, namespace)
+        selector = svc.spec.selector
+        if not selector:
+            return []
+        label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
+        return core.list_namespaced_pod(namespace, label_selector=label_selector).items
 
     pods = core.list_namespaced_pod(namespace).items
     match kind:

@@ -13,12 +13,13 @@ from kx.kinds import Kind
 # --- fake kubernetes objects ------------------------------------------------
 
 
-def _meta(name, uid="", owners=(), generation=None):
+def _meta(name, uid="", owners=(), generation=None, labels=None):
     return NS(
         name=name,
         uid=uid,
         owner_references=[NS(uid=o) for o in owners],
         generation=generation,
+        labels=labels or {},
     )
 
 
@@ -48,10 +49,18 @@ def _cstatus(
     )
 
 
-def _pod(name, uid="", owner=None, phase="Running", statuses=None, conditions=None):
+def _pod(
+    name,
+    uid="",
+    owner=None,
+    phase="Running",
+    statuses=None,
+    conditions=None,
+    labels=None,
+):
     owners = (owner,) if owner else ()
     return NS(
-        metadata=_meta(name, uid, owners),
+        metadata=_meta(name, uid, owners, labels=labels),
         spec=NS(node_name="node-1"),
         status=NS(
             phase=phase,
@@ -400,6 +409,80 @@ class TestJobHealth:
         assert [p.name for p in data.pods] == ["nightly-x1"]
 
 
+def _svc(name, uid="", selector=None):
+    sel = {"app": name} if selector is None else selector
+    return NS(metadata=_meta(name, uid), spec=NS(selector=sel))
+
+
+def _endpoint_subset(ready=0, not_ready=0):
+    return NS(
+        addresses=[NS() for _ in range(ready)],
+        not_ready_addresses=[NS() for _ in range(not_ready)],
+    )
+
+
+def _endpoints(*subsets):
+    return NS(subsets=list(subsets))
+
+
+def _endpoints_named(name, *subsets):
+    return NS(metadata=_meta(name), subsets=list(subsets))
+
+
+class TestServiceHealth:
+    def test_healthy_service_has_all_ready_addresses(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU")
+        core.read_namespaced_endpoints.return_value = _endpoints(
+            _endpoint_subset(ready=2)
+        )
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert data.service.has_selector is True
+        assert data.service.ready_addresses == 2
+        assert data.service.not_ready_addresses == 0
+
+    def test_service_without_selector_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("ext", "svcU", selector={})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "ext", "default")
+        assert data.service.has_selector is False
+
+    def test_missing_endpoints_object_yields_zero_addresses(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU")
+        core.read_namespaced_endpoints.side_effect = Exception("not found")
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert data.service.ready_addresses == 0
+        assert data.service.not_ready_addresses == 0
+
+    def test_service_pods_resolved_via_selector(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU", {"app": "web"})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        core.list_namespaced_pod.return_value = _items(_pod("web-1", "p1"))
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert [p.name for p in data.pods] == ["web-1"]
+        args, kwargs = core.list_namespaced_pod.call_args
+        assert kwargs.get("label_selector") == "app=web"
+
+    def test_no_selector_resolves_no_pods(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("ext", "svcU", selector={})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "ext", "default")
+        assert data.pods == []
+        core.list_namespaced_pod.assert_not_called()
+
+
 # --- namespace sweep ---------------------------------------------------------
 
 
@@ -585,6 +668,41 @@ class TestSweep:
             results = _service().sweep("default")
         assert results[0].job.backoff_limit_exceeded is False
         assert results[0].job.deadline_exceeded is False
+
+    def test_sweeps_services_without_claiming_their_pods_from_orphans(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_service.return_value = _items(
+            _svc("web-svc", "svcU", selector={"app": "web"})
+        )
+        core.list_namespaced_endpoints.return_value = _items(
+            _endpoints_named("web-svc", _endpoint_subset(ready=1))
+        )
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", labels={"app": "web"})
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Service, "web-svc"),
+            (Kind.Pod, "web-1"),
+        ]
+        svc_result = results[0]
+        assert [p.name for p in svc_result.pods] == ["web-1"]
+        assert svc_result.service.ready_addresses == 1
+
+    def test_sweep_service_missing_endpoints_entry_is_zero_addresses(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_service.return_value = _items(
+            _svc("orphaned-svc", "svcU", selector={"app": "gone"})
+        )
+        core.list_namespaced_endpoints.return_value = _items()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert results[0].service.ready_addresses == 0
+        assert results[0].service.not_ready_addresses == 0
 
     def test_empty_namespace_returns_no_results(self):
         core = MagicMock()

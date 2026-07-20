@@ -12,6 +12,7 @@ from kx.diagnostics import (
     PodDiagnostic,
     ReplicaHealth,
     SchedulingInfo,
+    ServiceHealth,
     Severity,
 )
 from kx.kinds import Kind
@@ -47,7 +48,12 @@ def _pod(name="web-1", phase="Running", containers=None, schedulable=True, **kwa
 
 
 def _data(
-    kind=Kind.Deployment, replicas=None, pods=None, warning_events=None, job=None
+    kind=Kind.Deployment,
+    replicas=None,
+    pods=None,
+    warning_events=None,
+    job=None,
+    service=None,
 ):
     return DiagnosticData(
         kind=kind,
@@ -55,8 +61,17 @@ def _data(
         namespace="default",
         replicas=replicas,
         job=job,
+        service=service,
         pods=pods or [],
         warning_events=warning_events or [],
+    )
+
+
+def _service_health(has_selector=True, ready_addresses=0, not_ready_addresses=0):
+    return ServiceHealth(
+        has_selector=has_selector,
+        ready_addresses=ready_addresses,
+        not_ready_addresses=not_ready_addresses,
     )
 
 
@@ -124,6 +139,19 @@ class TestDiagnosticCommand:
 
         assert report.verdict == Severity.OK
         diagnostics.gather.assert_called_once_with(Kind.Job, "nightly", "default")
+
+    def test_service_is_a_supported_kind(self):
+        state = MagicMock()
+        state.fields.return_value = ("web-svc", "default", Kind.Service)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.Service, service=_service_health(ready_addresses=1)
+        )
+
+        report = DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
+
+        assert report.verdict == Severity.OK
+        diagnostics.gather.assert_called_once_with(Kind.Service, "web-svc", "default")
 
 
 # --- namespace triage --------------------------------------------------------
@@ -300,6 +328,27 @@ class TestDiagnosticCli:
         assert result.exit_code == 0
         diagnostics.gather.assert_called_once_with(Kind.Job, "nightly", "default")
 
+    def test_indexed_diag_gathers_a_service(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        state = MagicMock()
+        state.fields.return_value = ("web-svc", "default", Kind.Service)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.Service, service=_service_health(ready_addresses=1)
+        )
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._diagnostics", diagnostics),
+        ):
+            result = CliRunner().invoke(app, ["diag", "1"])
+        assert result.exit_code == 0
+        diagnostics.gather.assert_called_once_with(Kind.Service, "web-svc", "default")
+
 
 # --- build_report (pure) ----------------------------------------------------
 
@@ -464,6 +513,65 @@ class TestBuildReport:
         )
         report = build_report(
             _data(kind=Kind.Job, job=_job_health(active=1), pods=[pod])
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "CrashLoopBackOff" in _summaries(report)
+
+    def test_service_without_selector_has_no_findings(self):
+        report = build_report(
+            _data(kind=Kind.Service, service=_service_health(has_selector=False))
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_service_all_ready_has_no_findings(self):
+        report = build_report(
+            _data(kind=Kind.Service, service=_service_health(ready_addresses=2))
+        )
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_service_no_endpoints_is_critical(self):
+        report = build_report(_data(kind=Kind.Service, service=_service_health()))
+        assert report.verdict == Severity.CRITICAL
+        assert "No endpoints" in _summaries(report)
+
+    def test_service_all_not_ready_is_critical(self):
+        report = build_report(
+            _data(
+                kind=Kind.Service,
+                service=_service_health(ready_addresses=0, not_ready_addresses=3),
+            )
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "3" in _summaries(report)
+        assert "0 ready" in _summaries(report)
+
+    def test_service_partially_ready_is_warning(self):
+        report = build_report(
+            _data(
+                kind=Kind.Service,
+                service=_service_health(ready_addresses=1, not_ready_addresses=1),
+            )
+        )
+        assert report.verdict == Severity.WARNING
+        assert "1/2 endpoints ready" in _summaries(report)
+
+    def test_service_pod_crashloop_still_surfaces_alongside_service_findings(self):
+        pod = _pod(
+            "web-1",
+            containers=[
+                _container(
+                    ready=False, state="Waiting", waiting_reason="CrashLoopBackOff"
+                )
+            ],
+        )
+        report = build_report(
+            _data(
+                kind=Kind.Service,
+                service=_service_health(ready_addresses=1),
+                pods=[pod],
+            )
         )
         assert report.verdict == Severity.CRITICAL
         assert "CrashLoopBackOff" in _summaries(report)
