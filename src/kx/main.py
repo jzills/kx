@@ -27,6 +27,7 @@ from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
 from kx.commands.state import StateCommand
 from kx.commands.theme import ThemeCommand
+from kx.commands.top import TopCommand
 from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config, save_theme
@@ -89,6 +90,7 @@ _HELP_SECTIONS = (
         "Resources",
         (
             "get",
+            "top",
             "describe",
             "events",
             "logs",
@@ -223,6 +225,35 @@ def get(
         except RuntimeError:
             namespace = "default"
     console.render_indexed_table(result, resource, namespace, note=note)
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors(refresh=False)
+def top(
+    ctx: typer.Context,
+    match: Optional[str] = typer.Option(
+        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
+    ),
+):
+    """List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get."""
+    extra = list(ctx.args)
+    command = TopCommand(kubectl=_kubectl, state=_state, index=_index)
+    with console.status("fetching pod usage"):
+        result = command.execute(match, extra)
+    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
+    if all_namespaces:
+        namespace = "all namespaces"
+        note = "indexes not saved for all-namespace listings — scope to a namespace (-n or kx ns) to select"
+    else:
+        note = None
+        try:
+            namespace = _state.load().namespace
+        except RuntimeError:
+            namespace = "default"
+    console.render_indexed_table(result, "pods", namespace, note=note)
 
 
 @app.command(
@@ -580,6 +611,7 @@ get._examples = [
     "kx pods",
     "kx po 3",
 ]
+top._examples = ["kx top", "kx top --sort-by=cpu"]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
