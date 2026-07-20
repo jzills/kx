@@ -10,6 +10,7 @@ from kx.diagnostics import (
     DiagnosticData,
     JobHealth,
     PodDiagnostic,
+    PVCHealth,
     ReplicaHealth,
     SchedulingInfo,
     ServiceHealth,
@@ -54,6 +55,7 @@ def _data(
     warning_events=None,
     job=None,
     service=None,
+    pvc=None,
 ):
     return DiagnosticData(
         kind=kind,
@@ -62,9 +64,14 @@ def _data(
         replicas=replicas,
         job=job,
         service=service,
+        pvc=pvc,
         pods=pods or [],
         warning_events=warning_events or [],
     )
+
+
+def _pvc_health(phase="Bound"):
+    return PVCHealth(phase=phase)
 
 
 def _service_health(has_selector=True, ready_addresses=0, not_ready_addresses=0):
@@ -152,6 +159,21 @@ class TestDiagnosticCommand:
 
         assert report.verdict == Severity.OK
         diagnostics.gather.assert_called_once_with(Kind.Service, "web-svc", "default")
+
+    def test_pvc_is_a_supported_kind(self):
+        state = MagicMock()
+        state.fields.return_value = ("data", "default", Kind.PersistentVolumeClaim)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.PersistentVolumeClaim, pvc=_pvc_health()
+        )
+
+        report = DiagnosticCommand(state=state, diagnostics=diagnostics).execute(1)
+
+        assert report.verdict == Severity.OK
+        diagnostics.gather.assert_called_once_with(
+            Kind.PersistentVolumeClaim, "data", "default"
+        )
 
 
 # --- namespace triage --------------------------------------------------------
@@ -348,6 +370,29 @@ class TestDiagnosticCli:
             result = CliRunner().invoke(app, ["diag", "1"])
         assert result.exit_code == 0
         diagnostics.gather.assert_called_once_with(Kind.Service, "web-svc", "default")
+
+    def test_indexed_diag_gathers_a_pvc(self):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from kx.main import app
+
+        state = MagicMock()
+        state.fields.return_value = ("data", "default", Kind.PersistentVolumeClaim)
+        diagnostics = MagicMock()
+        diagnostics.gather.return_value = _data(
+            kind=Kind.PersistentVolumeClaim, pvc=_pvc_health()
+        )
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._diagnostics", diagnostics),
+        ):
+            result = CliRunner().invoke(app, ["diag", "1"])
+        assert result.exit_code == 0
+        diagnostics.gather.assert_called_once_with(
+            Kind.PersistentVolumeClaim, "data", "default"
+        )
 
 
 # --- build_report (pure) ----------------------------------------------------
@@ -575,6 +620,25 @@ class TestBuildReport:
         )
         assert report.verdict == Severity.CRITICAL
         assert "CrashLoopBackOff" in _summaries(report)
+
+    def test_bound_pvc_has_no_findings(self):
+        report = build_report(_data(kind=Kind.PersistentVolumeClaim, pvc=_pvc_health()))
+        assert report.findings == []
+        assert report.verdict == Severity.OK
+
+    def test_pending_pvc_is_warning(self):
+        report = build_report(
+            _data(kind=Kind.PersistentVolumeClaim, pvc=_pvc_health(phase="Pending"))
+        )
+        assert report.verdict == Severity.WARNING
+        assert "pending" in _summaries(report)
+
+    def test_lost_pvc_is_critical(self):
+        report = build_report(
+            _data(kind=Kind.PersistentVolumeClaim, pvc=_pvc_health(phase="Lost"))
+        )
+        assert report.verdict == Severity.CRITICAL
+        assert "lost" in _summaries(report)
 
     def test_warning_events_become_warning_findings(self):
         from kx.diagnostics import EventSummary
