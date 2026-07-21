@@ -100,6 +100,8 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | `kx labels <indexes>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | `kx annotations <indexes>...` | Show annotations for one or more indexed resources. |
+| `kx label <index> [<pairs>...] [--remove str] [--overwrite]` | Set or remove labels on an indexed resource. |
+| `kx annotate <index> [<pairs>...] [--remove str] [--overwrite]` | Set or remove annotations on an indexed resource. |
 | `kx yaml <indexes>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |

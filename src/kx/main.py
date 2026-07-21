@@ -22,6 +22,7 @@ from kx.commands.events import EventsCommand
 from kx.commands.exec import ExecCommand
 from kx.commands.get import GetCommand
 from kx.commands.logs import LogsCommand
+from kx.commands.metadata_write import _MetadataWriteCommand
 from kx.commands.port_forward import PortForwardCommand
 from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
@@ -97,6 +98,8 @@ _HELP_SECTIONS = (
             "logs",
             "labels",
             "annotations",
+            "label",
+            "annotate",
             "yaml",
             "delete",
             "edit",
@@ -308,6 +311,16 @@ def logs(ctx: typer.Context, index: int):
     command.execute(index, ctx.args)
 
 
+def _parse_pairs(pairs: list[str]) -> dict[str, str]:
+    result = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"'{pair}' is not a valid key=value pair")
+        key, value = pair.split("=", 1)
+        result[key] = value
+    return result
+
+
 @app.command(cls=StyledCommand)
 @handle_errors
 def labels(
@@ -350,6 +363,46 @@ def annotations(indexes: list[int]):
             console.print_raw("")
         console.print_banner(kind, name, namespace=ns, extra=extra)
         console.render_key_value_table("ANNOTATION", annotation_map)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def label(
+    index: int,
+    pairs: list[str] = typer.Argument(default=None, help="key=value pairs to set"),
+    remove: list[str] = typer.Option([], "--remove", help="Key to remove (repeatable)"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Allow replacing an existing key"
+    ),
+):
+    """Set or remove labels on an indexed resource."""
+    sets = _parse_pairs(pairs or [])
+    command = _MetadataWriteCommand(
+        kubectl=_kubectl, state=_state, verb="label", field="labels"
+    )
+    with console.status("labeling"):
+        result = command.execute(index, sets, remove, overwrite)
+    console.print_success(result)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def annotate(
+    index: int,
+    pairs: list[str] = typer.Argument(default=None, help="key=value pairs to set"),
+    remove: list[str] = typer.Option([], "--remove", help="Key to remove (repeatable)"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Allow replacing an existing key"
+    ),
+):
+    """Set or remove annotations on an indexed resource."""
+    sets = _parse_pairs(pairs or [])
+    command = _MetadataWriteCommand(
+        kubectl=_kubectl, state=_state, verb="annotate", field="annotations"
+    )
+    with console.status("annotating"):
+        result = command.execute(index, sets, remove, overwrite)
+    console.print_success(result)
 
 
 @app.command(cls=StyledCommand)
@@ -639,6 +692,12 @@ events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
 labels._examples = ["kx labels 1 --selector"]
 annotations._examples = ["kx annotations 1"]
+label._examples = [
+    "kx label 1 env=prod",
+    "kx label 1 --remove env",
+    "kx label 1 env=staging --overwrite",
+]
+annotate._examples = ["kx annotate 1 note=x"]
 yaml._examples = ["kx yaml 1 --show metadata,spec"]
 delete._examples = ["kx delete 3 --yes"]
 edit._examples = ["kx edit 1"]
