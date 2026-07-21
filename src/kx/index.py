@@ -27,6 +27,13 @@ def _parse_output(output: str) -> tuple[list[str], list[list[str]], int]:
         (col_match.start(), col_match.end())
         for col_match in re.finditer(r"\S+\s*", header)
     ]
+    if spans:
+        # kubectl doesn't pad a table's last column with trailing spaces, so
+        # its span (derived from the header word's own width) can be
+        # narrower than a data row's actual value in that column. Extend it
+        # to end-of-line so wider values aren't sliced off.
+        last_start, _ = spans[-1]
+        spans[-1] = (last_start, None)
     headers = [header[start:end].strip() for start, end in spans]
     if "NAME" not in headers:
         return [], [], 0

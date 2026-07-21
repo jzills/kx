@@ -15,6 +15,15 @@ SINGLE_ROW_OUTPUT = (
     "only-pod-abc     1/1     Running   0          1d"
 )
 
+# `kubectl config get-contexts`-style output: the trailing NAMESPACE column
+# has no header padding (kubectl doesn't pad a table's last column), but a
+# data value in that column ("diagnostics") is wider than the header word
+# ("NAMESPACE") itself.
+CONTEXTS_OUTPUT = (
+    "CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE\n"
+    "*         docker-desktop   docker-desktop   docker-desktop   diagnostics"
+)
+
 
 class TestParseOutput:
     def test_standard_output_returns_headers(self):
@@ -47,6 +56,11 @@ class TestParseOutput:
         assert headers == ["NAME", "READY", "STATUS", "RESTARTS", "AGE"]
         assert rows == []
 
+    def test_last_column_value_wider_than_header_not_truncated(self):
+        headers, rows, _ = _parse_output(CONTEXTS_OUTPUT)
+        assert headers == ["CURRENT", "NAME", "CLUSTER", "AUTHINFO", "NAMESPACE"]
+        assert rows[0][-1] == "diagnostics"
+
 
 class TestIndexServiceAdd:
     def setup_method(self):
@@ -72,6 +86,11 @@ class TestIndexServiceAdd:
         output, names = self.svc.add("")
         assert output == ""
         assert names == []
+
+    def test_add_last_column_value_wider_than_header_not_truncated(self):
+        output, _ = self.svc.add(CONTEXTS_OUTPUT)
+        last_line = output.splitlines()[-1]
+        assert last_line.rstrip().endswith("diagnostics")
 
     def test_add_json_output_returns_raw(self):
         json_output = '{\n  "items": []\n}'
@@ -110,6 +129,11 @@ class TestIndexServiceFilter:
         lines = result.splitlines()
         assert len(lines) == 1
         assert "NAME" in lines[0]
+
+    def test_filter_last_column_value_wider_than_header_not_truncated(self):
+        result = self.svc.filter(CONTEXTS_OUTPUT, "docker")
+        last_line = result.splitlines()[-1]
+        assert last_line.rstrip().endswith("diagnostics")
 
     def test_filter_multiple_matches(self):
         output = (
