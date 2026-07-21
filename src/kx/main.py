@@ -606,7 +606,7 @@ def _context(index: Optional[int]) -> None:
         command = ContextsCommand(kubectl=_kubectl, state=_state, index=_index)
         with console.status("fetching contexts"):
             result = command.execute()
-        console.render_indexed_table(result, "contexts", _kubectl.current_context())
+        console.render_indexed_table(result, "Contexts", _kubectl.current_context())
         return
     command = ContextCommand(state=_state, kubectl=_kubectl)
     with console.status("switching context"):
