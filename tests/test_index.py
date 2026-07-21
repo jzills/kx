@@ -130,6 +130,11 @@ class TestIndexServiceFilter:
         assert len(lines) == 1
         assert "NAME" in lines[0]
 
+    def test_filter_last_column_value_wider_than_header_not_truncated(self):
+        result = self.svc.filter(CONTEXTS_OUTPUT, "docker")
+        last_line = result.splitlines()[-1]
+        assert last_line.rstrip().endswith("diagnostics")
+
     def test_filter_multiple_matches(self):
         output = (
             "NAME             READY   STATUS    RESTARTS   AGE\n"
