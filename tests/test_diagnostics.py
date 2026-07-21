@@ -3,6 +3,7 @@ extraction (replica counts, container states, scheduling, event dedup)."""
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
@@ -52,6 +53,10 @@ def _cstatus(
     )
 
 
+def _spec_container(name="app", limits=None):
+    return NS(name=name, resources=NS(limits=limits))
+
+
 def _pod(
     name,
     uid="",
@@ -60,14 +65,18 @@ def _pod(
     statuses=None,
     conditions=None,
     labels=None,
+    spec_containers=None,
 ):
     owners = (owner,) if owner else ()
+    statuses = statuses if statuses is not None else [_cstatus()]
+    if spec_containers is None:
+        spec_containers = [_spec_container(name=cs.name) for cs in statuses]
     return NS(
         metadata=_meta(name, uid, owners, labels=labels),
-        spec=NS(node_name="node-1"),
+        spec=NS(node_name="node-1", containers=spec_containers),
         status=NS(
             phase=phase,
-            container_statuses=statuses if statuses is not None else [_cstatus()],
+            container_statuses=statuses,
             conditions=conditions or [],
         ),
     )
@@ -239,6 +248,43 @@ class TestPodExtraction:
         assert container.last_exit_code == 137
         assert data.pods[0].ready_containers == 0
         assert data.pods[0].total_containers == 1
+
+    def test_container_limits_extracted_from_pod_spec(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo",
+            spec_containers=[
+                _spec_container("app", limits={"cpu": "500m", "memory": "256Mi"})
+            ],
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit == Decimal("0.5")
+        assert container.memory_limit == Decimal(256 * 1024 * 1024)
+
+    def test_container_with_no_limits_has_none(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo", spec_containers=[_spec_container("app", limits=None)]
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit is None
+        assert container.memory_limit is None
+
+    def test_container_with_only_memory_limit(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo",
+            spec_containers=[_spec_container("app", limits={"memory": "128Mi"})],
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit is None
+        assert container.memory_limit == Decimal(128 * 1024 * 1024)
 
     def test_scheduling_condition_parsed(self):
         conditions = [
@@ -653,6 +699,32 @@ def _sweep_batch(jobs=(), cronjobs=()):
     return batch
 
 
+class TestSweepUsage:
+    def test_usage_attached_once_across_workload_and_orphan_pods(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("solo", "p2"),
+        )
+        metrics = _metrics(
+            _metrics_item("web-1", ("app", "50m", "100Mi")),
+            _metrics_item("solo", ("app", "10m", "20Mi")),
+        )
+        with (
+            _mocked(apps=apps, core=core),
+            patch("kx.diagnostics.get_pods_metrics", return_value=metrics) as mock_gpm,
+        ):
+            results = _service().sweep("default")
+        mock_gpm.assert_called_once()
+        web, solo = results
+        assert web.pods[0].containers[0].cpu_usage == Decimal("0.05")
+        assert solo.pods[0].containers[0].cpu_usage == Decimal("0.01")
+
+
 class TestSweep:
     def test_orders_workloads_then_orphan_pods(self):
         apps = _sweep_apps(
@@ -974,6 +1046,63 @@ def _sts(name="db", uid="stsU"):
         ),
     )
     return apps
+
+
+def _metrics(*items):
+    return {"items": list(items)}
+
+
+def _metrics_item(pod_name, *container_usages):
+    return {
+        "metadata": {"name": pod_name},
+        "containers": [
+            {"name": name, "usage": {"cpu": cpu, "memory": memory}}
+            for name, cpu, memory in container_usages
+        ],
+    }
+
+
+class TestUsageAttachment:
+    def test_usage_matched_by_pod_and_container_name(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch(
+                "kx.diagnostics.get_pods_metrics",
+                return_value=_metrics(_metrics_item("solo", ("app", "93m", "188Mi"))),
+            ),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage == Decimal("0.093")
+        assert container.memory_usage == Decimal(188 * 1024 * 1024)
+
+    def test_no_matching_metrics_leaves_usage_none(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch("kx.diagnostics.get_pods_metrics", return_value=_metrics()),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage is None
+        assert container.memory_usage is None
+
+    def test_metrics_api_failure_is_swallowed(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch(
+                "kx.diagnostics.get_pods_metrics", side_effect=Exception("no metrics")
+            ),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage is None
+        assert container.memory_usage is None
 
 
 class TestLogAttachment:

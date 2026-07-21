@@ -1,8 +1,10 @@
 """Command wiring + pure finding-detection logic for `kx diagnostic`.
 The DiagnosticsService is mocked, so DiagnosticData is built directly."""
 
-import pytest
+from decimal import Decimal
 from unittest.mock import MagicMock
+
+import pytest
 
 from kx.commands.diagnostic import DiagnosticCommand, TriageCommand, build_report
 from kx.diagnostics import (
@@ -550,6 +552,86 @@ class TestBuildReport:
         report = build_report(_data(kind=Kind.Pod, replicas=None, pods=[_pod()]))
         assert report.findings == []
         assert report.verdict == Severity.OK
+
+    def test_memory_below_warning_threshold_has_no_finding(self):
+        pod = _pod(
+            containers=[
+                _container(
+                    memory_usage=Decimal(100 * 1024 * 1024),
+                    memory_limit=Decimal(200 * 1024 * 1024),
+                )
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.findings == []
+
+    def test_memory_at_warning_threshold_is_warning(self):
+        pod = _pod(
+            containers=[
+                _container(
+                    memory_usage=Decimal(150 * 1024 * 1024),
+                    memory_limit=Decimal(200 * 1024 * 1024),
+                )
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.verdict == Severity.WARNING
+        assert "Memory at 75% of limit (150Mi/200Mi)" in _summaries(report)
+
+    def test_memory_at_critical_threshold_is_critical(self):
+        pod = _pod(
+            containers=[
+                _container(
+                    memory_usage=Decimal(188 * 1024 * 1024),
+                    memory_limit=Decimal(200 * 1024 * 1024),
+                )
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.verdict == Severity.CRITICAL
+        assert "Memory at 94% of limit (188Mi/200Mi) — OOMKill risk" in _summaries(
+            report
+        )
+
+    def test_cpu_near_limit_is_warning_never_critical(self):
+        pod = _pod(
+            containers=[
+                _container(
+                    cpu_usage=Decimal("0.1"),
+                    cpu_limit=Decimal("0.1"),
+                )
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.verdict == Severity.WARNING
+        assert "CPU at 100% of limit (100m/100m) — likely throttling" in _summaries(
+            report
+        )
+
+    def test_cpu_below_threshold_has_no_finding(self):
+        pod = _pod(
+            containers=[_container(cpu_usage=Decimal("0.05"), cpu_limit=Decimal("0.1"))]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.findings == []
+
+    def test_no_limit_set_has_no_finding_regardless_of_usage(self):
+        pod = _pod(
+            containers=[
+                _container(memory_usage=Decimal(1000 * 1024 * 1024), memory_limit=None)
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.findings == []
+
+    def test_no_usage_data_has_no_finding(self):
+        pod = _pod(
+            containers=[
+                _container(memory_usage=None, memory_limit=Decimal(200 * 1024 * 1024))
+            ]
+        )
+        report = build_report(_data(pods=[pod]))
+        assert report.findings == []
 
     def test_active_job_has_no_findings(self):
         report = build_report(
