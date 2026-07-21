@@ -24,6 +24,8 @@ from kx.commands.get import GetCommand
 from kx.commands.logs import LogsCommand
 from kx.commands.metadata_write import _MetadataWriteCommand
 from kx.commands.port_forward import PortForwardCommand
+from kx.commands.context import ContextCommand
+from kx.commands.contexts import ContextsCommand
 from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
@@ -110,6 +112,7 @@ _HELP_SECTIONS = (
             "port-forward",
             "diagnostic",
             "namespace",
+            "context",
         ),
     ),
     ("History", ("state", "drop", "back", "forward")),
@@ -598,6 +601,19 @@ def _namespace(index: Optional[int]) -> None:
     console.print_success(f"Switched to '{name}'")
 
 
+def _context(index: Optional[int]) -> None:
+    if index is None:
+        command = ContextsCommand(kubectl=_kubectl, state=_state, index=_index)
+        with console.status("fetching contexts"):
+            result = command.execute()
+        console.render_indexed_table(result, "Contexts", _state.load().namespace)
+        return
+    command = ContextCommand(state=_state, kubectl=_kubectl)
+    with console.status("switching context"):
+        name = command.execute(index)
+    console.print_success(f"Switched to '{name}'")
+
+
 @app.command(cls=StyledCommand)
 @handle_errors
 def namespace(
@@ -618,6 +634,28 @@ def namespace_alias(
 ):
     """Alias for namespace."""
     _namespace(index)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def context(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Context index to switch to; omit to list contexts."
+    ),
+):
+    """List kubeconfig contexts, or switch to an indexed one; alias: kx contexts."""
+    _context(index)
+
+
+@app.command(name="contexts", cls=StyledCommand, hidden=True)
+@handle_errors
+def context_alias(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Context index to switch to; omit to list contexts."
+    ),
+):
+    """Alias for context."""
+    _context(index)
 
 
 @app.command(cls=StyledCommand)
@@ -679,6 +717,7 @@ def forward():
 # command callback to render the Aliases and Examples sections.
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
+context._aliases = ["kx contexts"]
 
 get._examples = [
     "kx get pods",
@@ -708,6 +747,7 @@ scale._examples = ["kx scale 2 5"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]
+context._examples = ["kx context", "kx context 3"]
 state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]
 back._examples = ["kx back"]
