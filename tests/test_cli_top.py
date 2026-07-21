@@ -53,6 +53,21 @@ class TestTopCliIntegration:
         assert result.exit_code == 0
         index.filter.assert_called_once()
 
+    def test_no_limits_flag_reaches_command(self):
+        kubectl, state, index = _make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+            patch("kx.main.TopCommand") as MockTopCommand,
+        ):
+            MockTopCommand.return_value.execute.return_value = "1  nginx"
+            result = runner.invoke(app, ["top", "--no-limits"])
+        assert result.exit_code == 0
+        MockTopCommand.return_value.execute.assert_called_once_with(
+            None, [], no_limits=True
+        )
+
     def test_metrics_api_missing_renders_styled_error(self):
         kubectl, state, index = _make_mocks()
         kubectl.run.side_effect = RuntimeError("error: Metrics API not available")
