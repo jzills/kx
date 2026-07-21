@@ -778,9 +778,9 @@ def render_state_history(history: StateHistory) -> None:
     _console.print(table)
 
 
-def render_labels(labels: dict[str, str]) -> None:
-    if not labels:
-        _console.print("[muted]No labels[/muted]")
+def render_key_value_table(header: str, data: dict[str, str]) -> None:
+    if not data:
+        _console.print(f"[muted]No {header.lower()}s[/muted]")
         return
     table = Table(
         show_header=True,
@@ -788,9 +788,9 @@ def render_labels(labels: dict[str, str]) -> None:
         box=None,
         padding=(0, 2),
     )
-    table.add_column("LABEL")
+    table.add_column(header.upper())
     table.add_column("VALUE", style="muted")
-    for key, value in labels.items():
+    for key, value in data.items():
         table.add_row(key, value)
     _console.print(table)
 

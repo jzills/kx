@@ -13,6 +13,7 @@ from kx.commands.back import BackCommand
 from kx.commands.delete import DeleteCommand
 from kx.commands.diagnostic import DiagnosticCommand, TriageCommand
 from kx.commands.drop import DropCommand
+from kx.commands.annotations import AnnotationsCommand
 from kx.commands.labels import LabelsCommand
 from kx.commands.describe import DescribeCommand
 from kx.commands.edit import EditCommand
@@ -95,6 +96,7 @@ _HELP_SECTIONS = (
             "events",
             "logs",
             "labels",
+            "annotations",
             "yaml",
             "delete",
             "edit",
@@ -330,7 +332,24 @@ def labels(
                 ",".join(f"{key}={value}" for key, value in label_map.items())
             )
         else:
-            console.render_labels(label_map)
+            console.render_key_value_table("LABEL", label_map)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def annotations(indexes: list[int]):
+    """Show annotations for one or more indexed resources."""
+    command = AnnotationsCommand(state=_state, kubectl=_kubectl)
+    for position, index in enumerate(indexes):
+        with console.status("fetching annotations"):
+            annotation_map = command.execute(index)
+        name, ns, kind = _state.fields(index)
+        count = len(annotation_map)
+        extra = f"{count} {'item' if count == 1 else 'items'}"
+        if position > 0:
+            console.print_raw("")
+        console.print_banner(kind, name, namespace=ns, extra=extra)
+        console.render_key_value_table("ANNOTATION", annotation_map)
 
 
 @app.command(cls=StyledCommand)
@@ -619,6 +638,7 @@ describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
 labels._examples = ["kx labels 1 --selector"]
+annotations._examples = ["kx annotations 1"]
 yaml._examples = ["kx yaml 1 --show metadata,spec"]
 delete._examples = ["kx delete 3 --yes"]
 edit._examples = ["kx edit 1"]
