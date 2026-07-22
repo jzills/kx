@@ -101,6 +101,10 @@ def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> 
     _console.print(f"[muted]{' · '.join(parts)}[/muted]")
 
 
+def print_section(label: str) -> None:
+    _console.print(f"[muted]── {label} ──[/muted]")
+
+
 # How long a command runs silently before the spinner appears. Quick commands
 # intentionally show nothing — a spinner that flashes for a fraction of a
 # second is noise, not feedback.
