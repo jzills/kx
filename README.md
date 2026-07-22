@@ -65,26 +65,9 @@ pipx run --spec kx-cli kx get pods
 
 ## Usage
 
-### List resources
+`kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are display-only — names aren't unique across namespaces.
 
-```
-kx get <resource> [--match|-m <substring>] [kubectl flags...]
-```
-
-Fetches resources and assigns index numbers. Any extra flags (e.g. `-n <namespace>`, `-A`) are passed through to kubectl. Use `--match`/`-m` to filter results by name (substring, case-insensitive). All-namespace listings (`-A`) are display-only — rows aren't indexed, since names aren't unique across namespaces; scope to a namespace to select.
-
-Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api`. This covers the built-in kinds and their kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...); existing commands take precedence, so `kx ns 3` still switches namespaces (bare `kx ns` lists them). CRDs and other resource types still use `kx get <resource>`. An integer after a kind is an index into the current state: `kx po 3` (or `kx get po 3`) relists just that pod, erroring if index 3 isn't a pod. Multiple indexes work too: `kx po 1 3`.
-
-```
-$ kx get pods
-Pods · default · 3 items
-  X    NAME                      READY    STATUS     RESTARTS    AGE
-  1    api-7d9f4b8c6-xkp2q       1/1      Running    0            2d
-  2    worker-6c8b5f7d9-mnt4r    1/1      Running    3            5h
-  3    postgres-0                1/1      Running    0           12d
-```
-
-All subsequent commands reference resources by their `X` index from the last `kx get`.
+Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs and other resource types still use `kx get <resource>`.
 
 Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
 
@@ -121,62 +104,14 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx forward` | Navigate to the next kx get result. |
 <!-- commands-table-end -->
 
-### Example workflow
-
-```bash
-# list deployments, pick index 2
-kx get deployments
-kx describe 2
-
-# check events on that deployment
-kx events 2
-
-# drill into a pod
-kx get pods
-kx logs 1
-kx exec 1            # opens bash/sh
-kx exec 1 -- env     # run a specific command
-
-# forward local port 8080 to port 80 on a service
-kx get services
-kx port-forward 2 8080:80
-
-# what's unhealthy here, and why?
-kx diag
-kx diag 1            # full findings for the worst offender
-
-# check resource usage, then drill in off the same indexes
-kx top
-kx logs 2
-
-# switch kubeconfig context by index
-kx context
-kx context 2
-
-# navigate history after multiple gets
-kx get pods
-kx get deployments
-kx logs 1            # logs from pod index 1
-kx state --all       # review full history
-
-# clean up
-kx delete 3
-```
-
 ### Triage a namespace
 
 Bare `kx diag` sweeps the current namespace — Deployments, StatefulSets,
 DaemonSets, Jobs, CronJobs, Services, and PersistentVolumeClaims, plus pods
 nothing owns — and prints a ranked table of what's unhealthy. Findings also
-draw on live resource usage: a pod running hot against its memory limit is
-flagged as an OOMKill risk before it dies. The rows are indexed, so the usual
-commands drill straight in:
-
-```bash
-kx diag              # what's wrong here?
-kx diag 1            # full findings for the worst offender
-kx logs 2            # logs for the second
-```
+draw on live resource usage (`kx top`): a pod running hot against its memory
+limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
+`kx diag 1` or `kx logs 2` drill straight in.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/diag.gif" alt="kx diag demo" width="800"/>
@@ -189,89 +124,21 @@ CronJob runs, usage near limits), a per-pod status table, recent log tails
 from broken containers, and warning events — one screen instead of four
 kubectl commands.
 
-### Resource usage
-
-`kx top` lists pod CPU/memory usage and indexes the rows exactly like
-`kx get`, with usage shown as a percentage of each pod's resource limits
-(`—` when a container has no limit set; `--no-limits` hides the columns):
-
-```
-$ kx top
-Pods · diagnostics · 6 items
-  X    NAME                                  CPU(cores)    MEMORY(bytes)    CPU%    MEM%
-  1    billing-flaky-b7878b475-dm9sk         0m            1Mi                0%      3%
-  2    frontend-notready-7fc649587b-r4fh4    1m            12Mi               1%     18%
-  3    frontend-notready-7fc649587b-zvtb5    1m            12Mi               1%     18%
-  4    memory-pressure                       0m            38Mi                —     76%
-  5    web-healthy-5c4657576d-v9j5p          0m            12Mi               0%     18%
-  6    web-healthy-5c4657576d-x4752          0m            12Mi               0%     18%
-```
-
-Since the rows land in state, `kx diag 4` or `kx logs 4` drill straight into
-the pod that's running hot.
-
 ### Scan images for vulnerabilities
 
 `kx scan <index>` scans the unique container images of an indexed workload
 (init containers and CronJob job templates included); bare `kx scan` sweeps
-every workload in the namespace. Results come back as a severity summary:
+every workload in the namespace. Results come back as a severity summary,
+or the full per-image CVE report with `--full`. Requires
+[Docker Scout](https://docs.docker.com/scout/).
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
 
-Scanning uses [Docker Scout](https://docs.docker.com/scout/) (`docker scout`
-must be available). Pass `--full` to stream the raw scanner output — CVE IDs,
-affected packages, fix versions — per image.
-
-### Labels and annotations
-
-`kx labels` / `kx annotations` read metadata for indexed resources;
-`kx label` / `kx annotate` write it (`--remove` deletes a key, `--overwrite`
-replaces an existing value):
-
-```
-$ kx labels 12
-Pod/web-healthy-5c4657576d-v9j5p · diagnostics · 2 items
-  LABEL                VALUE
-  app                  web-healthy
-  pod-template-hash    5c4657576d
-
-$ kx label 12 tier=frontend
-✓ Labeled Pod/web-healthy-5c4657576d-v9j5p (set 1)
-
-$ kx labels 12 --selector
-Pod/web-healthy-5c4657576d-v9j5p · diagnostics · 3 items
-app=web-healthy,pod-template-hash=5c4657576d,tier=frontend
-```
-
-`--selector` prints a copy-pastable label selector for use with any kubectl
-command.
-
-### Switch namespace or context
-
-`kx ns` lists namespaces indexed; `kx ns <index>` switches. `kx context`
-(alias `kx contexts`) does the same for kubeconfig contexts:
-
-```bash
-kx ns                # list namespaces
-kx ns 3              # switch to the third
-kx context           # list kubeconfig contexts
-kx context 2         # switch to the second
-```
-
 ## State
 
-`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor.
-
-```
-$ kx get pods          # saves a new entry, cursor advances
-$ kx get deployments   # saves another entry, cursor advances
-$ kx logs 1            # resolves index 1 from the pods result
-$ kx state --all       # lists all history entries and the current position
-```
-
-Use `kx state <position>` to jump directly to any history entry, and `kx drop <position>` to remove one.
+`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
 
 ## Configuration
 
@@ -288,15 +155,11 @@ Styled output is emitted only when stdout is a terminal — piped or redirected 
 
 ## Themes
 
+`kx theme` lists the available themes with a preview of each; `kx theme <name|index>` persists a choice to `~/.kx/config.toml`.
+
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/theme.gif" alt="kx theme demo" width="800"/>
 </div>
-
-```bash
-kx theme        # list available themes (indexed) with a preview of each
-kx theme nord   # persist a theme to ~/.kx/config.toml
-kx theme 3      # same, selecting by index from the kx theme listing
-```
 
 Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).
 
