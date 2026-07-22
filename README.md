@@ -22,7 +22,7 @@
 `kx` is a kubectl wrapper that adds index-based resource selection. Run `kx get <resource>` once, then reference any result by number instead of typing full resource names.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/demo.gif" alt="kx demo" width="800"/>
 </div>
 
 ## Install
@@ -179,7 +179,7 @@ kx logs 2            # logs for the second
 ```
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/diag.gif" alt="kx diag demo" width="800"/>
 </div>
 
 `kx diag <index>` diagnoses a single resource: a verdict banner, a `SUMMARY`
@@ -296,7 +296,7 @@ Styled output is emitted only when stdout is a terminal — piped or redirected 
 ### Themes
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/theme.gif" alt="kx theme demo" width="800"/>
 </div>
 
 ```bash
