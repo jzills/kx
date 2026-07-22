@@ -15,6 +15,7 @@ from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
+from kx.scanner import SEVERITIES, ImageScan
 from kx.state import StateHistory
 from kx.themes import DEFAULT_THEME, rich_theme, styles as theme_styles
 
@@ -51,6 +52,17 @@ _VERDICT_LABEL = {
     Severity.OK: "healthy",
     Severity.WARNING: "warnings",
     Severity.CRITICAL: "critical",
+}
+
+# CVE severity buckets → (column header, style for a nonzero count). Critical
+# and high share the alarm color; medium is a warning; low/unspecified stay
+# muted so the eye lands on what's actionable. Order matches scanner.SEVERITIES.
+_SCAN_SEVERITY = {
+    "CRITICAL": ("CRIT", "status.bad"),
+    "HIGH": ("HIGH", "status.bad"),
+    "MEDIUM": ("MED", "status.warn"),
+    "LOW": ("LOW", "muted"),
+    "UNSPECIFIED": ("UNSPEC", "muted"),
 }
 
 
@@ -478,6 +490,38 @@ def render_triage(result) -> None:
             f"[muted]{name} shares a name with an indexed resource "
             f"and was omitted[/muted]"
         )
+
+
+def render_scan_summary(rows: list[ImageScan]) -> None:
+    """One row per unique image: severity counts colored by bucket, with a
+    trailing status cell for images that failed to scan. Counts of zero stay
+    muted so nonzero criticals/highs stand out."""
+    table = Table(
+        show_header=True,
+        header_style="header",
+        box=None,
+        padding=(0, 2),
+        expand=_console.is_terminal,
+    )
+    # IMAGE absorbs the width pressure and ellipsizes; count columns are fixed.
+    table.add_column("IMAGE", no_wrap=True, overflow="ellipsis", ratio=1, min_width=10)
+    for severity in SEVERITIES:
+        table.add_column(_SCAN_SEVERITY[severity][0], justify="right", no_wrap=True)
+    table.add_column("", no_wrap=True)
+    for row in rows:
+        if row.counts is None:
+            dashes = ["[muted]—[/muted]"] * len(SEVERITIES)
+            table.add_row(row.image, *dashes, f"[error]{row.error or 'error'}[/error]")
+            continue
+        cells = []
+        for severity in SEVERITIES:
+            count = row.counts.get(severity, 0)
+            if count:
+                cells.append(f"[{_SCAN_SEVERITY[severity][1]}]{count}[/]")
+            else:
+                cells.append("[muted]0[/muted]")
+        table.add_row(row.image, *cells, "")
+    _console.print(table)
 
 
 def _render_pod_table(pods) -> None:

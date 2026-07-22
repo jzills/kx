@@ -336,8 +336,13 @@ def scan(
     engine: str = typer.Option(
         "scout", "--engine", help="Vulnerability scanner to use"
     ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Stream the scanner's full output instead of the summary table",
+    ),
 ):
-    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given."""
+    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full."""
     command = ScanCommand(
         state=_state, kubectl=_kubectl, scanner=_scanner, status=console.status
     )
@@ -349,11 +354,17 @@ def scan(
         name, ns, kind = _state.fields(index)
         images = command.execute(index, engine)
         console.print_banner(kind, name, namespace=ns, extra=_images_noun(len(images)))
-    for position, image in enumerate(images):
-        if position > 0:
-            console.print_raw("")
-        console.print_section(image)
-        command.scan_image(engine, image, ctx.args)
+
+    if full:
+        for position, image in enumerate(images):
+            if position > 0:
+                console.print_raw("")
+            console.print_section(image)
+            command.scan_image(engine, image, ctx.args)
+    else:
+        with console.status(f"scanning {_images_noun(len(images))}"):
+            rows = command.summarize(engine, images)
+        console.render_scan_summary(rows)
 
 
 def _parse_pairs(pairs: list[str]) -> dict[str, str]:
@@ -786,7 +797,7 @@ exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
 tree._examples = ["kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
-scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --engine scout"]
+scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --full", "kx scan --engine scout"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]

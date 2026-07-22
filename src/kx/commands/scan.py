@@ -3,7 +3,7 @@ from contextlib import nullcontext
 
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
-from kx.scanner import ScannerServiceProtocol, build_engine_argv
+from kx.scanner import ImageScan, ScannerServiceProtocol, get_engine
 from kx.state import StateServiceProtocol
 from kx.types import Status
 
@@ -41,7 +41,7 @@ class ScanCommand:
         if kind not in _SUPPORTED_KINDS:
             raise ValueError(f"scan is not supported for '{kind}'.")
         # Validate the engine before hitting the cluster so a typo fails fast.
-        build_engine_argv(engine, "", extra_args)
+        get_engine(engine)
         with self.status("resolving images"):
             raw = self.kubectl.run(["get", kind, name, "-n", namespace, "-o", "json"])
         images = _dedupe(self._images_of(json.loads(raw)))
@@ -52,7 +52,7 @@ class ScanCommand:
     def collect_namespace(
         self, namespace: str, engine: str = "scout", extra_args: list[str] | None = None
     ) -> list[str]:
-        build_engine_argv(engine, "", extra_args)
+        get_engine(engine)
         with self.status(f"resolving images in {namespace}"):
             raw = self.kubectl.run(
                 ["get", _NAMESPACE_KINDS, "-n", namespace, "-o", "json"]
@@ -66,7 +66,26 @@ class ScanCommand:
     def scan_image(
         self, engine: str, image: str, extra_args: list[str] | None = None
     ) -> int:
-        return self.scanner.scan(build_engine_argv(engine, image, extra_args))
+        return self.scanner.scan(get_engine(engine).passthrough_argv(image, extra_args))
+
+    def summarize(self, engine: str, images: list[str]) -> list[ImageScan]:
+        eng = get_engine(engine)
+        rows = []
+        for image in images:
+            result = self.scanner.capture(eng.summary_argv(image))
+            if result.returncode != 0:
+                reason = (result.stderr or "").strip().splitlines()
+                rows.append(
+                    ImageScan(image, error=reason[-1] if reason else "scan failed")
+                )
+                continue
+            try:
+                counts = eng.parse_counts(result.stdout)
+            except (ValueError, KeyError, TypeError):
+                rows.append(ImageScan(image, error="unparseable output"))
+                continue
+            rows.append(ImageScan(image, counts=counts))
+        return rows
 
     @classmethod
     def _images_of(cls, obj: dict) -> list[str]:

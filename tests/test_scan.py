@@ -1,4 +1,5 @@
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +8,24 @@ from typer.testing import CliRunner
 from kx.commands.scan import ScanCommand
 from kx.kinds import Kind
 from kx.main import app
+
+
+def _sarif(**sev_counts):
+    rules = []
+    results = []
+    for severity, n in sev_counts.items():
+        for _ in range(n):
+            results.append({"ruleIndex": len(rules)})
+            rules.append({"properties": {"cvssV3_severity": severity}})
+    return json.dumps(
+        {"runs": [{"tool": {"driver": {"rules": rules}}, "results": results}]}
+    )
+
+
+def _captured(stdout="", returncode=0, stderr=""):
+    return subprocess.CompletedProcess(
+        args=[], returncode=returncode, stdout=stdout, stderr=stderr
+    )
 
 
 def _deployment_json(images, init_images=None):
@@ -194,8 +213,81 @@ class TestScanCollectNamespace:
         kubectl.run.assert_not_called()
 
 
+class TestScanSummarize:
+    def _cmd(self, capture_results):
+        scanner = MagicMock()
+        scanner.capture.side_effect = capture_results
+        return (
+            ScanCommand(state=MagicMock(), kubectl=MagicMock(), scanner=scanner),
+            scanner,
+        )
+
+    def test_uses_sarif_summary_argv(self):
+        cmd, scanner = self._cmd([_captured(_sarif(HIGH=1))])
+        cmd.summarize("scout", ["nginx:1.25"])
+        scanner.capture.assert_called_once_with(
+            ["docker", "scout", "cves", "--format", "sarif", "nginx:1.25"]
+        )
+
+    def test_returns_counts_per_image(self):
+        cmd, _ = self._cmd(
+            [_captured(_sarif(CRITICAL=1, HIGH=2)), _captured(_sarif(LOW=3))]
+        )
+        rows = cmd.summarize("scout", ["nginx:1.25", "redis:7"])
+        assert rows[0].image == "nginx:1.25"
+        assert rows[0].counts["CRITICAL"] == 1
+        assert rows[0].counts["HIGH"] == 2
+        assert rows[1].counts["LOW"] == 3
+
+    def test_failed_scan_becomes_error_row(self):
+        cmd, _ = self._cmd(
+            [_captured(returncode=1, stderr="no such image: api/bad:latest")]
+        )
+        rows = cmd.summarize("scout", ["api/bad:latest"])
+        assert rows[0].counts is None
+        assert "no such image" in rows[0].error
+
+    def test_unparseable_output_becomes_error_row(self):
+        cmd, _ = self._cmd([_captured(stdout="not json")])
+        rows = cmd.summarize("scout", ["nginx:1.25"])
+        assert rows[0].counts is None
+        assert rows[0].error == "unparseable output"
+
+    def test_unknown_engine_raises(self):
+        cmd, _ = self._cmd([])
+        with pytest.raises(ValueError, match="unknown engine 'bogus'"):
+            cmd.summarize("bogus", ["nginx:1.25"])
+
+
 class TestScanCli:
-    def test_scan_prints_banner_and_scans_each_image(self):
+    def test_scan_prints_summary_table_by_default(self):
+        state = MagicMock()
+        state.fields.return_value = ("web", "default", Kind.Deployment)
+        kubectl = MagicMock()
+        kubectl.run.return_value = _deployment_json(["nginx:1.25", "redis:7"])
+        scanner = MagicMock()
+        scanner.capture.side_effect = [
+            _captured(_sarif(CRITICAL=1, HIGH=2)),
+            _captured(_sarif(LOW=3)),
+        ]
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._scanner", scanner),
+        ):
+            result = CliRunner().invoke(app, ["scan", "1"])
+        assert result.exit_code == 0
+        assert "Deployment/web" in result.output
+        assert "2 images" in result.output
+        # Table headers and per-image rows, no raw scanner streaming.
+        assert "CRIT" in result.output
+        assert "UNSPEC" in result.output
+        assert "nginx:1.25" in result.output
+        assert "redis:7" in result.output
+        assert scanner.capture.call_count == 2
+        scanner.scan.assert_not_called()
+
+    def test_scan_full_streams_raw_output(self):
         state = MagicMock()
         state.fields.return_value = ("web", "default", Kind.Deployment)
         kubectl = MagicMock()
@@ -207,13 +299,28 @@ class TestScanCli:
             patch("kx.main._kubectl", kubectl),
             patch("kx.main._scanner", scanner),
         ):
-            result = CliRunner().invoke(app, ["scan", "1"])
+            result = CliRunner().invoke(app, ["scan", "1", "--full"])
         assert result.exit_code == 0
-        assert "Deployment/web" in result.output
-        assert "2 images" in result.output
         assert "nginx:1.25" in result.output
         assert "redis:7" in result.output
         assert scanner.scan.call_count == 2
+        scanner.capture.assert_not_called()
+
+    def test_scan_summary_shows_error_row(self):
+        state = MagicMock()
+        state.fields.return_value = ("web", "default", Kind.Deployment)
+        kubectl = MagicMock()
+        kubectl.run.return_value = _deployment_json(["api/bad:latest"])
+        scanner = MagicMock()
+        scanner.capture.return_value = _captured(returncode=1, stderr="no such image")
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._scanner", scanner),
+        ):
+            result = CliRunner().invoke(app, ["scan", "1"])
+        assert result.exit_code == 0
+        assert "no such image" in result.output
 
     def test_scan_unknown_engine_exits_1(self):
         state = MagicMock()
@@ -234,7 +341,10 @@ class TestScanCli:
             _deployment_item(["nginx:1.27"]), _cronjob_item(["busybox:1"])
         )
         scanner = MagicMock()
-        scanner.scan.return_value = 0
+        scanner.capture.side_effect = [
+            _captured(_sarif(HIGH=1)),
+            _captured(_sarif(MEDIUM=2)),
+        ]
         with (
             patch("kx.main._state", MagicMock()),
             patch("kx.main._kubectl", kubectl),
@@ -245,4 +355,4 @@ class TestScanCli:
         assert "Mixed · prod · 2 images" in result.output
         assert "nginx:1.27" in result.output
         assert "busybox:1" in result.output
-        assert scanner.scan.call_count == 2
+        assert scanner.capture.call_count == 2
