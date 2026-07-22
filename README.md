@@ -22,7 +22,7 @@
 `kx` is a kubectl wrapper that adds index-based resource selection. Run `kx get <resource>` once, then reference any result by number instead of typing full resource names.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/demo.gif" alt="kx demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
 </div>
 
 ## Install
@@ -114,7 +114,7 @@ limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
 `kx diag 1` or `kx logs 2` drill straight in.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/diag.gif" alt="kx diag demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
 </div>
 
 `kx diag <index>` diagnoses a single resource: a verdict banner, a `SUMMARY`
@@ -133,7 +133,7 @@ or the full per-image CVE report with `--full`. Requires
 [Docker Scout](https://docs.docker.com/scout/).
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/scan.gif" alt="kx scan demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
 
 ## State
@@ -158,7 +158,7 @@ Styled output is emitted only when stdout is a terminal — piped or redirected 
 `kx theme` lists the available themes with a preview of each; `kx theme <name|index>` persists a choice to `~/.kx/config.toml`.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/theme.gif" alt="kx theme demo" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
 </div>
 
 Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).
