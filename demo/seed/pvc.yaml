@@ -1,0 +1,15 @@
+# PVC bound to a StorageClass with no provisioner — stays Pending.
+# On clusters where "standard" actually provisions, point it at a
+# nonexistent class instead.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: storage-pending
+  namespace: diagnostics
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Mi
