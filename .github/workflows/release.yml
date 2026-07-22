@@ -107,16 +107,21 @@ jobs:
             --title "v${{ needs.build-and-publish.outputs.version }}" \
             --generate-notes
 
+      # TEMPORARILY DISABLED: krew-index submission is paused so releases don't
+      # open unmergeable PRs on kubernetes-sigs/krew-index. krew.yml is left
+      # intact (still manually dispatchable); uncomment this step to resume
+      # auto-submitting on release.
+      #
       # Runs the Krew workflow at the tag so krew-release-bot picks the
       # version from GITHUB_REF. Explicit dispatch because GITHUB_TOKEN-created
       # releases never fire release: triggers.
-      - name: Trigger krew-index update
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run krew.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "v${{ needs.build-and-publish.outputs.version }}"
+      # - name: Trigger krew-index update
+      #   env:
+      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     gh workflow run krew.yml \
+      #       --repo "$GITHUB_REPOSITORY" \
+      #       --ref "v${{ needs.build-and-publish.outputs.version }}"
 
   merge:
     name: Open PR to Main
