@@ -293,7 +293,7 @@ Use `kx state <position>` to jump directly to any history entry, and `kx drop <p
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
 
-### Themes
+## Themes
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/theme.gif" alt="kx theme demo" width="800"/>
