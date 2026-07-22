@@ -362,7 +362,7 @@ def scan(
             console.print_section(image)
             command.scan_image(engine, image, ctx.args)
     else:
-        with console.status(f"scanning {_images_noun(len(images))}"):
+        with console.status("scanning"):
             rows = command.summarize(engine, images)
         console.render_scan_summary(rows)
 
