@@ -9,5 +9,6 @@ coverage.xml
 *.egg-info/
 docs/
 .superpowers/
+.claude/
 build/
 dist/
