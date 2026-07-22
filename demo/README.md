@@ -7,6 +7,7 @@ The GIFs embedded in the top-level README are rendered from the
 | --- | --- | --- |
 | `demo.tape` | `demo.gif` | Hero demo — get, top, logs, triage, drill-in, tree |
 | `diag.tape` | `diag.gif` | Namespace triage and per-resource diagnosis |
+| `scan.tape` | `scan.gif` | Namespace-wide image vulnerability scan rollup |
 | `theme.tape` | `theme.gif` | Theme listing with previews, switching themes |
 
 ## Prerequisites
@@ -30,6 +31,10 @@ never-Ready, a failing Job and CronJob, an endpointless Service, and a
 Pending PVC — plus a healthy control Deployment (`web-healthy`) and a pod
 near its memory limit (`memory-pressure`). Give the namespace a few minutes
 after seeding so restart counts and events accumulate.
+
+`scan.tape` additionally needs [Docker Scout](https://docs.docker.com/scout/)
+and hides a fixed 45s wait while the scan runs — run `kx scan` once beforehand
+to warm Scout's cache so the recording's wait is long enough.
 
 ## Render
 

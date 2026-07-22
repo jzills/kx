@@ -216,16 +216,9 @@ the pod that's running hot.
 (init containers and CronJob job templates included); bare `kx scan` sweeps
 every workload in the namespace. Results come back as a severity summary:
 
-```
-$ kx scan
-Mixed · diagnostics · 5 images
-  IMAGE                                     CRIT    HIGH    MED    LOW    UNSPEC
-  registry.invalid/does-not-exist:latest       —       —      —      —         —        ✗ Pull failed
-  busybox:1.36                                 0       0      0      0         0
-  nginx:1.27-alpine                            4      26     47     15        28
-  busybox                                      0       0      0      0         0
-  python:3-alpine                              0       0      0      0         0
-```
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-demo-overhaul/demo/scan.gif" alt="kx scan demo" width="800"/>
+</div>
 
 Scanning uses [Docker Scout](https://docs.docker.com/scout/) (`docker scout`
 must be available). Pass `--full` to stream the raw scanner output — CVE IDs,
