@@ -11,7 +11,7 @@ Type "kx theme"
 Enter
 Sleep 3.5s
 
-Type "kx theme nord"
+Type "kx theme 3"
 Enter
 Sleep 1.5s
 
@@ -19,7 +19,7 @@ Type "kx get pods"
 Enter
 Sleep 2.5s
 
-Type "kx theme catppuccin-mocha"
+Type "kx theme 6"
 Enter
 Sleep 1.5s
 
