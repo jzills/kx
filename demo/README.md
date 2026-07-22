@@ -14,7 +14,8 @@ The GIFs embedded in the top-level README are rendered from the
 - `vhs` on your PATH
 - a local cluster reachable via kubectl, seeded with the demo namespace (below)
 - kubectl's current namespace set to `diagnostics` (`kx ns` → pick it)
-- the project virtualenv at `.venv/` (the tapes' hidden prelude sources it)
+- the project virtualenv at `.venv/` (`render.sh` activates it and pins the
+  theme to `github-dark` for the recording, restoring your theme after)
 
 ## Seed the demo namespace
 
