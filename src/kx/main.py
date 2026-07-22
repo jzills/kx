@@ -318,6 +318,10 @@ def logs(ctx: typer.Context, index: int):
     command.execute(index, ctx.args)
 
 
+def _images_noun(count: int) -> str:
+    return f"{count} {'image' if count == 1 else 'images'}"
+
+
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -325,19 +329,26 @@ def logs(ctx: typer.Context, index: int):
 @handle_errors
 def scan(
     ctx: typer.Context,
-    index: int,
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to scan; omit to scan the whole namespace.",
+    ),
     engine: str = typer.Option(
         "scout", "--engine", help="Vulnerability scanner to use"
     ),
 ):
-    """Scan the unique container images of an indexed workload for vulnerabilities."""
-    name, ns, kind = _state.fields(index)
+    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given."""
     command = ScanCommand(
         state=_state, kubectl=_kubectl, scanner=_scanner, status=console.status
     )
-    images = command.execute(index, engine)
-    extra = f"{len(images)} {'image' if len(images) == 1 else 'images'}"
-    console.print_banner(kind, name, namespace=ns, extra=extra)
+    if index is None:
+        namespace = _kubectl.current_namespace()
+        images = command.collect_namespace(namespace, engine)
+        console.print_scope_banner("Mixed", namespace, _images_noun(len(images)))
+    else:
+        name, ns, kind = _state.fields(index)
+        images = command.execute(index, engine)
+        console.print_banner(kind, name, namespace=ns, extra=_images_noun(len(images)))
     for position, image in enumerate(images):
         if position > 0:
             console.print_raw("")
@@ -775,7 +786,7 @@ exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
 tree._examples = ["kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
-scan._examples = ["kx scan 1", "kx scan 1 --engine scout"]
+scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --engine scout"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]

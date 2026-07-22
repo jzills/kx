@@ -17,6 +17,9 @@ _SUPPORTED_KINDS = {
     Kind.CronJob,
 }
 
+# Workload kinds swept for a namespace-level scan, as a single kubectl selector.
+_NAMESPACE_KINDS = "deployments,statefulsets,daemonsets,cronjobs,jobs,pods"
+
 
 class ScanCommand:
     def __init__(
@@ -41,9 +44,23 @@ class ScanCommand:
         build_engine_argv(engine, "", extra_args)
         with self.status("resolving images"):
             raw = self.kubectl.run(["get", kind, name, "-n", namespace, "-o", "json"])
-        images = self._extract_images(json.loads(raw))
+        images = _dedupe(self._images_of(json.loads(raw)))
         if not images:
             raise ValueError(f"no container images found for {kind}/{name}.")
+        return images
+
+    def collect_namespace(
+        self, namespace: str, engine: str = "scout", extra_args: list[str] | None = None
+    ) -> list[str]:
+        build_engine_argv(engine, "", extra_args)
+        with self.status(f"resolving images in {namespace}"):
+            raw = self.kubectl.run(
+                ["get", _NAMESPACE_KINDS, "-n", namespace, "-o", "json"]
+            )
+        items = json.loads(raw).get("items", [])
+        images = _dedupe([image for item in items for image in self._images_of(item)])
+        if not images:
+            raise ValueError(f"no container images found in namespace '{namespace}'.")
         return images
 
     def scan_image(
@@ -51,18 +68,36 @@ class ScanCommand:
     ) -> int:
         return self.scanner.scan(build_engine_argv(engine, image, extra_args))
 
-    @staticmethod
-    def _extract_images(obj: dict) -> list[str]:
-        spec = obj.get("spec", {})
-        # Workloads carry the container spec under spec.template.spec; a bare Pod
-        # carries it directly under spec.
-        pod_spec = spec.get("template", {}).get("spec") if "template" in spec else spec
-        pod_spec = pod_spec or {}
-        images = [
+    @classmethod
+    def _images_of(cls, obj: dict) -> list[str]:
+        pod_spec = cls._pod_spec(obj)
+        return [
             container["image"]
             for group in ("initContainers", "containers")
             for container in (pod_spec.get(group) or [])
             if container.get("image")
         ]
-        # Unique, preserving first-seen order.
-        return list(dict.fromkeys(images))
+
+    @staticmethod
+    def _pod_spec(obj: dict) -> dict:
+        """Locate the PodSpec for any workload kind. Deployments/StatefulSets/
+        DaemonSets/Jobs/ReplicaSets carry it under spec.template.spec; a CronJob
+        nests it under spec.jobTemplate.spec.template.spec; a bare Pod is spec."""
+        spec = obj.get("spec") or {}
+        if obj.get("kind") == Kind.CronJob:
+            return (
+                spec.get("jobTemplate", {})
+                .get("spec", {})
+                .get("template", {})
+                .get("spec")
+                or {}
+            )
+        template = spec.get("template")
+        if template is not None:
+            return template.get("spec") or {}
+        return spec
+
+
+def _dedupe(images: list[str]) -> list[str]:
+    """Unique, preserving first-seen order."""
+    return list(dict.fromkeys(images))

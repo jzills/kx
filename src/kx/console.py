@@ -93,12 +93,17 @@ def print_error(msg: str) -> None:
 
 
 def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> None:
-    parts = [f"{kind}/{name}"]
-    if namespace:
-        parts.append(namespace)
-    if extra:
-        parts.append(extra)
-    _console.print(f"[muted]{' · '.join(parts)}[/muted]")
+    _print_caption([f"{kind}/{name}", namespace, extra])
+
+
+def print_scope_banner(label: str, namespace: str = "", extra: str = "") -> None:
+    """Caption for a cross-kind sweep: "{label} · {namespace} · {extra}",
+    matching kx diag's "Mixed · …" header for namespace-spanning listings."""
+    _print_caption([label, namespace, extra])
+
+
+def _print_caption(parts: list[str]) -> None:
+    _console.print(f"[muted]{' · '.join(part for part in parts if part)}[/muted]")
 
 
 def print_section(label: str) -> None:

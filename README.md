@@ -98,7 +98,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
-| `kx scan <index> [--engine str] [kubectl flags...]` | Scan the unique container images of an indexed workload for vulnerabilities. |
+| `kx scan [<index>] [--engine str] [kubectl flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given. |
 | `kx labels <indexes>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | `kx annotations <indexes>...` | Show annotations for one or more indexed resources. |
 | `kx label <index> [<pairs>...] [--remove str] [--overwrite]` | Set or remove labels on an indexed resource. |
