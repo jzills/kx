@@ -10,6 +10,10 @@ repos:
       - id: gen-command-table
         name: Regenerate README command table
         language: system
-        entry: python scripts/gen_command_table.py
+        # Prefer the project's venv interpreter (which has the deps) when it
+        # exists, so `git commit` works without activating it first; fall back
+        # to `python` on PATH for CI, where deps live in the setup-python env
+        # and there is no .venv directory.
+        entry: sh -c 'if [ -x .venv/bin/python ]; then exec .venv/bin/python scripts/gen_command_table.py; else exec python scripts/gen_command_table.py; fi'
         pass_filenames: false
         always_run: true

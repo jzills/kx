@@ -811,3 +811,36 @@ def test_render_diagnostic_empty_states_share_indent(capture_console):
     indent = len(summary_empty) - len(summary_empty.lstrip())
     assert indent == 4
     assert indent == len(events_empty) - len(events_empty.lstrip())
+
+
+def test_render_scan_summary_counts_and_headers(capture_console):
+    from kx.scanner import ImageScan
+
+    rows = [
+        ImageScan(
+            "nginx:1.27",
+            counts={
+                "CRITICAL": 4,
+                "HIGH": 26,
+                "MEDIUM": 47,
+                "LOW": 15,
+                "UNSPECIFIED": 28,
+            },
+        )
+    ]
+    kx_console.render_scan_summary(rows)
+    out = capture_console.getvalue()
+    for header in ("IMAGE", "CRIT", "HIGH", "MED", "LOW", "UNSPEC"):
+        assert header in out
+    assert "nginx:1.27" in out
+    assert "26" in out
+
+
+def test_render_scan_summary_error_row(capture_console):
+    from kx.scanner import ImageScan
+
+    kx_console.render_scan_summary([ImageScan("api/bad:latest", error="Pull failed")])
+    out = capture_console.getvalue()
+    assert "api/bad:latest" in out
+    assert "Pull failed" in out
+    assert "—" in out

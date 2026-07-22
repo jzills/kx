@@ -29,6 +29,7 @@ from kx.commands.contexts import ContextsCommand
 from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
+from kx.commands.scan import ScanCommand
 from kx.commands.state import StateCommand
 from kx.commands.theme import ThemeCommand
 from kx.commands.top import TopCommand
@@ -43,6 +44,7 @@ from kx.index import IndexService
 from kx.kinds import is_kind_spelling, normalize_kind
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
+from kx.scanner import ScannerService
 from kx.state import StateService
 
 
@@ -109,6 +111,7 @@ _HELP_SECTIONS = (
             "tree",
             "rollout",
             "scale",
+            "scan",
             "port-forward",
             "diagnostic",
             "namespace",
@@ -170,6 +173,7 @@ _kubectl = KubectlService()
 _state = StateService(max_history=_config.max_history)
 _events = EventsService()
 _index = IndexService()
+_scanner = ScannerService()
 _diagnostics = DiagnosticsService(events=_events)
 # A lambda, not an instance: it reads the module globals at call time so tests
 # that patch kx.main._state/_kubectl are honored.
@@ -312,6 +316,55 @@ def logs(ctx: typer.Context, index: int):
     console.print_banner(kind, name, namespace=ns)
     command = LogsCommand(state=_state, kubectl=_kubectl, status=console.status)
     command.execute(index, ctx.args)
+
+
+def _images_noun(count: int) -> str:
+    return f"{count} {'image' if count == 1 else 'images'}"
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors
+def scan(
+    ctx: typer.Context,
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to scan; omit to scan the whole namespace.",
+    ),
+    engine: str = typer.Option(
+        "scout", "--engine", help="Vulnerability scanner to use"
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Stream the scanner's full output instead of the summary table",
+    ),
+):
+    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full."""
+    command = ScanCommand(
+        state=_state, kubectl=_kubectl, scanner=_scanner, status=console.status
+    )
+    if index is None:
+        namespace = _kubectl.current_namespace()
+        images = command.collect_namespace(namespace, engine)
+        console.print_scope_banner("Mixed", namespace, _images_noun(len(images)))
+    else:
+        name, ns, kind = _state.fields(index)
+        images = command.execute(index, engine)
+        console.print_banner(kind, name, namespace=ns, extra=_images_noun(len(images)))
+
+    if full:
+        for position, image in enumerate(images):
+            if position > 0:
+                console.print_raw("")
+            console.print_section(image)
+            command.scan_image(engine, image, ctx.args)
+    else:
+        with console.status("scanning"):
+            rows = command.summarize(engine, images)
+        console.render_scan_summary(rows)
 
 
 def _parse_pairs(pairs: list[str]) -> dict[str, str]:
@@ -744,6 +797,7 @@ exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
 tree._examples = ["kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
+scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --full", "kx scan --engine scout"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
 diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]
