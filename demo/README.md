@@ -7,7 +7,7 @@ The GIFs embedded in the top-level README are rendered from the
 | --- | --- | --- |
 | `demo.tape` | `demo.gif` | Hero demo — get, top, logs, triage, drill-in, tree |
 | `diag.tape` | `diag.gif` | Namespace triage and per-resource diagnosis |
-| `scan.tape` | `scan.gif` | Namespace-wide image vulnerability scan rollup |
+| `scan.tape` | `scan.gif` | Namespace scan rollup, then one workload with --full |
 | `theme.tape` | `theme.gif` | Theme listing with previews, switching themes |
 
 ## Prerequisites
