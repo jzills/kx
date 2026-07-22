@@ -15,6 +15,7 @@ from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.kinds import plural_display
+from kx.scanner import SEVERITIES, ImageScan
 from kx.state import StateHistory
 from kx.themes import DEFAULT_THEME, rich_theme, styles as theme_styles
 
@@ -51,6 +52,17 @@ _VERDICT_LABEL = {
     Severity.OK: "healthy",
     Severity.WARNING: "warnings",
     Severity.CRITICAL: "critical",
+}
+
+# CVE severity buckets → (column header, style for a nonzero count). Critical
+# and high share the alarm color; medium is a warning; low/unspecified stay
+# muted so the eye lands on what's actionable. Order matches scanner.SEVERITIES.
+_SCAN_SEVERITY = {
+    "CRITICAL": ("CRIT", "status.bad"),
+    "HIGH": ("HIGH", "status.bad"),
+    "MEDIUM": ("MED", "status.warn"),
+    "LOW": ("LOW", "muted"),
+    "UNSPECIFIED": ("UNSPEC", "muted"),
 }
 
 
@@ -93,12 +105,21 @@ def print_error(msg: str) -> None:
 
 
 def print_banner(kind: str, name: str, namespace: str = "", extra: str = "") -> None:
-    parts = [f"{kind}/{name}"]
-    if namespace:
-        parts.append(namespace)
-    if extra:
-        parts.append(extra)
-    _console.print(f"[muted]{' · '.join(parts)}[/muted]")
+    _print_caption([f"{kind}/{name}", namespace, extra])
+
+
+def print_scope_banner(label: str, namespace: str = "", extra: str = "") -> None:
+    """Caption for a cross-kind sweep: "{label} · {namespace} · {extra}",
+    matching kx diag's "Mixed · …" header for namespace-spanning listings."""
+    _print_caption([label, namespace, extra])
+
+
+def _print_caption(parts: list[str]) -> None:
+    _console.print(f"[muted]{' · '.join(part for part in parts if part)}[/muted]")
+
+
+def print_section(label: str) -> None:
+    _console.print(f"[muted]── {label} ──[/muted]")
 
 
 # How long a command runs silently before the spinner appears. Quick commands
@@ -185,6 +206,35 @@ def _status_color(status: str) -> str:
     return "status.neutral"
 
 
+# kx top's usage-percentage columns. Mirrors _MEMORY_WARN_THRESHOLD (0.75),
+# _MEMORY_CRITICAL_THRESHOLD (0.90), and _CPU_WARN_THRESHOLD (0.90) in
+# commands/diagnostic.py, re-expressed as plain percentages here rather than
+# imported — console.py is a lower-level rendering module the commands
+# import from, not the reverse. A red 94% in kx top means exactly what a
+# critical finding means in kx diag; keep these two in sync by hand.
+_MEM_WARN_PCT = 75
+_MEM_CRITICAL_PCT = 90
+_CPU_WARN_PCT = 90  # CPU never reaches critical: throttling, not a crash.
+
+
+def _usage_pct_color(cell: str, resource: str) -> str | None:
+    if not cell.endswith("%"):
+        return None
+    try:
+        pct = int(cell[:-1])
+    except ValueError:
+        return None
+    if resource == "memory":
+        if pct >= _MEM_CRITICAL_PCT:
+            return "status.bad"
+        if pct >= _MEM_WARN_PCT:
+            return "status.warn"
+        return None
+    if pct >= _CPU_WARN_PCT:
+        return "status.warn"
+    return None
+
+
 def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
     label = "item" if count == 1 else "items"
     _console.print(
@@ -250,19 +300,25 @@ def render_indexed_table(
         box=None,
         padding=(0, 2),
     )
-    _right_aligned = {"X", "AGE"}
+    _right_aligned = {"X", "AGE", "CPU%", "MEM%"}
     for header in headers:
         table.add_column(
             header, justify="right" if header in _right_aligned else "left"
         )
 
     status_col = headers.index("STATUS") if "STATUS" in headers else -1
+    cpu_pct_col = headers.index("CPU%") if "CPU%" in headers else -1
+    mem_pct_col = headers.index("MEM%") if "MEM%" in headers else -1
 
     for row in rows:
         styled = []
         for index, cell in enumerate(row):
             if index == status_col:
                 styled.append(f"[{_status_color(cell)}]{cell}[/]")
+            elif index in (cpu_pct_col, mem_pct_col):
+                resource = "cpu" if index == cpu_pct_col else "memory"
+                color = _usage_pct_color(cell, resource)
+                styled.append(f"[{color}]{cell}[/]" if color else cell)
             else:
                 styled.append(cell)
         table.add_row(*styled)
@@ -357,6 +413,115 @@ def render_diagnostic(report) -> None:
     _render_pod_table(report.pods)
     _render_logs(report.pods)
     _render_warning_events(report.warning_events)
+
+
+def render_triage(result) -> None:
+    """Namespace triage table: one row per unhealthy resource (indexed to match
+    the saved state), healthy resources collapsed into the footer.
+
+    Caption follows the same "{kind label} · {namespace} · {count} {noun}"
+    shape as kx get and kx state — "Mixed" as the kind label, matching
+    render_state's convention for cross-kind listings, since a sweep spans
+    whatever kinds exist in the namespace. "checked" (not "items") because
+    the count is resources examined, not rows in the table below it — most
+    checked resources are healthy and never appear as a row."""
+    if result.checked == 0:
+        _console.print(f"[muted]Mixed · {result.namespace} · 0 checked[/muted]")
+        return
+    if not result.reports:
+        _console.print(
+            f"[muted]Mixed · {result.namespace} ·[/muted] "
+            f"[success]{result.checked} checked · all healthy[/success]"
+        )
+        return
+
+    _console.print(
+        f"[muted]Mixed · {result.namespace} · {result.checked} checked[/muted]"
+    )
+    _console.print()
+    # Expanded on a terminal so TOP FINDING (the one ratio column) absorbs the
+    # width pressure and ellipsizes. Off-terminal (the 1000-col pipe console)
+    # expansion would stretch trailing padding across the full pipe width, so
+    # the table hugs its content there.
+    table = Table(
+        show_header=True,
+        header_style="header",
+        box=None,
+        padding=(0, 2),
+        expand=_console.is_terminal,
+    )
+    table.add_column("", justify="right", style="muted", no_wrap=True)
+    table.add_column("KIND", no_wrap=True)
+    table.add_column("NAME", no_wrap=True)
+    table.add_column("VERDICT", no_wrap=True)
+    # One resource per line keeps the table scannable; the full finding is one
+    # `kx diag <index>` away.
+    table.add_column(
+        "TOP FINDING", no_wrap=True, overflow="ellipsis", ratio=1, min_width=10
+    )
+    # Long names are truncated by hand: with every column no_wrap, Rich's
+    # last-resort overflow handling shrinks all columns evenly (min_width is
+    # ignored), which can erase the index and verdict cells on narrow
+    # terminals. The budget is the console width minus the fixed columns
+    # (index 2, KIND ≤11, VERDICT 8, TOP FINDING ≥10, 5×4 padding).
+    name_budget = max(8, _console.width - 51)
+    for position, report in enumerate(result.reports, start=1):
+        color = _SEVERITY_COLOR[report.verdict]
+        top = report.findings[0].summary if report.findings else ""
+        name = report.name
+        if len(name) > name_budget:
+            name = name[: name_budget - 1] + "…"
+        table.add_row(
+            str(position),
+            report.kind,
+            name,
+            f"[{color}]{_VERDICT_LABEL[report.verdict]}[/]",
+            Text(top, style="body"),
+        )
+    _console.print(table)
+    _console.print()
+    label = "resource" if result.healthy == 1 else "resources"
+    _console.print(
+        f"[muted]{result.healthy} healthy {label} not shown · "
+        f"kx diag <index> for detail[/muted]"
+    )
+    for name in result.dropped:
+        _console.print(
+            f"[muted]{name} shares a name with an indexed resource "
+            f"and was omitted[/muted]"
+        )
+
+
+def render_scan_summary(rows: list[ImageScan]) -> None:
+    """One row per unique image: severity counts colored by bucket, with a
+    trailing status cell for images that failed to scan. Counts of zero stay
+    muted so nonzero criticals/highs stand out."""
+    table = Table(
+        show_header=True,
+        header_style="header",
+        box=None,
+        padding=(0, 2),
+        expand=_console.is_terminal,
+    )
+    # IMAGE absorbs the width pressure and ellipsizes; count columns are fixed.
+    table.add_column("IMAGE", no_wrap=True, overflow="ellipsis", ratio=1, min_width=10)
+    for severity in SEVERITIES:
+        table.add_column(_SCAN_SEVERITY[severity][0], justify="right", no_wrap=True)
+    table.add_column("", no_wrap=True)
+    for row in rows:
+        if row.counts is None:
+            dashes = ["[muted]—[/muted]"] * len(SEVERITIES)
+            table.add_row(row.image, *dashes, f"[error]{row.error or 'error'}[/error]")
+            continue
+        cells = []
+        for severity in SEVERITIES:
+            count = row.counts.get(severity, 0)
+            if count:
+                cells.append(f"[{_SCAN_SEVERITY[severity][1]}]{count}[/]")
+            else:
+                cells.append("[muted]0[/muted]")
+        table.add_row(row.image, *cells, "")
+    _console.print(table)
 
 
 def _render_pod_table(pods) -> None:
@@ -666,9 +831,9 @@ def render_state_history(history: StateHistory) -> None:
     _console.print(table)
 
 
-def render_labels(labels: dict[str, str]) -> None:
-    if not labels:
-        _console.print("[muted]No labels[/muted]")
+def render_key_value_table(header: str, data: dict[str, str]) -> None:
+    if not data:
+        _console.print(f"[muted]No {header.lower()}s[/muted]")
         return
     table = Table(
         show_header=True,
@@ -676,9 +841,9 @@ def render_labels(labels: dict[str, str]) -> None:
         box=None,
         padding=(0, 2),
     )
-    table.add_column("LABEL")
+    table.add_column(header.upper())
     table.add_column("VALUE", style="muted")
-    for key, value in labels.items():
+    for key, value in data.items():
         table.add_row(key, value)
     _console.print(table)
 

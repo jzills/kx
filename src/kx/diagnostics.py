@@ -1,13 +1,15 @@
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import IntEnum
 from typing import Protocol
 
 from kubernetes import client
+from kubernetes.utils import get_pods_metrics, parse_quantity
 
 from kx.events import EventsServiceProtocol
-from kx.graph import resolve_workload_pods
+from kx.graph import _owned_by, most_recent_job, resolve_workload_pods
 from kx.k8s import load_config
 from kx.kinds import Kind
 
@@ -64,6 +66,10 @@ class ContainerDiagnostic:
     log_lines: list[str] = field(default_factory=list)
     log_source: str | None = None  # "previous" | "current"
     log_filtered: bool = True  # False when log_lines is a raw fallback tail
+    cpu_usage: Decimal | None = None
+    cpu_limit: Decimal | None = None
+    memory_usage: Decimal | None = None
+    memory_limit: Decimal | None = None
 
 
 @dataclass
@@ -95,6 +101,49 @@ class ReplicaHealth:
 
 
 @dataclass
+class ServiceHealth:
+    """The Service's own spec/status carries no health signal — this is built
+    from its Endpoints object, the same source kubectl and the cluster use to
+    decide where traffic actually routes."""
+
+    has_selector: bool
+    ready_addresses: int
+    not_ready_addresses: int
+
+
+@dataclass
+class PVCHealth:
+    """No pod fan-out, no ownership — a PVC's status is self-contained."""
+
+    phase: str  # "Pending" | "Bound" | "Lost" | "Unknown"
+
+
+@dataclass
+class JobHealth:
+    """Doesn't reuse ReplicaHealth: a Job has no desired/ready replica concept
+    — completion/failure counts and a backoff limit instead."""
+
+    succeeded: int
+    failed: int
+    active: int
+    suspended: bool
+    backoff_limit: int
+    backoff_limit_exceeded: bool
+    deadline_exceeded: bool
+
+
+@dataclass
+class CronJobHealth:
+    """No cron-expression parsing (no dependency for it, and the semantics
+    are easy to get subtly wrong — timezones, concurrencyPolicy). Health is
+    instead a rollup of the most recently-run owned Job, reusing JobHealth
+    and _job_findings rather than inventing a new heuristic."""
+
+    suspended: bool
+    most_recent_job: JobHealth | None
+
+
+@dataclass
 class EventSummary:
     reason: str
     message: str
@@ -112,6 +161,10 @@ class DiagnosticData:
     name: str
     namespace: str
     replicas: ReplicaHealth | None
+    job: JobHealth | None = None
+    service: ServiceHealth | None = None
+    pvc: PVCHealth | None = None
+    cronjob: CronJobHealth | None = None
     pods: list[PodDiagnostic] = field(default_factory=list)
     warning_events: list[EventSummary] = field(default_factory=list)
 
@@ -144,6 +197,7 @@ class DiagnosticReport:
 
 class DiagnosticsServiceProtocol(Protocol):
     def gather(self, kind: str, name: str, namespace: str) -> DiagnosticData: ...
+    def sweep(self, namespace: str) -> list[DiagnosticData]: ...
 
 
 class DiagnosticsService:
@@ -154,10 +208,16 @@ class DiagnosticsService:
         load_config()
         apps = client.AppsV1Api()
         core = client.CoreV1Api()
+        batch = client.BatchV1Api()
 
         replicas = self._replica_health(kind, name, namespace, apps)
-        pods_raw = resolve_workload_pods(kind, name, namespace, apps, core)
+        job = self._job_health(kind, name, namespace, batch)
+        service = self._service_health(kind, name, namespace, core)
+        pvc = self._pvc_health(kind, name, namespace, core)
+        cronjob = self._cronjob_health(kind, name, namespace, batch)
+        pods_raw = resolve_workload_pods(kind, name, namespace, apps, core, batch)
         pods = [_pod_diagnostic(pod) for pod in pods_raw]
+        self._attach_usage(pods, self._usage_lookup(namespace))
         self._attach_logs(pods, namespace, core)
         warning_events = self._warning_events(kind, name, namespace, pods_raw)
 
@@ -166,45 +226,286 @@ class DiagnosticsService:
             name=name,
             namespace=namespace,
             replicas=replicas,
+            job=job,
+            service=service,
+            cronjob=cronjob,
+            pvc=pvc,
             pods=pods,
             warning_events=warning_events,
         )
 
+    def sweep(self, namespace: str) -> list[DiagnosticData]:
+        """Diagnose every workload in the namespace plus orphan pods (pods not
+        owned by a swept workload — bare pods, Job pods). One list call per
+        kind, one events fetch, and no log tails: logs feed the detailed LOGS
+        section only, never findings, so the sweep skips them for speed."""
+        load_config()
+        apps = client.AppsV1Api()
+        core = client.CoreV1Api()
+        batch = client.BatchV1Api()
+
+        pods = core.list_namespaced_pod(namespace).items
+        replica_sets = apps.list_namespaced_replica_set(namespace).items
+        jobs = batch.list_namespaced_job(namespace).items
+        all_events = self.events.get(namespace)
+        # One metrics-server call for the whole sweep, unlike logs (skipped
+        # entirely here) — usage actually drives a finding, so every entry
+        # below needs it, but still just one API call total.
+        usage_lookup = self._usage_lookup(namespace)
+
+        # CronJobs own Jobs (not pods), so they get their own pass — like
+        # Services, not the pod-owner-claiming workloads loop below. Their
+        # owned Jobs' UIDs are excluded from the standalone Job listing so a
+        # CronJob-owned Job is never double-reported (once under its CronJob,
+        # once as its own row) — the same exclusion pattern the workloads
+        # loop already applies to pods, one level up the ownership chain.
+        results: list[DiagnosticData] = []
+        claimed: set[str] = set()
+        claimed_job_uids: set[str] = set()
+        for cj in batch.list_namespaced_cron_job(namespace).items:
+            owned_jobs = [job for job in jobs if _owned_by(job, cj.metadata.uid)]
+            owned_job_uids = {job.metadata.uid for job in owned_jobs}
+            claimed_job_uids.update(owned_job_uids)
+            # Every owned Job's pods are claimed here, not just the displayed
+            # (most-recent) Job's — every owned Job is excluded from the
+            # standalone Job listing below, so all of their pods must be
+            # excluded from the orphan-pod pass too, or old runs' pods leak
+            # through as unlabeled orphans.
+            claimed.update(
+                pod.metadata.uid
+                for pod in pods
+                if any(_owned_by(pod, uid) for uid in owned_job_uids)
+            )
+            recent = most_recent_job(cj.metadata.uid, jobs)
+            recent_pods = (
+                [pod for pod in pods if _owned_by(pod, recent.metadata.uid)]
+                if recent
+                else []
+            )
+            cronjob_pods = [_pod_diagnostic(pod) for pod in recent_pods]
+            self._attach_usage(cronjob_pods, usage_lookup)
+            results.append(
+                DiagnosticData(
+                    kind=Kind.CronJob,
+                    name=cj.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    cronjob=CronJobHealth(
+                        suspended=bool(cj.spec.suspend),
+                        most_recent_job=_job_health_from(recent) if recent else None,
+                    ),
+                    pods=cronjob_pods,
+                    warning_events=self._warning_events(
+                        Kind.CronJob,
+                        cj.metadata.name,
+                        namespace,
+                        recent_pods,
+                        all_events=all_events,
+                    ),
+                )
+            )
+
+        workloads: list[tuple[Kind, object, set[str]]] = []
+        for deploy in apps.list_namespaced_deployment(namespace).items:
+            rs_uids = {
+                rs.metadata.uid
+                for rs in replica_sets
+                if _owned_by(rs, deploy.metadata.uid)
+            }
+            workloads.append((Kind.Deployment, deploy, rs_uids))
+        for sts in apps.list_namespaced_stateful_set(namespace).items:
+            workloads.append((Kind.StatefulSet, sts, {sts.metadata.uid}))
+        for ds in apps.list_namespaced_daemon_set(namespace).items:
+            workloads.append((Kind.DaemonSet, ds, {ds.metadata.uid}))
+        for job in jobs:
+            if job.metadata.uid in claimed_job_uids:
+                continue
+            workloads.append((Kind.Job, job, {job.metadata.uid}))
+
+        for kind, obj, owner_uids in workloads:
+            owned = [
+                pod for pod in pods if any(_owned_by(pod, uid) for uid in owner_uids)
+            ]
+            claimed.update(pod.metadata.uid for pod in owned)
+            results.append(
+                self._build_data(
+                    kind,
+                    obj.metadata.name,
+                    namespace,
+                    obj,
+                    owned,
+                    all_events,
+                    usage_lookup,
+                )
+            )
+
+        # Services are matched by label selector, not ownership: their pods
+        # are independently owned (or genuinely unowned) elsewhere and are
+        # never excluded from the orphan pass below on a Service's account.
+        endpoints_by_name = {
+            ep.metadata.name: ep
+            for ep in core.list_namespaced_endpoints(namespace).items
+        }
+        for svc in core.list_namespaced_service(namespace).items:
+            selector = svc.spec.selector or {}
+            svc_pods = [
+                pod for pod in pods if selector and _matches_selector(pod, selector)
+            ]
+            service_pods = [_pod_diagnostic(pod) for pod in svc_pods]
+            self._attach_usage(service_pods, usage_lookup)
+            results.append(
+                DiagnosticData(
+                    kind=Kind.Service,
+                    name=svc.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    service=_service_health_from(
+                        svc, endpoints_by_name.get(svc.metadata.name)
+                    ),
+                    pods=service_pods,
+                    warning_events=self._warning_events(
+                        Kind.Service,
+                        svc.metadata.name,
+                        namespace,
+                        svc_pods,
+                        all_events=all_events,
+                    ),
+                )
+            )
+
+        # PVCs have no pods and no ownership relationships — simplest of the
+        # sweep's additions, just a listing and a phase check.
+        for claim in core.list_namespaced_persistent_volume_claim(namespace).items:
+            results.append(
+                DiagnosticData(
+                    kind=Kind.PersistentVolumeClaim,
+                    name=claim.metadata.name,
+                    namespace=namespace,
+                    replicas=None,
+                    pvc=PVCHealth(
+                        phase=getattr(claim.status, "phase", None) or "Unknown"
+                    ),
+                    warning_events=self._warning_events(
+                        Kind.PersistentVolumeClaim,
+                        claim.metadata.name,
+                        namespace,
+                        [],
+                        all_events=all_events,
+                    ),
+                )
+            )
+
+        for pod in pods:
+            if pod.metadata.uid in claimed:
+                continue
+            results.append(
+                self._build_data(
+                    Kind.Pod,
+                    pod.metadata.name,
+                    namespace,
+                    None,
+                    [pod],
+                    all_events,
+                    usage_lookup,
+                )
+            )
+        return results
+
+    def _build_data(
+        self, kind, name, namespace, obj, pods_raw, all_events, usage_lookup
+    ) -> DiagnosticData:
+        pods = [_pod_diagnostic(pod) for pod in pods_raw]
+        self._attach_usage(pods, usage_lookup)
+        return DiagnosticData(
+            kind=kind,
+            name=name,
+            namespace=namespace,
+            # Both extractors already return None for kinds they don't handle
+            # (Job has no ReplicaHealth; anything else has no JobHealth).
+            replicas=_replica_health_from(kind, obj) if obj is not None else None,
+            job=_job_health_from(obj) if obj is not None and kind == Kind.Job else None,
+            pods=pods,
+            warning_events=self._warning_events(
+                kind, name, namespace, pods_raw, all_events=all_events
+            ),
+        )
+
     def _replica_health(self, kind, name, namespace, apps) -> ReplicaHealth | None:
         if kind == Kind.Deployment:
-            obj = apps.read_namespaced_deployment(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(obj.spec.replicas),
-                ready=_int(status.ready_replicas),
-                available=_int(status.available_replicas),
-                updated=_int(status.updated_replicas),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_deployment(name, namespace)
             )
         if kind == Kind.StatefulSet:
-            obj = apps.read_namespaced_stateful_set(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(obj.spec.replicas),
-                ready=_int(status.ready_replicas),
-                available=_int(getattr(status, "available_replicas", None)),
-                updated=_int(status.updated_replicas),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_stateful_set(name, namespace)
             )
         if kind == Kind.DaemonSet:
-            obj = apps.read_namespaced_daemon_set(name, namespace)
-            status = obj.status
-            return ReplicaHealth(
-                desired=_int(status.desired_number_scheduled),
-                ready=_int(status.number_ready),
-                available=_int(status.number_available),
-                updated=_int(status.updated_number_scheduled),
-                generation=obj.metadata.generation,
-                observed_generation=status.observed_generation,
+            return _replica_health_from(
+                kind, apps.read_namespaced_daemon_set(name, namespace)
             )
         return None
+
+    def _job_health(self, kind, name, namespace, batch) -> JobHealth | None:
+        if kind != Kind.Job:
+            return None
+        return _job_health_from(batch.read_namespaced_job(name, namespace))
+
+    def _service_health(self, kind, name, namespace, core) -> ServiceHealth | None:
+        if kind != Kind.Service:
+            return None
+        svc = core.read_namespaced_service(name, namespace)
+        try:
+            endpoints = core.read_namespaced_endpoints(name, namespace)
+        except Exception:
+            endpoints = None
+        return _service_health_from(svc, endpoints)
+
+    def _pvc_health(self, kind, name, namespace, core) -> PVCHealth | None:
+        if kind != Kind.PersistentVolumeClaim:
+            return None
+        claim = core.read_namespaced_persistent_volume_claim(name, namespace)
+        return PVCHealth(phase=getattr(claim.status, "phase", None) or "Unknown")
+
+    def _cronjob_health(self, kind, name, namespace, batch) -> CronJobHealth | None:
+        if kind != Kind.CronJob:
+            return None
+        cj = batch.read_namespaced_cron_job(name, namespace)
+        most_recent = most_recent_job(
+            cj.metadata.uid, batch.list_namespaced_job(namespace).items
+        )
+        return CronJobHealth(
+            suspended=bool(cj.spec.suspend),
+            most_recent_job=_job_health_from(most_recent) if most_recent else None,
+        )
+
+    def _usage_lookup(
+        self, namespace
+    ) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
+        """One metrics-server call per namespace. Swallows failure (e.g.
+        metrics-server not installed — the same failure kx top surfaces to
+        the user directly) so the rest of kx diag is unaffected; usage-based
+        findings simply don't appear."""
+        try:
+            metrics = get_pods_metrics(client.ApiClient(), namespace)
+        except Exception:
+            return {}
+        lookup = {}
+        for item in metrics.get("items", []):
+            pod_name = item["metadata"]["name"]
+            for c in item.get("containers", []):
+                usage = c["usage"]
+                lookup[(pod_name, c["name"])] = (
+                    parse_quantity(usage["cpu"]),
+                    parse_quantity(usage["memory"]),
+                )
+        return lookup
+
+    def _attach_usage(self, pods, usage_lookup) -> None:
+        for pod in pods:
+            for container in pod.containers:
+                usage = usage_lookup.get((pod.name, container.name))
+                if usage:
+                    container.cpu_usage, container.memory_usage = usage
 
     def _attach_logs(self, pods, namespace, core) -> None:
         """Fetch and filter a log excerpt for every unhealthy container. Healthy,
@@ -247,8 +548,11 @@ class DiagnosticsService:
                 return text.splitlines(), ("previous" if previous else "current")
         return [], None
 
-    def _warning_events(self, kind, name, namespace, pods_raw) -> list[EventSummary]:
-        all_events = self.events.get(namespace)
+    def _warning_events(
+        self, kind, name, namespace, pods_raw, all_events=None
+    ) -> list[EventSummary]:
+        if all_events is None:
+            all_events = self.events.get(namespace)
         groups: dict[tuple[str, str, str], EventSummary] = {}
 
         # dedup: for a bare Pod the workload target equals its pod target.
@@ -288,6 +592,68 @@ def _int(value) -> int:
     return value or 0
 
 
+def _replica_health_from(kind, obj) -> ReplicaHealth | None:
+    """Extract replica health from an already-fetched workload object."""
+    status = obj.status
+    if kind in (Kind.Deployment, Kind.StatefulSet):
+        return ReplicaHealth(
+            desired=_int(obj.spec.replicas),
+            ready=_int(status.ready_replicas),
+            available=_int(getattr(status, "available_replicas", None)),
+            updated=_int(status.updated_replicas),
+            generation=obj.metadata.generation,
+            observed_generation=status.observed_generation,
+        )
+    if kind == Kind.DaemonSet:
+        return ReplicaHealth(
+            desired=_int(status.desired_number_scheduled),
+            ready=_int(status.number_ready),
+            available=_int(status.number_available),
+            updated=_int(status.updated_number_scheduled),
+            generation=obj.metadata.generation,
+            observed_generation=status.observed_generation,
+        )
+    return None
+
+
+def _job_health_from(obj) -> JobHealth:
+    """Extract job health from an already-fetched Job object."""
+    status = obj.status
+    conditions = getattr(status, "conditions", None) or []
+    failed_reasons = {
+        c.reason for c in conditions if getattr(c, "type", None) == "Failed"
+    }
+    return JobHealth(
+        succeeded=_int(status.succeeded),
+        failed=_int(status.failed),
+        active=_int(status.active),
+        suspended=bool(obj.spec.suspend),
+        backoff_limit=_int(obj.spec.backoff_limit),
+        backoff_limit_exceeded="BackoffLimitExceeded" in failed_reasons,
+        deadline_exceeded="DeadlineExceeded" in failed_reasons,
+    )
+
+
+def _matches_selector(pod, selector: dict) -> bool:
+    labels = getattr(pod.metadata, "labels", None) or {}
+    return all(labels.get(key) == value for key, value in selector.items())
+
+
+def _service_health_from(svc, endpoints) -> ServiceHealth:
+    """Extract service health from an already-fetched Service and its
+    Endpoints object (None if the Endpoints read failed/404ed)."""
+    ready = 0
+    not_ready = 0
+    for subset in getattr(endpoints, "subsets", None) or []:
+        ready += len(getattr(subset, "addresses", None) or [])
+        not_ready += len(getattr(subset, "not_ready_addresses", None) or [])
+    return ServiceHealth(
+        has_selector=bool(svc.spec.selector),
+        ready_addresses=ready,
+        not_ready_addresses=not_ready,
+    )
+
+
 def _container_needs_logs(container: ContainerDiagnostic) -> bool:
     """Any container that is unhealthy in some way: not ready, not currently
     running, restarted, or previously terminated. Fully healthy containers are
@@ -303,7 +669,10 @@ def _container_needs_logs(container: ContainerDiagnostic) -> bool:
 def _pod_diagnostic(pod) -> PodDiagnostic:
     status = pod.status
     statuses = getattr(status, "container_statuses", None) or []
-    containers = [_container_diagnostic(cs) for cs in statuses]
+    spec_containers = {c.name: c for c in (pod.spec.containers or [])}
+    containers = [
+        _container_diagnostic(cs, spec_containers.get(cs.name)) for cs in statuses
+    ]
     return PodDiagnostic(
         name=pod.metadata.name,
         phase=getattr(status, "phase", None) or "Unknown",
@@ -315,11 +684,15 @@ def _pod_diagnostic(pod) -> PodDiagnostic:
     )
 
 
-def _container_diagnostic(cs) -> ContainerDiagnostic:
+def _container_diagnostic(cs, spec_container=None) -> ContainerDiagnostic:
     state = cs.state
     waiting = getattr(state, "waiting", None)
     running = getattr(state, "running", None)
     terminated = getattr(state, "terminated", None)
+
+    limits = getattr(getattr(spec_container, "resources", None), "limits", None) or {}
+    cpu_limit = parse_quantity(limits["cpu"]) if "cpu" in limits else None
+    memory_limit = parse_quantity(limits["memory"]) if "memory" in limits else None
 
     if running is not None:
         state_str = "Running"
@@ -348,6 +721,8 @@ def _container_diagnostic(cs) -> ContainerDiagnostic:
         last_exit_code=(
             getattr(last_terminated, "exit_code", None) if last_terminated else None
         ),
+        cpu_limit=cpu_limit,
+        memory_limit=memory_limit,
     )
 
 

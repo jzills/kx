@@ -156,15 +156,36 @@ def _owned_by(resource, uid: str) -> bool:
     return any(ref.uid == uid for ref in refs)
 
 
-def resolve_workload_pods(kind: str, name: str, namespace: str, apps, core) -> list:
+def most_recent_job(owner_uid: str, jobs):
+    """The most recently-created Job owned by `owner_uid` (a CronJob's uid),
+    by `metadata.creation_timestamp`; None if it has never run. Shared by
+    resolve_workload_pods and DiagnosticsService — CronJob health and pods
+    are both scoped to the latest run, not the full retained history."""
+    owned = [job for job in jobs if _owned_by(job, owner_uid)]
+    if not owned:
+        return None
+    return max(owned, key=lambda job: job.metadata.creation_timestamp)
+
+
+def resolve_workload_pods(
+    kind: str, name: str, namespace: str, apps, core, batch=None
+) -> list:
     """Resolve the pods belonging to a workload via ownership references.
 
     Deployment is a two-hop walk (Deployment → owned ReplicaSets → owned pods,
-    which includes surge/old pods mid-rollout); StatefulSet/DaemonSet own their
-    pods directly; Pod resolves to itself. Reuses `_owned_by` and fetches pods
-    once per namespace, filtering client-side (mirrors the tree builders)."""
+    which includes surge/old pods mid-rollout); StatefulSet/DaemonSet/Job own
+    their pods directly; Pod resolves to itself. Reuses `_owned_by` and fetches
+    pods once per namespace, filtering client-side (mirrors the tree
+    builders). `batch` is required for Job, unused otherwise."""
     if kind == Kind.Pod:
         return [core.read_namespaced_pod(name, namespace)]
+    if kind == Kind.Service:
+        svc = core.read_namespaced_service(name, namespace)
+        selector = svc.spec.selector
+        if not selector:
+            return []
+        label_selector = ",".join(f"{k}={v}" for k, v in selector.items())
+        return core.list_namespaced_pod(namespace, label_selector=label_selector).items
 
     pods = core.list_namespaced_pod(namespace).items
     match kind:
@@ -182,5 +203,16 @@ def resolve_workload_pods(kind: str, name: str, namespace: str, apps, core) -> l
         case Kind.DaemonSet:
             ds = apps.read_namespaced_daemon_set(name, namespace)
             return [pod for pod in pods if _owned_by(pod, ds.metadata.uid)]
+        case Kind.Job:
+            job = batch.read_namespaced_job(name, namespace)
+            return [pod for pod in pods if _owned_by(pod, job.metadata.uid)]
+        case Kind.CronJob:
+            cj = batch.read_namespaced_cron_job(name, namespace)
+            recent = most_recent_job(
+                cj.metadata.uid, batch.list_namespaced_job(namespace).items
+            )
+            if recent is None:
+                return []
+            return [pod for pod in pods if _owned_by(pod, recent.metadata.uid)]
         case _:
             return []

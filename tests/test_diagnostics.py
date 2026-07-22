@@ -3,6 +3,7 @@ extraction (replica counts, container states, scheduling, event dedup)."""
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
@@ -13,12 +14,16 @@ from kx.kinds import Kind
 # --- fake kubernetes objects ------------------------------------------------
 
 
-def _meta(name, uid="", owners=(), generation=None):
+def _meta(
+    name, uid="", owners=(), generation=None, labels=None, creation_timestamp=None
+):
     return NS(
         name=name,
         uid=uid,
         owner_references=[NS(uid=o) for o in owners],
         generation=generation,
+        labels=labels or {},
+        creation_timestamp=creation_timestamp,
     )
 
 
@@ -48,14 +53,30 @@ def _cstatus(
     )
 
 
-def _pod(name, uid="", owner=None, phase="Running", statuses=None, conditions=None):
+def _spec_container(name="app", limits=None):
+    return NS(name=name, resources=NS(limits=limits))
+
+
+def _pod(
+    name,
+    uid="",
+    owner=None,
+    phase="Running",
+    statuses=None,
+    conditions=None,
+    labels=None,
+    spec_containers=None,
+):
     owners = (owner,) if owner else ()
+    statuses = statuses if statuses is not None else [_cstatus()]
+    if spec_containers is None:
+        spec_containers = [_spec_container(name=cs.name) for cs in statuses]
     return NS(
-        metadata=_meta(name, uid, owners),
-        spec=NS(node_name="node-1"),
+        metadata=_meta(name, uid, owners, labels=labels),
+        spec=NS(node_name="node-1", containers=spec_containers),
         status=NS(
             phase=phase,
-            container_statuses=statuses if statuses is not None else [_cstatus()],
+            container_statuses=statuses,
             conditions=conditions or [],
         ),
     )
@@ -72,10 +93,11 @@ def _log(text):
 
 
 @contextmanager
-def _mocked(apps=None, core=None):
+def _mocked(apps=None, core=None, batch=None):
     client = MagicMock()
     client.AppsV1Api.return_value = apps or MagicMock()
     client.CoreV1Api.return_value = core or MagicMock()
+    client.BatchV1Api.return_value = batch or MagicMock()
     with patch("kx.diagnostics.client", client), patch("kx.diagnostics.load_config"):
         yield
 
@@ -227,6 +249,43 @@ class TestPodExtraction:
         assert data.pods[0].ready_containers == 0
         assert data.pods[0].total_containers == 1
 
+    def test_container_limits_extracted_from_pod_spec(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo",
+            spec_containers=[
+                _spec_container("app", limits={"cpu": "500m", "memory": "256Mi"})
+            ],
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit == Decimal("0.5")
+        assert container.memory_limit == Decimal(256 * 1024 * 1024)
+
+    def test_container_with_no_limits_has_none(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo", spec_containers=[_spec_container("app", limits=None)]
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit is None
+        assert container.memory_limit is None
+
+    def test_container_with_only_memory_limit(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod(
+            "solo",
+            spec_containers=[_spec_container("app", limits={"memory": "128Mi"})],
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_limit is None
+        assert container.memory_limit == Decimal(128 * 1024 * 1024)
+
     def test_scheduling_condition_parsed(self):
         conditions = [
             NS(
@@ -288,6 +347,640 @@ class TestWarningEvents:
         summary = data.warning_events[0]
         assert summary.reason == "BackOff"
         assert summary.count == 8  # 3 + 5, deduped
+
+
+def _job(
+    name,
+    uid="",
+    succeeded=0,
+    failed=0,
+    active=0,
+    suspended=False,
+    backoff_limit=6,
+    conditions=(),
+    owner=None,
+    created=None,
+):
+    owners = (owner,) if owner else ()
+    return NS(
+        metadata=_meta(name, uid, owners, creation_timestamp=created),
+        spec=NS(suspend=suspended, backoff_limit=backoff_limit),
+        status=NS(
+            succeeded=succeeded,
+            failed=failed,
+            active=active,
+            conditions=list(conditions),
+        ),
+    )
+
+
+def _condition(cond_type, reason=None):
+    return NS(type=cond_type, reason=reason)
+
+
+class TestJobHealth:
+    def test_active_job_has_no_failure_flags(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU", active=1)
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.active == 1
+        assert data.job.backoff_limit_exceeded is False
+        assert data.job.deadline_exceeded is False
+        assert data.replicas is None
+
+    def test_backoff_limit_exceeded_condition_is_flagged(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "nightly",
+            "jU",
+            failed=3,
+            backoff_limit=3,
+            conditions=[_condition("Failed", "BackoffLimitExceeded")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.backoff_limit_exceeded is True
+        assert data.job.failed == 3
+        assert data.job.backoff_limit == 3
+
+    def test_deadline_exceeded_condition_is_flagged(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "nightly", "jU", conditions=[_condition("Failed", "DeadlineExceeded")]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.deadline_exceeded is True
+        assert data.job.backoff_limit_exceeded is False
+
+    def test_suspended_job_is_extracted(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU", suspended=True)
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert data.job.suspended is True
+
+    def test_completed_job_reports_succeeded_count(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job(
+            "backup", "jU", succeeded=1, conditions=[_condition("Complete")]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "backup", "default")
+        assert data.job.succeeded == 1
+        assert data.job.backoff_limit_exceeded is False
+        assert data.job.deadline_exceeded is False
+
+    def test_job_pods_resolved_by_owner_uid(self):
+        apps = MagicMock()
+        batch = MagicMock()
+        batch.read_namespaced_job.return_value = _job("nightly", "jU")
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-x1", "p1", owner="jU"),
+            _pod("other", "p2", owner="unrelated"),
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            data = _service().gather(Kind.Job, "nightly", "default")
+        assert [p.name for p in data.pods] == ["nightly-x1"]
+
+
+def _svc(name, uid="", selector=None):
+    sel = {"app": name} if selector is None else selector
+    return NS(metadata=_meta(name, uid), spec=NS(selector=sel))
+
+
+def _endpoint_subset(ready=0, not_ready=0):
+    return NS(
+        addresses=[NS() for _ in range(ready)],
+        not_ready_addresses=[NS() for _ in range(not_ready)],
+    )
+
+
+def _endpoints(*subsets):
+    return NS(subsets=list(subsets))
+
+
+def _endpoints_named(name, *subsets):
+    return NS(metadata=_meta(name), subsets=list(subsets))
+
+
+class TestServiceHealth:
+    def test_healthy_service_has_all_ready_addresses(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU")
+        core.read_namespaced_endpoints.return_value = _endpoints(
+            _endpoint_subset(ready=2)
+        )
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert data.service.has_selector is True
+        assert data.service.ready_addresses == 2
+        assert data.service.not_ready_addresses == 0
+
+    def test_service_without_selector_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("ext", "svcU", selector={})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "ext", "default")
+        assert data.service.has_selector is False
+
+    def test_missing_endpoints_object_yields_zero_addresses(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU")
+        core.read_namespaced_endpoints.side_effect = Exception("not found")
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert data.service.ready_addresses == 0
+        assert data.service.not_ready_addresses == 0
+
+    def test_service_pods_resolved_via_selector(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("web", "svcU", {"app": "web"})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        core.list_namespaced_pod.return_value = _items(_pod("web-1", "p1"))
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "web", "default")
+        assert [p.name for p in data.pods] == ["web-1"]
+        args, kwargs = core.list_namespaced_pod.call_args
+        assert kwargs.get("label_selector") == "app=web"
+
+    def test_no_selector_resolves_no_pods(self):
+        core = MagicMock()
+        core.read_namespaced_service.return_value = _svc("ext", "svcU", selector={})
+        core.read_namespaced_endpoints.return_value = _endpoints()
+        with _mocked(core=core):
+            data = _service().gather(Kind.Service, "ext", "default")
+        assert data.pods == []
+        core.list_namespaced_pod.assert_not_called()
+
+
+def _pvc(name, uid="", phase="Bound"):
+    return NS(metadata=_meta(name, uid), status=NS(phase=phase))
+
+
+class TestPvcHealth:
+    def test_bound_pvc_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Bound"
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.PersistentVolumeClaim, "data", "default")
+        assert data.pvc.phase == "Bound"
+        assert data.pods == []
+        assert data.replicas is None
+
+    def test_pending_pvc_is_extracted(self):
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Pending"
+        )
+        with _mocked(core=core):
+            data = _service().gather(Kind.PersistentVolumeClaim, "data", "default")
+        assert data.pvc.phase == "Pending"
+
+    def test_pvc_warning_events_flow_through_generic_path(self):
+        events = MagicMock()
+        events.get.return_value = [_event("Warning", "ProvisioningFailed", "data")]
+        events.filter.side_effect = lambda evs, name, kind: [
+            e for e in evs if e.involved_object.name == name
+        ]
+        core = MagicMock()
+        core.read_namespaced_persistent_volume_claim.return_value = _pvc(
+            "data", "pvcU", phase="Pending"
+        )
+        with _mocked(core=core):
+            data = _service(events=events).gather(
+                Kind.PersistentVolumeClaim, "data", "default"
+            )
+        assert [e.reason for e in data.warning_events] == ["ProvisioningFailed"]
+
+
+def _cronjob(name, uid="", suspended=False):
+    return NS(metadata=_meta(name, uid), spec=NS(suspend=suspended))
+
+
+class TestCronJobHealth:
+    def test_suspended_cronjob_is_extracted(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob(
+            "nightly", "cjU", suspended=True
+        )
+        batch.list_namespaced_job.return_value = _items()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.suspended is True
+        assert data.cronjob.most_recent_job is None
+
+    def test_never_run_cronjob_has_no_most_recent_job(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob("nightly", "cjU")
+        batch.list_namespaced_job.return_value = _items()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.most_recent_job is None
+        assert data.pods == []
+
+    def test_most_recent_job_by_creation_timestamp_is_used(self):
+        batch = MagicMock()
+        batch.read_namespaced_cron_job.return_value = _cronjob("nightly", "cjU")
+        batch.list_namespaced_job.return_value = _items(
+            _job(
+                "nightly-old",
+                "jOld",
+                owner="cjU",
+                created=datetime(2026, 7, 1, tzinfo=timezone.utc),
+                succeeded=1,
+            ),
+            _job(
+                "nightly-new",
+                "jNew",
+                owner="cjU",
+                created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                failed=3,
+                backoff_limit=3,
+                conditions=[_condition("Failed", "BackoffLimitExceeded")],
+            ),
+            _job("unrelated", "jOther", owner="somethingElse"),
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-new-x1", "p1", owner="jNew"),
+            _pod("nightly-old-x1", "p2", owner="jOld"),
+        )
+        with _mocked(core=core, batch=batch):
+            data = _service().gather(Kind.CronJob, "nightly", "default")
+        assert data.cronjob.most_recent_job.backoff_limit_exceeded is True
+        assert [p.name for p in data.pods] == ["nightly-new-x1"]
+
+
+# --- namespace sweep ---------------------------------------------------------
+
+
+def _deploy(name, uid, ready=1, desired=1):
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        spec=NS(replicas=desired),
+        status=NS(
+            ready_replicas=ready,
+            available_replicas=ready,
+            updated_replicas=ready,
+            observed_generation=1,
+        ),
+    )
+
+
+def _sweep_sts(name, uid, ready=1, desired=1):
+    # Not named _sts: a later helper of that name (MagicMock apps for the
+    # log-attachment tests) would shadow it at runtime.
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        spec=NS(replicas=desired),
+        status=NS(
+            ready_replicas=ready,
+            available_replicas=ready,
+            updated_replicas=ready,
+            observed_generation=1,
+        ),
+    )
+
+
+def _ds(name, uid, ready=1, desired=1):
+    return NS(
+        metadata=_meta(name, uid, generation=1),
+        status=NS(
+            desired_number_scheduled=desired,
+            number_ready=ready,
+            number_available=ready,
+            updated_number_scheduled=desired,
+            observed_generation=1,
+        ),
+    )
+
+
+def _sweep_apps(deploys=(), stss=(), dss=(), replica_sets=()):
+    apps = MagicMock()
+    apps.list_namespaced_deployment.return_value = _items(*deploys)
+    apps.list_namespaced_stateful_set.return_value = _items(*stss)
+    apps.list_namespaced_daemon_set.return_value = _items(*dss)
+    apps.list_namespaced_replica_set.return_value = _items(*replica_sets)
+    return apps
+
+
+def _sweep_batch(jobs=(), cronjobs=()):
+    batch = MagicMock()
+    batch.list_namespaced_job.return_value = _items(*jobs)
+    batch.list_namespaced_cron_job.return_value = _items(*cronjobs)
+    return batch
+
+
+class TestSweepUsage:
+    def test_usage_attached_once_across_workload_and_orphan_pods(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("solo", "p2"),
+        )
+        metrics = _metrics(
+            _metrics_item("web-1", ("app", "50m", "100Mi")),
+            _metrics_item("solo", ("app", "10m", "20Mi")),
+        )
+        with (
+            _mocked(apps=apps, core=core),
+            patch("kx.diagnostics.get_pods_metrics", return_value=metrics) as mock_gpm,
+        ):
+            results = _service().sweep("default")
+        mock_gpm.assert_called_once()
+        web, solo = results
+        assert web.pods[0].containers[0].cpu_usage == Decimal("0.05")
+        assert solo.pods[0].containers[0].cpu_usage == Decimal("0.01")
+
+
+class TestSweep:
+    def test_orders_workloads_then_orphan_pods(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            stss=[_sweep_sts("db", "sU")],
+            dss=[_ds("agent", "aU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("job-pod-1", "p4", owner="jobU"),
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("db-0", "p2", owner="sU"),
+            _pod("agent-x", "p3", owner="aU"),
+            _pod("solo", "p5"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Deployment, "web"),
+            (Kind.StatefulSet, "db"),
+            (Kind.DaemonSet, "agent"),
+            (Kind.Pod, "job-pod-1"),
+            (Kind.Pod, "solo"),
+        ]
+
+    def test_workload_data_carries_owned_pods_and_replicas(self):
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU", ready=1, desired=3)],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("web-2", "p2", owner="rsU"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert len(results) == 1
+        data = results[0]
+        assert [p.name for p in data.pods] == ["web-1", "web-2"]
+        assert data.replicas.desired == 3
+        assert data.replicas.ready == 1
+        assert data.namespace == "default"
+        # Replica health comes from the listed object, not a per-resource read.
+        apps.read_namespaced_deployment.assert_not_called()
+
+    def test_orphan_pod_has_no_replica_health(self):
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(_pod("solo", "p1"))
+        with _mocked(apps=_sweep_apps(), core=core):
+            results = _service().sweep("default")
+        assert results[0].replicas is None
+        assert [p.name for p in results[0].pods] == ["solo"]
+
+    def test_sweep_never_fetches_logs(self):
+        crashing = _cstatus(
+            ready=False,
+            restart_count=7,
+            state=_cstate(waiting=NS(reason="CrashLoopBackOff", message=None)),
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("solo", "p1", statuses=[crashing])
+        )
+        with _mocked(apps=_sweep_apps(), core=core):
+            _service().sweep("default")
+        core.read_namespaced_pod_log.assert_not_called()
+
+    def test_sweep_fetches_events_once_and_partitions(self):
+        events = MagicMock()
+        events.get.return_value = [
+            _event("Warning", "BackOff", "web-1"),
+            _event("Warning", "FailedScheduling", "solo"),
+        ]
+        events.filter.side_effect = lambda evs, name, kind: [
+            e for e in evs if e.involved_object.name == name
+        ]
+        apps = _sweep_apps(
+            deploys=[_deploy("web", "dU")],
+            replica_sets=[_res("web-abc", "rsU", owner="dU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", owner="rsU"),
+            _pod("solo", "p2"),
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service(events=events).sweep("default")
+        events.get.assert_called_once_with("default")
+        web, solo = results
+        assert [e.name for e in web.warning_events] == ["web-1"]
+        assert [e.name for e in solo.warning_events] == ["solo"]
+
+    def test_sweeps_jobs_and_excludes_their_pods_from_orphans(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(jobs=[_job("nightly", "jU", succeeded=1)])
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-x1", "p1", owner="jU"),
+            _pod("solo", "p2"),
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Job, "nightly"),
+            (Kind.Pod, "solo"),
+        ]
+        job_result = results[0]
+        assert [p.name for p in job_result.pods] == ["nightly-x1"]
+        assert job_result.job.succeeded == 1
+        assert job_result.replicas is None
+
+    def test_sweep_includes_completed_job_as_healthy(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job("backup", "jU", succeeded=1, conditions=[_condition("Complete")])
+            ]
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert results[0].job.backoff_limit_exceeded is False
+        assert results[0].job.deadline_exceeded is False
+
+    def test_sweeps_services_without_claiming_their_pods_from_orphans(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_service.return_value = _items(
+            _svc("web-svc", "svcU", selector={"app": "web"})
+        )
+        core.list_namespaced_endpoints.return_value = _items(
+            _endpoints_named("web-svc", _endpoint_subset(ready=1))
+        )
+        core.list_namespaced_pod.return_value = _items(
+            _pod("web-1", "p1", labels={"app": "web"})
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.Service, "web-svc"),
+            (Kind.Pod, "web-1"),
+        ]
+        svc_result = results[0]
+        assert [p.name for p in svc_result.pods] == ["web-1"]
+        assert svc_result.service.ready_addresses == 1
+
+    def test_sweep_service_missing_endpoints_entry_is_zero_addresses(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_service.return_value = _items(
+            _svc("orphaned-svc", "svcU", selector={"app": "gone"})
+        )
+        core.list_namespaced_endpoints.return_value = _items()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert results[0].service.ready_addresses == 0
+        assert results[0].service.not_ready_addresses == 0
+
+    def test_sweeps_pvcs(self):
+        apps = _sweep_apps()
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        core.list_namespaced_persistent_volume_claim.return_value = _items(
+            _pvc("data", "pvcU", phase="Pending")
+        )
+        with _mocked(apps=apps, core=core):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.PersistentVolumeClaim, "data")
+        ]
+        assert results[0].pvc.phase == "Pending"
+
+    def test_sweep_cronjob_excludes_its_owned_job_from_standalone_rows(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    succeeded=1,
+                ),
+                _job("standalone", "jStandalone", succeeded=1),
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [
+            (Kind.CronJob, "nightly"),
+            (Kind.Job, "standalone"),
+        ]
+        assert results[0].cronjob.most_recent_job.succeeded == 1
+
+    def test_sweep_cronjob_owned_job_pods_are_not_orphaned(self):
+        # A pod belonging to a CronJob-owned Job must not leak through as a
+        # standalone orphan-pod row just because its Job was excluded from
+        # the standalone Job listing.
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    failed=3,
+                    backoff_limit=3,
+                    conditions=[_condition("Failed", "BackoffLimitExceeded")],
+                )
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("nightly-abc-x1", "p1", owner="jU")
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert [(d.kind, d.name) for d in results] == [(Kind.CronJob, "nightly")]
+        assert [p.name for p in results[0].pods] == ["nightly-abc-x1"]
+
+    def test_sweep_cronjob_with_failed_most_recent_job(self):
+        apps = _sweep_apps()
+        batch = _sweep_batch(
+            jobs=[
+                _job(
+                    "nightly-abc",
+                    "jU",
+                    owner="cjU",
+                    created=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                    failed=3,
+                    backoff_limit=3,
+                    conditions=[_condition("Failed", "BackoffLimitExceeded")],
+                )
+            ],
+            cronjobs=[_cronjob("nightly", "cjU")],
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=apps, core=core, batch=batch):
+            results = _service().sweep("default")
+        assert results[0].cronjob.most_recent_job.backoff_limit_exceeded is True
+
+    def test_empty_namespace_returns_no_results(self):
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=_sweep_apps(), core=core):
+            assert _service().sweep("default") == []
 
 
 # --- OTEL severity filtering (pure) -----------------------------------------
@@ -353,6 +1046,63 @@ def _sts(name="db", uid="stsU"):
         ),
     )
     return apps
+
+
+def _metrics(*items):
+    return {"items": list(items)}
+
+
+def _metrics_item(pod_name, *container_usages):
+    return {
+        "metadata": {"name": pod_name},
+        "containers": [
+            {"name": name, "usage": {"cpu": cpu, "memory": memory}}
+            for name, cpu, memory in container_usages
+        ],
+    }
+
+
+class TestUsageAttachment:
+    def test_usage_matched_by_pod_and_container_name(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch(
+                "kx.diagnostics.get_pods_metrics",
+                return_value=_metrics(_metrics_item("solo", ("app", "93m", "188Mi"))),
+            ),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage == Decimal("0.093")
+        assert container.memory_usage == Decimal(188 * 1024 * 1024)
+
+    def test_no_matching_metrics_leaves_usage_none(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch("kx.diagnostics.get_pods_metrics", return_value=_metrics()),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage is None
+        assert container.memory_usage is None
+
+    def test_metrics_api_failure_is_swallowed(self):
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = _pod("solo")
+        with (
+            _mocked(core=core),
+            patch(
+                "kx.diagnostics.get_pods_metrics", side_effect=Exception("no metrics")
+            ),
+        ):
+            data = _service().gather(Kind.Pod, "solo", "default")
+        container = data.pods[0].containers[0]
+        assert container.cpu_usage is None
+        assert container.memory_usage is None
 
 
 class TestLogAttachment:

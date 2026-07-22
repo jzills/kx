@@ -11,8 +11,9 @@ from typer.core import TyperCommand, TyperGroup
 from kx import console
 from kx.commands.back import BackCommand
 from kx.commands.delete import DeleteCommand
-from kx.commands.diagnostic import DiagnosticCommand
+from kx.commands.diagnostic import DiagnosticCommand, TriageCommand
 from kx.commands.drop import DropCommand
+from kx.commands.annotations import AnnotationsCommand
 from kx.commands.labels import LabelsCommand
 from kx.commands.describe import DescribeCommand
 from kx.commands.edit import EditCommand
@@ -21,12 +22,17 @@ from kx.commands.events import EventsCommand
 from kx.commands.exec import ExecCommand
 from kx.commands.get import GetCommand
 from kx.commands.logs import LogsCommand
+from kx.commands.metadata_write import _MetadataWriteCommand
 from kx.commands.port_forward import PortForwardCommand
+from kx.commands.context import ContextCommand
+from kx.commands.contexts import ContextsCommand
 from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
+from kx.commands.scan import ScanCommand
 from kx.commands.state import StateCommand
 from kx.commands.theme import ThemeCommand
+from kx.commands.top import TopCommand
 from kx.commands.tree import TreeCommand
 from kx.commands.yaml import YamlCommand
 from kx.config import load_config, save_theme
@@ -38,6 +44,7 @@ from kx.index import IndexService
 from kx.kinds import is_kind_spelling, normalize_kind
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
+from kx.scanner import ScannerService
 from kx.state import StateService
 
 
@@ -89,10 +96,14 @@ _HELP_SECTIONS = (
         "Resources",
         (
             "get",
+            "top",
             "describe",
             "events",
             "logs",
             "labels",
+            "annotations",
+            "label",
+            "annotate",
             "yaml",
             "delete",
             "edit",
@@ -100,9 +111,11 @@ _HELP_SECTIONS = (
             "tree",
             "rollout",
             "scale",
+            "scan",
             "port-forward",
             "diagnostic",
             "namespace",
+            "context",
         ),
     ),
     ("History", ("state", "drop", "back", "forward")),
@@ -160,6 +173,7 @@ _kubectl = KubectlService()
 _state = StateService(max_history=_config.max_history)
 _events = EventsService()
 _index = IndexService()
+_scanner = ScannerService()
 _diagnostics = DiagnosticsService(events=_events)
 # A lambda, not an instance: it reads the module globals at call time so tests
 # that patch kx.main._state/_kubectl are honored.
@@ -229,6 +243,38 @@ def get(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors(refresh=False)
+def top(
+    ctx: typer.Context,
+    match: Optional[str] = typer.Option(
+        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
+    ),
+    no_limits: bool = typer.Option(
+        False, "--no-limits", help="Skip the CPU%/MEM% columns (one fewer kubectl call)"
+    ),
+):
+    """List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits."""
+    extra = list(ctx.args)
+    command = TopCommand(kubectl=_kubectl, state=_state, index=_index)
+    with console.status("fetching pod usage"):
+        result = command.execute(match, extra, no_limits=no_limits)
+    all_namespaces = any(arg in ("-A", "--all-namespaces") for arg in extra)
+    if all_namespaces:
+        namespace = "all namespaces"
+        note = "indexes not saved for all-namespace listings — scope to a namespace (-n or kx ns) to select"
+    else:
+        note = None
+        try:
+            namespace = _state.load().namespace
+        except RuntimeError:
+            namespace = "default"
+    console.render_indexed_table(result, "pods", namespace, note=note)
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 @handle_errors
 def describe(ctx: typer.Context, indexes: list[int]):
     """Show full kubectl describe output for one or more indexed resources."""
@@ -272,6 +318,65 @@ def logs(ctx: typer.Context, index: int):
     command.execute(index, ctx.args)
 
 
+def _images_noun(count: int) -> str:
+    return f"{count} {'image' if count == 1 else 'images'}"
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors
+def scan(
+    ctx: typer.Context,
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to scan; omit to scan the whole namespace.",
+    ),
+    engine: str = typer.Option(
+        "scout", "--engine", help="Vulnerability scanner to use"
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Stream the scanner's full output instead of the summary table",
+    ),
+):
+    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full."""
+    command = ScanCommand(
+        state=_state, kubectl=_kubectl, scanner=_scanner, status=console.status
+    )
+    if index is None:
+        namespace = _kubectl.current_namespace()
+        images = command.collect_namespace(namespace, engine)
+        console.print_scope_banner("Mixed", namespace, _images_noun(len(images)))
+    else:
+        name, ns, kind = _state.fields(index)
+        images = command.execute(index, engine)
+        console.print_banner(kind, name, namespace=ns, extra=_images_noun(len(images)))
+
+    if full:
+        for position, image in enumerate(images):
+            if position > 0:
+                console.print_raw("")
+            console.print_section(image)
+            command.scan_image(engine, image, ctx.args)
+    else:
+        with console.status("scanning"):
+            rows = command.summarize(engine, images)
+        console.render_scan_summary(rows)
+
+
+def _parse_pairs(pairs: list[str]) -> dict[str, str]:
+    result = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"'{pair}' is not a valid key=value pair")
+        key, value = pair.split("=", 1)
+        result[key] = value
+    return result
+
+
 @app.command(cls=StyledCommand)
 @handle_errors
 def labels(
@@ -296,7 +401,64 @@ def labels(
                 ",".join(f"{key}={value}" for key, value in label_map.items())
             )
         else:
-            console.render_labels(label_map)
+            console.render_key_value_table("LABEL", label_map)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def annotations(indexes: list[int]):
+    """Show annotations for one or more indexed resources."""
+    command = AnnotationsCommand(state=_state, kubectl=_kubectl)
+    for position, index in enumerate(indexes):
+        with console.status("fetching annotations"):
+            annotation_map = command.execute(index)
+        name, ns, kind = _state.fields(index)
+        count = len(annotation_map)
+        extra = f"{count} {'item' if count == 1 else 'items'}"
+        if position > 0:
+            console.print_raw("")
+        console.print_banner(kind, name, namespace=ns, extra=extra)
+        console.render_key_value_table("ANNOTATION", annotation_map)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def label(
+    index: int,
+    pairs: list[str] = typer.Argument(default=None, help="key=value pairs to set"),
+    remove: list[str] = typer.Option([], "--remove", help="Key to remove (repeatable)"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Allow replacing an existing key"
+    ),
+):
+    """Set or remove labels on an indexed resource."""
+    sets = _parse_pairs(pairs or [])
+    command = _MetadataWriteCommand(
+        kubectl=_kubectl, state=_state, verb="label", field="labels"
+    )
+    with console.status("labeling"):
+        result = command.execute(index, sets, remove, overwrite)
+    console.print_success(result)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def annotate(
+    index: int,
+    pairs: list[str] = typer.Argument(default=None, help="key=value pairs to set"),
+    remove: list[str] = typer.Option([], "--remove", help="Key to remove (repeatable)"),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Allow replacing an existing key"
+    ),
+):
+    """Set or remove annotations on an indexed resource."""
+    sets = _parse_pairs(pairs or [])
+    command = _MetadataWriteCommand(
+        kubectl=_kubectl, state=_state, verb="annotate", field="annotations"
+    )
+    with console.status("annotating"):
+        result = command.execute(index, sets, remove, overwrite)
+    console.print_success(result)
 
 
 @app.command(cls=StyledCommand)
@@ -438,10 +600,16 @@ def port_forward(ctx: typer.Context, index: int, port: str):
     command.execute(index, port, ctx.args)
 
 
-@app.command(cls=StyledCommand)
-@handle_errors
-def diagnostic(index: int):
-    """Run read-only health diagnostics on an indexed Deployment, StatefulSet, DaemonSet, or Pod; alias: kx diag."""
+def _diagnostic(index: Optional[int]) -> None:
+    if index is None:
+        # Bare invocation: triage sweep of the current namespace. The result
+        # is indexed (unhealthy rows saved as state) so kx diag <i> drills in.
+        command = TriageCommand(state=_state, diagnostics=_diagnostics)
+        namespace = _kubectl.current_namespace()
+        with console.status(f"sweeping {namespace}"):
+            result = command.execute(namespace)
+        console.render_triage(result)
+        return
     # render_diagnostic prints the banner: the issue count is only known post-report.
     command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
     with console.status("running diagnostics"):
@@ -449,14 +617,28 @@ def diagnostic(index: int):
     console.render_diagnostic(report)
 
 
+@app.command(cls=StyledCommand)
+@handle_errors
+def diagnostic(
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to diagnose; omit to triage the whole namespace.",
+    ),
+):
+    """Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag."""
+    _diagnostic(index)
+
+
 @app.command(name="diag", cls=StyledCommand, hidden=True)
 @handle_errors
-def diagnostic_alias(index: int):
+def diagnostic_alias(
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to diagnose; omit to triage the whole namespace.",
+    ),
+):
     """Alias for diagnostic."""
-    command = DiagnosticCommand(state=_state, diagnostics=_diagnostics)
-    with console.status("running diagnostics"):
-        report = command.execute(index)
-    console.render_diagnostic(report)
+    _diagnostic(index)
 
 
 def _namespace(index: Optional[int]) -> None:
@@ -468,6 +650,19 @@ def _namespace(index: Optional[int]) -> None:
         return
     command = NamespaceCommand(state=_state, kubectl=_kubectl)
     with console.status("switching namespace"):
+        name = command.execute(index)
+    console.print_success(f"Switched to '{name}'")
+
+
+def _context(index: Optional[int]) -> None:
+    if index is None:
+        command = ContextsCommand(kubectl=_kubectl, state=_state, index=_index)
+        with console.status("fetching contexts"):
+            result = command.execute()
+        console.render_indexed_table(result, "Contexts", _state.load().namespace)
+        return
+    command = ContextCommand(state=_state, kubectl=_kubectl)
+    with console.status("switching context"):
         name = command.execute(index)
     console.print_success(f"Switched to '{name}'")
 
@@ -492,6 +687,28 @@ def namespace_alias(
 ):
     """Alias for namespace."""
     _namespace(index)
+
+
+@app.command(cls=StyledCommand)
+@handle_errors
+def context(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Context index to switch to; omit to list contexts."
+    ),
+):
+    """List kubeconfig contexts, or switch to an indexed one; alias: kx contexts."""
+    _context(index)
+
+
+@app.command(name="contexts", cls=StyledCommand, hidden=True)
+@handle_errors
+def context_alias(
+    index: Optional[int] = typer.Argument(
+        default=None, help="Context index to switch to; omit to list contexts."
+    ),
+):
+    """Alias for context."""
+    _context(index)
 
 
 @app.command(cls=StyledCommand)
@@ -553,6 +770,7 @@ def forward():
 # command callback to render the Aliases and Examples sections.
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
+context._aliases = ["kx contexts"]
 
 get._examples = [
     "kx get pods",
@@ -560,10 +778,18 @@ get._examples = [
     "kx pods",
     "kx po 3",
 ]
+top._examples = ["kx top", "kx top --sort-by=cpu", "kx top --no-limits"]
 describe._examples = ["kx describe 2"]
 events._examples = ["kx events 2"]
 logs._examples = ["kx logs 1 -f"]
 labels._examples = ["kx labels 1 --selector"]
+annotations._examples = ["kx annotations 1"]
+label._examples = [
+    "kx label 1 env=prod",
+    "kx label 1 --remove env",
+    "kx label 1 env=staging --overwrite",
+]
+annotate._examples = ["kx annotate 1 note=x"]
 yaml._examples = ["kx yaml 1 --show metadata,spec"]
 delete._examples = ["kx delete 3 --yes"]
 edit._examples = ["kx edit 1"]
@@ -571,9 +797,11 @@ exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
 tree._examples = ["kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
+scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --full", "kx scan --engine scout"]
 port_forward._examples = ["kx port-forward 2 8080:80"]
-diagnostic._examples = ["kx diag 2"]
+diagnostic._examples = ["kx diag", "kx diag 2"]
 namespace._examples = ["kx ns", "kx ns 3"]
+context._examples = ["kx context", "kx context 3"]
 state._examples = ["kx state --all", "kx state 2"]
 drop._examples = ["kx drop 2"]
 back._examples = ["kx back"]

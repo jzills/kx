@@ -1,18 +1,39 @@
+from dataclasses import dataclass, field
+from decimal import Decimal
+
 from kx.diagnostics import (
     ContainerDiagnostic,
+    CronJobHealth,
     DiagnosticData,
     DiagnosticReport,
     DiagnosticsServiceProtocol,
     Finding,
+    JobHealth,
     PodDiagnostic,
+    PVCHealth,
     ReplicaHealth,
+    ServiceHealth,
     Severity,
 )
 from kx.kinds import Kind
-from kx.state import StateServiceProtocol
+from kx.state import State, StateServiceProtocol
 
-_SUPPORTED_KINDS = {Kind.Deployment, Kind.StatefulSet, Kind.DaemonSet, Kind.Pod}
+_SUPPORTED_KINDS = {
+    Kind.Deployment,
+    Kind.StatefulSet,
+    Kind.DaemonSet,
+    Kind.Pod,
+    Kind.Job,
+    Kind.Service,
+    Kind.PersistentVolumeClaim,
+    Kind.CronJob,
+}
 _RESTART_WARN_THRESHOLD = 5
+_MEMORY_WARN_THRESHOLD = Decimal("0.75")
+_MEMORY_CRITICAL_THRESHOLD = Decimal("0.90")
+_CPU_WARN_THRESHOLD = Decimal("0.90")  # CPU never reaches critical: throttling
+# degrades performance, it doesn't take the container down like a memory
+# limit breach does.
 
 _IMAGE_PULL_REASONS = {"ImagePullBackOff", "ErrImagePull", "InvalidImageName"}
 _CONFIG_ERROR_REASONS = {"CreateContainerConfigError", "CreateContainerError"}
@@ -34,11 +55,66 @@ class DiagnosticCommand:
         return build_report(self.diagnostics.gather(kind, name, namespace))
 
 
+@dataclass
+class TriageResult:
+    namespace: str
+    checked: int  # total resources swept
+    reports: list[DiagnosticReport]  # non-OK only, sorted critical → warning
+    healthy: int  # OK resources, collapsed out of the table
+    dropped: list[str] = field(default_factory=list)  # rows lost to name collisions
+
+
+class TriageCommand:
+    def __init__(
+        self,
+        state: StateServiceProtocol,
+        diagnostics: DiagnosticsServiceProtocol,
+    ):
+        self.state = state
+        self.diagnostics = diagnostics
+
+    def execute(self, namespace: str) -> TriageResult:
+        reports = [build_report(data) for data in self.diagnostics.sweep(namespace)]
+        unhealthy = sorted(
+            (r for r in reports if r.verdict != Severity.OK),
+            key=lambda r: r.verdict,
+            reverse=True,  # stable: sweep order preserved within a severity
+        )
+        # State.resources is keyed by name alone, so a rare cross-kind name
+        # collision keeps the earlier (more severe) row and drops the later one.
+        resources: dict[str, Kind | str] = {}
+        displayed: list[DiagnosticReport] = []
+        dropped: list[str] = []
+        for report in unhealthy:
+            if report.name in resources:
+                dropped.append(f"{report.kind}/{report.name}")
+                continue
+            resources[report.name] = report.kind
+            displayed.append(report)
+        if displayed:
+            self.state.save(State(resources=resources, namespace=namespace))
+        return TriageResult(
+            namespace=namespace,
+            checked=len(reports),
+            reports=displayed,
+            healthy=len(reports) - len(unhealthy),
+            dropped=dropped,
+        )
+
+
 def build_report(data: DiagnosticData) -> DiagnosticReport:
     findings: list[Finding] = []
 
     if data.replicas is not None:
         findings.extend(_replica_findings(data.replicas))
+    if data.job is not None:
+        findings.extend(_job_findings(data.job))
+    if data.service is not None:
+        findings.extend(_service_findings(data.service))
+    if data.pvc is not None:
+        findings.extend(_pvc_findings(data.pvc))
+    if data.cronjob is not None:
+        findings.extend(_cronjob_findings(data.cronjob))
     for pod in data.pods:
         findings.extend(_pod_findings(pod))
     findings.extend(_event_findings(data.warning_events))
@@ -96,6 +172,78 @@ def _replica_findings(replicas: ReplicaHealth) -> list[Finding]:
             )
         )
     return findings
+
+
+def _job_findings(job: JobHealth) -> list[Finding]:
+    """Suspended, active, and successfully-completed Jobs are all OK — the
+    same treatment a Deployment scaled to 0 replicas already gets from
+    _replica_findings. Any trouble in the Job's own pods (CrashLoopBackOff,
+    ImagePullBackOff, ...) surfaces separately via _pod_findings."""
+    findings: list[Finding] = []
+    if job.backoff_limit_exceeded:
+        findings.append(
+            Finding(
+                Severity.CRITICAL,
+                f"BackoffLimitExceeded ({job.failed}/{job.backoff_limit} failed)",
+            )
+        )
+    if job.deadline_exceeded:
+        findings.append(Finding(Severity.CRITICAL, "DeadlineExceeded"))
+    return findings
+
+
+def _service_findings(svc: ServiceHealth) -> list[Finding]:
+    """No selector (ExternalName, headless, manually-managed Endpoints) is a
+    legitimate configuration, not a defect — no finding either way. Any real
+    trouble in the Service's backing pods surfaces separately via
+    _pod_findings, same as for any other kind."""
+    if not svc.has_selector:
+        return []
+    total = svc.ready_addresses + svc.not_ready_addresses
+    if total == 0:
+        return [Finding(Severity.CRITICAL, "No endpoints: no pods match the selector")]
+    if svc.ready_addresses == 0:
+        return [
+            Finding(
+                Severity.CRITICAL,
+                f"{svc.not_ready_addresses} endpoint(s) not ready, 0 ready",
+            )
+        ]
+    if svc.not_ready_addresses > 0:
+        return [
+            Finding(Severity.WARNING, f"{svc.ready_addresses}/{total} endpoints ready")
+        ]
+    return []
+
+
+def _cronjob_findings(cj: CronJobHealth) -> list[Finding]:
+    """No 'missed schedule' detection (would need cron-expression parsing,
+    not a dependency here). Instead a rollup of the most recently-run owned
+    Job, reusing _job_findings directly so a CronJob whose last run hit
+    BackoffLimitExceeded/DeadlineExceeded shows up the same way a standalone
+    failed Job does. Suspended and never-run are both OK — not enough signal
+    to call a fresh or paused CronJob broken."""
+    if cj.suspended or cj.most_recent_job is None:
+        return []
+    return [
+        Finding(finding.severity, f"Most recent run: {finding.summary}")
+        for finding in _job_findings(cj.most_recent_job)
+    ]
+
+
+def _pvc_findings(pvc: PVCHealth) -> list[Finding]:
+    """No duration threshold — Pending is flagged immediately, mirroring the
+    unconditional "Pod pending" finding rather than a time-gated heuristic."""
+    if pvc.phase == "Pending":
+        return [Finding(Severity.WARNING, "PersistentVolumeClaim pending")]
+    if pvc.phase == "Lost":
+        return [
+            Finding(
+                Severity.CRITICAL,
+                "PersistentVolumeClaim lost: backing volume no longer available",
+            )
+        ]
+    return []
 
 
 def _pod_findings(pod: PodDiagnostic) -> list[Finding]:
@@ -180,7 +328,60 @@ def _container_findings(pod_name: str, container: ContainerDiagnostic) -> list[F
                 f"restarted {container.restart_count} times",
             )
         )
+    findings.extend(_usage_findings(container))
     return findings
+
+
+def _usage_findings(container: ContainerDiagnostic) -> list[Finding]:
+    """No limit set means nothing to compare usage against — the same
+    reasoning already applied elsewhere (e.g. a suspended Job): no finding is
+    possible, not a defect. No usage data (metrics-server unavailable, or
+    this container just isn't in the metrics response) is likewise silent."""
+    findings: list[Finding] = []
+    if container.memory_usage is not None and container.memory_limit:
+        ratio = container.memory_usage / container.memory_limit
+        if ratio >= _MEMORY_CRITICAL_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.CRITICAL,
+                    f"Memory at {_pct(ratio)}% of limit "
+                    f"({_format_memory(container.memory_usage)}/"
+                    f"{_format_memory(container.memory_limit)}) — OOMKill risk",
+                )
+            )
+        elif ratio >= _MEMORY_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    f"Memory at {_pct(ratio)}% of limit "
+                    f"({_format_memory(container.memory_usage)}/"
+                    f"{_format_memory(container.memory_limit)})",
+                )
+            )
+    if container.cpu_usage is not None and container.cpu_limit:
+        ratio = container.cpu_usage / container.cpu_limit
+        if ratio >= _CPU_WARN_THRESHOLD:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    f"CPU at {_pct(ratio)}% of limit "
+                    f"({_format_cpu(container.cpu_usage)}/"
+                    f"{_format_cpu(container.cpu_limit)}) — likely throttling",
+                )
+            )
+    return findings
+
+
+def _pct(ratio: Decimal) -> int:
+    return int(ratio * 100)
+
+
+def _format_memory(value: Decimal) -> str:
+    return f"{int(value / (1024 * 1024))}Mi"
+
+
+def _format_cpu(value: Decimal) -> str:
+    return f"{int(value * 1000)}m"
 
 
 def _event_findings(events) -> list[Finding]:

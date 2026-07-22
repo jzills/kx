@@ -1,0 +1,12 @@
+# Service whose selector matches no pods — `kx diag` flags the missing endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: orphaned-svc
+  namespace: diagnostics
+spec:
+  selector:
+    app: nonexistent-backend
+  ports:
+    - port: 80
+      targetPort: 80

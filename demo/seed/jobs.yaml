@@ -1,0 +1,35 @@
+# Failing batch workloads: a Job that exhausts its backoff limit and a
+# CronJob whose runs fail every minute.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migration-backofflimit
+  namespace: diagnostics
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: busybox
+          command: ["sh", "-c", "echo migration failed; exit 1"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-failing
+  namespace: diagnostics
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: nightly
+              image: busybox
+              command: ["sh", "-c", "echo nightly job failed; exit 1"]

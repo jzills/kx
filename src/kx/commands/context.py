@@ -1,12 +1,13 @@
-from kx.commands._metadata import fetch_metadata_field
 from kx.kubectl import KubectlServiceProtocol
 from kx.state import StateServiceProtocol
 
 
-class LabelsCommand:
+class ContextCommand:
     def __init__(self, state: StateServiceProtocol, kubectl: KubectlServiceProtocol):
         self.state = state
         self.kubectl = kubectl
 
-    def execute(self, index: int) -> dict[str, str]:
-        return fetch_metadata_field(self.kubectl, self.state, index, "labels")
+    def execute(self, index: int) -> str:
+        name, _, _ = self.state.fields(index)
+        self.kubectl.run(["config", "use-context", name])
+        return name

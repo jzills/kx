@@ -109,6 +109,45 @@ def test_render_indexed_table_non_tabular_falls_through(capture_console):
     assert '{"items": []}' in capture_console.getvalue()
 
 
+USAGE_OUTPUT = """\
+X   NAME      CPU(cores)   CPU%   MEMORY(bytes)   MEM%
+1   web-1     50m          50%    38Mi             77%
+2   web-2     5m           —      100Mi            —"""
+
+
+def test_render_indexed_table_shows_usage_percent_columns(capture_console):
+    kx_console.render_indexed_table(USAGE_OUTPUT, "pods", "default")
+    out = capture_console.getvalue()
+    assert "CPU%" in out
+    assert "MEM%" in out
+    assert "50%" in out
+    assert "77%" in out
+    assert "—" in out
+
+
+class TestUsagePctColor:
+    def test_memory_below_warning_is_uncolored(self):
+        assert kx_console._usage_pct_color("50%", "memory") is None
+
+    def test_memory_at_warning_threshold(self):
+        assert kx_console._usage_pct_color("75%", "memory") == "status.warn"
+
+    def test_memory_at_critical_threshold(self):
+        assert kx_console._usage_pct_color("90%", "memory") == "status.bad"
+
+    def test_cpu_below_warning_is_uncolored(self):
+        assert kx_console._usage_pct_color("50%", "cpu") is None
+
+    def test_cpu_at_warning_threshold(self):
+        assert kx_console._usage_pct_color("90%", "cpu") == "status.warn"
+
+    def test_cpu_never_reaches_critical(self):
+        assert kx_console._usage_pct_color("150%", "cpu") == "status.warn"
+
+    def test_dash_is_uncolored(self):
+        assert kx_console._usage_pct_color("—", "memory") is None
+
+
 ALL_NAMESPACES_OUTPUT = """\
 NAMESPACE     NAME        READY   STATUS    AGE
 default       nginx-abc   1/1     Running   2d
@@ -245,6 +284,135 @@ def _diag_report(verdict, findings, pods=None, warning_events=None):
         pods=pods or [],
         warning_events=warning_events or [],
     )
+
+
+def _triage_report(name, verdict, summary=None, kind="Deployment"):
+    from kx.diagnostics import DiagnosticReport, Finding
+
+    findings = [Finding(verdict, summary)] if summary else []
+    return DiagnosticReport(
+        kind=kind,
+        name=name,
+        namespace="default",
+        verdict=verdict,
+        findings=findings,
+    )
+
+
+def _triage_result(reports, checked=None, healthy=0, dropped=None, namespace="default"):
+    from kx.commands.diagnostic import TriageResult
+
+    return TriageResult(
+        namespace=namespace,
+        checked=checked if checked is not None else len(reports) + healthy,
+        reports=reports,
+        healthy=healthy,
+        dropped=dropped or [],
+    )
+
+
+def test_render_triage_table_rows_and_caption(capture_console):
+    from kx.diagnostics import Severity
+
+    result = _triage_result(
+        [
+            _triage_report("checkout", Severity.CRITICAL, "ImagePullBackOff: api:v9"),
+            _triage_report("runner", Severity.WARNING, "Restarted 7 times", kind="Pod"),
+        ],
+        healthy=10,
+    )
+    kx_console.render_triage(result)
+    out = capture_console.getvalue()
+    assert "Mixed · default · 12 checked" in out
+    assert "KIND" in out and "VERDICT" in out and "TOP FINDING" in out
+    assert "1" in out and "Deployment" in out and "checkout" in out
+    assert "critical" in out and "ImagePullBackOff: api:v9" in out
+    assert "2" in out and "Pod" in out and "runner" in out
+    assert "warning" in out and "Restarted 7 times" in out
+    assert "10 healthy resources not shown · kx diag <index> for detail" in out
+
+
+def test_render_triage_all_healthy(capture_console):
+    result = _triage_result([], checked=5, healthy=5)
+    kx_console.render_triage(result)
+    out = capture_console.getvalue()
+    assert "Mixed · default · 5 checked · all healthy" in out
+    assert "TOP FINDING" not in out
+
+
+def test_render_triage_empty_namespace(capture_console):
+    result = _triage_result([], checked=0)
+    kx_console.render_triage(result)
+    out = capture_console.getvalue()
+    assert "Mixed · default · 0 checked" in out
+    assert "healthy" not in out
+
+
+def test_render_triage_notes_dropped_collisions(capture_console):
+    from kx.diagnostics import Severity
+
+    result = _triage_result(
+        [_triage_report("web", Severity.CRITICAL, "boom")],
+        dropped=["Pod/web"],
+    )
+    kx_console.render_triage(result)
+    assert "Pod/web" in capture_console.getvalue()
+
+
+def test_render_triage_singular_healthy_footer(capture_console):
+    from kx.diagnostics import Severity
+
+    result = _triage_result([_triage_report("web", Severity.WARNING, "hmm")], healthy=1)
+    kx_console.render_triage(result)
+    assert "1 healthy resource not shown" in capture_console.getvalue()
+
+
+def test_render_triage_narrow_terminal_keeps_indexes_and_columns():
+    # Long names must squeeze TOP FINDING, never the index/kind/verdict cells.
+    from kx.diagnostics import Severity
+
+    buf = io.StringIO()
+    original = kx_console._console
+    kx_console._console = kx_console._build_console(
+        plain=True, file=buf, width=60, force_terminal=True
+    )
+    try:
+        result = _triage_result(
+            [
+                _triage_report(
+                    "kube-controller-manager-desktop-control-plane",
+                    Severity.WARNING,
+                    "Container manager restarted 2 times",
+                    kind="Pod",
+                ),
+                _triage_report("web", Severity.CRITICAL, "boom"),
+            ]
+        )
+        kx_console.render_triage(result)
+    finally:
+        kx_console._console = original
+    out = buf.getvalue()
+    assert " 1 " in out and " 2 " in out
+    assert "Pod" in out
+    assert "warning" in out and "critical" in out
+
+
+def test_render_triage_piped_output_is_not_stretched():
+    # The piped console is 1000 columns wide; the table must hug its content
+    # instead of expanding padding across the full pipe width.
+    from kx.diagnostics import Severity
+
+    buf = io.StringIO()
+    original = kx_console._console
+    kx_console._console = kx_console._build_console(plain=True, file=buf, width=1000)
+    try:
+        result = _triage_result([_triage_report("web", Severity.CRITICAL, "boom")])
+        kx_console.render_triage(result)
+    finally:
+        kx_console._console = original
+    lines = buf.getvalue().splitlines()
+    # No rstrip: the stretch shows up as trailing padding on every table line.
+    assert all(len(line) < 120 for line in lines)
 
 
 def test_render_diagnostic_healthy_reports_no_issues(capture_console):
@@ -643,3 +811,36 @@ def test_render_diagnostic_empty_states_share_indent(capture_console):
     indent = len(summary_empty) - len(summary_empty.lstrip())
     assert indent == 4
     assert indent == len(events_empty) - len(events_empty.lstrip())
+
+
+def test_render_scan_summary_counts_and_headers(capture_console):
+    from kx.scanner import ImageScan
+
+    rows = [
+        ImageScan(
+            "nginx:1.27",
+            counts={
+                "CRITICAL": 4,
+                "HIGH": 26,
+                "MEDIUM": 47,
+                "LOW": 15,
+                "UNSPECIFIED": 28,
+            },
+        )
+    ]
+    kx_console.render_scan_summary(rows)
+    out = capture_console.getvalue()
+    for header in ("IMAGE", "CRIT", "HIGH", "MED", "LOW", "UNSPEC"):
+        assert header in out
+    assert "nginx:1.27" in out
+    assert "26" in out
+
+
+def test_render_scan_summary_error_row(capture_console):
+    from kx.scanner import ImageScan
+
+    kx_console.render_scan_summary([ImageScan("api/bad:latest", error="Pull failed")])
+    out = capture_console.getvalue()
+    assert "api/bad:latest" in out
+    assert "Pull failed" in out
+    assert "—" in out

@@ -1,0 +1,20 @@
+# Standalone pod sitting at ~70%+ of its memory limit — drives the
+# usage-vs-limit findings in `kx diag` and the MEM% column in `kx top`.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-pressure
+  namespace: diagnostics
+spec:
+  containers:
+    - name: app
+      image: python:3-alpine
+      command:
+        - python3
+        - -c
+        - "x = bytearray(35*1024*1024); import time; time.sleep(1000000)"
+      resources:
+        requests:
+          memory: 50Mi
+        limits:
+          memory: 50Mi
