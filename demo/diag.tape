@@ -1,4 +1,4 @@
-Output demo/demo.gif
+Output demo/diag.gif
 
 Set FontSize 16
 Set Width 1200
@@ -13,26 +13,18 @@ Enter
 Sleep 500ms
 Show
 
-Type "kx get pods"
-Enter
-Sleep 2.5s
-
-Type "kx top"
-Enter
-Sleep 2.5s
-
-Type "kx get deployments"
-Enter
-Sleep 2s
-
-Type "kx logs 7 --tail=2"
-Enter
-Sleep 2.5s
-
-Type "kx tree 7 --index"
-Enter
-Sleep 3s
-
 Type "kx diag"
 Enter
 Sleep 4s
+
+Type "kx diag 6"
+Enter
+Sleep 4.5s
+
+Type "kx logs 6 --tail=3"
+Enter
+Sleep 3s
+
+Type "kx diag 8"
+Enter
+Sleep 3.5s

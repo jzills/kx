@@ -47,7 +47,7 @@ With pip:
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required; pending krew-index acceptance):
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required; krew-index submission in progress):
 
 ```bash
 kubectl krew install idx
@@ -141,6 +141,18 @@ kx exec 1 -- env     # run a specific command
 kx get services
 kx port-forward 2 8080:80
 
+# what's unhealthy here, and why?
+kx diag
+kx diag 1            # full findings for the worst offender
+
+# check resource usage, then drill in off the same indexes
+kx top
+kx logs 2
+
+# switch kubeconfig context by index
+kx context
+kx context 2
+
 # navigate history after multiple gets
 kx get pods
 kx get deployments
@@ -153,14 +165,106 @@ kx delete 3
 
 ### Triage a namespace
 
-Bare `kx diag` sweeps the current namespace — every Deployment, StatefulSet,
-and DaemonSet, plus pods they don't own — and prints a ranked table of what's
-unhealthy. The rows are indexed, so the usual commands drill straight in:
+Bare `kx diag` sweeps the current namespace — Deployments, StatefulSets,
+DaemonSets, Jobs, CronJobs, Services, and PersistentVolumeClaims, plus pods
+nothing owns — and prints a ranked table of what's unhealthy. Findings also
+draw on live resource usage: a pod running hot against its memory limit is
+flagged as an OOMKill risk before it dies. The rows are indexed, so the usual
+commands drill straight in:
 
 ```bash
 kx diag              # what's wrong here?
 kx diag 1            # full findings for the worst offender
 kx logs 2            # logs for the second
+```
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
+</div>
+
+`kx diag <index>` diagnoses a single resource: a verdict banner, a `SUMMARY`
+of findings (CrashLoopBackOff, image pull failures, OOMKills, unschedulable
+pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed
+CronJob runs, usage near limits), a per-pod status table, recent log tails
+from broken containers, and warning events — one screen instead of four
+kubectl commands.
+
+### Resource usage
+
+`kx top` lists pod CPU/memory usage and indexes the rows exactly like
+`kx get`, with usage shown as a percentage of each pod's resource limits
+(`—` when a container has no limit set; `--no-limits` hides the columns):
+
+```
+$ kx top
+Pods · diagnostics · 6 items
+  X    NAME                                  CPU(cores)    MEMORY(bytes)    CPU%    MEM%
+  1    billing-flaky-b7878b475-dm9sk         0m            1Mi                0%      3%
+  2    frontend-notready-7fc649587b-r4fh4    1m            12Mi               1%     18%
+  3    frontend-notready-7fc649587b-zvtb5    1m            12Mi               1%     18%
+  4    memory-pressure                       0m            38Mi                —     76%
+  5    web-healthy-5c4657576d-v9j5p          0m            12Mi               0%     18%
+  6    web-healthy-5c4657576d-x4752          0m            12Mi               0%     18%
+```
+
+Since the rows land in state, `kx diag 4` or `kx logs 4` drill straight into
+the pod that's running hot.
+
+### Scan images for vulnerabilities
+
+`kx scan <index>` scans the unique container images of an indexed workload
+(init containers and CronJob job templates included); bare `kx scan` sweeps
+every workload in the namespace. Results come back as a severity summary:
+
+```
+$ kx scan
+Mixed · diagnostics · 5 images
+  IMAGE                                     CRIT    HIGH    MED    LOW    UNSPEC
+  registry.invalid/does-not-exist:latest       —       —      —      —         —        ✗ Pull failed
+  busybox:1.36                                 0       0      0      0         0
+  nginx:1.27-alpine                            4      26     47     15        28
+  busybox                                      0       0      0      0         0
+  python:3-alpine                              0       0      0      0         0
+```
+
+Scanning uses [Docker Scout](https://docs.docker.com/scout/) (`docker scout`
+must be available). Pass `--full` to stream the raw scanner output — CVE IDs,
+affected packages, fix versions — per image.
+
+### Labels and annotations
+
+`kx labels` / `kx annotations` read metadata for indexed resources;
+`kx label` / `kx annotate` write it (`--remove` deletes a key, `--overwrite`
+replaces an existing value):
+
+```
+$ kx labels 12
+Pod/web-healthy-5c4657576d-v9j5p · diagnostics · 2 items
+  LABEL                VALUE
+  app                  web-healthy
+  pod-template-hash    5c4657576d
+
+$ kx label 12 tier=frontend
+✓ Labeled Pod/web-healthy-5c4657576d-v9j5p (set 1)
+
+$ kx labels 12 --selector
+Pod/web-healthy-5c4657576d-v9j5p · diagnostics · 3 items
+app=web-healthy,pod-template-hash=5c4657576d,tier=frontend
+```
+
+`--selector` prints a copy-pastable label selector for use with any kubectl
+command.
+
+### Switch namespace or context
+
+`kx ns` lists namespaces indexed; `kx ns <index>` switches. `kx context`
+(alias `kx contexts`) does the same for kubeconfig contexts:
+
+```bash
+kx ns                # list namespaces
+kx ns 3              # switch to the third
+kx context           # list kubeconfig contexts
+kx context 2         # switch to the second
 ```
 
 ## State
@@ -191,6 +295,10 @@ Styled output is emitted only when stdout is a terminal — piped or redirected 
 
 ### Themes
 
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
+</div>
+
 ```bash
 kx theme        # list available themes (indexed) with a preview of each
 kx theme nord   # persist a theme to ~/.kx/config.toml
@@ -212,3 +320,7 @@ Run the CLI directly:
 ```bash
 python -m kx.main --help
 ```
+
+The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)
+tapes — see [`demo/README.md`](demo/README.md) for seeding the demo namespace
+and re-recording.
