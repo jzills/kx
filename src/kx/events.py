@@ -1,7 +1,22 @@
-from kubernetes import client
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
+from kubernetes import client
+
 from kx.k8s import load_config
+
+
+@dataclass
+class EventRow:
+    """One event, flattened for rendering. `timestamp` is the event's last-seen
+    time (falling back to creation) as a datetime, or None if unavailable."""
+
+    type: str
+    reason: str
+    kind: str
+    message: str
+    timestamp: datetime | None = None
 
 
 class EventsServiceProtocol(Protocol):
