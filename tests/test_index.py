@@ -110,6 +110,26 @@ class TestIndexServiceAdd:
         lines = output.splitlines()
         assert lines[1].startswith("1")
 
+    def test_add_dedupes_duplicate_names_keeping_first(self):
+        # Index numbers must map 1:1 to saved state entries. State is keyed by
+        # name, so a listing with a repeated NAME would desync the two — the
+        # display must collapse to the same unique, first-seen set.
+        output = (
+            "NAME          READY   STATUS    RESTARTS   AGE\n"
+            "dup-pod       1/1     Running   0          5d\n"
+            "dup-pod       0/1     Pending   0          1d\n"
+            "other-pod     1/1     Running   0          3d"
+        )
+        indexed, names = self.svc.add(output)
+        assert names == ["dup-pod", "other-pod"]
+        data_lines = [line for line in indexed.splitlines()[1:] if line.strip()]
+        assert len(data_lines) == 2
+        assert data_lines[0].startswith("1")
+        assert data_lines[1].startswith("2")
+        # First occurrence wins (Running), not the later Pending row.
+        assert "Running" in data_lines[0]
+        assert "Pending" not in indexed
+
 
 class TestIndexServiceFilter:
     def setup_method(self):
