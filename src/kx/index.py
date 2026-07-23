@@ -63,6 +63,19 @@ class IndexService:
         if not headers:
             return output, []
 
+        # Index numbers must map 1:1 to saved state, which is keyed by name.
+        # Collapse any repeated NAME (first-seen wins) so the displayed indexes
+        # and the state entries can never desync.
+        seen: set[str] = set()
+        unique_rows = []
+        for row in rows:
+            name = row[name_idx]
+            if name in seen:
+                continue
+            seen.add(name)
+            unique_rows.append(row)
+        rows = unique_rows
+
         names = [row[name_idx] for row in rows]
 
         headers = ["X"] + headers

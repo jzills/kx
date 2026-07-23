@@ -52,6 +52,13 @@ def load_config() -> Config:
     if "KX_THEME" in os.environ:
         kwargs["theme"] = os.environ["KX_THEME"]
 
+    if "max_history" in kwargs:
+        mh = kwargs["max_history"]
+        # bool is an int subclass; reject it and any non-int/non-positive value
+        # (a string from TOML, 0, or a negative) with a clear message.
+        if isinstance(mh, bool) or not isinstance(mh, int) or mh < 1:
+            raise SystemExit("kx: max_history must be a positive integer")
+
     if "theme" in kwargs and kwargs["theme"] not in THEMES:
         raise SystemExit(
             f"kx: unknown theme '{kwargs['theme']}' (run kx theme to list themes)"

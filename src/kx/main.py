@@ -293,16 +293,13 @@ def events(indexes: list[int]):
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         with console.status("fetching events"):
-            result = command.execute(index)
-        if result.strip() == "No events found":
-            count = 0
-        else:
-            count = len([line for line in result.splitlines() if line.strip()])
+            rows = command.execute(index)
+        count = len(rows)
         extra = f"{count} {'item' if count == 1 else 'items'}" if count else ""
         if position > 0:
             console.print_raw("")
         console.print_banner(kind, name, namespace=ns, extra=extra)
-        console.render_events_table(result)
+        console.render_events_table(rows)
 
 
 @app.command(
@@ -468,7 +465,7 @@ def yaml(
     show: Optional[str] = typer.Option(
         None,
         "--show",
-        help="Comma-separated top-level YAML fields to display (e.g. metadata,spec)",
+        help="Comma-separated YAML fields to display (e.g. metadata,spec)",
     ),
 ):
     """Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."""

@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
+from kx.events import EventRow
 from kx.kinds import plural_display
 from kx.scanner import SEVERITIES, ImageScan
 from kx.state import StateHistory
@@ -329,8 +330,8 @@ def render_indexed_table(
         _console.print(f"[muted]{note}[/muted]")
 
 
-def render_events_table(text: str) -> None:
-    if text.strip() == "No events found":
+def render_events_table(rows: list[EventRow]) -> None:
+    if not rows:
         _console.print("[muted]No events found[/muted]")
         return
 
@@ -343,31 +344,17 @@ def render_events_table(text: str) -> None:
     for col in ("TYPE", "REASON", "KIND", "AGE", "MESSAGE"):
         table.add_column(col)
 
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        event_type = line[0:8].strip()
-        reason = line[9:39].strip()
-        kind = line[40:50].strip()
-        rest = line[51:]
-        parts = rest.split(" ", 2)
-        timestamp = (
-            f"{parts[0]} {parts[1]}" if len(parts) >= 2 else (parts[0] if parts else "")
-        )
-        message = parts[2] if len(parts) >= 3 else ""
-
-        try:
-            age = _format_age(datetime.fromisoformat(timestamp))
-        except ValueError:
-            age = timestamp
-
-        type_color = "muted" if event_type == "Normal" else "warn"
+    for row in rows:
+        age = _format_age(row.timestamp)
+        type_color = "muted" if row.type == "Normal" else "warn"
         table.add_row(
-            f"[{type_color}]{event_type}[/]",
-            reason,
-            kind,
+            f"[{type_color}]{row.type}[/]",
+            row.reason,
+            row.kind,
             f"[muted]{age}[/]",
-            message,
+            # Text (not markup) so bracketed characters in a message are shown
+            # literally, matching the WARNING EVENTS section.
+            Text(row.message),
         )
 
     _console.print(table)

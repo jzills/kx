@@ -1,4 +1,4 @@
-from kx.events import EventsServiceProtocol
+from kx.events import EventRow, EventsServiceProtocol
 from kx.kubectl import KubectlServiceProtocol
 from kx.refresh import ensure_exists
 from kx.state import StateServiceProtocol
@@ -15,7 +15,7 @@ class EventsCommand:
         self.events = events
         self.kubectl = kubectl
 
-    def execute(self, index: int) -> str:
+    def execute(self, index: int) -> list[EventRow]:
         name, namespace, kind = self.state.fields(index)
         all_events = self.events.get(namespace)
         filtered = self.events.filter(all_events, name, kind)
@@ -24,14 +24,21 @@ class EventsCommand:
             # Deleted resources keep their events ~1h; only an empty result
             # warrants checking whether the target itself is gone.
             ensure_exists(self.kubectl, kind, name, namespace)
-            return "No events found"
+            return []
 
-        output = []
+        rows = []
         for event in filtered:
             obj = event.involved_object
-            output.append(
-                f"{event.type:8} {event.reason:30} "
-                f"{obj.kind:10} {event.metadata.creation_timestamp} "
-                f"{event.message}"
+            timestamp = getattr(event, "last_timestamp", None) or getattr(
+                event.metadata, "creation_timestamp", None
             )
-        return "\n".join(output)
+            rows.append(
+                EventRow(
+                    type=event.type or "",
+                    reason=event.reason or "",
+                    kind=obj.kind,
+                    message=event.message or "",
+                    timestamp=timestamp,
+                )
+            )
+        return rows
