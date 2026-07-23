@@ -15,6 +15,7 @@ from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
 from kx.events import EventRow
+from kx.index import _parse_output
 from kx.kinds import plural_display
 from kx.scanner import SEVERITIES, ImageScan
 from kx.state import StateHistory
@@ -246,27 +247,19 @@ def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
 def render_indexed_table(
     text: str, resource_type: str, namespace: str, note: str | None = None
 ) -> None:
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        # kubectl exits 0 with empty stdout when nothing matches ("No
-        # resources found" goes to stderr) — show the caption, not silence.
-        _print_get_caption(resource_type, namespace, 0)
+    # Share index._parse_output (the single table parser) rather than a private
+    # copy: it extends the last column to end-of-line, so a value wider than its
+    # header (kubectl doesn't pad the last column) is never sliced off.
+    headers, rows, _ = _parse_output(text)
+    if not headers:
+        # Non-tabular output (JSON/YAML, or a table with no NAME column) prints
+        # as-is; genuinely empty stdout (kubectl sends "No resources found" to
+        # stderr) shows the zero-count caption instead of silence.
+        if text.strip():
+            _console.print(text, markup=False, highlight=False)
+        else:
+            _print_get_caption(resource_type, namespace, 0)
         return
-
-    header_line = lines[0]
-    first_col = header_line.split()[0] if header_line.split() else ""
-    if first_col != "X" and note is None:
-        _console.print(text, markup=False, highlight=False)
-        return
-
-    spans = [(m.start(), m.end()) for m in re.finditer(r"\S+\s*", header_line)]
-    headers = [header_line[start:end].strip() for start, end in spans]
-
-    rows = []
-    for line in lines[1:]:
-        cols = [line[start:end].strip() for start, end in spans]
-        if cols:
-            rows.append(cols)
 
     if not rows:
         _print_get_caption(resource_type, namespace, 0)

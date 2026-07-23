@@ -171,6 +171,18 @@ def test_render_indexed_table_no_note_after_indexed_output(capture_console):
     assert "indexes not saved" not in capture_console.getvalue()
 
 
+def test_render_indexed_table_wide_last_column_not_truncated(capture_console):
+    # kubectl doesn't pad a table's last column, so an -A value wider than the
+    # AGE header ("100d" vs "AGE") was sliced by render_indexed_table's own
+    # parser. Sharing _parse_output (which extends the last column) fixes it.
+    output = (
+        "NAMESPACE     NAME        READY   STATUS    AGE\n"
+        "kube-system   coredns-1   1/1     Running   100d"
+    )
+    kx_console.render_indexed_table(output, "pods", "all namespaces", note="x")
+    assert "100d" in capture_console.getvalue()
+
+
 def test_render_indexed_table_empty_string_shows_zero_caption(capture_console):
     kx_console.render_indexed_table("", "pods", "default")
     assert "Pods · default · 0 items" in capture_console.getvalue()
