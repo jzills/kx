@@ -171,6 +171,18 @@ def test_render_indexed_table_no_note_after_indexed_output(capture_console):
     assert "indexes not saved" not in capture_console.getvalue()
 
 
+def test_render_indexed_table_wide_last_column_not_truncated(capture_console):
+    # kubectl doesn't pad a table's last column, so an -A value wider than the
+    # AGE header ("100d" vs "AGE") was sliced by render_indexed_table's own
+    # parser. Sharing _parse_output (which extends the last column) fixes it.
+    output = (
+        "NAMESPACE     NAME        READY   STATUS    AGE\n"
+        "kube-system   coredns-1   1/1     Running   100d"
+    )
+    kx_console.render_indexed_table(output, "pods", "all namespaces", note="x")
+    assert "100d" in capture_console.getvalue()
+
+
 def test_render_indexed_table_empty_string_shows_zero_caption(capture_console):
     kx_console.render_indexed_table("", "pods", "default")
     assert "Pods · default · 0 items" in capture_console.getvalue()
@@ -183,34 +195,80 @@ def test_render_indexed_table_header_only_shows_zero_caption(capture_console):
     assert "NAME" not in out
 
 
-EVENTS_OUTPUT = (
-    "Normal   Pulling                        Pod        2024-01-01 12:00:00+00:00 Pulling image nginx\n"
-    "Warning  BackOff                        Pod        2024-01-01 12:01:00+00:00 Back-off restarting"
-)
+def _event_row(
+    type_="Normal",
+    reason="Pulling",
+    kind="Pod",
+    message="Pulling image nginx",
+    minutes_ago=1,
+):
+    from kx.events import EventRow
+
+    ts = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return EventRow(type=type_, reason=reason, kind=kind, message=message, timestamp=ts)
 
 
 def test_render_events_table_shows_type_values(capture_console):
-    kx_console.render_events_table(EVENTS_OUTPUT)
+    kx_console.render_events_table(
+        [
+            _event_row(type_="Normal", reason="Pulling"),
+            _event_row(type_="Warning", reason="BackOff", message="Back-off"),
+        ]
+    )
     out = capture_console.getvalue()
     assert "Normal" in out
     assert "Warning" in out
 
 
 def test_render_events_table_shows_reason(capture_console):
-    kx_console.render_events_table(EVENTS_OUTPUT)
+    kx_console.render_events_table(
+        [_event_row(reason="Pulling"), _event_row(type_="Warning", reason="BackOff")]
+    )
     out = capture_console.getvalue()
     assert "Pulling" in out
     assert "BackOff" in out
 
 
 def test_render_events_table_shows_message(capture_console):
-    kx_console.render_events_table(EVENTS_OUTPUT)
+    kx_console.render_events_table([_event_row(message="Back-off restarting")])
     assert "Back-off restarting" in capture_console.getvalue()
 
 
 def test_render_events_table_no_events(capture_console):
-    kx_console.render_events_table("No events found")
+    kx_console.render_events_table([])
     assert "No events found" in capture_console.getvalue()
+
+
+def test_render_events_table_long_kind_not_mangled(capture_console):
+    # The old fixed-offset reparse truncated kinds longer than 10 chars and
+    # leaked the timestamp into the message. Structured rows render each field
+    # in its own column, whatever the kind's length. (Widen the console so the
+    # long kind isn't wrapped by the 80-col test default.)
+    kx_console._console = kx_console._build_console(
+        plain=True, file=capture_console, width=200
+    )
+    rows = [
+        _event_row(
+            type_="Warning",
+            reason="FailedCreate",
+            kind="StatefulSet",
+            message="create Pod web-0 failed",
+            minutes_ago=5,
+        ),
+        _event_row(
+            type_="Warning",
+            reason="FailedGetScale",
+            kind="HorizontalPodAutoscaler",
+            message="no metrics",
+            minutes_ago=5,
+        ),
+    ]
+    kx_console.render_events_table(rows)
+    out = capture_console.getvalue()
+    assert "StatefulSet" in out
+    assert "HorizontalPodAutoscaler" in out
+    assert "create Pod web-0 failed" in out
+    assert "5m ago" in out
 
 
 STATE_JSON = '{"resources": {"nginx": "Pod", "redis": "Pod"}, "namespace": "staging"}'
@@ -698,17 +756,26 @@ def test_print_success_passes_quoted_names_through(capture_console):
 
 
 def test_render_events_table_shows_compact_age(capture_console):
-    kx_console.render_events_table(EVENTS_OUTPUT)
+    kx_console.render_events_table([_event_row(minutes_ago=3)])
     out = capture_console.getvalue()
     assert "AGE" in out
-    assert "ago" in out
-    assert "2024-01-01 12:00:00+00:00" not in out
+    assert "3m ago" in out
 
 
-def test_render_events_table_unparseable_timestamp_falls_back(capture_console):
-    line = "Normal   Pulling                        Pod        notadate garbage Pulling image"
-    kx_console.render_events_table(line)
-    assert "notadate garbage" in capture_console.getvalue()
+def test_render_events_table_missing_timestamp_renders_without_age(capture_console):
+    from kx.events import EventRow
+
+    rows = [
+        EventRow(
+            type="Normal",
+            reason="Pulling",
+            kind="Pod",
+            message="Pulling image nginx",
+            timestamp=None,
+        )
+    ]
+    kx_console.render_events_table(rows)
+    assert "Pulling image nginx" in capture_console.getvalue()
 
 
 def test_status_is_noop_off_terminal(capture_console):

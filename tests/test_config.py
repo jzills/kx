@@ -90,6 +90,40 @@ class TestEnvOverrides:
             with pytest.raises(SystemExit, match="KX_MAX_HISTORY must be an integer"):
                 load_config()
 
+    def test_zero_max_history_from_env_raises_system_exit(self, tmp_path, monkeypatch):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KX_MAX_HISTORY", "0")
+        with _patch_config_file(tmp_path / "config.toml"):
+            with pytest.raises(SystemExit, match="positive integer"):
+                load_config()
+
+    def test_negative_max_history_from_env_raises_system_exit(
+        self, tmp_path, monkeypatch
+    ):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KX_MAX_HISTORY", "-3")
+        with _patch_config_file(tmp_path / "config.toml"):
+            with pytest.raises(SystemExit, match="positive integer"):
+                load_config()
+
+    def test_zero_max_history_from_file_raises_system_exit(self, tmp_path, monkeypatch):
+        _clear_env(monkeypatch)
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("max_history = 0\n")
+        with _patch_config_file(config_file):
+            with pytest.raises(SystemExit, match="positive integer"):
+                load_config()
+
+    def test_non_integer_max_history_from_file_raises_system_exit(
+        self, tmp_path, monkeypatch
+    ):
+        _clear_env(monkeypatch)
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('max_history = "ten"\n')
+        with _patch_config_file(config_file):
+            with pytest.raises(SystemExit, match="positive integer"):
+                load_config()
+
 
 class TestNoColor:
     def test_no_color_from_file(self, tmp_path, monkeypatch):

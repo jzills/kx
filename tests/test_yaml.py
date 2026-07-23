@@ -71,6 +71,28 @@ class TestYamlCommand:
         assert "containerStatuses" in parsed
         assert parsed["containerStatuses"][0]["name"] == "nginx"
 
+    def test_show_prefers_top_level_on_collision(self):
+        # A Deployment carries `metadata` at the document root AND under
+        # spec.template.metadata. --show metadata must return the workload's
+        # own metadata, not the pod template's.
+        manifest = yaml.dump(
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {"name": "web", "namespace": "prod"},
+                "spec": {
+                    "template": {
+                        "metadata": {"name": "pod-template"},
+                        "spec": {"containers": [{"name": "app", "image": "nginx"}]},
+                    }
+                },
+            }
+        )
+        cmd, _, _ = _make_command(raw_yaml=manifest, kind=str(Kind.Deployment))
+        result = cmd.execute(1, show=["metadata"])
+        parsed = yaml.safe_load(result)
+        assert parsed["metadata"]["name"] == "web"
+
     def test_kubectl_called_with_correct_args(self):
         cmd, _, kubectl = _make_command()
         cmd.execute(1)

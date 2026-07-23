@@ -14,6 +14,8 @@ from rich.table import Table
 from rich.text import Text
 
 from kx.diagnostics import SEVERITY_PATTERN, Severity
+from kx.events import EventRow
+from kx.index import _parse_output
 from kx.kinds import plural_display
 from kx.scanner import SEVERITIES, ImageScan
 from kx.state import StateHistory
@@ -245,27 +247,19 @@ def _print_get_caption(resource_type: str, namespace: str, count: int) -> None:
 def render_indexed_table(
     text: str, resource_type: str, namespace: str, note: str | None = None
 ) -> None:
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        # kubectl exits 0 with empty stdout when nothing matches ("No
-        # resources found" goes to stderr) — show the caption, not silence.
-        _print_get_caption(resource_type, namespace, 0)
+    # Share index._parse_output (the single table parser) rather than a private
+    # copy: it extends the last column to end-of-line, so a value wider than its
+    # header (kubectl doesn't pad the last column) is never sliced off.
+    headers, rows, _ = _parse_output(text)
+    if not headers:
+        # Non-tabular output (JSON/YAML, or a table with no NAME column) prints
+        # as-is; genuinely empty stdout (kubectl sends "No resources found" to
+        # stderr) shows the zero-count caption instead of silence.
+        if text.strip():
+            _console.print(text, markup=False, highlight=False)
+        else:
+            _print_get_caption(resource_type, namespace, 0)
         return
-
-    header_line = lines[0]
-    first_col = header_line.split()[0] if header_line.split() else ""
-    if first_col != "X" and note is None:
-        _console.print(text, markup=False, highlight=False)
-        return
-
-    spans = [(m.start(), m.end()) for m in re.finditer(r"\S+\s*", header_line)]
-    headers = [header_line[start:end].strip() for start, end in spans]
-
-    rows = []
-    for line in lines[1:]:
-        cols = [line[start:end].strip() for start, end in spans]
-        if cols:
-            rows.append(cols)
 
     if not rows:
         _print_get_caption(resource_type, namespace, 0)
@@ -329,8 +323,8 @@ def render_indexed_table(
         _console.print(f"[muted]{note}[/muted]")
 
 
-def render_events_table(text: str) -> None:
-    if text.strip() == "No events found":
+def render_events_table(rows: list[EventRow]) -> None:
+    if not rows:
         _console.print("[muted]No events found[/muted]")
         return
 
@@ -343,31 +337,17 @@ def render_events_table(text: str) -> None:
     for col in ("TYPE", "REASON", "KIND", "AGE", "MESSAGE"):
         table.add_column(col)
 
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        event_type = line[0:8].strip()
-        reason = line[9:39].strip()
-        kind = line[40:50].strip()
-        rest = line[51:]
-        parts = rest.split(" ", 2)
-        timestamp = (
-            f"{parts[0]} {parts[1]}" if len(parts) >= 2 else (parts[0] if parts else "")
-        )
-        message = parts[2] if len(parts) >= 3 else ""
-
-        try:
-            age = _format_age(datetime.fromisoformat(timestamp))
-        except ValueError:
-            age = timestamp
-
-        type_color = "muted" if event_type == "Normal" else "warn"
+    for row in rows:
+        age = _format_age(row.timestamp)
+        type_color = "muted" if row.type == "Normal" else "warn"
         table.add_row(
-            f"[{type_color}]{event_type}[/]",
-            reason,
-            kind,
+            f"[{type_color}]{row.type}[/]",
+            row.reason,
+            row.kind,
             f"[muted]{age}[/]",
-            message,
+            # Text (not markup) so bracketed characters in a message are shown
+            # literally, matching the WARNING EVENTS section.
+            Text(row.message),
         )
 
     _console.print(table)

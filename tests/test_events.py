@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
@@ -20,7 +21,7 @@ def _event(type_, reason, kind, ts, message, name="web"):
 
 
 class TestEventsCommand:
-    def test_no_events_returns_placeholder(self):
+    def test_no_events_returns_empty_list(self):
         state = MagicMock()
         state.fields.return_value = ("web", "default", Kind.Pod)
         events = MagicMock()
@@ -31,15 +32,43 @@ class TestEventsCommand:
         kubectl.probe.return_value = 0
         result = EventsCommand(state=state, events=events, kubectl=kubectl).execute(1)
 
-        assert result == "No events found"
+        assert result == []
         events.get.assert_called_once_with("default")
         events.filter.assert_called_once_with([], "web", Kind.Pod)
 
-    def test_formats_each_event(self):
+    def test_returns_structured_rows(self):
         state = MagicMock()
         state.fields.return_value = ("web", "default", Kind.Pod)
-        ev = _event(
-            "Normal", "Scheduled", "Pod", "2024-01-01T00:00:00Z", "Assigned to node-1"
+        ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        ev = _event("Normal", "Scheduled", "Pod", ts, "Assigned to node-1")
+        events = MagicMock()
+        events.get.return_value = [ev]
+        events.filter.return_value = [ev]
+
+        result = EventsCommand(state=state, events=events, kubectl=MagicMock()).execute(
+            1
+        )
+
+        assert len(result) == 1
+        row = result[0]
+        assert row.type == "Normal"
+        assert row.reason == "Scheduled"
+        assert row.kind == "Pod"
+        assert row.message == "Assigned to node-1"
+        assert row.timestamp == ts
+
+    def test_prefers_last_timestamp_over_creation(self):
+        state = MagicMock()
+        state.fields.return_value = ("web", "default", Kind.Pod)
+        last = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        created = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        ev = NS(
+            type="Warning",
+            reason="BackOff",
+            message="Back-off restarting",
+            involved_object=NS(kind="Pod", name="web"),
+            last_timestamp=last,
+            metadata=NS(creation_timestamp=created),
         )
         events = MagicMock()
         events.get.return_value = [ev]
@@ -49,10 +78,7 @@ class TestEventsCommand:
             1
         )
 
-        assert "Normal" in result
-        assert "Scheduled" in result
-        assert "Pod" in result
-        assert "Assigned to node-1" in result
+        assert result[0].timestamp == last
 
 
 class TestEventsStaleDetection:
@@ -73,9 +99,9 @@ class TestEventsStaleDetection:
             cmd.execute(1)
         kubectl.probe.assert_called_once_with(["get", "Pod", "web-1", "-n", "default"])
 
-    def test_no_events_and_live_resource_returns_no_events(self):
+    def test_no_events_and_live_resource_returns_empty_list(self):
         cmd, _ = self._command([], probe_rc=0)
-        assert cmd.execute(1) == "No events found"
+        assert cmd.execute(1) == []
 
     def test_matched_events_skip_probe(self):
         event = _event(

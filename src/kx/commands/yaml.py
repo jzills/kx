@@ -5,16 +5,27 @@ from kx.state import StateServiceProtocol
 
 
 def _find_keys(data: dict | list, keys: set[str]) -> dict:
-    result = {}
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if k in keys:
-                result[k] = v
-            else:
-                result.update(_find_keys(v, keys))
-    elif isinstance(data, list):
-        for item in data:
-            result.update(_find_keys(item, keys))
+    """Collect the value of each requested key from anywhere in the manifest,
+    preferring the shallowest occurrence when a key appears at multiple depths.
+
+    A breadth-first walk guarantees shallowest-wins: a workload's own top-level
+    `metadata` is returned rather than its pod template's nested `metadata`,
+    while genuinely nested-only keys (e.g. `containerStatuses` under `status`)
+    are still found. A matched key's own subtree is not descended into."""
+    result: dict = {}
+    frontier: list = [data]
+    while frontier:
+        deeper: list = []
+        for node in frontier:
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k in keys:
+                        result.setdefault(k, v)
+                    else:
+                        deeper.append(v)
+            elif isinstance(node, list):
+                deeper.extend(node)
+        frontier = deeper
     return result
 
 
