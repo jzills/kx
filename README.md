@@ -47,7 +47,7 @@ With pip:
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required; krew-index submission in progress):
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required):
 
 ```bash
 kubectl krew install idx
