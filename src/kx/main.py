@@ -468,7 +468,7 @@ def yaml(
     show: Optional[str] = typer.Option(
         None,
         "--show",
-        help="Comma-separated top-level YAML fields to display (e.g. metadata,spec)",
+        help="Comma-separated YAML fields to display (e.g. metadata,spec)",
     ),
 ):
     """Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."""
