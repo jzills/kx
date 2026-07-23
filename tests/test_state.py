@@ -8,6 +8,10 @@ def _patched(tmp_path):
     return patch("kx.state._STATE_FILE", tmp_path / "kx_state.json")
 
 
+def _boom(*args, **kwargs):
+    raise RuntimeError("boom")
+
+
 class TestStateDataclass:
     def test_default_namespace_is_default(self):
         state = State(resources={"nginx": "Pod"})
@@ -71,7 +75,62 @@ class TestStateServiceSaveLoad:
         assert loaded == State(resources={"nginx": "Pod"}, namespace="staging")
 
 
+class TestStateServiceCorruptFile:
+    def test_load_invalid_json_raises_runtime_error(self, tmp_path):
+        state_file = tmp_path / "kx_state.json"
+        state_file.write_text("this is not json{{{")
+        with patch("kx.state._STATE_FILE", state_file):
+            with pytest.raises(RuntimeError, match="unreadable"):
+                StateService().load()
+
+    def test_load_valid_json_missing_keys_raises_runtime_error(self, tmp_path):
+        # Valid JSON but not a state document (missing 'resources').
+        state_file = tmp_path / "kx_state.json"
+        state_file.write_text("{}")
+        with patch("kx.state._STATE_FILE", state_file):
+            with pytest.raises(RuntimeError, match="unreadable"):
+                StateService().load()
+
+    def test_save_heals_corrupt_file(self, tmp_path):
+        state_file = tmp_path / "kx_state.json"
+        state_file.write_text("garbage")
+        with patch("kx.state._STATE_FILE", state_file):
+            svc = StateService()
+            svc.save(State(resources={"nginx": "Pod"}))
+            loaded = svc.load()
+        assert loaded == State(resources={"nginx": "Pod"})
+
+
+class TestStateServiceAtomicWrite:
+    def test_save_failure_at_commit_preserves_existing_state(
+        self, tmp_path, monkeypatch
+    ):
+        state_file = tmp_path / "kx_state.json"
+        with patch("kx.state._STATE_FILE", state_file):
+            svc = StateService()
+            svc.save(State(resources={"good": "Pod"}, namespace="ns1"))
+            original = state_file.read_text()
+            # A crash at the atomic-commit step must leave the existing file
+            # intact — the new state is written to a temp file and only swapped
+            # in by the (here-failing) replace.
+            monkeypatch.setattr("kx.state.os.replace", _boom)
+            with pytest.raises(RuntimeError):
+                svc.save(State(resources={"bad": "Pod"}))
+            assert state_file.read_text() == original
+        # The temp file must be cleaned up, not left orphaned.
+        leftovers = [p.name for p in tmp_path.iterdir() if p.name != state_file.name]
+        assert leftovers == []
+
+
 class TestStateServiceHistory:
+    def test_zero_max_history_keeps_at_least_one(self, tmp_path):
+        with _patched(tmp_path):
+            svc = StateService(max_history=0)
+            for number in range(3):
+                svc.save(State(resources={f"pod-{number}": "Pod"}))
+            history = svc._load_history()
+        assert len(history.states) == 1
+
     def test_history_preserves_previous_states(self, tmp_path):
         state1 = State(resources={"nginx": "Pod"})
         state2 = State(resources={"myapp": "Deployment"})

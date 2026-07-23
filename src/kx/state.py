@@ -1,5 +1,7 @@
 from dataclasses import dataclass, asdict
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
@@ -55,16 +57,26 @@ _STATE_FILE = Path.home() / ".kx" / "state.json"
 
 class StateService:
     def __init__(self, max_history: int = 10) -> None:
-        self.max_history = max_history
+        # Always keep at least one entry: max_history < 1 would otherwise make
+        # the history slice below a no-op (list[-0:] is the whole list).
+        self.max_history = max(1, max_history)
 
     def _load_history(self) -> StateHistory:
         if not _STATE_FILE.exists():
             raise RuntimeError("No state found. Run `kx get <resource>` first.")
-        data = json.loads(_STATE_FILE.read_text())
-        if "states" not in data:
-            return StateHistory(states=[_state_from_dict(data)], cursor=0)
-        states = [_state_from_dict(state_data) for state_data in data["states"]]
-        return StateHistory(states=states, cursor=data["cursor"])
+        try:
+            data = json.loads(_STATE_FILE.read_text())
+            if "states" not in data:
+                return StateHistory(states=[_state_from_dict(data)], cursor=0)
+            states = [_state_from_dict(state_data) for state_data in data["states"]]
+            return StateHistory(states=states, cursor=data["cursor"])
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            # Corrupt or foreign JSON (partial write, hand-edit, old schema).
+            # A `kx get` rebuilds state, so this is recoverable, not fatal.
+            raise RuntimeError(
+                f"State file at {_STATE_FILE} is unreadable ({e}). "
+                f"Run `kx get <resource>` to rebuild it."
+            ) from e
 
     def _save_history(self, history: StateHistory) -> None:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +84,18 @@ class StateService:
             "states": [asdict(state) for state in history.states],
             "cursor": history.cursor,
         }
-        _STATE_FILE.write_text(json.dumps(data))
+        # Write to a sibling temp file and atomically replace it in, so an
+        # interrupted write can never leave a truncated/corrupt state.json.
+        fd, tmp = tempfile.mkstemp(
+            dir=_STATE_FILE.parent, prefix=".state-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(data))
+            os.replace(tmp, _STATE_FILE)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def save(self, state: State) -> None:
         try:
