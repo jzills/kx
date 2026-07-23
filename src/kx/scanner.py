@@ -24,15 +24,25 @@ class ScannerServiceProtocol(Protocol):
     def capture(self, argv: list[str]) -> subprocess.CompletedProcess: ...
 
 
+def _missing_binary(argv: list[str]) -> str:
+    return f"{argv[0]} not found on PATH — install it to run this scan."
+
+
 class ScannerService:
     def scan(self, argv: list[str]) -> int:
         # Inherit stdio so the scanner streams its own output straight to the
         # terminal (native passthrough); return the exit code without raising.
-        return subprocess.run(argv).returncode
+        try:
+            return subprocess.run(argv).returncode
+        except FileNotFoundError as e:
+            raise RuntimeError(_missing_binary(argv)) from e
 
     def capture(self, argv: list[str]) -> subprocess.CompletedProcess:
         # Capture stdout for structured (SARIF) parsing into a summary table.
-        return subprocess.run(argv, capture_output=True, text=True)
+        try:
+            return subprocess.run(argv, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise RuntimeError(_missing_binary(argv)) from e
 
 
 class Engine:

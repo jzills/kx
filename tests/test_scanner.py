@@ -1,8 +1,21 @@
 import json
+from unittest.mock import patch
 
 import pytest
 
-from kx.scanner import SEVERITIES, ScoutEngine, get_engine
+from kx.scanner import SEVERITIES, ScannerService, ScoutEngine, get_engine
+
+
+class TestScannerMissingBinary:
+    def test_capture_translates_missing_binary(self):
+        with patch("kx.scanner.subprocess.run", side_effect=FileNotFoundError()):
+            with pytest.raises(RuntimeError, match="docker not found"):
+                ScannerService().capture(["docker", "scout", "cves", "nginx"])
+
+    def test_scan_translates_missing_binary(self):
+        with patch("kx.scanner.subprocess.run", side_effect=FileNotFoundError()):
+            with pytest.raises(RuntimeError, match="docker not found"):
+                ScannerService().scan(["docker", "scout", "cves", "nginx"])
 
 
 def _sarif(**sev_counts):

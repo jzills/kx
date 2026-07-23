@@ -1,6 +1,11 @@
 import subprocess
 from typing import Protocol
 
+_MISSING_KUBECTL = (
+    "kubectl not found on PATH — install kubectl "
+    "(https://kubernetes.io/docs/tasks/tools/) and ensure it is on your PATH."
+)
+
 
 class KubectlServiceProtocol(Protocol):
     def run(self, args: list[str]) -> str: ...
@@ -11,39 +16,49 @@ class KubectlServiceProtocol(Protocol):
 
 
 class KubectlService:
+    def _run(self, args: list[str], **kwargs) -> subprocess.CompletedProcess:
+        # Central chokepoint: a missing kubectl raises FileNotFoundError, which
+        # handle_errors doesn't catch (traceback). Translate it into a handled
+        # RuntimeError with an actionable message.
+        try:
+            return subprocess.run(["kubectl", *args], **kwargs)
+        except FileNotFoundError as e:
+            raise RuntimeError(_MISSING_KUBECTL) from e
+
     def run(self, args: list[str]) -> str:
-        result = subprocess.run(
-            ["kubectl", *args],
-            capture_output=True,
-            text=True,
-        )
+        result = self._run(args, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip())
         return result.stdout
 
     def run_interactive(self, args: list[str], stderr: int | None = None) -> int:
-        result = subprocess.run(["kubectl", *args], stderr=stderr)
-        return result.returncode
+        return self._run(args, stderr=stderr).returncode
 
     def probe(self, args: list[str]) -> int:
-        result = subprocess.run(["kubectl", *args], capture_output=True)
-        return result.returncode
+        return self._run(args, capture_output=True).returncode
 
     def current_namespace(self) -> str:
-        result = subprocess.run(
-            ["kubectl", "config", "view", "--minify", "-o", "jsonpath={..namespace}"],
+        # Best-effort: no kubeconfig / no current context exits non-zero, and
+        # `check=True` would surface that as an unhandled CalledProcessError.
+        # The namespace is only a label here, so fall back to "default".
+        result = self._run(
+            ["config", "view", "--minify", "-o", "jsonpath={..namespace}"],
             capture_output=True,
             text=True,
-            check=True,
         )
+        if result.returncode != 0:
+            return "default"
         ns = result.stdout.strip()
         return ns if ns else "default"
 
     def current_context(self) -> str:
-        result = subprocess.run(
-            ["kubectl", "config", "current-context"],
+        # `kubectl config current-context` exits non-zero when none is set;
+        # return empty so context listing still works instead of crashing.
+        result = self._run(
+            ["config", "current-context"],
             capture_output=True,
             text=True,
-            check=True,
         )
+        if result.returncode != 0:
+            return ""
         return result.stdout.strip()
