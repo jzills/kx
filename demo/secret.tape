@@ -18,3 +18,10 @@ Sleep 4s
 Type "kx secret 1 --decode -k password"
 Enter
 Sleep 3s
+
+Type "kx secret --decode"
+Enter
+Sleep 2.5s
+Type "y"
+Enter
+Sleep 4s
