@@ -1,0 +1,352 @@
+import base64
+import json
+from unittest.mock import MagicMock, patch
+
+from typer.testing import CliRunner
+
+from kx.main import app
+
+runner = CliRunner()
+
+_SECRET = {
+    "data": {
+        "username": base64.b64encode(b"admin").decode(),
+        "password": base64.b64encode(b"s3cr3t").decode(),
+    }
+}
+
+
+def _mocks(payload=None):
+    kubectl = MagicMock()
+    kubectl.run.return_value = json.dumps(payload if payload is not None else _SECRET)
+    kubectl.current_namespace.return_value = "default"
+    state = MagicMock()
+    state.fields.return_value = ("db-credentials", "default", "Secret")
+    index = MagicMock()
+    return kubectl, state, index
+
+
+def _invoke(args, payload=None, stdin=None):
+    kubectl, state, index = _mocks(payload)
+    with (
+        patch("kx.main._kubectl", kubectl),
+        patch("kx.main._state", state),
+        patch("kx.main._index", index),
+    ):
+        result = runner.invoke(app, args, input=stdin)
+    return result, kubectl, state
+
+
+class TestDecodeRendering:
+    def test_renders_decoded_key_value_table(self):
+        result, _, _ = _invoke(["secret", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "username" in result.output
+        assert "admin" in result.output
+        assert "s3cr3t" in result.output
+
+    def test_banner_carries_name_and_namespace_only(self):
+        # No key count: the table right below it already shows the keys.
+        result, _, _ = _invoke(["secret", "1", "--decode"])
+        banner = next(
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("Secret/")
+        )
+        assert banner == "Secret/db-credentials · default"
+
+    def test_empty_secret_reports_no_keys(self):
+        result, _, _ = _invoke(["secret", "1", "--decode"], {"data": {}})
+        assert result.exit_code == 0
+        assert "No keys" in result.output
+
+    def test_binary_value_shows_placeholder(self):
+        payload = {
+            "data": {"store.p12": base64.b64encode(b"\xff\xfe\x00\x01").decode()}
+        }
+        result, _, _ = _invoke(["secret", "1", "--decode"], payload)
+        assert "<binary, 4 bytes>" in result.output
+
+    def test_multiple_indexes_stack(self):
+        result, _, _ = _invoke(["secret", "1", "2", "--decode"])
+        assert result.exit_code == 0
+        assert result.output.count("Secret/db-credentials") == 2
+
+    def test_decode_does_not_save_state(self):
+        _, _, state = _invoke(["secret", "1", "--decode"])
+        state.save.assert_not_called()
+
+
+class TestDecodeSpellings:
+    def test_get_secret_spelling(self):
+        result, _, _ = _invoke(["get", "secret", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "s3cr3t" in result.output
+
+    def test_kind_alias_singular_spelling(self):
+        result, _, _ = _invoke(["secret", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "s3cr3t" in result.output
+
+    def test_kind_alias_plural_spelling(self):
+        result, _, _ = _invoke(["secrets", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "s3cr3t" in result.output
+
+    def test_decode_flag_does_not_leak_to_kubectl(self):
+        _, kubectl, _ = _invoke(["secret", "1", "--decode"])
+        for call in kubectl.run.call_args_list:
+            assert "--decode" not in call.args[0]
+
+
+class TestSecretCommandListing:
+    """`secret` is a registered command, so it must still do everything the
+    kind alias did before it shadowed that spelling."""
+
+    def _listing_mocks(self):
+        kubectl = MagicMock()
+        kubectl.run.return_value = "NAME\ndb-credentials"
+        kubectl.current_namespace.return_value = "default"
+        state = MagicMock()
+        index = MagicMock()
+        index.add.return_value = ("1  db-credentials", ["db-credentials"])
+        index.filter.side_effect = lambda output, term: output
+        return kubectl, state, index
+
+    def _invoke_listing(self, args):
+        kubectl, state, index = self._listing_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, args)
+        return result, kubectl, state
+
+    def test_bare_secret_lists(self):
+        result, kubectl, _ = self._invoke_listing(["secret"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_bare_secrets_alias_lists(self):
+        result, kubectl, _ = self._invoke_listing(["secrets"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_kubectl_flags_pass_through(self):
+        result, kubectl, _ = self._invoke_listing(["secret", "-n", "kube-system"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret", "-n", "kube-system"])
+
+    def test_match_filters(self):
+        result, kubectl, _ = self._invoke_listing(["secret", "--match", "db"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_index_relists_by_name(self):
+        kubectl, state, index = self._listing_mocks()
+        state.fields.return_value = ("db-credentials", "default", "Secret")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["secret", "1"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(
+            ["get", "secret", "db-credentials", "-n", "default"]
+        )
+
+    def test_listing_saves_state(self):
+        _, _, state = self._invoke_listing(["secret"])
+        state.save.assert_called_once()
+
+
+class TestSecretHelp:
+    def test_secret_listed_in_root_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "secret" in result.output
+
+    def test_secrets_alias_hidden_from_root_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert "secrets" not in result.output
+
+    def test_no_unmapped_commands(self):
+        result = runner.invoke(app, ["--help"])
+        assert "Other" not in result.output
+
+    def test_secret_help_shows_decode_options(self):
+        result = runner.invoke(app, ["secret", "--help"])
+        assert result.exit_code == 0
+        assert "--decode" in result.output
+        assert "--key" in result.output
+
+    def test_secret_help_shows_alias(self):
+        result = runner.invoke(app, ["secret", "--help"])
+        assert "kx secrets" in result.output
+
+
+_SECRET_LIST = {
+    "items": [
+        {
+            "metadata": {"name": "db-credentials", "namespace": "default"},
+            "data": {"password": base64.b64encode(b"s3cr3t").decode()},
+        },
+        {
+            "metadata": {"name": "tls-cert", "namespace": "default"},
+            "data": {"tls.key": base64.b64encode(b"PRIVATE KEY").decode()},
+        },
+    ]
+}
+
+
+class TestDecodeNamespaceSweep:
+    def test_decodes_every_secret_in_the_namespace(self):
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Secret/db-credentials" in result.output
+        assert "s3cr3t" in result.output
+        assert "Secret/tls-cert" in result.output
+        assert "PRIVATE KEY" in result.output
+
+    def test_uses_a_single_kubectl_call(self):
+        _, kubectl, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        kubectl.run.assert_called_once_with(["get", "secret", "-o", "json"])
+
+    def test_passes_namespace_flag_through(self):
+        _, kubectl, _ = _invoke(
+            ["secret", "--decode", "-y", "-n", "kube-system"], _SECRET_LIST
+        )
+        kubectl.run.assert_called_once_with(
+            ["get", "secret", "-o", "json", "-n", "kube-system"]
+        )
+
+    def test_get_spelling_sweeps_too(self):
+        result, _, _ = _invoke(["get", "secret", "--decode", "-y"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Secret/db-credentials" in result.output
+        assert "Secret/tls-cert" in result.output
+
+    def test_empty_namespace_reports_zero_items(self):
+        result, _, _ = _invoke(["secret", "--decode"], {"items": []})
+        assert result.exit_code == 0
+        assert "0 items" in result.output
+
+    def test_scope_banner_heads_the_sweep(self):
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        lines = [line for line in result.output.splitlines() if line.strip()]
+        assert lines[0] == "Secrets · default · 2 items"
+
+    def test_blocks_carry_only_the_name(self):
+        # Namespace lives in the scope banner (as kx scan's sweep does), and
+        # the key count is dropped entirely — the table below shows the keys.
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        blocks = [
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("Secret/")
+        ]
+        assert blocks == ["Secret/db-credentials", "Secret/tls-cert"]
+
+    def test_sweep_does_not_save_state(self):
+        _, _, state = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        state.save.assert_not_called()
+
+    def test_sweep_does_not_resolve_indexes(self):
+        _, _, state = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        state.fields.assert_not_called()
+
+
+class TestSweepConfirmation:
+    def test_prompts_before_decoding_the_namespace(self):
+        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST, stdin="y\n")
+        assert result.exit_code == 0
+        assert "Decode 2 Secrets in default?" in result.output
+        assert "s3cr3t" in result.output
+
+    def test_declining_prints_no_values(self):
+        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST, stdin="n\n")
+        assert result.exit_code == 1
+        assert "s3cr3t" not in result.output
+        assert "PRIVATE KEY" not in result.output
+
+    def test_yes_skips_the_prompt(self):
+        result, _, _ = _invoke(["secret", "--decode", "--yes"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
+        assert "s3cr3t" in result.output
+
+    def test_singular_wording_for_one_secret(self):
+        payload = {"items": [_SECRET_LIST["items"][0]]}
+        result, _, _ = _invoke(["secret", "--decode"], payload, stdin="y\n")
+        assert "Decode 1 Secret in default?" in result.output
+
+    def test_indexed_decode_does_not_prompt(self):
+        result, _, _ = _invoke(["secret", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
+        assert "s3cr3t" in result.output
+
+    def test_empty_namespace_does_not_prompt(self):
+        result, _, _ = _invoke(["secret", "--decode"], {"items": []})
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
+
+
+class TestDecodeValidation:
+    def test_key_without_index_errors(self):
+        result, _, _ = _invoke(["secret", "--decode", "--key", "password"])
+        assert result.exit_code == 1
+        assert "single index" in result.output
+
+    def test_decode_on_non_secret_kind_errors(self):
+        result, _, _ = _invoke(["pods", "1", "--decode"])
+        assert result.exit_code == 1
+        assert "only applies to Secrets" in result.output
+        assert "Pod" in result.output
+
+    def test_key_without_decode_errors(self):
+        result, _, _ = _invoke(["secret", "1", "--key", "password"])
+        assert result.exit_code == 1
+        assert "--key requires --decode" in result.output
+
+    def test_key_with_multiple_indexes_errors(self):
+        result, _, _ = _invoke(["secret", "1", "2", "--decode", "--key", "password"])
+        assert result.exit_code == 1
+        assert "single index" in result.output
+
+
+class TestKeyExtraction:
+    def test_prints_raw_value_only(self):
+        result, _, _ = _invoke(["secret", "1", "--decode", "--key", "password"])
+        assert result.exit_code == 0
+        assert result.output == "s3cr3t\n"
+
+    def test_short_flag(self):
+        result, _, _ = _invoke(["secret", "1", "--decode", "-k", "username"])
+        assert result.exit_code == 0
+        assert result.output == "admin\n"
+
+    def test_long_value_is_not_wrapped(self):
+        # Rich wraps at the console width (1000 off-terminal); a wrapped value
+        # would put a newline inside $(kx secret … -k …) and corrupt it.
+        long_value = "x" * 2000
+        payload = {"data": {"cert": base64.b64encode(long_value.encode()).decode()}}
+        result, _, _ = _invoke(["secret", "1", "--decode", "-k", "cert"], payload)
+        assert result.exit_code == 0
+        assert result.output == long_value + "\n"
+
+    def test_binary_value_written_byte_exact(self):
+        blob = b"\xff\xfe\x00\x01binary"
+        payload = {"data": {"store.p12": base64.b64encode(blob).decode()}}
+        result, _, _ = _invoke(["secret", "1", "--decode", "-k", "store.p12"], payload)
+        assert result.exit_code == 0
+        # No trailing newline: a redirect must reproduce the file exactly.
+        assert result.stdout_bytes == blob
+
+    def test_missing_key_errors(self):
+        result, _, _ = _invoke(["secret", "1", "--decode", "--key", "nope"])
+        assert result.exit_code == 1
+        assert "No key 'nope'" in result.output
+        assert "Secret/db-credentials" in result.output

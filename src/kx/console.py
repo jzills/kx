@@ -1,5 +1,6 @@
 import re
 import json
+import sys
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -192,6 +193,25 @@ def install_traceback() -> None:
 
 def print_raw(text: str) -> None:
     _console.print(text, markup=False, highlight=False)
+
+
+def write_value(value: bytes) -> None:
+    """Write a secret value to stdout unstyled, bypassing Rich entirely.
+
+    Rich wraps at the console width (_PIPE_WIDTH off-terminal), which would
+    inject newlines into a long value — a cert or token — and corrupt
+    `$(kx secret 1 --decode -k tls.crt)`. Writing to the byte buffer also keeps
+    `> store.p12` byte-exact. The trailing newline is added only for text, so
+    binary redirects reproduce the file exactly while text stays shell-friendly.
+    """
+    try:
+        value.decode("utf-8")
+    except UnicodeDecodeError:
+        payload = value
+    else:
+        payload = value + b"\n"
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
 
 
 def print_rich(renderable) -> None:
