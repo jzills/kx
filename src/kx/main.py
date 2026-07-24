@@ -20,7 +20,7 @@ from kx.commands.edit import EditCommand
 from kx.commands.forward import ForwardCommand
 from kx.commands.events import EventsCommand
 from kx.commands.exec import ExecCommand
-from kx.commands.get import GetCommand
+from kx.commands.get import GetCommand, _extract_namespace
 from kx.commands.logs import LogsCommand
 from kx.commands.metadata_write import _MetadataWriteCommand
 from kx.commands.port_forward import PortForwardCommand
@@ -47,7 +47,7 @@ from kx.graph import (
     build_tree,
 )
 from kx.index import IndexService
-from kx.kinds import Kind, is_kind_spelling, normalize_kind
+from kx.kinds import Kind, is_kind_spelling, normalize_kind, plural_display
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.scanner import ScannerService
@@ -190,25 +190,53 @@ _diagnostics = DiagnosticsService(events=_events)
 set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
-def _decode_secrets(
-    resource: str, indexes: list[int], decode: bool, key: Optional[str]
-) -> None:
-    """Render an indexed Secret's data in plaintext, or one key's raw value.
+def _render_secret(name: str, namespace: str, data: dict[str, bytes]) -> None:
+    """One Secret's decoded data, matching kx labels/annotations exactly."""
+    count = len(data)
+    extra = f"{count} {'item' if count == 1 else 'items'}"
+    console.print_banner(Kind.Secret, name, namespace=namespace, extra=extra)
+    console.render_key_value_table(
+        "KEY", {field: to_display(value) for field, value in data.items()}
+    )
 
-    Split out of `get` so the listing path stays untouched: decoding reads a
-    named resource rather than a list, so it never re-saves state. Requiring an
-    index (rather than decoding the whole namespace) keeps plaintext exposure
-    deliberate and per-resource."""
+
+def _decode_namespace(command: SecretCommand, extra: list[str]) -> None:
+    """Every Secret in the namespace, stacked. One kubectl call covers the lot."""
+    with console.status("fetching secrets"):
+        rows = command.execute_all(extra)
+    if not rows:
+        namespace = _extract_namespace(extra) or _kubectl.current_namespace()
+        console.print_scope_banner(plural_display("secret"), namespace, "0 items")
+        return
+    for position, (name, namespace, data) in enumerate(rows):
+        if position > 0:
+            console.print_raw("")
+        _render_secret(name, namespace, data)
+
+
+def _decode_secrets(
+    resource: str,
+    indexes: list[int],
+    extra: list[str],
+    decode: bool,
+    key: Optional[str],
+) -> None:
+    """Render Secret data in plaintext: one indexed Secret, several, one key's
+    raw value, or — with no index — every Secret in the namespace.
+
+    Split out of `get` so the listing path stays untouched; decoding reads
+    resources rather than listing them, so it never re-saves state."""
     if not decode:
         raise ValueError("--key requires --decode")
-    if not indexes:
-        raise ValueError(f"--decode needs an index — run 'kx get {resource}' first")
     expected = normalize_kind(resource)
     if expected != Kind.Secret:
         raise ValueError(f"--decode only applies to Secrets, not {expected}")
-    if key is not None and len(indexes) > 1:
+    if key is not None and len(indexes) != 1:
         raise ValueError("--key takes a single index")
     command = SecretCommand(state=_state, kubectl=_kubectl)
+    if not indexes:
+        _decode_namespace(command, extra)
+        return
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
         if str(kind) != str(expected):
@@ -231,14 +259,23 @@ def _decode_secrets(
             # Raw and unwrapped so the value stays substitutable in shell.
             console.write_value(data[key])
             return
-        count = len(data)
-        extra = f"{count} {'item' if count == 1 else 'items'}"
         if position > 0:
             console.print_raw("")
-        console.print_banner(kind, name, namespace=ns, extra=extra)
-        console.render_key_value_table(
-            "KEY", {field: to_display(value) for field, value in data.items()}
-        )
+        _render_secret(name, ns, data)
+
+
+# Shared by get and the secret command so their help text can't drift apart.
+_MATCH_OPTION = typer.Option(
+    None, "--match", "-m", help="Match by name (substring, case-insensitive)"
+)
+_DECODE_OPTION = typer.Option(
+    False,
+    "--decode",
+    help="Show Secret data in plaintext; every Secret in the namespace when no index is given",
+)
+_KEY_OPTION = typer.Option(
+    None, "--key", "-k", help="With --decode, print only this key's value"
+)
 
 
 @app.command(
@@ -249,15 +286,9 @@ def _decode_secrets(
 def get(
     ctx: typer.Context,
     resource: str,
-    match: Optional[str] = typer.Option(
-        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
-    ),
-    decode: bool = typer.Option(
-        False, "--decode", help="Show an indexed Secret's data in plaintext"
-    ),
-    key: Optional[str] = typer.Option(
-        None, "--key", "-k", help="With --decode, print only this key's value"
-    ),
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
 ):
     """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
     _get(resource, list(ctx.args), match, decode, key)
@@ -276,7 +307,7 @@ def _get(
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
     if decode or key is not None:
-        _decode_secrets(resource, indexes, decode, key)
+        _decode_secrets(resource, indexes, extra, decode, key)
         return
     if indexes:
         expected = normalize_kind(resource)
@@ -321,19 +352,6 @@ def _get(
     console.render_indexed_table(result, resource, namespace, note=note)
 
 
-_SECRET_OPTIONS = {
-    "match": typer.Option(
-        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
-    ),
-    "decode": typer.Option(
-        False, "--decode", help="Show an indexed Secret's data in plaintext"
-    ),
-    "key": typer.Option(
-        None, "--key", "-k", help="With --decode, print only this key's value"
-    ),
-}
-
-
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -341,9 +359,9 @@ _SECRET_OPTIONS = {
 @handle_errors(refresh=False)
 def secret(
     ctx: typer.Context,
-    match: Optional[str] = _SECRET_OPTIONS["match"],
-    decode: bool = _SECRET_OPTIONS["decode"],
-    key: Optional[str] = _SECRET_OPTIONS["key"],
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
 ):
     """List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."""
     _get("secret", list(ctx.args), match, decode, key)
@@ -358,9 +376,9 @@ def secret(
 @handle_errors(refresh=False)
 def secret_alias(
     ctx: typer.Context,
-    match: Optional[str] = _SECRET_OPTIONS["match"],
-    decode: bool = _SECRET_OPTIONS["decode"],
-    key: Optional[str] = _SECRET_OPTIONS["key"],
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
 ):
     """Alias for secret."""
     _get("secret", list(ctx.args), match, decode, key)

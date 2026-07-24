@@ -132,8 +132,8 @@ decoded, instead of the base64 kubectl returns. Values that aren't text show a
 `<binary, N bytes>` placeholder rather than garbling the table. `--key`/`-k`
 prints a single value raw — no banner, no wrapping — so it drops straight into
 a shell: `export PGPASSWORD=$(kx secret 1 --decode -k password)`, or redirect a
-binary value to a file. Decoding always takes an index, so plaintext is never
-printed by accident.
+binary value to a file. Bare `kx secret --decode` decodes every Secret in the
+namespace in one call, `-n` included.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>

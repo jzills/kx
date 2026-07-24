@@ -188,11 +188,66 @@ class TestSecretHelp:
         assert "kx secrets" in result.output
 
 
+_SECRET_LIST = {
+    "items": [
+        {
+            "metadata": {"name": "db-credentials", "namespace": "default"},
+            "data": {"password": base64.b64encode(b"s3cr3t").decode()},
+        },
+        {
+            "metadata": {"name": "tls-cert", "namespace": "default"},
+            "data": {"tls.key": base64.b64encode(b"PRIVATE KEY").decode()},
+        },
+    ]
+}
+
+
+class TestDecodeNamespaceSweep:
+    def test_decodes_every_secret_in_the_namespace(self):
+        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Secret/db-credentials" in result.output
+        assert "s3cr3t" in result.output
+        assert "Secret/tls-cert" in result.output
+        assert "PRIVATE KEY" in result.output
+
+    def test_uses_a_single_kubectl_call(self):
+        _, kubectl, _ = _invoke(["secret", "--decode"], _SECRET_LIST)
+        kubectl.run.assert_called_once_with(["get", "secret", "-o", "json"])
+
+    def test_passes_namespace_flag_through(self):
+        _, kubectl, _ = _invoke(
+            ["secret", "--decode", "-n", "kube-system"], _SECRET_LIST
+        )
+        kubectl.run.assert_called_once_with(
+            ["get", "secret", "-o", "json", "-n", "kube-system"]
+        )
+
+    def test_get_spelling_sweeps_too(self):
+        result, _, _ = _invoke(["get", "secret", "--decode"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Secret/db-credentials" in result.output
+        assert "Secret/tls-cert" in result.output
+
+    def test_empty_namespace_reports_zero_items(self):
+        result, _, _ = _invoke(["secret", "--decode"], {"items": []})
+        assert result.exit_code == 0
+        assert "0 items" in result.output
+
+    def test_sweep_does_not_save_state(self):
+        _, _, state = _invoke(["secret", "--decode"], _SECRET_LIST)
+        state.save.assert_not_called()
+
+    def test_sweep_does_not_resolve_indexes(self):
+        _, _, state = _invoke(["secret", "--decode"], _SECRET_LIST)
+        state.fields.assert_not_called()
+
+
 class TestDecodeValidation:
-    def test_decode_without_index_errors(self):
-        result, _, _ = _invoke(["secret", "--decode"])
+    def test_key_without_index_errors(self):
+        result, _, _ = _invoke(["secret", "--decode", "--key", "password"])
         assert result.exit_code == 1
-        assert "needs an index" in result.output
+        assert "single index" in result.output
 
     def test_decode_on_non_secret_kind_errors(self):
         result, _, _ = _invoke(["pods", "1", "--decode"])
