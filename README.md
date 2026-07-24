@@ -90,7 +90,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx exec <index> [<cmd>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
-| `kx tree <index> [--index/-i]` | Show the ownership graph for an indexed resource; --index assigns indexes to tree nodes. |
+| `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |

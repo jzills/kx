@@ -7,7 +7,12 @@ from contextlib import contextmanager
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
 
-from kx.graph import build_indexed_tree, build_tree
+from kx.graph import (
+    build_indexed_tree,
+    build_namespace_indexed_tree,
+    build_namespace_tree,
+    build_tree,
+)
 from kx.kinds import Kind
 
 
@@ -230,4 +235,118 @@ class TestBuildIndexedTree:
             (1, "2 job/cj-1"),
             (2, "3 pod/cj-1-a"),
             (3, "container: app"),
+        ]
+
+
+# --- namespace forest -------------------------------------------------------
+
+
+def _empty_apps():
+    apps = MagicMock()
+    apps.list_namespaced_deployment.return_value = _items()
+    apps.list_namespaced_replica_set.return_value = _items()
+    apps.list_namespaced_stateful_set.return_value = _items()
+    apps.list_namespaced_daemon_set.return_value = _items()
+    return apps
+
+
+def _empty_batch():
+    batch = MagicMock()
+    batch.list_namespaced_cron_job.return_value = _items()
+    batch.list_namespaced_job.return_value = _items()
+    return batch
+
+
+class TestBuildNamespaceTree:
+    def test_mixed_workloads_form_kind_ordered_forest(self):
+        apps = _empty_apps()
+        apps.list_namespaced_deployment.return_value = _items(_res("api", "depU"))
+        apps.list_namespaced_replica_set.return_value = _items(
+            _res("api-7c9", "rsU", owner="depU")
+        )
+        apps.list_namespaced_stateful_set.return_value = _items(_res("db", "stsU"))
+        batch = _empty_batch()
+        batch.list_namespaced_cron_job.return_value = _items(_res("report", "cjU"))
+        batch.list_namespaced_job.return_value = _items(
+            _res("report-289", "jobU", owner="cjU")
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("api-7c9-abc", "podA", owner="rsU"),
+            _pod("db-0", "podB", owner="stsU"),
+            _pod("report-289-k2", "podC", owner="jobU"),
+            _pod("debug", "podD"),  # bare pod — no owner
+        )
+        with _mocked(apps=apps, core=core, batch=batch):
+            tree = build_namespace_tree("my-app")
+        # Kind order: Deployment, StatefulSet, DaemonSet, CronJob, then orphans.
+        assert _flatten(tree) == [
+            (0, "Namespace/my-app"),
+            (1, "Deployment/api"),
+            (2, "rs/api-7c9"),
+            (3, "pod/api-7c9-abc"),
+            (4, "container: app"),
+            (1, "StatefulSet/db"),
+            (2, "pod/db-0"),
+            (3, "container: app"),
+            (1, "CronJob/report"),
+            (2, "job/report-289"),
+            (3, "pod/report-289-k2"),
+            (4, "container: app"),
+            (1, "pod/debug"),
+            (2, "container: app"),
+        ]
+
+    def test_orphan_replicaset_becomes_root(self):
+        # An RS whose Deployment was deleted: its owner uid isn't present, so
+        # the RS surfaces as a root rather than vanishing. Its own pod nests.
+        apps = _empty_apps()
+        apps.list_namespaced_replica_set.return_value = _items(
+            _res("orphan-rs", "rsU", owner="goneU")
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("orphan-rs-1", "podA", owner="rsU")
+        )
+        with _mocked(apps=apps, core=core, batch=_empty_batch()):
+            tree = build_namespace_tree("ns")
+        assert _flatten(tree) == [
+            (0, "Namespace/ns"),
+            (1, "rs/orphan-rs"),
+            (2, "pod/orphan-rs-1"),
+            (3, "container: app"),
+        ]
+
+    def test_empty_namespace_says_no_workloads(self):
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items()
+        with _mocked(apps=_empty_apps(), core=core, batch=_empty_batch()):
+            tree = build_namespace_tree("empty")
+        assert _flatten(tree) == [(0, "Namespace/empty"), (1, "(no workloads)")]
+
+
+class TestBuildNamespaceIndexedTree:
+    def test_numbers_from_one_and_excludes_namespace_root(self):
+        apps = _empty_apps()
+        apps.list_namespaced_deployment.return_value = _items(_res("api", "depU"))
+        apps.list_namespaced_replica_set.return_value = _items(
+            _res("api-7c9", "rsU", owner="depU")
+        )
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = _items(
+            _pod("api-7c9-abc", "podA", owner="rsU")
+        )
+        with _mocked(apps=apps, core=core, batch=_empty_batch()):
+            tree, resources = build_namespace_indexed_tree("my-app")
+        assert _flatten(tree) == [
+            (0, "Namespace/my-app"),
+            (1, "1 Deployment/api"),
+            (2, "2 rs/api-7c9"),
+            (3, "3 pod/api-7c9-abc"),
+            (4, "container: app"),
+        ]
+        assert resources == [
+            ("api", Kind.Deployment),
+            ("api-7c9", Kind.ReplicaSet),
+            ("api-7c9-abc", Kind.Pod),
         ]

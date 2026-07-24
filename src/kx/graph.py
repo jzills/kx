@@ -16,6 +16,17 @@ def build_indexed_tree(
     return _build(kind, name, namespace, indexed=True)
 
 
+def build_namespace_tree(namespace: str) -> Tree:
+    root, _ = _build_namespace(namespace, indexed=False)
+    return root
+
+
+def build_namespace_indexed_tree(
+    namespace: str,
+) -> tuple[Tree, list[tuple[str, str]]]:
+    return _build_namespace(namespace, indexed=True)
+
+
 def _build(
     kind: str, name: str, namespace: str, indexed: bool
 ) -> tuple[Tree, list[tuple[str, str]]]:
@@ -52,6 +63,115 @@ def _build(
             root.add(f"[muted](no ownership graph for {kind})[/muted]")
 
     return root, resources
+
+
+# Prefix + semantic color for each node kind in a namespace forest. Controllers
+# render as roots with their full kind name; owned resources use the short
+# prefixes the single-resource tree already uses (rs/job/pod).
+_NODE_STYLE: dict[Kind, tuple[str, str]] = {
+    Kind.Deployment: ("Deployment", "header"),
+    Kind.StatefulSet: ("StatefulSet", "header"),
+    Kind.DaemonSet: ("DaemonSet", "header"),
+    Kind.CronJob: ("CronJob", "header"),
+    Kind.Job: ("job", "accent"),
+    Kind.ReplicaSet: ("rs", "accent"),
+    Kind.Pod: ("pod", "body"),
+}
+
+# Stable order roots appear under the Namespace node.
+_ROOT_ORDER: list[Kind] = [
+    Kind.Deployment,
+    Kind.StatefulSet,
+    Kind.DaemonSet,
+    Kind.CronJob,
+    Kind.Job,
+    Kind.ReplicaSet,
+    Kind.Pod,
+]
+
+
+def _build_namespace(
+    namespace: str, indexed: bool
+) -> tuple[Tree, list[tuple[str, str]]]:
+    """Full ownership forest for a namespace: every workload controller as a
+    root with its owned resources beneath, plus orphan Jobs/ReplicaSets and bare
+    Pods so nothing is hidden. Each pod appears exactly once. Unlike `_build`,
+    the Namespace root node is not indexed — children number from 1."""
+    load_config()
+    apps = client.AppsV1Api()
+    core = client.CoreV1Api()
+    batch = client.BatchV1Api()
+
+    deployments = apps.list_namespaced_deployment(namespace).items
+    replica_sets = apps.list_namespaced_replica_set(namespace).items
+    stateful_sets = apps.list_namespaced_stateful_set(namespace).items
+    daemon_sets = apps.list_namespaced_daemon_set(namespace).items
+    cron_jobs = batch.list_namespaced_cron_job(namespace).items
+    jobs = batch.list_namespaced_job(namespace).items
+    pods = core.list_namespaced_pod(namespace).items
+
+    # Resources that can be owned by something else in the namespace, indexed by
+    # each owner uid so a parent finds its children in one pass.
+    child_kinds = (
+        [(rs, Kind.ReplicaSet) for rs in replica_sets]
+        + [(job, Kind.Job) for job in jobs]
+        + [(pod, Kind.Pod) for pod in pods]
+    )
+    children_by_owner: dict[str, list[tuple[object, Kind]]] = {}
+    for obj, kind in child_kinds:
+        for ref in obj.metadata.owner_references or []:
+            children_by_owner.setdefault(ref.uid, []).append((obj, kind))
+
+    present_uids = {
+        obj.metadata.uid
+        for obj in (
+            *deployments,
+            *replica_sets,
+            *stateful_sets,
+            *daemon_sets,
+            *cron_jobs,
+            *jobs,
+            *pods,
+        )
+    }
+
+    # Controllers are always roots; an owned child (rs/job/pod) is a root only
+    # when orphaned — its owner isn't among the namespace's collected objects.
+    roots: list[tuple[object, Kind]] = [
+        *[(d, Kind.Deployment) for d in deployments],
+        *[(s, Kind.StatefulSet) for s in stateful_sets],
+        *[(d, Kind.DaemonSet) for d in daemon_sets],
+        *[(c, Kind.CronJob) for c in cron_jobs],
+    ]
+    for obj, kind in child_kinds:
+        refs = obj.metadata.owner_references or []
+        if not any(ref.uid in present_uids for ref in refs):
+            roots.append((obj, kind))
+
+    order = {kind: position for position, kind in enumerate(_ROOT_ORDER)}
+    roots.sort(key=lambda pair: (order[pair[1]], pair[0].metadata.name))
+
+    resources: list[tuple[str, str]] = []
+    root = Tree(f"[header]Namespace/{namespace}[/header]")
+    if not roots:
+        root.add("[muted](no workloads)[/muted]")
+        return root, resources
+
+    for obj, kind in roots:
+        _render(obj, kind, root, children_by_owner, resources, indexed)
+    return root, resources
+
+
+def _render(obj, kind, parent, children_by_owner, resources, indexed):
+    """Add `obj` under `parent`, then recurse into its owned children; a Pod is
+    a leaf whose containers are listed directly."""
+    prefix, color = _NODE_STYLE[kind]
+    node = _add_node(parent, resources, indexed, color, prefix, obj.metadata.name, kind)
+    if kind == Kind.Pod:
+        _add_containers(obj, node)
+        return
+    for child, child_kind in children_by_owner.get(obj.metadata.uid, []):
+        _render(child, child_kind, node, children_by_owner, resources, indexed)
 
 
 def _add_node(parent, resources, indexed, color, prefix, name, kind):
