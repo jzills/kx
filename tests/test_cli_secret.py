@@ -45,16 +45,15 @@ class TestDecodeRendering:
         assert "admin" in result.output
         assert "s3cr3t" in result.output
 
-    def test_shows_banner_with_item_count(self):
+    def test_banner_carries_name_and_namespace_only(self):
+        # No key count: the table right below it already shows the keys.
         result, _, _ = _invoke(["secret", "1", "--decode"])
-        assert "Secret/db-credentials" in result.output
-        assert "2 items" in result.output
-
-    def test_singular_item_count(self):
-        payload = {"data": {"username": base64.b64encode(b"admin").decode()}}
-        result, _, _ = _invoke(["secret", "1", "--decode"], payload)
-        assert "1 item" in result.output
-        assert "1 items" not in result.output
+        banner = next(
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("Secret/")
+        )
+        assert banner == "Secret/db-credentials · default"
 
     def test_empty_secret_reports_no_keys(self):
         result, _, _ = _invoke(["secret", "1", "--decode"], {"data": {}})
@@ -239,11 +238,16 @@ class TestDecodeNamespaceSweep:
         lines = [line for line in result.output.splitlines() if line.strip()]
         assert lines[0] == "Secrets · default · 2 items"
 
-    def test_blocks_do_not_repeat_the_namespace(self):
-        # The scope banner already names it; kx scan's sweep does the same.
+    def test_blocks_carry_only_the_name(self):
+        # Namespace lives in the scope banner (as kx scan's sweep does), and
+        # the key count is dropped entirely — the table below shows the keys.
         result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
-        assert "Secret/db-credentials · 1 item" in result.output
-        assert "Secret/db-credentials · default" not in result.output
+        blocks = [
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("Secret/")
+        ]
+        assert blocks == ["Secret/db-credentials", "Secret/tls-cert"]
 
     def test_sweep_does_not_save_state(self):
         _, _, state = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)

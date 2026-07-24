@@ -195,13 +195,16 @@ def _items_noun(count: int) -> str:
 
 
 def _render_secret(name: str, namespace: str, data: dict[str, bytes]) -> None:
-    """One Secret's decoded data, matching kx labels/annotations exactly.
+    """One Secret's decoded data.
 
-    `namespace` is blank under a namespace sweep, whose scope banner already
-    names it — print_banner drops empty parts."""
-    console.print_banner(
-        Kind.Secret, name, namespace=namespace, extra=_items_noun(len(data))
-    )
+    No key count, unlike kx labels/annotations: a Secret holds a handful of
+    keys, all of them visible in the table immediately below, so the count
+    restates what the reader already has. The sweep's scope banner keeps its
+    count — that one reports how many blocks follow, before they scroll past.
+
+    `namespace` is blank under a sweep, whose scope banner already names it —
+    print_banner drops empty parts."""
+    console.print_banner(Kind.Secret, name, namespace=namespace)
     console.render_key_value_table(
         "KEY", {field: to_display(value) for field, value in data.items()}
     )
