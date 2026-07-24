@@ -76,7 +76,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m str] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [--match/-m str] [--decode] [--key/-k str] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx top [--match/-m str] [--no-limits] [kubectl flags...]` | List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits. |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
@@ -123,6 +123,20 @@ pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed
 CronJob runs, usage near limits), a per-pod status table, recent log tails
 from broken containers, and warning events — one screen instead of four
 kubectl commands.
+
+### Read a Secret in plaintext
+
+`kx secret <index> --decode` prints an indexed Secret's keys and values
+decoded, instead of the base64 kubectl returns. Values that aren't text show a
+`<binary, N bytes>` placeholder rather than garbling the table. `--key`/`-k`
+prints a single value raw — no banner, no wrapping — so it drops straight into
+a shell: `export PGPASSWORD=$(kx secret 1 --decode -k password)`, or redirect a
+binary value to a file. Decoding always takes an index, so plaintext is never
+printed by accident.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
+</div>
 
 ### Scan images for vulnerabilities
 

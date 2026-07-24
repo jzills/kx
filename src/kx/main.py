@@ -30,6 +30,7 @@ from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
 from kx.commands.scan import ScanCommand
+from kx.commands.secret import SecretCommand, to_display
 from kx.commands.state import StateCommand
 from kx.commands.theme import ThemeCommand
 from kx.commands.top import TopCommand
@@ -188,6 +189,57 @@ _diagnostics = DiagnosticsService(events=_events)
 set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
+def _decode_secrets(
+    resource: str, indexes: list[int], decode: bool, key: Optional[str]
+) -> None:
+    """Render an indexed Secret's data in plaintext, or one key's raw value.
+
+    Split out of `get` so the listing path stays untouched: decoding reads a
+    named resource rather than a list, so it never re-saves state. Requiring an
+    index (rather than decoding the whole namespace) keeps plaintext exposure
+    deliberate and per-resource."""
+    if not decode:
+        raise ValueError("--key requires --decode")
+    if not indexes:
+        raise ValueError(f"--decode needs an index — run 'kx get {resource}' first")
+    expected = normalize_kind(resource)
+    if expected != Kind.Secret:
+        raise ValueError(f"--decode only applies to Secrets, not {expected}")
+    if key is not None and len(indexes) > 1:
+        raise ValueError("--key takes a single index")
+    command = SecretCommand(state=_state, kubectl=_kubectl)
+    for position, index in enumerate(indexes):
+        name, ns, kind = _state.fields(index)
+        if str(kind) != str(expected):
+            raise ValueError(
+                f"Index {index} is {kind}/{name}, not {expected} — "
+                f"run 'kx get {resource}' to relist."
+            )
+        try:
+            with console.status("fetching secret"):
+                data = command.execute(index)
+        except RuntimeError as e:
+            # A NotFound here means the saved index outlived the Secret; the
+            # explicit error type triggers the refresh path despite refresh=False.
+            if is_not_found(e):
+                raise StaleResourceError(str(e)) from e
+            raise
+        if key is not None:
+            if key not in data:
+                raise ValueError(f"No key '{key}' in {kind}/{name}")
+            # Raw and unwrapped so the value stays substitutable in shell.
+            console.write_value(data[key])
+            return
+        count = len(data)
+        extra = f"{count} {'item' if count == 1 else 'items'}"
+        if position > 0:
+            console.print_raw("")
+        console.print_banner(kind, name, namespace=ns, extra=extra)
+        console.render_key_value_table(
+            "KEY", {field: to_display(value) for field, value in data.items()}
+        )
+
+
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -199,11 +251,20 @@ def get(
     match: Optional[str] = typer.Option(
         None, "--match", "-m", help="Match by name (substring, case-insensitive)"
     ),
+    decode: bool = typer.Option(
+        False, "--decode", help="Show an indexed Secret's data in plaintext"
+    ),
+    key: Optional[str] = typer.Option(
+        None, "--key", "-k", help="With --decode, print only this key's value"
+    ),
 ):
     """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
     args = list(ctx.args)
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
+    if decode or key is not None:
+        _decode_secrets(resource, indexes, decode, key)
+        return
     if indexes:
         expected = normalize_kind(resource)
         names = []
@@ -796,6 +857,8 @@ get._examples = [
     "kx get deploy -n kube-system --match api",
     "kx pods",
     "kx po 3",
+    "kx secret 1 --decode",
+    "kx secret 1 --decode -k password",
 ]
 top._examples = ["kx top", "kx top --sort-by=cpu", "kx top --no-limits"]
 describe._examples = ["kx describe 2"]

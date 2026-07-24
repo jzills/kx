@@ -9,6 +9,7 @@ The GIFs embedded in the top-level README are rendered from the
 | `diag.tape` | `diag.gif` | Namespace triage and per-resource diagnosis |
 | `scan.tape` | `scan.gif` | Namespace scan rollup, then one workload with --full |
 | `theme.tape` | `theme.gif` | Theme listing with previews, switching themes |
+| `secret.tape` | `secret.gif` | Decoding a Secret, then extracting one key raw |
 
 ## Prerequisites
 
