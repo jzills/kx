@@ -667,7 +667,7 @@ def print_command_help(ctx) -> None:
         names = "  ".join(opt.opts)
         _console.print(f"  [body]{names:<20}[/body]  [muted]{opt.help or ''}[/muted]")
     _console.print(
-        f"  [body]{'--help':<20}[/body]  [muted]Show this message and exit.[/muted]"
+        f"  [body]{'-h, --help':<20}[/body]  [muted]Show this message and exit.[/muted]"
     )
 
     aliases = getattr(ctx.command.callback, "_aliases", [])
@@ -725,7 +725,7 @@ def print_help(
         f"  [body]{'-v, --version':<14}[/body]  [muted]Show the kx version and exit.[/muted]"
     )
     _console.print(
-        f"  [body]{'--help':<14}[/body]  [muted]Show this message and exit.[/muted]"
+        f"  [body]{'-h, --help':<14}[/body]  [muted]Show this message and exit.[/muted]"
     )
     if version:
         _console.print()

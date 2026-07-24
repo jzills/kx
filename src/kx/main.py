@@ -92,6 +92,9 @@ app = typer.Typer(
     cls=KindAliasGroup,
     add_help_option=False,
     add_completion=False,
+    # Inherited by every subcommand's context, so `-h` works throughout even
+    # though the root group renders its own help option (see `callback`).
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -145,7 +148,7 @@ def callback(
         False, "--version", "-v", is_eager=True, help="Show the kx version and exit."
     ),
     show_help: bool = typer.Option(
-        False, "--help", is_eager=True, help="Show this message and exit."
+        False, "--help", "-h", is_eager=True, help="Show this message and exit."
     ),
 ) -> None:
     if no_color:

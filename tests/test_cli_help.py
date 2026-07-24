@@ -43,6 +43,28 @@ def test_help_lists_version_option():
     assert "--version" in result.output
 
 
+def test_help_short_flag():
+    result = runner.invoke(app, ["-h"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_help_lists_short_flag():
+    result = runner.invoke(app, ["--help"])
+    assert "-h, --help" in result.output
+
+
+def test_command_help_short_flag():
+    result = runner.invoke(app, ["get", "-h"])
+    assert result.exit_code == 0
+    assert "kx get pods" in result.output
+
+
+def test_command_help_lists_short_flag():
+    result = runner.invoke(app, ["get", "--help"])
+    assert "-h, --help" in result.output
+
+
 def test_command_help_shows_examples():
     result = runner.invoke(app, ["get", "--help"])
     assert "Examples" in result.output
