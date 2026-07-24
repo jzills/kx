@@ -105,6 +105,7 @@ _HELP_SECTIONS = (
         "Resources",
         (
             "get",
+            "secret",
             "top",
             "describe",
             "events",
@@ -259,7 +260,19 @@ def get(
     ),
 ):
     """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
-    args = list(ctx.args)
+    _get(resource, list(ctx.args), match, decode, key)
+
+
+def _get(
+    resource: str,
+    args: list[str],
+    match: Optional[str],
+    decode: bool = False,
+    key: Optional[str] = None,
+) -> None:
+    """Shared body of `get` and the `secret` command, which delegates here so
+    that shadowing the `secret` kind spelling costs none of the listing
+    behaviour the alias used to provide."""
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
     if decode or key is not None:
@@ -306,6 +319,51 @@ def get(
         except RuntimeError:
             namespace = "default"
     console.render_indexed_table(result, resource, namespace, note=note)
+
+
+_SECRET_OPTIONS = {
+    "match": typer.Option(
+        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
+    ),
+    "decode": typer.Option(
+        False, "--decode", help="Show an indexed Secret's data in plaintext"
+    ),
+    "key": typer.Option(
+        None, "--key", "-k", help="With --decode, print only this key's value"
+    ),
+}
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors(refresh=False)
+def secret(
+    ctx: typer.Context,
+    match: Optional[str] = _SECRET_OPTIONS["match"],
+    decode: bool = _SECRET_OPTIONS["decode"],
+    key: Optional[str] = _SECRET_OPTIONS["key"],
+):
+    """List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."""
+    _get("secret", list(ctx.args), match, decode, key)
+
+
+@app.command(
+    name="secrets",
+    hidden=True,
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors(refresh=False)
+def secret_alias(
+    ctx: typer.Context,
+    match: Optional[str] = _SECRET_OPTIONS["match"],
+    decode: bool = _SECRET_OPTIONS["decode"],
+    key: Optional[str] = _SECRET_OPTIONS["key"],
+):
+    """Alias for secret."""
+    _get("secret", list(ctx.args), match, decode, key)
 
 
 @app.command(
@@ -851,6 +909,13 @@ def forward():
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
 context._aliases = ["kx contexts"]
+secret._aliases = ["kx secrets"]
+
+secret._examples = [
+    "kx secret",
+    "kx secret 1 --decode",
+    "kx secret 1 --decode -k password",
+]
 
 get._examples = [
     "kx get pods",

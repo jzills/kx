@@ -100,6 +100,94 @@ class TestDecodeSpellings:
             assert "--decode" not in call.args[0]
 
 
+class TestSecretCommandListing:
+    """`secret` is a registered command, so it must still do everything the
+    kind alias did before it shadowed that spelling."""
+
+    def _listing_mocks(self):
+        kubectl = MagicMock()
+        kubectl.run.return_value = "NAME\ndb-credentials"
+        kubectl.current_namespace.return_value = "default"
+        state = MagicMock()
+        index = MagicMock()
+        index.add.return_value = ("1  db-credentials", ["db-credentials"])
+        index.filter.side_effect = lambda output, term: output
+        return kubectl, state, index
+
+    def _invoke_listing(self, args):
+        kubectl, state, index = self._listing_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, args)
+        return result, kubectl, state
+
+    def test_bare_secret_lists(self):
+        result, kubectl, _ = self._invoke_listing(["secret"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_bare_secrets_alias_lists(self):
+        result, kubectl, _ = self._invoke_listing(["secrets"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_kubectl_flags_pass_through(self):
+        result, kubectl, _ = self._invoke_listing(["secret", "-n", "kube-system"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret", "-n", "kube-system"])
+
+    def test_match_filters(self):
+        result, kubectl, _ = self._invoke_listing(["secret", "--match", "db"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["get", "secret"])
+
+    def test_index_relists_by_name(self):
+        kubectl, state, index = self._listing_mocks()
+        state.fields.return_value = ("db-credentials", "default", "Secret")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["secret", "1"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(
+            ["get", "secret", "db-credentials", "-n", "default"]
+        )
+
+    def test_listing_saves_state(self):
+        _, _, state = self._invoke_listing(["secret"])
+        state.save.assert_called_once()
+
+
+class TestSecretHelp:
+    def test_secret_listed_in_root_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "secret" in result.output
+
+    def test_secrets_alias_hidden_from_root_help(self):
+        result = runner.invoke(app, ["--help"])
+        assert "secrets" not in result.output
+
+    def test_no_unmapped_commands(self):
+        result = runner.invoke(app, ["--help"])
+        assert "Other" not in result.output
+
+    def test_secret_help_shows_decode_options(self):
+        result = runner.invoke(app, ["secret", "--help"])
+        assert result.exit_code == 0
+        assert "--decode" in result.output
+        assert "--key" in result.output
+
+    def test_secret_help_shows_alias(self):
+        result = runner.invoke(app, ["secret", "--help"])
+        assert "kx secrets" in result.output
+
+
 class TestDecodeValidation:
     def test_decode_without_index_errors(self):
         result, _, _ = _invoke(["secret", "--decode"])
