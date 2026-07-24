@@ -190,28 +190,50 @@ _diagnostics = DiagnosticsService(events=_events)
 set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
+def _items_noun(count: int) -> str:
+    return f"{count} {'item' if count == 1 else 'items'}"
+
+
 def _render_secret(name: str, namespace: str, data: dict[str, bytes]) -> None:
-    """One Secret's decoded data, matching kx labels/annotations exactly."""
-    count = len(data)
-    extra = f"{count} {'item' if count == 1 else 'items'}"
-    console.print_banner(Kind.Secret, name, namespace=namespace, extra=extra)
+    """One Secret's decoded data, matching kx labels/annotations exactly.
+
+    `namespace` is blank under a namespace sweep, whose scope banner already
+    names it — print_banner drops empty parts."""
+    console.print_banner(
+        Kind.Secret, name, namespace=namespace, extra=_items_noun(len(data))
+    )
     console.render_key_value_table(
         "KEY", {field: to_display(value) for field, value in data.items()}
     )
 
 
-def _decode_namespace(command: SecretCommand, extra: list[str]) -> None:
-    """Every Secret in the namespace, stacked. One kubectl call covers the lot."""
+def _decode_namespace(command: SecretCommand, extra: list[str], yes: bool) -> None:
+    """Every Secret in the namespace, stacked. One kubectl call covers the lot.
+
+    Confirms first unless --yes: unlike an indexed decode, this prints every
+    credential in the namespace, and it sits one flag away from the `kx secret`
+    listing people run by reflex. Fetching before prompting costs nothing and
+    discloses nothing, and lets the prompt name the blast radius."""
     with console.status("fetching secrets"):
         rows = command.execute_all(extra)
+    count = len(rows)
+    # Scope banner then per-Secret blocks, the shape kx scan's namespace sweep
+    # uses; the blocks leave the namespace to this header rather than repeat it.
+    namespace = (
+        rows[0][1]
+        if rows
+        else (_extract_namespace(extra) or _kubectl.current_namespace())
+    )
+    console.print_scope_banner(plural_display("secret"), namespace, _items_noun(count))
     if not rows:
-        namespace = _extract_namespace(extra) or _kubectl.current_namespace()
-        console.print_scope_banner(plural_display("secret"), namespace, "0 items")
         return
-    for position, (name, namespace, data) in enumerate(rows):
-        if position > 0:
-            console.print_raw("")
-        _render_secret(name, namespace, data)
+    if not yes:
+        noun = "Secret" if count == 1 else "Secrets"
+        # Outside the spinner above: a prompt inside a Live region breaks input.
+        console.confirm(f"Decode {count} {noun} in {namespace}?")
+    for name, _ns, data in rows:
+        console.print_raw("")
+        _render_secret(name, "", data)
 
 
 def _decode_secrets(
@@ -220,6 +242,7 @@ def _decode_secrets(
     extra: list[str],
     decode: bool,
     key: Optional[str],
+    yes: bool = False,
 ) -> None:
     """Render Secret data in plaintext: one indexed Secret, several, one key's
     raw value, or — with no index — every Secret in the namespace.
@@ -235,7 +258,7 @@ def _decode_secrets(
         raise ValueError("--key takes a single index")
     command = SecretCommand(state=_state, kubectl=_kubectl)
     if not indexes:
-        _decode_namespace(command, extra)
+        _decode_namespace(command, extra, yes)
         return
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
@@ -276,6 +299,12 @@ _DECODE_OPTION = typer.Option(
 _KEY_OPTION = typer.Option(
     None, "--key", "-k", help="With --decode, print only this key's value"
 )
+_YES_OPTION = typer.Option(
+    False,
+    "--yes",
+    "-y",
+    help="Skip the confirmation prompt for a namespace-wide --decode",
+)
 
 
 @app.command(
@@ -289,9 +318,10 @@ def get(
     match: Optional[str] = _MATCH_OPTION,
     decode: bool = _DECODE_OPTION,
     key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
 ):
     """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
-    _get(resource, list(ctx.args), match, decode, key)
+    _get(resource, list(ctx.args), match, decode, key, yes)
 
 
 def _get(
@@ -300,6 +330,7 @@ def _get(
     match: Optional[str],
     decode: bool = False,
     key: Optional[str] = None,
+    yes: bool = False,
 ) -> None:
     """Shared body of `get` and the `secret` command, which delegates here so
     that shadowing the `secret` kind spelling costs none of the listing
@@ -307,7 +338,7 @@ def _get(
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
     if decode or key is not None:
-        _decode_secrets(resource, indexes, extra, decode, key)
+        _decode_secrets(resource, indexes, extra, decode, key, yes)
         return
     if indexes:
         expected = normalize_kind(resource)
@@ -362,9 +393,10 @@ def secret(
     match: Optional[str] = _MATCH_OPTION,
     decode: bool = _DECODE_OPTION,
     key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
 ):
     """List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."""
-    _get("secret", list(ctx.args), match, decode, key)
+    _get("secret", list(ctx.args), match, decode, key, yes)
 
 
 @app.command(
@@ -379,9 +411,10 @@ def secret_alias(
     match: Optional[str] = _MATCH_OPTION,
     decode: bool = _DECODE_OPTION,
     key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
 ):
     """Alias for secret."""
-    _get("secret", list(ctx.args), match, decode, key)
+    _get("secret", list(ctx.args), match, decode, key, yes)
 
 
 @app.command(

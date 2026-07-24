@@ -26,14 +26,14 @@ def _mocks(payload=None):
     return kubectl, state, index
 
 
-def _invoke(args, payload=None):
+def _invoke(args, payload=None, stdin=None):
     kubectl, state, index = _mocks(payload)
     with (
         patch("kx.main._kubectl", kubectl),
         patch("kx.main._state", state),
         patch("kx.main._index", index),
     ):
-        result = runner.invoke(app, args)
+        result = runner.invoke(app, args, input=stdin)
     return result, kubectl, state
 
 
@@ -204,7 +204,7 @@ _SECRET_LIST = {
 
 class TestDecodeNamespaceSweep:
     def test_decodes_every_secret_in_the_namespace(self):
-        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST)
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
         assert result.exit_code == 0
         assert "Secret/db-credentials" in result.output
         assert "s3cr3t" in result.output
@@ -212,19 +212,19 @@ class TestDecodeNamespaceSweep:
         assert "PRIVATE KEY" in result.output
 
     def test_uses_a_single_kubectl_call(self):
-        _, kubectl, _ = _invoke(["secret", "--decode"], _SECRET_LIST)
+        _, kubectl, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
         kubectl.run.assert_called_once_with(["get", "secret", "-o", "json"])
 
     def test_passes_namespace_flag_through(self):
         _, kubectl, _ = _invoke(
-            ["secret", "--decode", "-n", "kube-system"], _SECRET_LIST
+            ["secret", "--decode", "-y", "-n", "kube-system"], _SECRET_LIST
         )
         kubectl.run.assert_called_once_with(
             ["get", "secret", "-o", "json", "-n", "kube-system"]
         )
 
     def test_get_spelling_sweeps_too(self):
-        result, _, _ = _invoke(["get", "secret", "--decode"], _SECRET_LIST)
+        result, _, _ = _invoke(["get", "secret", "--decode", "-y"], _SECRET_LIST)
         assert result.exit_code == 0
         assert "Secret/db-credentials" in result.output
         assert "Secret/tls-cert" in result.output
@@ -234,13 +234,60 @@ class TestDecodeNamespaceSweep:
         assert result.exit_code == 0
         assert "0 items" in result.output
 
+    def test_scope_banner_heads_the_sweep(self):
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        lines = [line for line in result.output.splitlines() if line.strip()]
+        assert lines[0] == "Secrets · default · 2 items"
+
+    def test_blocks_do_not_repeat_the_namespace(self):
+        # The scope banner already names it; kx scan's sweep does the same.
+        result, _, _ = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
+        assert "Secret/db-credentials · 1 item" in result.output
+        assert "Secret/db-credentials · default" not in result.output
+
     def test_sweep_does_not_save_state(self):
-        _, _, state = _invoke(["secret", "--decode"], _SECRET_LIST)
+        _, _, state = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
         state.save.assert_not_called()
 
     def test_sweep_does_not_resolve_indexes(self):
-        _, _, state = _invoke(["secret", "--decode"], _SECRET_LIST)
+        _, _, state = _invoke(["secret", "--decode", "-y"], _SECRET_LIST)
         state.fields.assert_not_called()
+
+
+class TestSweepConfirmation:
+    def test_prompts_before_decoding_the_namespace(self):
+        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST, stdin="y\n")
+        assert result.exit_code == 0
+        assert "Decode 2 Secrets in default?" in result.output
+        assert "s3cr3t" in result.output
+
+    def test_declining_prints_no_values(self):
+        result, _, _ = _invoke(["secret", "--decode"], _SECRET_LIST, stdin="n\n")
+        assert result.exit_code == 1
+        assert "s3cr3t" not in result.output
+        assert "PRIVATE KEY" not in result.output
+
+    def test_yes_skips_the_prompt(self):
+        result, _, _ = _invoke(["secret", "--decode", "--yes"], _SECRET_LIST)
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
+        assert "s3cr3t" in result.output
+
+    def test_singular_wording_for_one_secret(self):
+        payload = {"items": [_SECRET_LIST["items"][0]]}
+        result, _, _ = _invoke(["secret", "--decode"], payload, stdin="y\n")
+        assert "Decode 1 Secret in default?" in result.output
+
+    def test_indexed_decode_does_not_prompt(self):
+        result, _, _ = _invoke(["secret", "1", "--decode"])
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
+        assert "s3cr3t" in result.output
+
+    def test_empty_namespace_does_not_prompt(self):
+        result, _, _ = _invoke(["secret", "--decode"], {"items": []})
+        assert result.exit_code == 0
+        assert "Decode" not in result.output
 
 
 class TestDecodeValidation:
