@@ -39,9 +39,14 @@ from kx.config import load_config, save_theme
 from kx.diagnostics import DiagnosticsService
 from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
-from kx.graph import build_indexed_tree, build_tree
+from kx.graph import (
+    build_indexed_tree,
+    build_namespace_indexed_tree,
+    build_namespace_tree,
+    build_tree,
+)
 from kx.index import IndexService
-from kx.kinds import is_kind_spelling, normalize_kind
+from kx.kinds import Kind, is_kind_spelling, normalize_kind
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.scanner import ScannerService
@@ -534,22 +539,36 @@ def exec_cmd(
 @app.command(cls=StyledCommand)
 @handle_errors
 def tree(
-    index: int,
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to graph; omit to graph the whole current namespace.",
+    ),
     indexed: bool = typer.Option(
         False, "--index", "-i", help="Assign indexes to tree nodes and update state"
     ),
 ):
-    """Show the ownership graph for an indexed resource; --index assigns indexes to tree nodes."""
-    name, ns, kind = _state.fields(index)
-    console.print_banner(kind, name, namespace=ns)
+    """Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace."""
     command = TreeCommand(
         state=_state,
         kubectl=_kubectl,
         build_tree=build_tree,
         build_indexed_tree=build_indexed_tree,
+        build_namespace_tree=build_namespace_tree,
+        build_namespace_indexed_tree=build_namespace_indexed_tree,
     )
-    with console.status("resolving ownership graph"):
-        rendered = command.execute(index, indexed)
+    if index is None:
+        namespace = _kubectl.current_namespace()
+        console.print_scope_banner("Namespace", namespace)
+        with console.status("resolving ownership graph"):
+            rendered = command.execute_namespace(namespace, indexed)
+    else:
+        name, ns, kind = _state.fields(index)
+        if kind == Kind.Namespace:
+            console.print_scope_banner("Namespace", name)
+        else:
+            console.print_banner(kind, name, namespace=ns)
+        with console.status("resolving ownership graph"):
+            rendered = command.execute(index, indexed)
     console.print_rich(rendered)
 
 
@@ -791,7 +810,7 @@ yaml._examples = ["kx yaml 1 --show metadata,spec"]
 delete._examples = ["kx delete 3 --yes"]
 edit._examples = ["kx edit 1"]
 exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
-tree._examples = ["kx tree 2 --index"]
+tree._examples = ["kx tree", "kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
 scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --full", "kx scan --engine scout"]
