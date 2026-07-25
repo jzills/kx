@@ -69,14 +69,15 @@ pipx run --spec kx-cli kx get pods
 
 Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs and other resource types still use `kx get <resource>`.
 
-Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `--help` on any command shows usage, examples, and aliases.
+Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `-h`/`--help` on any command shows usage, examples, and aliases.
 
 ### Commands
 
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m str] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [--match/-m str] [--decode] [--key/-k str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx secret [--match/-m str] [--decode] [--key/-k str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [--match/-m str] [--no-limits] [kubectl flags...]` | List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits. |
 | `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
@@ -90,7 +91,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx exec <index> [<cmd>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
-| `kx tree <index> [--index/-i]` | Show the ownership graph for an indexed resource; --index assigns indexes to tree nodes. |
+| `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
@@ -123,6 +124,21 @@ pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed
 CronJob runs, usage near limits), a per-pod status table, recent log tails
 from broken containers, and warning events — one screen instead of four
 kubectl commands.
+
+### Read a Secret in plaintext
+
+`kx secret <index> --decode` prints an indexed Secret's keys and values
+decoded, instead of the base64 kubectl returns. Values that aren't text show a
+`<binary, N bytes>` placeholder rather than garbling the table. `--key`/`-k`
+prints a single value raw — no banner, no wrapping — so it drops straight into
+a shell: `export PGPASSWORD=$(kx secret 1 --decode -k password)`, or redirect a
+binary value to a file. Bare `kx secret --decode` decodes every Secret in the
+namespace in one call, `-n` included — it confirms first unless you pass
+`--yes`/`-y`, since that prints every credential in the namespace.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
+</div>
 
 ### Scan images for vulnerabilities
 

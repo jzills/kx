@@ -20,7 +20,7 @@ from kx.commands.edit import EditCommand
 from kx.commands.forward import ForwardCommand
 from kx.commands.events import EventsCommand
 from kx.commands.exec import ExecCommand
-from kx.commands.get import GetCommand
+from kx.commands.get import GetCommand, _extract_namespace
 from kx.commands.logs import LogsCommand
 from kx.commands.metadata_write import _MetadataWriteCommand
 from kx.commands.port_forward import PortForwardCommand
@@ -30,6 +30,7 @@ from kx.commands.namespace import NamespaceCommand
 from kx.commands.rollout import RolloutAction, RolloutCommand
 from kx.commands.scale import ScaleCommand
 from kx.commands.scan import ScanCommand
+from kx.commands.secret import SecretCommand, to_display
 from kx.commands.state import StateCommand
 from kx.commands.theme import ThemeCommand
 from kx.commands.top import TopCommand
@@ -39,9 +40,14 @@ from kx.config import load_config, save_theme
 from kx.diagnostics import DiagnosticsService
 from kx.errors import handle_errors, set_refresh
 from kx.events import EventsService
-from kx.graph import build_indexed_tree, build_tree
+from kx.graph import (
+    build_indexed_tree,
+    build_namespace_indexed_tree,
+    build_namespace_tree,
+    build_tree,
+)
 from kx.index import IndexService
-from kx.kinds import is_kind_spelling, normalize_kind
+from kx.kinds import Kind, is_kind_spelling, normalize_kind, plural_display
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.scanner import ScannerService
@@ -87,6 +93,9 @@ app = typer.Typer(
     cls=KindAliasGroup,
     add_help_option=False,
     add_completion=False,
+    # Inherited by every subcommand's context, so `-h` works throughout even
+    # though the root group renders its own help option (see `callback`).
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -96,6 +105,7 @@ _HELP_SECTIONS = (
         "Resources",
         (
             "get",
+            "secret",
             "top",
             "describe",
             "events",
@@ -140,7 +150,7 @@ def callback(
         False, "--version", "-v", is_eager=True, help="Show the kx version and exit."
     ),
     show_help: bool = typer.Option(
-        False, "--help", is_eager=True, help="Show this message and exit."
+        False, "--help", "-h", is_eager=True, help="Show this message and exit."
     ),
 ) -> None:
     if no_color:
@@ -180,6 +190,126 @@ _diagnostics = DiagnosticsService(events=_events)
 set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index))
 
 
+def _items_noun(count: int) -> str:
+    return f"{count} {'item' if count == 1 else 'items'}"
+
+
+def _render_secret(name: str, namespace: str, data: dict[str, bytes]) -> None:
+    """One Secret's decoded data.
+
+    No key count, unlike kx labels/annotations: a Secret holds a handful of
+    keys, all of them visible in the table immediately below, so the count
+    restates what the reader already has. The sweep's scope banner keeps its
+    count — that one reports how many blocks follow, before they scroll past.
+
+    `namespace` is blank under a sweep, whose scope banner already names it —
+    print_banner drops empty parts."""
+    console.print_banner(Kind.Secret, name, namespace=namespace)
+    console.render_key_value_table(
+        "KEY", {field: to_display(value) for field, value in data.items()}
+    )
+
+
+def _decode_namespace(command: SecretCommand, extra: list[str], yes: bool) -> None:
+    """Every Secret in the namespace, stacked. One kubectl call covers the lot.
+
+    Confirms first unless --yes: unlike an indexed decode, this prints every
+    credential in the namespace, and it sits one flag away from the `kx secret`
+    listing people run by reflex. Fetching before prompting costs nothing and
+    discloses nothing, and lets the prompt name the blast radius."""
+    with console.status("fetching secrets"):
+        rows = command.execute_all(extra)
+    count = len(rows)
+    # Scope banner then per-Secret blocks, the shape kx scan's namespace sweep
+    # uses; the blocks leave the namespace to this header rather than repeat it.
+    namespace = (
+        rows[0][1]
+        if rows
+        else (_extract_namespace(extra) or _kubectl.current_namespace())
+    )
+    console.print_scope_banner(plural_display("secret"), namespace, _items_noun(count))
+    if not rows:
+        return
+    if not yes:
+        noun = "Secret" if count == 1 else "Secrets"
+        # Outside the spinner above: a prompt inside a Live region breaks input.
+        console.confirm(f"Decode {count} {noun} in {namespace}?")
+    for name, _ns, data in rows:
+        console.print_raw("")
+        _render_secret(name, "", data)
+
+
+def _decode_secrets(
+    resource: str,
+    indexes: list[int],
+    extra: list[str],
+    decode: bool,
+    key: Optional[str],
+    yes: bool = False,
+) -> None:
+    """Render Secret data in plaintext: one indexed Secret, several, one key's
+    raw value, or — with no index — every Secret in the namespace.
+
+    Split out of `get` so the listing path stays untouched; decoding reads
+    resources rather than listing them, so it never re-saves state."""
+    if not decode:
+        raise ValueError("--key requires --decode")
+    expected = normalize_kind(resource)
+    if expected != Kind.Secret:
+        raise ValueError(f"--decode only applies to Secrets, not {expected}")
+    if key is not None and len(indexes) != 1:
+        raise ValueError("--key takes a single index")
+    command = SecretCommand(state=_state, kubectl=_kubectl)
+    if not indexes:
+        _decode_namespace(command, extra, yes)
+        return
+    for position, index in enumerate(indexes):
+        name, ns, kind = _state.fields(index)
+        if str(kind) != str(expected):
+            raise ValueError(
+                f"Index {index} is {kind}/{name}, not {expected} — "
+                f"run 'kx get {resource}' to relist."
+            )
+        try:
+            with console.status("fetching secret"):
+                data = command.execute(index)
+        except RuntimeError as e:
+            # A NotFound here means the saved index outlived the Secret; the
+            # explicit error type triggers the refresh path despite refresh=False.
+            if is_not_found(e):
+                raise StaleResourceError(str(e)) from e
+            raise
+        if key is not None:
+            if key not in data:
+                raise ValueError(f"No key '{key}' in {kind}/{name}")
+            # Raw and unwrapped so the value stays substitutable in shell.
+            console.write_value(data[key])
+            return
+        if position > 0:
+            console.print_raw("")
+        _render_secret(name, ns, data)
+
+
+# Shared by get and the secret command so their help text can't drift apart.
+_MATCH_OPTION = typer.Option(
+    None, "--match", "-m", help="Match by name (substring, case-insensitive)"
+)
+_DECODE_OPTION = typer.Option(
+    False,
+    "--decode",
+    help="Show Secret data in plaintext; every Secret in the namespace when no index is given",
+)
+_KEY_OPTION = typer.Option(
+    None, "--key", "-k", help="With --decode, print only this key's value"
+)
+_YES_OPTION = typer.Option(
+    False,
+    "--yes",
+    "-y",
+    help="Skip the confirmation prompt for a namespace-wide --decode",
+)
+
+
 @app.command(
     cls=StyledCommand,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -188,14 +318,31 @@ set_refresh(lambda: RefreshService(state=_state, kubectl=_kubectl, index=_index)
 def get(
     ctx: typer.Context,
     resource: str,
-    match: Optional[str] = typer.Option(
-        None, "--match", "-m", help="Match by name (substring, case-insensitive)"
-    ),
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
 ):
     """List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."""
-    args = list(ctx.args)
+    _get(resource, list(ctx.args), match, decode, key, yes)
+
+
+def _get(
+    resource: str,
+    args: list[str],
+    match: Optional[str],
+    decode: bool = False,
+    key: Optional[str] = None,
+    yes: bool = False,
+) -> None:
+    """Shared body of `get` and the `secret` command, which delegates here so
+    that shadowing the `secret` kind spelling costs none of the listing
+    behaviour the alias used to provide."""
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
+    if decode or key is not None:
+        _decode_secrets(resource, indexes, extra, decode, key, yes)
+        return
     if indexes:
         expected = normalize_kind(resource)
         names = []
@@ -237,6 +384,40 @@ def get(
         except RuntimeError:
             namespace = "default"
     console.render_indexed_table(result, resource, namespace, note=note)
+
+
+@app.command(
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors(refresh=False)
+def secret(
+    ctx: typer.Context,
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
+):
+    """List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."""
+    _get("secret", list(ctx.args), match, decode, key, yes)
+
+
+@app.command(
+    name="secrets",
+    hidden=True,
+    cls=StyledCommand,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+@handle_errors(refresh=False)
+def secret_alias(
+    ctx: typer.Context,
+    match: Optional[str] = _MATCH_OPTION,
+    decode: bool = _DECODE_OPTION,
+    key: Optional[str] = _KEY_OPTION,
+    yes: bool = _YES_OPTION,
+):
+    """Alias for secret."""
+    _get("secret", list(ctx.args), match, decode, key, yes)
 
 
 @app.command(
@@ -534,22 +715,36 @@ def exec_cmd(
 @app.command(cls=StyledCommand)
 @handle_errors
 def tree(
-    index: int,
+    index: Optional[int] = typer.Argument(
+        default=None,
+        help="Resource index to graph; omit to graph the whole current namespace.",
+    ),
     indexed: bool = typer.Option(
         False, "--index", "-i", help="Assign indexes to tree nodes and update state"
     ),
 ):
-    """Show the ownership graph for an indexed resource; --index assigns indexes to tree nodes."""
-    name, ns, kind = _state.fields(index)
-    console.print_banner(kind, name, namespace=ns)
+    """Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace."""
     command = TreeCommand(
         state=_state,
         kubectl=_kubectl,
         build_tree=build_tree,
         build_indexed_tree=build_indexed_tree,
+        build_namespace_tree=build_namespace_tree,
+        build_namespace_indexed_tree=build_namespace_indexed_tree,
     )
-    with console.status("resolving ownership graph"):
-        rendered = command.execute(index, indexed)
+    if index is None:
+        namespace = _kubectl.current_namespace()
+        console.print_scope_banner("Namespace", namespace)
+        with console.status("resolving ownership graph"):
+            rendered = command.execute_namespace(namespace, indexed)
+    else:
+        name, ns, kind = _state.fields(index)
+        if kind == Kind.Namespace:
+            console.print_scope_banner("Namespace", name)
+        else:
+            console.print_banner(kind, name, namespace=ns)
+        with console.status("resolving ownership graph"):
+            rendered = command.execute(index, indexed)
     console.print_rich(rendered)
 
 
@@ -768,12 +963,21 @@ def forward():
 diagnostic._aliases = ["kx diag"]
 namespace._aliases = ["kx ns"]
 context._aliases = ["kx contexts"]
+secret._aliases = ["kx secrets"]
+
+secret._examples = [
+    "kx secret",
+    "kx secret 1 --decode",
+    "kx secret 1 --decode -k password",
+]
 
 get._examples = [
     "kx get pods",
     "kx get deploy -n kube-system --match api",
     "kx pods",
     "kx po 3",
+    "kx secret 1 --decode",
+    "kx secret 1 --decode -k password",
 ]
 top._examples = ["kx top", "kx top --sort-by=cpu", "kx top --no-limits"]
 describe._examples = ["kx describe 2"]
@@ -791,7 +995,7 @@ yaml._examples = ["kx yaml 1 --show metadata,spec"]
 delete._examples = ["kx delete 3 --yes"]
 edit._examples = ["kx edit 1"]
 exec_cmd._examples = ["kx exec 1", "kx exec 1 -- env"]
-tree._examples = ["kx tree 2 --index"]
+tree._examples = ["kx tree", "kx tree 2 --index"]
 rollout._examples = ["kx rollout restart 2"]
 scale._examples = ["kx scale 2 5"]
 scan._examples = ["kx scan", "kx scan 1", "kx scan 1 --full", "kx scan --engine scout"]
