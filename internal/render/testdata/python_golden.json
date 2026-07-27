@@ -35,6 +35,12 @@
   "theme_list": {
     "output": "Themes \u00b7 11 items\n   X         THEME               PREVIEW                                     \n   1         github-dark         \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   2    \u2192    dracula             \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   3         nord                \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   4         gruvbox             \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   5         solarized-dark      \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   6         catppuccin-mocha    \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   7         tokyo-night         \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   8         rose-pine           \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   9         mono                \u2713 ok  ! warn  \u2717 error  header  body  muted  \n  10         light               \u2713 ok  ! warn  \u2717 error  header  body  muted  \n  11         plain               \u2713 ok  ! warn  \u2717 error  header  body  muted  \n"
   },
+  "tree": {
+    "output": "Deployment/web\n\u251c\u2500\u2500 rs/web-abc\n\u2502   \u251c\u2500\u2500 pod/web-abc-1\n\u2502   \u2502   \u251c\u2500\u2500 container: app\n\u2502   \u2502   \u2514\u2500\u2500 container: sidecar\n\u2502   \u2514\u2500\u2500 pod/web-abc-2\n\u2502       \u2514\u2500\u2500 container: app\n\u2514\u2500\u2500 rs/web-old\n"
+  },
+  "tree_indexed": {
+    "output": "1 Deployment/web\n\u2514\u2500\u2500 2 rs/web-abc\n    \u2514\u2500\u2500 3 pod/web-abc-1\n        \u2514\u2500\u2500 container: app\n"
+  },
   "wide_names": {
     "indexed": "X  NAME                                    READY  STATUS   AGE\n1  very-long-deployment-name-abcdef-12345  1/1    Running  12d\n2  s                                       1/1    Running  1s ",
     "namespace": "prod",

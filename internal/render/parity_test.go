@@ -122,3 +122,34 @@ func TestThemeListParity(t *testing.T) {
 		t.Errorf("layout mismatch\n go: %q\n py: %q", got, want.Output)
 	}
 }
+
+// Tree guides must match Rich's exactly: the structure below exercises a middle
+// child, a last child, and a nested last child whose parent still continues,
+// which is where a hand-rolled renderer gets the continuation bars wrong.
+func TestTreeParity(t *testing.T) {
+	root := &Node{Label: "Deployment/web", Style: "header"}
+	rs := root.Add("rs/web-abc", "accent")
+	pod1 := rs.Add("pod/web-abc-1", "body")
+	pod1.Add("container: app", "muted")
+	pod1.Add("container: sidecar", "muted")
+	pod2 := rs.Add("pod/web-abc-2", "body")
+	pod2.Add("container: app", "muted")
+	root.Add("rs/web-old", "accent")
+
+	got := capture(func(r *Renderer) { r.Tree(root) })
+	if want := loadRenderGolden(t)["tree"].Output; got != want {
+		t.Errorf("tree mismatch\n go: %q\n py: %q", got, want)
+	}
+}
+
+func TestIndexedTreeParity(t *testing.T) {
+	root := &Node{Label: "Deployment/web", Style: "header", Index: 1}
+	rs := root.AddIndexed("rs/web-abc", "accent", 2)
+	pod := rs.AddIndexed("pod/web-abc-1", "body", 3)
+	pod.Add("container: app", "muted")
+
+	got := capture(func(r *Renderer) { r.Tree(root) })
+	if want := loadRenderGolden(t)["tree_indexed"].Output; got != want {
+		t.Errorf("indexed tree mismatch\n go: %q\n py: %q", got, want)
+	}
+}

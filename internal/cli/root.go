@@ -3,13 +3,16 @@ package cli
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Services holds the dependencies commands are constructed with, so tests can
@@ -19,17 +22,35 @@ type Services struct {
 	State   *state.Service
 	Index   Indexer
 	Config  config.Config
+	// Kubernetes builds the API client, for the commands that need structured
+	// data kubectl's table output can't provide. Deferred rather than built up
+	// front so commands that never touch the API server don't pay for loading
+	// and validating a kubeconfig.
+	Kubernetes func() (kubernetes.Interface, error)
 }
 
 // NewServices builds the production service set from the loaded config.
 func NewServices(cfg config.Config) Services {
 	return Services{
-		Kubectl: kubectl.New(),
-		State:   state.NewService(cfg.MaxHistory),
-		Index:   index.Service{},
-		Config:  cfg,
+		Kubectl:    kubectl.New(),
+		State:      state.NewService(cfg.MaxHistory),
+		Index:      index.Service{},
+		Config:     cfg,
+		Kubernetes: kubernetesClient,
 	}
 }
+
+// kubernetesClient builds the API client once per process and reuses it.
+func kubernetesClient() (kubernetes.Interface, error) {
+	clientOnce.Do(func() { client, clientErr = k8s.Client() })
+	return client, clientErr
+}
+
+var (
+	clientOnce sync.Once
+	client     *kubernetes.Clientset
+	clientErr  error
+)
 
 // NewRoot builds the kx command tree.
 func NewRoot(services Services, version string) *cobra.Command {
@@ -66,6 +87,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
 		newYamlCommand(services),
+		newTreeCommand(services),
 		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources", "labels", "LABEL", true),
 		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources", "annotations", "ANNOTATION", false),
 		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource"),

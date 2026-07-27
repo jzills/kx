@@ -23,6 +23,7 @@ from kx.state import State, StateHistory  # noqa: E402
 from kx.kinds import Kind  # noqa: E402
 from kx.themes import rich_theme  # noqa: E402
 from rich.console import Console  # noqa: E402
+from rich.tree import Tree  # noqa: E402
 
 # Matches _build_console's non-terminal branch: colors off, wide enough that
 # table rows are never wrapped.
@@ -120,6 +121,32 @@ def main() -> None:
     # The widest table kx renders, and the one whose cells arrive pre-styled.
     golden["theme_list"] = {
         "output": capture(lambda: console.render_theme_list("dracula"))
+    }
+
+    # Tree guides: the structure below exercises every branch shape — a middle
+    # child, a last child, and a nested last child whose parent continues.
+    def build_tree():
+        root = Tree("[header]Deployment/web[/header]")
+        rs = root.add("[accent]rs/web-abc[/accent]")
+        pod1 = rs.add("[body]pod/web-abc-1[/body]")
+        pod1.add("[muted]container: app[/muted]")
+        pod1.add("[muted]container: sidecar[/muted]")
+        pod2 = rs.add("[body]pod/web-abc-2[/body]")
+        pod2.add("[muted]container: app[/muted]")
+        root.add("[accent]rs/web-old[/accent]")
+        return root
+
+    golden["tree"] = {"output": capture(lambda: console.print_rich(build_tree()))}
+
+    def build_indexed_tree():
+        root = Tree("[muted]1[/muted] [header]Deployment/web[/header]")
+        rs = root.add("[muted]2[/muted] [accent]rs/web-abc[/accent]")
+        pod = rs.add("[muted]3[/muted] [body]pod/web-abc-1[/body]")
+        pod.add("[muted]container: app[/muted]")
+        return root
+
+    golden["tree_indexed"] = {
+        "output": capture(lambda: console.print_rich(build_indexed_tree()))
     }
 
     print(json.dumps(golden, indent=2, sort_keys=True))

@@ -43,6 +43,14 @@ func NewResources(names []string, kind kinds.Kind) Resources {
 	return Resources{entries: entries}
 }
 
+// NewOrderedResources builds an ordered mapping from name/kind pairs already
+// in index order, which is what a tree walk produces.
+func NewOrderedResources(entries []Resource) Resources {
+	ordered := make([]Resource, len(entries))
+	copy(ordered, entries)
+	return Resources{entries: ordered}
+}
+
 // Entries returns the resources in index order.
 func (r Resources) Entries() []Resource { return r.entries }
 
