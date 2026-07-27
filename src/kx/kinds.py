@@ -90,6 +90,21 @@ def normalize_kind(resource_type: str) -> Kind | str:
     return _KIND_MAP.get(resource_type.lower(), resource_type)
 
 
+def ensure_kind(
+    index: int, name: str, kind: Kind | str, expected: Kind | str, relist: str
+) -> None:
+    """Reject an index that resolved to something other than `expected`.
+
+    Every command that resolves an index against a kind reports the mismatch
+    in this one shape, so `relist` is the only part that varies: the command
+    that rebuilds the listing the index was meant to come from."""
+    if str(kind) != str(expected):
+        raise ValueError(
+            f"Index {index} is {kind}/{name}, not {expected} — "
+            f"run '{relist}' to relist."
+        )
+
+
 def plural_display(resource_type: str) -> str:
     kind = _KIND_MAP.get(resource_type.lower())
     if kind is not None:
