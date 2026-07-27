@@ -56,6 +56,12 @@ alias kx="kubectl idx"
 
 Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
 
+On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans the bundle; later runs are unaffected until the next install. Get it over with up front:
+
+```bash
+kx --version >/dev/null
+```
+
 Or try it without installing (the package is `kx-cli`, the command is `kx`):
 
 ```bash
