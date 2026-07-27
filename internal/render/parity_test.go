@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/tree"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
@@ -130,7 +131,7 @@ func TestThemeListParity(t *testing.T) {
 // child, a last child, and a nested last child whose parent still continues,
 // which is where a hand-rolled renderer gets the continuation bars wrong.
 func TestTreeParity(t *testing.T) {
-	root := &Node{Label: "Deployment/web", Style: "header"}
+	root := &tree.Node{Label: "Deployment/web", Style: "header"}
 	rs := root.Add("rs/web-abc", "accent")
 	pod1 := rs.Add("pod/web-abc-1", "body")
 	pod1.Add("container: app", "muted")
@@ -146,7 +147,7 @@ func TestTreeParity(t *testing.T) {
 }
 
 func TestIndexedTreeParity(t *testing.T) {
-	root := &Node{Label: "Deployment/web", Style: "header", Index: 1}
+	root := &tree.Node{Label: "Deployment/web", Style: "header", Index: 1}
 	rs := root.AddIndexed("rs/web-abc", "accent", 2)
 	pod := rs.AddIndexed("pod/web-abc-1", "body", 3)
 	pod.Add("container: app", "muted")

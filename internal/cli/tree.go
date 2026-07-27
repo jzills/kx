@@ -7,6 +7,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/tree"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ type TreeCommand struct {
 
 // Execute graphs the resource an index names. A Namespace row graphs that
 // namespace itself — its own name, not the namespace the `kx get ns` ran in.
-func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*render.Node, error) {
+func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tree.Node, error) {
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return nil, err
@@ -42,7 +43,7 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*ren
 }
 
 // ExecuteNamespace graphs the whole ownership forest for a namespace.
-func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*render.Node, error) {
+func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*tree.Node, error) {
 	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed)
 	if err != nil {
 		return nil, err

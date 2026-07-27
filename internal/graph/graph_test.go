@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/jzills/kx/internal/kinds"
-	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/tree"
 )
 
 const ns = "prod"
@@ -43,7 +43,7 @@ func builder(objects ...runtime.Object) Builder {
 
 // flatten renders the tree structurally, so assertions read as the shape a user
 // would see rather than as nested field access.
-func flatten(node *render.Node, depth int) []string {
+func flatten(node *tree.Node, depth int) []string {
 	lines := []string{strings.Repeat("  ", depth) + node.Label}
 	for _, child := range node.Children {
 		lines = append(lines, flatten(child, depth+1)...)
@@ -51,7 +51,7 @@ func flatten(node *render.Node, depth int) []string {
 	return lines
 }
 
-func treeOf(t *testing.T, node *render.Node) string {
+func treeOf(t *testing.T, node *tree.Node) string {
 	t.Helper()
 	return strings.Join(flatten(node, 0), "\n")
 }

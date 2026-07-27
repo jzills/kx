@@ -90,6 +90,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newYamlCommand(services),
 		newTreeCommand(services),
 		newEventsCommand(services),
+		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
 		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources", "labels", "LABEL", true),
 		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources", "annotations", "ANNOTATION", false),
 		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource"),

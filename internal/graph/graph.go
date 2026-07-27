@@ -17,8 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/jzills/kx/internal/kinds"
-	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/theme"
+	"github.com/jzills/kx/internal/tree"
 )
 
 // Resource is a node recorded for indexing, so `kx tree --index` can save the
@@ -65,7 +65,7 @@ type collector struct {
 
 // add appends a labelled child, numbering it and recording it when the tree is
 // being indexed.
-func (c *collector) add(parent *render.Node, style, prefix, name string, kind kinds.Kind) *render.Node {
+func (c *collector) add(parent *tree.Node, style, prefix, name string, kind kinds.Kind) *tree.Node {
 	label := prefix + "/" + name
 	if !c.indexed {
 		return parent.Add(label, style)
@@ -86,10 +86,10 @@ func ownedBy(meta metav1.ObjectMeta, uid types.UID) bool {
 // BuildResource graphs a single resource's ownership tree.
 func (b Builder) BuildResource(
 	ctx context.Context, kind kinds.Kind, name, namespace string, indexed bool,
-) (*render.Node, []Resource, error) {
+) (*tree.Node, []Resource, error) {
 	c := &collector{indexed: indexed}
 
-	root := &render.Node{Label: string(kind) + "/" + name, Style: theme.Header}
+	root := &tree.Node{Label: string(kind) + "/" + name, Style: theme.Header}
 	if indexed {
 		// The root is itself indexable, and numbers first.
 		c.resources = append(c.resources, Resource{Name: name, Kind: kind})
@@ -140,7 +140,7 @@ func (b Builder) pods(ctx context.Context, namespace string) ([]corev1.Pod, erro
 }
 
 func (b Builder) treeDeployment(
-	ctx context.Context, name, namespace string, node *render.Node,
+	ctx context.Context, name, namespace string, node *tree.Node,
 	pods []corev1.Pod, c *collector,
 ) error {
 	deployment, err := b.Client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -167,7 +167,7 @@ func (b Builder) treeDeployment(
 // treeOwnedPods handles the kinds that own their pods directly.
 func (b Builder) treeOwnedPods(
 	ctx context.Context, kind kinds.Kind, name, namespace string,
-	node *render.Node, pods []corev1.Pod, c *collector,
+	node *tree.Node, pods []corev1.Pod, c *collector,
 ) error {
 	uid, err := b.workloadUID(ctx, kind, name, namespace)
 	if err != nil {
@@ -212,7 +212,7 @@ func (b Builder) workloadUID(
 }
 
 func (b Builder) treeCronJob(
-	ctx context.Context, name, namespace string, node *render.Node,
+	ctx context.Context, name, namespace string, node *tree.Node,
 	pods []corev1.Pod, c *collector,
 ) error {
 	cronJob, err := b.Client.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -235,7 +235,7 @@ func (b Builder) treeCronJob(
 }
 
 func (b Builder) treeService(
-	ctx context.Context, name, namespace string, node *render.Node, c *collector,
+	ctx context.Context, name, namespace string, node *tree.Node, c *collector,
 ) error {
 	service, err := b.Client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -265,7 +265,7 @@ func (b Builder) treeService(
 	return nil
 }
 
-func addPodsForOwner(uid types.UID, pods []corev1.Pod, parent *render.Node, c *collector) {
+func addPodsForOwner(uid types.UID, pods []corev1.Pod, parent *tree.Node, c *collector) {
 	for i := range pods {
 		pod := &pods[i]
 		if !ownedBy(pod.ObjectMeta, uid) {
@@ -276,7 +276,7 @@ func addPodsForOwner(uid types.UID, pods []corev1.Pod, parent *render.Node, c *c
 	}
 }
 
-func addContainers(pod *corev1.Pod, parent *render.Node) {
+func addContainers(pod *corev1.Pod, parent *tree.Node) {
 	for _, container := range pod.Spec.Containers {
 		parent.Add("container: "+container.Name, theme.Muted)
 	}
@@ -318,7 +318,7 @@ type ownerRef struct {
 // from 1.
 func (b Builder) BuildNamespace(
 	ctx context.Context, namespace string, indexed bool,
-) (*render.Node, []Resource, error) {
+) (*tree.Node, []Resource, error) {
 	deployments, err := b.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, err
@@ -430,7 +430,7 @@ func (b Builder) BuildNamespace(
 	sortRoots(roots, order)
 
 	c := &collector{indexed: indexed}
-	root := &render.Node{Label: "Namespace/" + namespace, Style: theme.Header}
+	root := &tree.Node{Label: "Namespace/" + namespace, Style: theme.Header}
 	if len(roots) == 0 {
 		root.Add("(no workloads)", theme.Muted)
 		return root, c.resources, nil
@@ -443,7 +443,7 @@ func (b Builder) BuildNamespace(
 
 // renderNode adds an object under parent, then recurses into what it owns. A
 // Pod is a leaf whose containers are listed directly.
-func renderNode(entry ownerRef, parent *render.Node, childrenByOwner map[types.UID][]ownerRef, c *collector) {
+func renderNode(entry ownerRef, parent *tree.Node, childrenByOwner map[types.UID][]ownerRef, c *collector) {
 	style := nodeStyle[entry.kind]
 	node := c.add(parent, style.Style, style.Prefix, entry.object.GetName(), entry.kind)
 	if entry.kind == kinds.Pod {

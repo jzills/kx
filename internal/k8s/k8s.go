@@ -25,6 +25,11 @@ func Client() (*kubernetes.Clientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	// client-go surfaces API deprecation warnings on stderr by default (the
+	// Endpoints v1 notice, for one). kx reads Endpoints deliberately, and a
+	// warning it can't act on would land in the middle of a diagnostic report.
+	config.WarningHandler = rest.NoWarnings{}
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("could not build a Kubernetes client: %w", err)
