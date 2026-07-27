@@ -36,15 +36,6 @@ func padName(name string, width int) string {
 	return name + strings.Repeat(" ", width-len(name))
 }
 
-// truncate shortens text to fit the remaining width, so a long description
-// doesn't wrap and break the two-column layout.
-func truncate(text string, width int) string {
-	if width < 8 || len(text) <= width {
-		return text
-	}
-	return text[:width-1] + "…"
-}
-
 // RootHelp renders the top-level help screen.
 func (r *Renderer) RootHelp(sections []HelpSection, version string) {
 	r.Blank()
@@ -60,7 +51,7 @@ func (r *Renderer) RootHelp(sections []HelpSection, version string) {
 		r.line(r.style(theme.Header, section.Title))
 		for _, item := range section.Items {
 			r.line("  " + r.style(theme.Body, padName(item.Name, 14)) + "  " +
-				r.style(theme.Muted, truncate(item.Doc, r.width()-18)))
+				r.style(theme.Muted, shortHelp(item.Doc, shortHelpLimit)))
 		}
 	}
 

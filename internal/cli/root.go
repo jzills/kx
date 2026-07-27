@@ -77,8 +77,8 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.AddCommand(withoutRefresh(newStateCommand(services)))
 	root.AddCommand(withoutRefresh(newDropCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "back", "Navigate to the previous kx get result", -1)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "forward", "Navigate to the next kx get result", +1)))
+	root.AddCommand(withoutRefresh(newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1)))
+	root.AddCommand(withoutRefresh(newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1)))
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),

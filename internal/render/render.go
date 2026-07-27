@@ -175,16 +175,19 @@ func ThemeList(active string)            { current.ThemeList(active) }
 func StateHistory(history state.History) { current.StateHistory(history) }
 func State(entry state.State)            { current.State(entry) }
 
-// width reports the terminal width for layout that has to fit, falling back to
-// 80 when stdout isn't a terminal.
+// pipeWidth is the width used off-terminal. Wide enough that piped or
+// redirected output is never truncated, matching the Python console.
+const pipeWidth = 1000
+
+// width reports the width layout that has to fit should target.
 func (r *Renderer) width() int {
 	file, ok := r.out.(*os.File)
 	if !ok {
-		return 80
+		return pipeWidth
 	}
 	width, _, err := term.GetSize(int(file.Fd()))
 	if err != nil || width <= 0 {
-		return 80
+		return pipeWidth
 	}
 	return width
 }

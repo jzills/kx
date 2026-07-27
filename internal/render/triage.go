@@ -43,8 +43,16 @@ func (r *Renderer) Triage(result TriageResult) {
 
 	columns := []Column{
 		{Header: "", Right: true}, {Header: "KIND"}, {Header: "NAME"},
-		{Header: "VERDICT"}, {Header: "TOP FINDING"},
+		{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
 	}
+	// Names are truncated against their own budget rather than left to the flex
+	// column: with everything else fixed, a very long name would otherwise
+	// squeeze TOP FINDING out entirely.
+	nameBudget := r.width() - 51
+	if nameBudget < 8 {
+		nameBudget = 8
+	}
+
 	rows := make([][]Cell, 0, len(result.Reports))
 	for position, report := range result.Reports {
 		top := ""
@@ -56,7 +64,7 @@ func (r *Renderer) Triage(result TriageResult) {
 		rows = append(rows, []Cell{
 			Styled(strconv.Itoa(position+1), theme.Muted),
 			Plain(string(report.Kind)),
-			Plain(report.Name),
+			Plain(ellipsize(report.Name, nameBudget)),
 			Styled(report.Verdict.String(), severityStyle(report.Verdict)),
 			Styled(top, theme.Body),
 		})

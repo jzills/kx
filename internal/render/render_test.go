@@ -255,3 +255,51 @@ func TestFormatAgeFutureIsJustNow(t *testing.T) {
 		t.Errorf("future timestamp = %q, want \"just now\"", got)
 	}
 }
+
+func TestEllipsize(t *testing.T) {
+	cases := []struct {
+		text string
+		n    int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"exactly-10", 10, "exactly-10"},
+		{"this is far too long", 10, "this is f…"},
+		{"anything", 0, "anything"},
+	}
+	for _, tc := range cases {
+		if got := ellipsize(tc.text, tc.n); got != tc.want {
+			t.Errorf("ellipsize(%q, %d) = %q, want %q", tc.text, tc.n, got, tc.want)
+		}
+	}
+}
+
+// A flexed column gives back what the rest of the table overruns, so a long
+// value is cut rather than wrapping every row across two lines.
+func TestFlexColumnShrinksToFit(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := New(&buf, &buf, "github-dark", false)
+
+	columns := []Column{{Header: "NAME"}, {Header: "DETAIL", Flex: true}}
+	rows := [][]Cell{{Plain("web"), Plain(strings.Repeat("x", 400))}}
+	renderer.Table(columns, rows)
+
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		// Off-terminal the renderer targets the wide pipe width, so nothing
+		// should be cut here.
+		if !strings.Contains(line, strings.Repeat("x", 400)) && strings.Contains(line, "x") {
+			t.Errorf("piped output was truncated: %q", line)
+		}
+	}
+}
+
+// Without a flex column the table keeps its natural width, which is what every
+// other listing relies on.
+func TestTableWithoutFlexIsUnconstrained(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := New(&buf, &buf, "github-dark", false)
+	renderer.Table([]Column{{Header: "A"}}, [][]Cell{{Plain(strings.Repeat("y", 300))}})
+	if !strings.Contains(buf.String(), strings.Repeat("y", 300)) {
+		t.Error("a table with no flex column was truncated")
+	}
+}
