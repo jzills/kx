@@ -91,6 +91,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newPortForwardCommand(services),
 		newYamlCommand(services),
 		newTreeCommand(services),
+		newScanCommand(services),
 		newEventsCommand(services),
 		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
 		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources; --selector formats output as a label selector.", "labels", "LABEL", true),
