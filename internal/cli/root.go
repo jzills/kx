@@ -9,7 +9,6 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kubectl"
-	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -92,6 +91,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newYamlCommand(services),
 		newTreeCommand(services),
 		newScanCommand(services),
+		newSecretCommand(services, "secret", []string{"secrets"}),
 		newEventsCommand(services),
 		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
 		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources; --selector formats output as a label selector.", "labels", "LABEL", true),
@@ -120,34 +120,27 @@ func newGetCommand(services Services) *cobra.Command {
 		// why cobra can't do this.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if help, _ := extractBool(args, "-h", "--help"); help {
-				return cmd.Help()
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
 			}
-			match, rest, err := extractString(args, "--match", "-m")
+			rest, options, err := secretFlags(rest)
 			if err != nil {
 				return err
 			}
-			// kx's own global flag; kubectl would reject it.
-			_, rest = extractBool(rest, "--no-color")
 			if len(rest) == 0 {
 				return fmt.Errorf("get requires a resource type, e.g. 'kx get pods'")
 			}
-
-			get := GetCommand{
-				Kubectl: services.Kubectl,
-				State:   services.State,
-				Index:   services.Index,
-			}
-			resource, extra := rest[0], rest[1:]
-			output, err := get.Execute(resource, match, extra)
-			if err != nil {
-				return err
-			}
-			render.IndexedTable(output, resource, extractNamespaceFor(services, extra), "")
-			return nil
+			// The resource type leads; everything after is indexes or kubectl's.
+			return runGet(services, rest[0], rest[1:], options)
 		},
 	}
-	cmd.Flags().StringP("match", "m", "", "Filter rows by name substring")
+	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().Bool("decode", false,
+		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
+	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
+	cmd.Flags().BoolP("yes", "y", false,
+		"Skip the confirmation prompt for a namespace-wide --decode")
 	return cmd
 }
 
