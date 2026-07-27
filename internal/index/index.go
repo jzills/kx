@@ -131,10 +131,19 @@ func format(allRows [][]string) string {
 	return strings.Join(lines, "\n")
 }
 
+// ParseTable splits kubectl table output into headers and rows, returning a nil
+// header slice for anything kx can't index (JSON/YAML, or a table with no NAME
+// column).
+//
+// Exported so the renderer shares this one parser rather than keeping a private
+// copy: it extends the last column to end-of-line, so a value wider than its
+// header is never sliced off, and a second implementation would drift from that.
+func ParseTable(output string) (headers []string, rows [][]string, nameIdx int) {
+	return parseOutput(output)
+}
+
 // CountRows reports how many resource rows kubectl output contains, and
-// whether it is a table kx can index at all. Callers rendering a caption share
-// this parser rather than counting lines, so a non-tabular payload (JSON/YAML)
-// isn't mistaken for a one-row listing.
+// whether it is a table kx can index at all.
 func CountRows(output string) (count int, tabular bool) {
 	headers, rows, _ := parseOutput(output)
 	if headers == nil {

@@ -3,12 +3,9 @@ package cli
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
-	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -49,6 +46,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
 
 	root.AddCommand(newGetCommand(services))
+	root.AddCommand(newThemeCommand(services))
 	return root
 }
 
@@ -89,7 +87,7 @@ func newGetCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderListing(output, resource, extractNamespaceFor(services, extra))
+			render.IndexedTable(output, resource, extractNamespaceFor(services, extra), "")
 			return nil
 		},
 	}
@@ -102,31 +100,4 @@ func extractNamespaceFor(services Services, extraArgs []string) string {
 		return namespace
 	}
 	return services.Kubectl.CurrentNamespace()
-}
-
-// renderListing prints the caption and the indexed table. The table itself is
-// already laid out by the index service; phase 2 replaces this with the themed
-// renderer.
-//
-// Non-tabular output (JSON/YAML via -o, or a table with no NAME column) prints
-// as-is with no caption, since a resource count would be meaningless there.
-func renderListing(output, resource, namespace string) {
-	count, tabular := index.CountRows(output)
-	if !tabular {
-		if strings.TrimSpace(output) != "" {
-			render.Raw(output)
-			return
-		}
-		// kubectl sends "No resources found" to stderr, so genuinely empty
-		// stdout still gets the zero-count caption rather than silence.
-	}
-
-	label := "items"
-	if count == 1 {
-		label = "item"
-	}
-	render.Caption(kinds.PluralDisplay(resource), namespace, strconv.Itoa(count)+" "+label)
-	if count > 0 {
-		render.Raw(output)
-	}
 }

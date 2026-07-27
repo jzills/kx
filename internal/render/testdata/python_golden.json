@@ -1,0 +1,44 @@
+{
+  "empty": {
+    "indexed": "",
+    "namespace": "prod",
+    "output": "Pods \u00b7 prod \u00b7 0 items\n",
+    "resource": "pods"
+  },
+  "key_values": {
+    "output": "  LABEL    VALUE     \n  app      web       \n  tier     frontend  \n"
+  },
+  "key_values_empty": {
+    "output": "No labels\n"
+  },
+  "no_restarts": {
+    "indexed": "X  NAME     AGE\n1  widget1  5d \n2  widget2  3d ",
+    "namespace": "prod",
+    "output": "widgets.example.com \u00b7 prod \u00b7 2 items\n  X    NAME       AGE  \n  1    widget1     5d  \n  2    widget2     3d  \n",
+    "resource": "widgets.example.com"
+  },
+  "pods": {
+    "indexed": "X  NAME           READY  STATUS            RESTARTS  AGE\n1  nginx-abc-xyz  1/1    Running           0         5d \n2  redis-def-uvw  0/1    CrashLoopBackOff  17        3d \n3  api-ghi-rst    1/1    Pending           3         1h ",
+    "namespace": "prod",
+    "output": "Pods \u00b7 prod \u00b7 3 items\n  X    NAME             READY    STATUS              RESTARTS    AGE  \n  1    nginx-abc-xyz    1/1      Running              0           5d  \n  2    redis-def-uvw    0/1      CrashLoopBackOff    17           3d  \n  3    api-ghi-rst      1/1      Pending              3           1h  \n",
+    "resource": "pods"
+  },
+  "single_item": {
+    "indexed": "X  NAME    AGE\n1  only-1  5d ",
+    "namespace": "default",
+    "output": "Pods \u00b7 default \u00b7 1 item\n  X    NAME      AGE  \n  1    only-1     5d  \n",
+    "resource": "pods"
+  },
+  "state_history": {
+    "output": "History \u00b7 3 entries\n  X         KIND           NAMESPACE    ITEMS  \n  1         Pods           prod             2  \n  2    \u2192    Deployments    staging          1  \n  3         Mixed          default          2  \n"
+  },
+  "theme_list": {
+    "output": "Themes \u00b7 11 items\n   X         THEME               PREVIEW                                     \n   1         github-dark         \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   2    \u2192    dracula             \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   3         nord                \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   4         gruvbox             \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   5         solarized-dark      \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   6         catppuccin-mocha    \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   7         tokyo-night         \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   8         rose-pine           \u2713 ok  ! warn  \u2717 error  header  body  muted  \n   9         mono                \u2713 ok  ! warn  \u2717 error  header  body  muted  \n  10         light               \u2713 ok  ! warn  \u2717 error  header  body  muted  \n  11         plain               \u2713 ok  ! warn  \u2717 error  header  body  muted  \n"
+  },
+  "wide_names": {
+    "indexed": "X  NAME                                    READY  STATUS   AGE\n1  very-long-deployment-name-abcdef-12345  1/1    Running  12d\n2  s                                       1/1    Running  1s ",
+    "namespace": "prod",
+    "output": "Deployments \u00b7 prod \u00b7 2 items\n  X    NAME                                      READY    STATUS     AGE  \n  1    very-long-deployment-name-abcdef-12345    1/1      Running    12d  \n  2    s                                         1/1      Running     1s  \n",
+    "resource": "deploy"
+  }
+}

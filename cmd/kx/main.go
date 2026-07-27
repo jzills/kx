@@ -9,6 +9,7 @@ import (
 	"github.com/jzills/kx/internal/cli"
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/theme"
 )
 
 // version is stamped at build time:
@@ -20,6 +21,15 @@ func main() {
 	os.Exit(run())
 }
 
+func hasNoColorFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--no-color" {
+			return true
+		}
+	}
+	return false
+}
+
 // run renders expected failures as a styled error and returns the exit code,
 // so no path calls os.Exit while defers are pending.
 //
@@ -27,12 +37,17 @@ func main() {
 // print verbatim; command errors go through the renderer, matching the Python
 // handle_errors decorator.
 func run() int {
-	loader := config.Loader{}
+	loader := config.Loader{ThemeKnown: theme.Exists}
 	cfg, err := loader.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+
+	// --no-color is resolved from the raw arguments rather than from cobra,
+	// because the pass-through commands disable flag parsing and would
+	// otherwise not surface it until after their first output.
+	render.Configure(cfg.Theme, cfg.NoColor || hasNoColorFlag(os.Args[1:]))
 
 	root := cli.NewRoot(cli.NewServices(cfg), version)
 	if err := root.Execute(); err != nil {
