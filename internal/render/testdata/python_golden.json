@@ -5,6 +5,12 @@
     "output": "Pods \u00b7 prod \u00b7 0 items\n",
     "resource": "pods"
   },
+  "events": {
+    "output": "  TYPE       REASON              KIND    AGE       MESSAGE                               \n  Warning    BackOff             Pod     3m ago    Back-off restarting failed container  \n  Normal     Pulled              Pod     2h ago    Container image already present       \n  Warning    FailedScheduling    Pod     1d ago    0/1 nodes are available               \n"
+  },
+  "events_empty": {
+    "output": "No events found\n"
+  },
   "key_values": {
     "output": "  LABEL    VALUE     \n  app      web       \n  tier     frontend  \n"
   },

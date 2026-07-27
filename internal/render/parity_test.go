@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/jzills/kx/internal/events"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
@@ -151,5 +154,28 @@ func TestIndexedTreeParity(t *testing.T) {
 	got := capture(func(r *Renderer) { r.Tree(root) })
 	if want := loadRenderGolden(t)["tree_indexed"].Output; got != want {
 		t.Errorf("indexed tree mismatch\n go: %q\n py: %q", got, want)
+	}
+}
+
+func TestEventsTableParity(t *testing.T) {
+	now := time.Now()
+	rows := []events.Row{
+		{Type: "Warning", Reason: "BackOff", Kind: "Pod",
+			Message: "Back-off restarting failed container", Timestamp: now.Add(-3 * time.Minute)},
+		{Type: "Normal", Reason: "Pulled", Kind: "Pod",
+			Message: "Container image already present", Timestamp: now.Add(-2 * time.Hour)},
+		{Type: "Warning", Reason: "FailedScheduling", Kind: "Pod",
+			Message: "0/1 nodes are available", Timestamp: now.Add(-24 * time.Hour)},
+	}
+	got := capture(func(r *Renderer) { r.EventsTable(rows) })
+	if want := loadRenderGolden(t)["events"].Output; got != want {
+		t.Errorf("events mismatch\n go: %q\n py: %q", got, want)
+	}
+}
+
+func TestEmptyEventsParity(t *testing.T) {
+	got := capture(func(r *Renderer) { r.EventsTable(nil) })
+	if want := loadRenderGolden(t)["events_empty"].Output; got != want {
+		t.Errorf("empty events mismatch\n go: %q\n py: %q", got, want)
 	}
 }

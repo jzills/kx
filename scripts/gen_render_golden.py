@@ -149,6 +149,40 @@ def main() -> None:
         "output": capture(lambda: console.print_rich(build_indexed_tree()))
     }
 
+    # Events table. Timestamps are fixed offsets from a reference so the ages
+    # are deterministic; the Go test uses the same offsets.
+    from datetime import datetime, timedelta, timezone
+    from kx.events import EventRow
+
+    now = datetime.now(timezone.utc)
+    rows = [
+        EventRow(
+            "Warning",
+            "BackOff",
+            "Pod",
+            "Back-off restarting failed container",
+            now - timedelta(minutes=3),
+        ),
+        EventRow(
+            "Normal",
+            "Pulled",
+            "Pod",
+            "Container image already present",
+            now - timedelta(hours=2),
+        ),
+        EventRow(
+            "Warning",
+            "FailedScheduling",
+            "Pod",
+            "0/1 nodes are available",
+            now - timedelta(days=1),
+        ),
+    ]
+    golden["events"] = {"output": capture(lambda: console.render_events_table(rows))}
+    golden["events_empty"] = {
+        "output": capture(lambda: console.render_events_table([]))
+    }
+
     print(json.dumps(golden, indent=2, sort_keys=True))
 
 

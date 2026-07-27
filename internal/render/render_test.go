@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jzills/kx/internal/theme"
@@ -218,5 +219,39 @@ func TestStyledCellsDoNotInflateColumnWidth(t *testing.T) {
 		if w > 100 {
 			t.Errorf("row display width = %d, far wider than the visible content", w)
 		}
+	}
+}
+
+func TestFormatAge(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		ago  time.Duration
+		want string
+	}{
+		{3 * time.Second, "3s ago"},
+		{90 * time.Second, "1m ago"},
+		{2 * time.Hour, "2h ago"},
+		{50 * time.Hour, "2d ago"},
+		{0, "0s ago"},
+	}
+	for _, tc := range cases {
+		if got := formatAgeAt(now, now.Add(-tc.ago)); got != tc.want {
+			t.Errorf("formatAgeAt(-%v) = %q, want %q", tc.ago, got, tc.want)
+		}
+	}
+}
+
+// An unset timestamp renders as nothing rather than as a wrong age.
+func TestFormatAgeZeroTime(t *testing.T) {
+	if got := FormatAge(time.Time{}); got != "" {
+		t.Errorf("FormatAge(zero) = %q, want empty", got)
+	}
+}
+
+// Clock skew between the API server and here would otherwise render "in 3m".
+func TestFormatAgeFutureIsJustNow(t *testing.T) {
+	now := time.Now()
+	if got := formatAgeAt(now, now.Add(time.Minute)); got != "just now" {
+		t.Errorf("future timestamp = %q, want \"just now\"", got)
 	}
 }
