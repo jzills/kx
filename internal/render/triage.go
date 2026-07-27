@@ -41,8 +41,12 @@ func (r *Renderer) Triage(result TriageResult) {
 	r.Caption("Mixed", result.Namespace, strconv.Itoa(result.Checked)+" checked")
 	r.Blank()
 
+	// Headed "X" like every other indexed listing. The Python renderer left it
+	// blank, alone among the indexed tables; these numbers are indexes passed
+	// to `kx diag <index>` exactly as `kx get`'s are, so they are labelled the
+	// same way.
 	columns := []Column{
-		{Header: "", Right: true}, {Header: "KIND"}, {Header: "NAME"},
+		{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"},
 		{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
 	}
 	// Names are truncated against their own budget rather than left to the flex
