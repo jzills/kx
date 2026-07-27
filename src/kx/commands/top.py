@@ -1,13 +1,14 @@
 import json
 from decimal import Decimal
 
-from kubernetes.utils import parse_quantity
-
 from kx.commands.get import _extract_namespace
 from kx.index import IndexServiceProtocol, _parse_output
 from kx.kinds import Kind
+from kx.lazy import sdk_callable
 from kx.kubectl import KubectlServiceProtocol
 from kx.state import Query, State, StateServiceProtocol
+
+parse_quantity = sdk_callable("kubernetes.utils:parse_quantity")
 
 
 class TopCommand:

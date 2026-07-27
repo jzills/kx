@@ -5,13 +5,15 @@ from decimal import Decimal
 from enum import IntEnum
 from typing import Protocol
 
-from kubernetes import client
-from kubernetes.utils import get_pods_metrics, parse_quantity
-
 from kx.events import EventsServiceProtocol
 from kx.graph import _owned_by, most_recent_job, resolve_workload_pods
 from kx.k8s import load_config
 from kx.kinds import Kind
+from kx.lazy import sdk_callable, sdk_module
+
+client = sdk_module("kubernetes.client")
+get_pods_metrics = sdk_callable("kubernetes.utils:get_pods_metrics")
+parse_quantity = sdk_callable("kubernetes.utils:parse_quantity")
 
 
 class Severity(IntEnum):

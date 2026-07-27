@@ -1,8 +1,10 @@
-from kubernetes import client
 from rich.tree import Tree
 
 from kx.k8s import load_config
 from kx.kinds import Kind
+from kx.lazy import sdk_module
+
+client = sdk_module("kubernetes.client")
 
 
 def build_tree(kind: str, name: str, namespace: str) -> Tree:

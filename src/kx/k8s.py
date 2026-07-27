@@ -1,5 +1,9 @@
 import certifi
-from kubernetes import client, config
+
+from kx.lazy import sdk_module
+
+client = sdk_module("kubernetes.client")
+config = sdk_module("kubernetes.config")
 
 
 def load_config():
