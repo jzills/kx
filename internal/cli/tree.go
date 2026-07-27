@@ -77,7 +77,7 @@ func newTreeCommand(services Services) *cobra.Command {
 	var indexed bool
 	cmd := &cobra.Command{
 		Use:   "tree [index]",
-		Short: "Show the ownership graph for an indexed resource, or the whole namespace",
+		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace.",
 		Long: "Graphs ownership references from controllers down to containers.\n" +
 			"With no index, graphs every workload in the current namespace.\n" +
 			"A Namespace index graphs that namespace.",

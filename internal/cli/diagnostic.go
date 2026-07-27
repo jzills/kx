@@ -105,7 +105,7 @@ func (c TriageCommand) Execute(ctx context.Context, namespace string) (render.Tr
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	return &cobra.Command{
 		Use:     use + " [index]",
-		Short:   "Diagnose an indexed resource, or triage the whole namespace",
+		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag.",
 		Aliases: aliases,
 		Long: "Analyses health signals — replica counts, container states, resource\n" +
 			"usage and warning events — and reports findings by severity.\n" +

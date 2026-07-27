@@ -41,7 +41,7 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 func newEventsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:     "events <index>...",
-		Short:   "Show Kubernetes events for one or more indexed resources",
+		Short:   "Show Kubernetes events for one or more indexed resources.",
 		Example: "  kx events 1\n  kx events 1 2",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,7 +87,7 @@ func newEventsCommand(services Services) *cobra.Command {
 func newTopCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:   "top [kubectl flags]",
-		Short: "Show pod resource usage, indexed, with usage against limits",
+		Short: "List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits.",
 		Long: "Lists pod CPU and memory usage with kubectl top, assigns indexes,\n" +
 			"and adds CPU%/MEM% columns computed against each pod's limits.",
 		Example:            "  kx top\n  kx top -m web\n  kx top --no-limits",

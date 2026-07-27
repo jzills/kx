@@ -9,6 +9,8 @@ require (
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
+	golang.org/x/term v0.21.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.4
 	k8s.io/apimachinery v0.31.4
@@ -45,13 +47,11 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect

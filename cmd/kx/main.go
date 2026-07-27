@@ -50,7 +50,7 @@ func run() int {
 	render.Configure(cfg.Theme, cfg.NoColor || hasNoColorFlag(os.Args[1:]))
 
 	root := cli.NewRoot(cli.NewServices(cfg), version)
-	if err := root.Execute(); err != nil {
+	if err := cli.Execute(root, os.Args[1:]); err != nil {
 		var silent cli.SilentError
 		if errors.As(err, &silent) {
 			return silent.Code

@@ -70,6 +70,8 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// from it means the resource type doesn't exist — refreshing the listing
 	// would be beside the point. Every other command resolves an index, where a
 	// NotFound usually means the saved listing has gone stale.
+	installHelp(root, version)
+
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
 	root.AddCommand(withoutRefresh(newStateCommand(services)))
@@ -91,12 +93,12 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newTreeCommand(services),
 		newEventsCommand(services),
 		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
-		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources", "labels", "LABEL", true),
-		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources", "annotations", "ANNOTATION", false),
-		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource"),
-		newMetadataWriteCommand(services, "annotate", "annotations", "Set or remove annotations on an indexed resource"),
-		newSwitchCommand(services, "namespace", "ns", "List namespaces, or switch to an indexed one", false),
-		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one", true),
+		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources; --selector formats output as a label selector.", "labels", "LABEL", true),
+		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources.", "annotations", "ANNOTATION", false),
+		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource."),
+		newMetadataWriteCommand(services, "annotate", "annotations", "Set or remove annotations on an indexed resource."),
+		newSwitchCommand(services, "namespace", "ns", "List namespaces, or switch to an indexed one; alias: kx ns.", false),
+		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.", true),
 	} {
 		root.AddCommand(withRefresh(services, cmd))
 	}
@@ -106,7 +108,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 func newGetCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <resource> [kubectl flags]",
-		Short: "List resources and assign each row an index",
+		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"Unrecognized flags are passed through to kubectl, so `-n <namespace>`,\n" +
 			"label selectors and output flags all work as usual.",

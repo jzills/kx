@@ -16,6 +16,7 @@ import (
 	"github.com/jzills/kx/internal/theme"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/termenv"
+	"golang.org/x/term"
 )
 
 const headerStyle = theme.Header
@@ -173,3 +174,17 @@ func KeyValueTable(header string, keys []string, values map[string]string) {
 func ThemeList(active string)            { current.ThemeList(active) }
 func StateHistory(history state.History) { current.StateHistory(history) }
 func State(entry state.State)            { current.State(entry) }
+
+// width reports the terminal width for layout that has to fit, falling back to
+// 80 when stdout isn't a terminal.
+func (r *Renderer) width() int {
+	file, ok := r.out.(*os.File)
+	if !ok {
+		return 80
+	}
+	width, _, err := term.GetSize(int(file.Fd()))
+	if err != nil || width <= 0 {
+		return 80
+	}
+	return width
+}

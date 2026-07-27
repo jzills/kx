@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/render"
@@ -15,14 +16,16 @@ type ThemeCommand struct {
 	Active string
 }
 
-// Execute with an empty name lists the themes; with a name it switches to it.
+// Execute with no argument lists the themes; with a name or an index from that
+// listing it switches to that theme.
 func (c ThemeCommand) Execute(name string) error {
 	if name == "" {
 		render.ThemeList(c.Active)
 		return nil
 	}
-	if !theme.Exists(name) {
-		return fmt.Errorf("Unknown theme '%s'. Run 'kx theme' to list themes.", name)
+	name, err := resolveTheme(name)
+	if err != nil {
+		return err
 	}
 	if err := c.Config.SaveTheme(name); err != nil {
 		return err
@@ -34,10 +37,29 @@ func (c ThemeCommand) Execute(name string) error {
 	return nil
 }
 
+// resolveTheme turns an argument into a theme name, accepting the index shown
+// in `kx theme` as well as the name — the listing numbers its rows, so typing
+// the number is the obvious thing to try.
+func resolveTheme(argument string) (string, error) {
+	if position, err := strconv.Atoi(argument); err == nil {
+		names := theme.Names()
+		if position < 1 || position > len(names) {
+			return "", fmt.Errorf(
+				"Theme index %d is out of range — %d themes (run 'kx theme' to list).",
+				position, len(names))
+		}
+		return names[position-1], nil
+	}
+	if !theme.Exists(argument) {
+		return "", fmt.Errorf("Unknown theme '%s'. Run 'kx theme' to list themes.", argument)
+	}
+	return argument, nil
+}
+
 func newThemeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:     "theme [name]",
-		Short:   "List color themes, or switch to one",
+		Short:   "List available color themes or persist a choice by name or index.",
 		Example: "  kx theme\n  kx theme dracula",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
