@@ -124,11 +124,11 @@ func splitLeadingIndexes(args []string) (indexes, rest []string) {
 
 func newLogsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logs <index> [kubectl flags]",
+		Use:   "logs <index>... [kubectl flags]",
 		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
 			"DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 -f --tail=100",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -136,23 +136,58 @@ func newLogsCommand(services Services) *cobra.Command {
 			if err != nil || handled {
 				return err
 			}
-			if len(rest) == 0 {
-				return fmt.Errorf("logs requires an index")
+			// Indexes lead, kubectl's flags follow — the same split describe
+			// uses. Without it a second index reaches kubectl as a positional,
+			// where it means a container name.
+			indexArgs, extra := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return fmt.Errorf("Missing argument 'indexes'.")
 			}
-			index, err := parseIndex("index", rest[0])
+			indexes, err := parseIndexes("indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			name, namespace, kind, err := services.State.Fields(index)
-			if err != nil {
+			if err := checkFollow(extra, len(indexes)); err != nil {
 				return err
 			}
-			render.Banner(string(kind), name, namespace, "")
-			return LogsCommand{
+
+			command := LogsCommand{
 				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
-			}.Execute(index, rest[1:])
+			}
+			for position, index := range indexes {
+				name, namespace, kind, err := services.State.Fields(index)
+				if err != nil {
+					return err
+				}
+				if position > 0 {
+					render.Blank()
+				}
+				render.Banner(string(kind), name, namespace, "")
+				if err := command.Execute(index, extra); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
+}
+
+// checkFollow refuses to follow several pods at once.
+//
+// Streaming them in turn would block on the first and silently never reach the
+// rest. Aggregating a workload's pods — `kx logs <deployment index>` — is the
+// supported way to follow more than one.
+func checkFollow(args []string, indexes int) error {
+	follow, _ := extractBool(args, "-f", "--follow")
+	if follow && indexes > 1 {
+		return fmt.Errorf(
+			"--follow streams a single pod; give one index, or use the workload's index to aggregate")
+	}
+	return nil
 }
 
 func newEditCommand(services Services) *cobra.Command {

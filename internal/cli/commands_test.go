@@ -51,3 +51,26 @@ func TestParseIndexNamesTheArgument(t *testing.T) {
 		t.Errorf("error = %q, want %q", err, want)
 	}
 }
+
+// Following several pods in turn would block on the first and never reach the
+// rest, so it is refused rather than half-done.
+func TestCheckFollow(t *testing.T) {
+	cases := []struct {
+		args    []string
+		indexes int
+		wantErr bool
+	}{
+		{[]string{"-f"}, 1, false},
+		{[]string{"--follow"}, 1, false},
+		{[]string{"-f"}, 2, true},
+		{[]string{"--follow"}, 3, true},
+		{[]string{"--tail=10"}, 3, false},
+		{nil, 3, false},
+	}
+	for _, tc := range cases {
+		err := checkFollow(tc.args, tc.indexes)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("checkFollow(%v, %d) = %v, wantErr %v", tc.args, tc.indexes, err, tc.wantErr)
+		}
+	}
+}
