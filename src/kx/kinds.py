@@ -57,6 +57,7 @@ _KIND_MAP: dict[str, Kind] = {
     "persistentvolumeclaims": Kind.PersistentVolumeClaim,
     "node": Kind.Node,
     "nodes": Kind.Node,
+    "ns": Kind.Namespace,
     "namespace": Kind.Namespace,
     "namespaces": Kind.Namespace,
 }
@@ -87,6 +88,36 @@ def is_kind_spelling(token: str) -> bool:
 
 def normalize_kind(resource_type: str) -> Kind | str:
     return _KIND_MAP.get(resource_type.lower(), resource_type)
+
+
+def ensure_kind(
+    index: int, name: str, kind: Kind | str, expected: Kind | str, state=None
+) -> None:
+    """Reject an index that resolved to something other than `expected`.
+
+    Every command that resolves an index against a kind reports the mismatch
+    in this one shape, and the relist hint always names the canonical kind
+    rather than whatever shorthand was typed — `kx get deployment`, never
+    `kx get deploy`.
+
+    Given a state service, an entry one step back that does list `expected`
+    adds the `kx back` clause: relisting re-runs kubectl, while the listing
+    the index came from is often still sitting in history."""
+    if str(kind) == str(expected):
+        return
+    # Deferred: kx.state imports Kind from here, so the module-level import
+    # would close a cycle. Only the error path pays for it.
+    from kx.state import previous_lists
+
+    back = (
+        f", or 'kx back' for the previous {expected} listing"
+        if state is not None and previous_lists(state, expected)
+        else ""
+    )
+    raise ValueError(
+        f"Index {index} is {kind}/{name}, not {expected} — "
+        f"run 'kx get {str(expected).lower()}' to relist{back}."
+    )
 
 
 def plural_display(resource_type: str) -> str:

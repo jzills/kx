@@ -47,7 +47,13 @@ from kx.graph import (
     build_tree,
 )
 from kx.index import IndexService
-from kx.kinds import Kind, is_kind_spelling, normalize_kind, plural_display
+from kx.kinds import (
+    Kind,
+    ensure_kind,
+    is_kind_spelling,
+    normalize_kind,
+    plural_display,
+)
 from kx.kubectl import KubectlService
 from kx.refresh import RefreshService, StaleResourceError, is_not_found
 from kx.scanner import ScannerService
@@ -265,11 +271,7 @@ def _decode_secrets(
         return
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
-        if str(kind) != str(expected):
-            raise ValueError(
-                f"Index {index} is {kind}/{name}, not {expected} — "
-                f"run 'kx get {resource}' to relist."
-            )
+        ensure_kind(index, name, kind, expected, _state)
         try:
             with console.status("fetching secret"):
                 data = command.execute(index)
@@ -340,6 +342,12 @@ def _get(
     behaviour the alias used to provide."""
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
+    # Contexts live in kubeconfig, not on the server, so kubectl rejects
+    # `get contexts`. Routing the spelling here keeps `kx get <thing>` the one
+    # way to relist anything — including the hint a kind mismatch prints.
+    if resource.lower() in ("context", "contexts"):
+        _context(indexes[0] if indexes else None)
+        return
     if decode or key is not None:
         _decode_secrets(resource, indexes, extra, decode, key, yes)
         return
@@ -349,11 +357,7 @@ def _get(
         namespace = None
         for idx in indexes:
             name, ns, kind = _state.fields(idx)
-            if str(kind) != str(expected):
-                raise ValueError(
-                    f"Index {idx} is {kind}/{name}, not {expected} — "
-                    f"run 'kx get {resource}' to relist."
-                )
+            ensure_kind(idx, name, kind, expected, _state)
             names.append(name)
             namespace = ns
         has_namespace_flag = any(

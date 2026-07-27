@@ -142,3 +142,20 @@ class StateService:
         state = self.load()
         name = resolve_index(state, index)
         return name, state.namespace, state.resources[name]
+
+
+def previous_lists(state: StateServiceProtocol, kind: Kind | str) -> bool:
+    """True when the entry one step back lists `kind`, so `kx back` reaches it.
+
+    Best-effort: this only decorates an error message, so an unreadable or
+    mock history yields no hint rather than displacing the real error."""
+    try:
+        history = state.load_history()
+        previous = history.cursor - 1
+        if previous < 0:
+            return False
+        return any(
+            str(k) == str(kind) for k in history.states[previous].resources.values()
+        )
+    except (RuntimeError, TypeError, AttributeError, IndexError, KeyError):
+        return False

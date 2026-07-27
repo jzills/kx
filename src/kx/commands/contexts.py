@@ -2,6 +2,10 @@ from kx.index import IndexServiceProtocol
 from kx.kubectl import KubectlServiceProtocol
 from kx.state import State, StateServiceProtocol
 
+# Pseudo-kind for kubeconfig contexts: not a Kubernetes kind, but stored in
+# State.resources so ContextCommand can tell a context index from a resource.
+CONTEXT_KIND = "Context"
+
 
 class ContextsCommand:
     def __init__(
@@ -21,7 +25,7 @@ class ContextsCommand:
             current = self.kubectl.current_context()
             self.state.save(
                 State(
-                    resources={name: "Context" for name in names},
+                    resources={name: CONTEXT_KIND for name in names},
                     namespace=current,
                 )
             )
