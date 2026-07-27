@@ -3,7 +3,7 @@ from contextlib import nullcontext
 
 from kx.kinds import Kind
 from kx.kubectl import KubectlServiceProtocol
-from kx.scanner import ImageScan, ScannerServiceProtocol, get_engine
+from kx.scanner import Engine, ImageScan, ScannerServiceProtocol, get_engine
 from kx.state import StateServiceProtocol
 from kx.types import Status
 
@@ -40,8 +40,9 @@ class ScanCommand:
         name, namespace, kind = self.state.fields(index)
         if kind not in _SUPPORTED_KINDS:
             raise ValueError(f"scan is not supported for '{kind}'.")
-        # Validate the engine before hitting the cluster so a typo fails fast.
-        get_engine(engine)
+        # Validate the engine and its availability before hitting the cluster,
+        # so a typo or a missing scanner fails fast with one clear message.
+        self.ensure_available(engine)
         with self.status("resolving images"):
             raw = self.kubectl.run(["get", kind, name, "-n", namespace, "-o", "json"])
         images = _dedupe(self._images_of(json.loads(raw)))
@@ -52,7 +53,7 @@ class ScanCommand:
     def collect_namespace(
         self, namespace: str, engine: str = "scout", extra_args: list[str] | None = None
     ) -> list[str]:
-        get_engine(engine)
+        self.ensure_available(engine)
         with self.status(f"resolving images in {namespace}"):
             raw = self.kubectl.run(
                 ["get", _NAMESPACE_KINDS, "-n", namespace, "-o", "json"]
@@ -62,6 +63,14 @@ class ScanCommand:
         if not images:
             raise ValueError(f"no container images found in namespace '{namespace}'.")
         return images
+
+    def ensure_available(self, engine: str) -> Engine:
+        """Resolve the engine and confirm the scanner is installed, so the
+        failure is reported once with a fix rather than per image."""
+        eng = get_engine(engine)
+        if self.scanner.probe(eng.preflight_argv()) != 0:
+            raise RuntimeError(eng.unavailable_message())
+        return eng
 
     def scan_image(
         self, engine: str, image: str, extra_args: list[str] | None = None

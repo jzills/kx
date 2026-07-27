@@ -22,6 +22,7 @@ class ImageScan:
 class ScannerServiceProtocol(Protocol):
     def scan(self, argv: list[str]) -> int: ...
     def capture(self, argv: list[str]) -> subprocess.CompletedProcess: ...
+    def probe(self, argv: list[str]) -> int: ...
 
 
 def _missing_binary(argv: list[str]) -> str:
@@ -44,9 +45,24 @@ class ScannerService:
         except FileNotFoundError as e:
             raise RuntimeError(_missing_binary(argv)) from e
 
+    def probe(self, argv: list[str]) -> int:
+        # Silent availability check: swallow output, report only the exit code.
+        try:
+            return subprocess.run(argv, capture_output=True, text=True).returncode
+        except FileNotFoundError as e:
+            raise RuntimeError(_missing_binary(argv)) from e
+
 
 class Engine:
     name: str
+
+    def preflight_argv(self) -> list[str]:
+        """Cheap command that exits 0 only when the scanner is usable."""
+        raise NotImplementedError
+
+    def unavailable_message(self) -> str:
+        """Actionable message when preflight_argv() fails."""
+        raise NotImplementedError
 
     def passthrough_argv(self, image: str, extra: list[str] | None = None) -> list[str]:
         raise NotImplementedError
@@ -58,8 +74,22 @@ class Engine:
         raise NotImplementedError
 
 
+SCOUT_DOCS_URL = "https://docs.docker.com/scout/"
+
+
 class ScoutEngine(Engine):
     name = "scout"
+
+    def preflight_argv(self) -> list[str]:
+        # `docker scout` is an optional CLI plugin; a plain Docker install
+        # answers `docker scout version` with "unknown command" and exits 1.
+        return ["docker", "scout", "version"]
+
+    def unavailable_message(self) -> str:
+        return (
+            "docker scout is not available — kx scan needs the Docker Scout "
+            f"CLI plugin. Install it: {SCOUT_DOCS_URL}"
+        )
 
     def passthrough_argv(self, image: str, extra: list[str] | None = None) -> list[str]:
         return ["docker", "scout", "cves", image, *(extra or [])]

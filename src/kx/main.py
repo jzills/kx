@@ -516,7 +516,9 @@ def scan(
         help="Resource index to scan; omit to scan the whole namespace.",
     ),
     engine: str = typer.Option(
-        "scout", "--engine", help="Vulnerability scanner to use"
+        "scout",
+        "--engine",
+        help="Vulnerability scanner to use; 'scout' is currently the only supported value",
     ),
     full: bool = typer.Option(
         False,
@@ -524,7 +526,7 @@ def scan(
         help="Stream the scanner's full output instead of the summary table",
     ),
 ):
-    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full."""
+    """Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/)."""
     command = ScanCommand(
         state=_state, kubectl=_kubectl, scanner=_scanner, status=console.status
     )

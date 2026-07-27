@@ -1,4 +1,5 @@
 import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,22 @@ class TestScannerMissingBinary:
         with patch("kx.scanner.subprocess.run", side_effect=FileNotFoundError()):
             with pytest.raises(RuntimeError, match="docker not found"):
                 ScannerService().scan(["docker", "scout", "cves", "nginx"])
+
+    def test_probe_translates_missing_binary(self):
+        with patch("kx.scanner.subprocess.run", side_effect=FileNotFoundError()):
+            with pytest.raises(RuntimeError, match="docker not found"):
+                ScannerService().probe(["docker", "scout", "version"])
+
+
+class TestScannerProbe:
+    def test_returns_exit_code(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr=""
+        )
+        with patch("kx.scanner.subprocess.run", return_value=completed) as run:
+            assert ScannerService().probe(["docker", "scout", "version"]) == 1
+        assert run.call_args.args[0] == ["docker", "scout", "version"]
+        assert run.call_args.kwargs["capture_output"] is True
 
 
 def _sarif(**sev_counts):
@@ -46,6 +63,14 @@ class TestGetEngine:
 
 
 class TestScoutEngine:
+    def test_preflight_argv(self):
+        assert ScoutEngine().preflight_argv() == ["docker", "scout", "version"]
+
+    def test_unavailable_message_points_at_docs(self):
+        message = ScoutEngine().unavailable_message()
+        assert "docker scout" in message
+        assert "https://docs.docker.com/scout/" in message
+
     def test_passthrough_argv(self):
         assert ScoutEngine().passthrough_argv("nginx:1.25") == [
             "docker",
