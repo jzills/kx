@@ -109,3 +109,10 @@ def test_plural_display_deployments_is_pascal_case():
 
 def test_plural_display_unknown_passthrough():
     assert plural_display("mycrd") == "mycrd"
+
+
+def test_every_kind_lowercase_is_a_valid_spelling():
+    # ensure_kind prints `kx get <kind lowercased>`; that hint is only useful
+    # if kx resolves the spelling back to the same kind.
+    for kind in Kind:
+        assert normalize_kind(str(kind).lower()) == kind

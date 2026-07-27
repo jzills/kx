@@ -13,6 +13,6 @@ class ContextCommand:
         name, _, kind = self.state.fields(index)
         # ContextsCommand tags its entries "Context"; anything else means the
         # active state entry is a resource listing, not the context listing.
-        ensure_kind(index, name, kind, _CONTEXT_KIND, "kx get contexts")
+        ensure_kind(index, name, kind, _CONTEXT_KIND)
         self.kubectl.run(["config", "use-context", name])
         return name

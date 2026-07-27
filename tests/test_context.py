@@ -45,7 +45,7 @@ class TestContextCommandExecute:
         cmd = ContextCommand(kubectl=kubectl, state=state)
         with pytest.raises(ValueError) as excinfo:
             cmd.execute(2)
-        assert "not Context — run 'kx get contexts' to relist." in str(excinfo.value)
+        assert "not Context — run 'kx get context' to relist." in str(excinfo.value)
         kubectl.run.assert_not_called()
 
     def test_raises_on_kubectl_error(self):
