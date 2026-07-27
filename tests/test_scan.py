@@ -76,6 +76,15 @@ def _list_json(*items):
     return json.dumps({"kind": "List", "items": list(items)})
 
 
+def _scanner_mock(probe=0):
+    """A scanner whose preflight passes by default; probe=1 simulates a Docker
+    install without the Scout plugin."""
+    scanner = MagicMock()
+    scanner.probe.return_value = probe
+    scanner.scan.return_value = 0
+    return scanner
+
+
 def _make_command(name="web", namespace="default", kind=Kind.Deployment, get_json=None):
     state = MagicMock()
     state.fields.return_value = (name, namespace, kind)
@@ -83,8 +92,7 @@ def _make_command(name="web", namespace="default", kind=Kind.Deployment, get_jso
     kubectl.run.return_value = (
         get_json if get_json is not None else _deployment_json(["nginx:1.25"])
     )
-    scanner = MagicMock()
-    scanner.scan.return_value = 0
+    scanner = _scanner_mock()
     return (
         ScanCommand(state=state, kubectl=kubectl, scanner=scanner),
         state,
@@ -155,6 +163,18 @@ class TestScanCommand:
             cmd.execute(1, engine="bogus")
         kubectl.run.assert_not_called()
 
+    def test_preflights_engine_before_cluster_call(self):
+        cmd, _, kubectl, scanner = _make_command()
+        cmd.execute(1)
+        scanner.probe.assert_called_once_with(["docker", "scout", "version"])
+
+    def test_missing_scout_plugin_raises_before_cluster_call(self):
+        cmd, _, kubectl, scanner = _make_command()
+        scanner.probe.return_value = 1
+        with pytest.raises(RuntimeError, match="https://docs.docker.com/scout/"):
+            cmd.execute(1)
+        kubectl.run.assert_not_called()
+
     def test_no_images_raises(self):
         cmd, _, _, _ = _make_command(get_json=_deployment_json([]))
         with pytest.raises(
@@ -168,7 +188,7 @@ class TestScanCollectNamespace:
         state = MagicMock()
         kubectl = MagicMock()
         kubectl.run.return_value = list_json
-        scanner = MagicMock()
+        scanner = _scanner_mock()
         return ScanCommand(state=state, kubectl=kubectl, scanner=scanner), kubectl
 
     def test_lists_all_workload_kinds(self):
@@ -210,6 +230,13 @@ class TestScanCollectNamespace:
         cmd, kubectl = self._cmd(_list_json(_deployment_item(["nginx:1.25"])))
         with pytest.raises(ValueError, match="unknown engine 'bogus'"):
             cmd.collect_namespace("default", engine="bogus")
+        kubectl.run.assert_not_called()
+
+    def test_missing_scout_plugin_raises_before_cluster_call(self):
+        cmd, kubectl = self._cmd(_list_json(_deployment_item(["nginx:1.25"])))
+        cmd.scanner.probe.return_value = 1
+        with pytest.raises(RuntimeError, match="https://docs.docker.com/scout/"):
+            cmd.collect_namespace("default")
         kubectl.run.assert_not_called()
 
 
@@ -265,7 +292,7 @@ class TestScanCli:
         state.fields.return_value = ("web", "default", Kind.Deployment)
         kubectl = MagicMock()
         kubectl.run.return_value = _deployment_json(["nginx:1.25", "redis:7"])
-        scanner = MagicMock()
+        scanner = _scanner_mock()
         scanner.capture.side_effect = [
             _captured(_sarif(CRITICAL=1, HIGH=2)),
             _captured(_sarif(LOW=3)),
@@ -292,8 +319,7 @@ class TestScanCli:
         state.fields.return_value = ("web", "default", Kind.Deployment)
         kubectl = MagicMock()
         kubectl.run.return_value = _deployment_json(["nginx:1.25", "redis:7"])
-        scanner = MagicMock()
-        scanner.scan.return_value = 0
+        scanner = _scanner_mock()
         with (
             patch("kx.main._state", state),
             patch("kx.main._kubectl", kubectl),
@@ -311,7 +337,7 @@ class TestScanCli:
         state.fields.return_value = ("web", "default", Kind.Deployment)
         kubectl = MagicMock()
         kubectl.run.return_value = _deployment_json(["api/bad:latest"])
-        scanner = MagicMock()
+        scanner = _scanner_mock()
         scanner.capture.return_value = _captured(returncode=1, stderr="no such image")
         with (
             patch("kx.main._state", state),
@@ -334,13 +360,29 @@ class TestScanCli:
         assert result.exit_code == 1
         assert "unknown engine" in result.output
 
+    def test_scan_missing_scout_plugin_exits_1_once(self):
+        state = MagicMock()
+        state.fields.return_value = ("web", "default", Kind.Deployment)
+        kubectl = MagicMock()
+        scanner = _scanner_mock(probe=1)
+        with (
+            patch("kx.main._state", state),
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._scanner", scanner),
+        ):
+            result = CliRunner().invoke(app, ["scan", "1"])
+        assert result.exit_code == 1
+        assert "docker scout is not available" in result.output
+        assert "https://docs.docker.com/scout/" in result.output
+        scanner.capture.assert_not_called()
+
     def test_scan_no_index_sweeps_namespace(self):
         kubectl = MagicMock()
         kubectl.current_namespace.return_value = "prod"
         kubectl.run.return_value = _list_json(
             _deployment_item(["nginx:1.27"]), _cronjob_item(["busybox:1"])
         )
-        scanner = MagicMock()
+        scanner = _scanner_mock()
         scanner.capture.side_effect = [
             _captured(_sarif(HIGH=1)),
             _captured(_sarif(MEDIUM=2)),
