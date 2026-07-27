@@ -55,6 +55,13 @@ func run() int {
 		if errors.As(err, &silent) {
 			return silent.Code
 		}
+		// A declined confirmation is the user's decision, not a failure to
+		// report back to them with an error marker.
+		var aborted render.ErrAborted
+		if errors.As(err, &aborted) {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return 1
+		}
 		render.Error(err.Error())
 		return 1
 	}

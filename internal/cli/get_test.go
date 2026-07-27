@@ -220,3 +220,7 @@ func TestGetUnknownResourceKindPassesThrough(t *testing.T) {
 		t.Errorf("kind = %q, want the resource type carried through", kind)
 	}
 }
+
+// indexService returns the real index service, used where a test exercises the
+// full listing path rather than substituting one.
+func indexService() Indexer { return index.Service{} }

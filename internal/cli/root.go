@@ -45,8 +45,36 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.Flags().BoolP("version", "v", false, "Show the installed version")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
 
-	root.AddCommand(newGetCommand(services))
-	root.AddCommand(newThemeCommand(services))
+	// `get` is the only command that doesn't consume an index, so a NotFound
+	// from it means the resource type doesn't exist — refreshing the listing
+	// would be beside the point. Every other command resolves an index, where a
+	// NotFound usually means the saved listing has gone stale.
+	root.AddCommand(withoutRefresh(newGetCommand(services)))
+	root.AddCommand(withoutRefresh(newThemeCommand(services)))
+	root.AddCommand(withoutRefresh(newStateCommand(services)))
+	root.AddCommand(withoutRefresh(newDropCommand(services)))
+	root.AddCommand(withoutRefresh(newNavigateCommand(services, "back", "Navigate to the previous kx get result", -1)))
+	root.AddCommand(withoutRefresh(newNavigateCommand(services, "forward", "Navigate to the next kx get result", +1)))
+
+	for _, cmd := range []*cobra.Command{
+		newDescribeCommand(services),
+		newLogsCommand(services),
+		newEditCommand(services),
+		newExecCommand(services),
+		newDeleteCommand(services),
+		newScaleCommand(services),
+		newRolloutCommand(services),
+		newPortForwardCommand(services),
+		newYamlCommand(services),
+		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources", "labels", "LABEL", true),
+		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources", "annotations", "ANNOTATION", false),
+		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource"),
+		newMetadataWriteCommand(services, "annotate", "annotations", "Set or remove annotations on an indexed resource"),
+		newSwitchCommand(services, "namespace", "ns", "List namespaces, or switch to an indexed one", false),
+		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one", true),
+	} {
+		root.AddCommand(withRefresh(services, cmd))
+	}
 	return root
 }
 

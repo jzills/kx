@@ -1,0 +1,577 @@
+package cli
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/jzills/kx/internal/render"
+	"github.com/spf13/cobra"
+)
+
+// parseIndex converts a positional argument to a 1-based index, rejecting
+// anything that isn't one before a command reaches the cluster. The argument
+// name is named in the error the way the Python CLI names it.
+func parseIndex(name, arg string) (int, error) {
+	index, err := strconv.Atoi(arg)
+	if err != nil {
+		return 0, fmt.Errorf("Invalid value for '%s': '%s' is not a valid int.", name, arg)
+	}
+	return index, nil
+}
+
+func parseIndexes(name string, args []string) ([]int, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("Missing argument '%s'.", name)
+	}
+	indexes := make([]int, 0, len(args))
+	for _, arg := range args {
+		index, err := parseIndex(name, arg)
+		if err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, index)
+	}
+	return indexes, nil
+}
+
+func itemCount(count int) string {
+	if count == 1 {
+		return "1 item"
+	}
+	return strconv.Itoa(count) + " items"
+}
+
+// passthrough splits a command's arguments into the ones kx consumes and the
+// ones forwarded to kubectl. See passthrough.go for why this is done by hand.
+func passthrough(cmd *cobra.Command, args []string, flags func([]string) ([]string, error)) ([]string, bool, error) {
+	if help, _ := extractBool(args, "-h", "--help"); help {
+		return nil, true, cmd.Help()
+	}
+	_, rest := extractBool(args, "--no-color")
+	if flags != nil {
+		var err error
+		rest, err = flags(rest)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	return rest, false, nil
+}
+
+// splitAtDoubleDash separates kx's own arguments from a command to run inside a
+// container, which is what `kx exec 1 -- ls /app` needs.
+func splitAtDoubleDash(args []string) (before, after []string) {
+	for i, arg := range args {
+		if arg == "--" {
+			return args[:i], args[i+1:]
+		}
+	}
+	return args, nil
+}
+
+func newDescribeCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:                "describe <index>... [kubectl flags]",
+		Short:              "Show full kubectl describe output for one or more indexed resources",
+		Example:            "  kx describe 1\n  kx describe 1 3 5",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			// The leading run of numbers are the indexes; the rest belongs to
+			// kubectl. The first argument is always an index, so a
+			// non-numeric one is reported rather than quietly forwarded —
+			// otherwise `kx describe abc` would describe nothing and succeed.
+			indexArgs, extra := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 && len(rest) > 0 {
+				return fmt.Errorf(
+					"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+			}
+			indexes, err := parseIndexes("indexes", indexArgs)
+			if err != nil {
+				return err
+			}
+			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
+			for _, index := range indexes {
+				name, namespace, kind, err := services.State.Fields(index)
+				if err != nil {
+					return err
+				}
+				render.Banner(string(kind), name, namespace, "")
+				if err := command.Execute(index, extra); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// splitLeadingIndexes takes the run of numeric arguments at the front, leaving
+// the rest for kubectl.
+func splitLeadingIndexes(args []string) (indexes, rest []string) {
+	for i, arg := range args {
+		if _, err := strconv.Atoi(arg); err != nil {
+			return args[:i], args[i:]
+		}
+	}
+	return args, nil
+}
+
+func newLogsCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logs <index> [kubectl flags]",
+		Short: "Stream logs for an indexed resource",
+		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
+			"DaemonSets and Services aggregate logs across the pods they own.",
+		Example:            "  kx logs 1\n  kx logs 1 -f --tail=100",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) == 0 {
+				return fmt.Errorf("logs requires an index")
+			}
+			index, err := parseIndex("index", rest[0])
+			if err != nil {
+				return err
+			}
+			name, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			render.Banner(string(kind), name, namespace, "")
+			return LogsCommand{
+				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
+			}.Execute(index, rest[1:])
+		},
+	}
+}
+
+func newEditCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:                "edit <index> [kubectl flags]",
+		Short:              "Open an indexed resource in your editor",
+		Example:            "  kx edit 2",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			index, err := parseIndex("index", rest[0])
+			if err != nil {
+				return err
+			}
+			return EditCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(index, rest[1:])
+		},
+	}
+}
+
+func newExecCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:   "exec <index> [kubectl flags] [-- command]",
+		Short: "Run a command or shell inside an indexed pod",
+		Long: "Runs a command inside an indexed pod. With no command, tries each\n" +
+			"configured shell in turn (bash, then sh by default).",
+		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			before, command := splitAtDoubleDash(args)
+			rest, handled, err := passthrough(cmd, before, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) == 0 {
+				return fmt.Errorf("exec requires an index")
+			}
+			index, err := parseIndex("index", rest[0])
+			if err != nil {
+				return err
+			}
+			return ExecCommand{
+				Kubectl: services.Kubectl, State: services.State, Shells: services.Config.Shells,
+			}.Execute(index, command, rest[1:])
+		},
+	}
+}
+
+func newDeleteCommand(services Services) *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:     "delete <index>",
+		Short:   "Delete an indexed resource",
+		Example: "  kx delete 3\n  kx delete 3 -y",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			index, err := parseIndex("index", args[0])
+			if err != nil {
+				return err
+			}
+			message, err := DeleteCommand{
+				Kubectl: services.Kubectl,
+				State:   services.State,
+				Confirm: render.Confirm,
+				Status:  render.Status,
+			}.Execute(index, yes)
+			if err != nil {
+				return err
+			}
+			render.Success(message)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt")
+	return cmd
+}
+
+func newScaleCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:     "scale <index> <replicas>",
+		Short:   "Scale an indexed Deployment, StatefulSet or ReplicaSet",
+		Example: "  kx scale 1 3",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			index, err := parseIndex("index", args[0])
+			if err != nil {
+				return err
+			}
+			replicas, err := strconv.Atoi(args[1])
+			if err != nil {
+				return fmt.Errorf("'%s' is not a replica count", args[1])
+			}
+			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(index, replicas)
+			if err != nil {
+				return err
+			}
+			render.Success(message)
+			return nil
+		},
+	}
+}
+
+func newRolloutCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:       "rollout <action> <index>",
+		Short:     "Drive a rollout for an indexed workload",
+		Example:   "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
+		ValidArgs: []string{"status", "restart", "pause", "resume", "history", "undo"},
+		Args:      cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			index, err := parseIndex("index", args[1])
+			if err != nil {
+				return err
+			}
+			output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(args[0], index)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(output) != "" {
+				render.Raw(strings.TrimRight(output, "\n"))
+			}
+			return nil
+		},
+	}
+}
+
+func newPortForwardCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:                "port-forward <index> <port> [kubectl flags]",
+		Short:              "Forward a local port to an indexed resource",
+		Example:            "  kx port-forward 1 8080:80",
+		Args:               cobra.MinimumNArgs(2),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return fmt.Errorf("port-forward requires an index and a port")
+			}
+			index, err := parseIndex("index", rest[0])
+			if err != nil {
+				return err
+			}
+			return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(index, rest[1], rest[2:])
+		},
+	}
+}
+
+func newYamlCommand(services Services) *cobra.Command {
+	var show string
+	cmd := &cobra.Command{
+		Use:     "yaml <index>",
+		Short:   "Print an indexed resource's manifest",
+		Example: "  kx yaml 1\n  kx yaml 1 --show metadata,spec",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			index, err := parseIndex("index", args[0])
+			if err != nil {
+				return err
+			}
+			var fields []string
+			if show != "" {
+				for _, field := range strings.Split(show, ",") {
+					if trimmed := strings.TrimSpace(field); trimmed != "" {
+						fields = append(fields, trimmed)
+					}
+				}
+			}
+			output, err := YamlCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(index, fields)
+			if err != nil {
+				return err
+			}
+			render.Raw(strings.TrimRight(output, "\n"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&show, "show", "", "Comma-separated fields to display (e.g. metadata,spec)")
+	return cmd
+}
+
+func newMetadataReadCommand(services Services, use, short, field, header string, selector bool) *cobra.Command {
+	var asSelector bool
+	cmd := &cobra.Command{
+		Use:     use + " <index>...",
+		Short:   short,
+		Args:    cobra.MinimumNArgs(1),
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			indexes, err := parseIndexes("indexes", args)
+			if err != nil {
+				return err
+			}
+			command := MetadataReadCommand{
+				Kubectl: services.Kubectl, State: services.State, Field: field,
+			}
+			for position, index := range indexes {
+				stop := render.Status("fetching " + field)
+				keys, values, err := command.Execute(index)
+				stop()
+				if err != nil {
+					return err
+				}
+				name, namespace, kind, err := services.State.Fields(index)
+				if err != nil {
+					return err
+				}
+				if position > 0 {
+					render.Blank()
+				}
+				render.Banner(string(kind), name, namespace, itemCount(len(keys)))
+				if asSelector {
+					pairs := make([]string, 0, len(keys))
+					for _, key := range keys {
+						pairs = append(pairs, key+"="+values[key])
+					}
+					render.Raw(strings.Join(pairs, ","))
+					continue
+				}
+				render.KeyValueTable(header, keys, values)
+			}
+			return nil
+		},
+	}
+	if selector {
+		cmd.Flags().BoolVarP(&asSelector, "selector", "s", false,
+			"Output as a copy-pastable label selector")
+	}
+	return cmd
+}
+
+func newMetadataWriteCommand(services Services, verb, field, short string) *cobra.Command {
+	var (
+		removes   []string
+		overwrite bool
+	)
+	cmd := &cobra.Command{
+		Use:     verb + " <index> [key=value...]",
+		Short:   short,
+		Args:    cobra.MinimumNArgs(1),
+		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			index, err := parseIndex("index", args[0])
+			if err != nil {
+				return err
+			}
+			keys, values, err := parsePairs(args[1:])
+			if err != nil {
+				return err
+			}
+			message, err := MetadataWriteCommand{
+				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
+			}.Execute(index, keys, values, removes, overwrite)
+			if err != nil {
+				return err
+			}
+			render.Success(message)
+			return nil
+		},
+	}
+	cmd.Flags().StringArrayVar(&removes, "remove", nil, "Key to remove (repeatable)")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Allow replacing an existing key")
+	return cmd
+}
+
+// newSwitchCommand builds the namespace and context commands, which share a
+// shape: no argument lists, an index switches.
+func newSwitchCommand(services Services, use, alias, short string, isContext bool) *cobra.Command {
+	return &cobra.Command{
+		Use:     use + " [index]",
+		Short:   short,
+		Aliases: []string{alias},
+		Args:    cobra.MaximumNArgs(1),
+		Example: "  kx " + use + "\n  kx " + use + " 2",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return listSwitchTargets(services, isContext)
+			}
+			index, err := parseIndex("index", args[0])
+			if err != nil {
+				return err
+			}
+			command := SwitchCommand{
+				Kubectl: services.Kubectl, State: services.State, Lister: services.State,
+			}
+			stop := render.Status("switching " + use)
+			var name string
+			if isContext {
+				name, err = command.context(index)
+			} else {
+				name, err = command.namespace(index)
+			}
+			stop()
+			if err != nil {
+				return err
+			}
+			render.Success(fmt.Sprintf("Switched to '%s'", name))
+			return nil
+		},
+	}
+}
+
+func listSwitchTargets(services Services, isContext bool) error {
+	if isContext {
+		stop := render.Status("fetching contexts")
+		output, err := ContextsCommand{
+			Kubectl: services.Kubectl, State: services.State, Index: services.Index,
+		}.Execute()
+		stop()
+		if err != nil {
+			return err
+		}
+		current, err := services.State.Load()
+		if err != nil {
+			return err
+		}
+		render.IndexedTable(output, "Contexts", current.Namespace, "")
+		return nil
+	}
+
+	stop := render.Status("fetching namespaces")
+	output, err := GetCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index,
+	}.Execute("namespaces", "", nil)
+	stop()
+	if err != nil {
+		return err
+	}
+	current, err := services.State.Load()
+	if err != nil {
+		return err
+	}
+	render.IndexedTable(output, "namespaces", current.Namespace, "")
+	return nil
+}
+
+func newStateCommand(services Services) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:     "state [position]",
+		Short:   "Show the current listing, jump to a history position, or list all entries",
+		Example: "  kx state\n  kx state --all\n  kx state 2",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				history, err := services.State.LoadHistory()
+				if err != nil {
+					return err
+				}
+				render.StateHistory(history)
+				return nil
+			}
+			if len(args) == 1 {
+				position, err := parseIndex("position", args[0])
+				if err != nil {
+					return err
+				}
+				entry, err := services.State.NavigateTo(position)
+				if err != nil {
+					return err
+				}
+				render.State(entry)
+				return nil
+			}
+			entry, err := services.State.Load()
+			if err != nil {
+				return err
+			}
+			render.State(entry)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show the full history stack")
+	return cmd
+}
+
+func newNavigateCommand(services Services, use, short string, delta int) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entry, err := services.State.Navigate(delta)
+			if err != nil {
+				return err
+			}
+			render.State(entry)
+			return nil
+		},
+	}
+}
+
+func newDropCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:     "drop <position>",
+		Short:   "Remove a history entry by position (shown in kx state --all)",
+		Example: "  kx drop 2",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			position, err := parseIndex("position", args[0])
+			if err != nil {
+				return err
+			}
+			history, err := services.State.Drop(position)
+			if err != nil {
+				return err
+			}
+			render.StateHistory(history)
+			return nil
+		},
+	}
+}
