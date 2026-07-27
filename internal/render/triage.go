@@ -38,8 +38,10 @@ func (r *Renderer) Triage(result TriageResult) {
 		return
 	}
 
+	// No blank line between the caption and the table: every other indexed
+	// listing puts its header row directly under the caption, and the Python
+	// renderer's extra line here was alone in doing otherwise.
 	r.Caption("Mixed", result.Namespace, strconv.Itoa(result.Checked)+" checked")
-	r.Blank()
 
 	// Headed "X" like every other indexed listing. The Python renderer left it
 	// blank, alone among the indexed tables; these numbers are indexes passed

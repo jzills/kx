@@ -142,8 +142,27 @@ func TestTriageIndexColumnIsLabelled(t *testing.T) {
 			}},
 		})
 	})
-	header := strings.Split(out, "\n")[2]
+	header := strings.Split(out, "\n")[1]
 	if !strings.HasPrefix(strings.TrimLeft(header, " "), "X") {
 		t.Errorf("header = %q, want it to start with the X index column", header)
+	}
+}
+
+// The table header sits directly under the caption, as in every other indexed
+// listing. The Python renderer printed a blank line between them, alone among
+// them; another deliberate divergence, pinned so it can't drift back.
+func TestTriageHasNoBlankLineAfterCaption(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			Namespace: "prod", Checked: 2, Healthy: 1,
+			Reports: []diagnostics.Report{{
+				Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
+			}},
+		})
+	})
+	lines := strings.Split(out, "\n")
+	if strings.TrimSpace(lines[1]) == "" {
+		t.Errorf("blank line between caption and header:\n%s", out)
 	}
 }
