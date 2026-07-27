@@ -94,6 +94,11 @@ def test_normalize_kind_namespace():
     assert normalize_kind("namespace") == Kind.Namespace
 
 
+def test_normalize_kind_namespace_shorthand():
+    # `kx get ns` must record Kind.Namespace so `kx ns <index>` accepts it.
+    assert normalize_kind("ns") == Kind.Namespace
+
+
 def test_plural_display_pods_is_pascal_case():
     assert plural_display("pods") == "Pods"
 

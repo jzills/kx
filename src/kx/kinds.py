@@ -57,6 +57,7 @@ _KIND_MAP: dict[str, Kind] = {
     "persistentvolumeclaims": Kind.PersistentVolumeClaim,
     "node": Kind.Node,
     "nodes": Kind.Node,
+    "ns": Kind.Namespace,
     "namespace": Kind.Namespace,
     "namespaces": Kind.Namespace,
 }

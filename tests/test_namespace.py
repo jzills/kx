@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from kx.commands.namespace import NamespaceCommand
@@ -42,6 +43,16 @@ class TestNamespaceCommandExecute:
             assert False, "expected RuntimeError"
         except RuntimeError:
             pass
+
+    def test_rejects_non_namespace_kind(self):
+        kubectl = MagicMock()
+        state = MagicMock()
+        state.fields.return_value = ("dragonfly-0", "db", "Pod")
+        cmd = NamespaceCommand(kubectl=kubectl, state=state)
+        with pytest.raises(ValueError) as excinfo:
+            cmd.execute(2)
+        assert "not a Namespace" in str(excinfo.value)
+        kubectl.run.assert_not_called()
 
     def test_raises_on_kubectl_error(self):
         kubectl = MagicMock()

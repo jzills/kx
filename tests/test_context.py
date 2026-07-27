@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from kx.commands.context import ContextCommand
 
 
@@ -35,6 +37,16 @@ class TestContextCommandExecute:
             assert False, "expected RuntimeError"
         except RuntimeError:
             pass
+
+    def test_rejects_non_context_kind(self):
+        kubectl = MagicMock()
+        state = MagicMock()
+        state.fields.return_value = ("dragonfly-0", "db", "Pod")
+        cmd = ContextCommand(kubectl=kubectl, state=state)
+        with pytest.raises(ValueError) as excinfo:
+            cmd.execute(2)
+        assert "not a Context" in str(excinfo.value)
+        kubectl.run.assert_not_called()
 
     def test_raises_on_kubectl_error(self):
         kubectl = MagicMock()
