@@ -51,7 +51,7 @@ class TestNamespaceCommandExecute:
         cmd = NamespaceCommand(kubectl=kubectl, state=state)
         with pytest.raises(ValueError) as excinfo:
             cmd.execute(2)
-        assert "not Namespace — run 'kx ns' to relist." in str(excinfo.value)
+        assert "not Namespace — run 'kx get ns' to relist." in str(excinfo.value)
         kubectl.run.assert_not_called()
 
     def test_raises_on_kubectl_error(self):

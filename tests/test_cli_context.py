@@ -52,3 +52,42 @@ class TestContextCliBareForm:
             result = runner.invoke(app, ["context", "3"])
         assert result.exit_code == 0
         kubectl.run.assert_called_once_with(["config", "use-context", "staging"])
+
+
+class TestGetContextsRouting:
+    """`kx get contexts` is the relist hint a kind mismatch prints, so it has
+    to list contexts rather than reach kubectl for a nonexistent resource."""
+
+    def test_get_contexts_lists_contexts(self):
+        kubectl, state, index = _make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["get", "contexts"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["config", "get-contexts"])
+
+    def test_get_context_singular_lists_contexts(self):
+        kubectl, state, index = _make_mocks()
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["get", "context"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["config", "get-contexts"])
+
+    def test_get_contexts_with_index_switches(self):
+        kubectl, state, index = _make_mocks()
+        state.fields.return_value = ("staging", "default", "Context")
+        with (
+            patch("kx.main._kubectl", kubectl),
+            patch("kx.main._state", state),
+            patch("kx.main._index", index),
+        ):
+            result = runner.invoke(app, ["get", "contexts", "2"])
+        assert result.exit_code == 0
+        kubectl.run.assert_called_once_with(["config", "use-context", "staging"])

@@ -12,6 +12,6 @@ class NamespaceCommand:
         name, _, kind = self.state.fields(index)
         # kubectl config set-context accepts any string, so a stale index
         # pointing at a Pod would silently make its name the active namespace.
-        ensure_kind(index, name, kind, Kind.Namespace, "kx ns")
+        ensure_kind(index, name, kind, Kind.Namespace, "kx get ns")
         self.kubectl.run(["config", "set-context", "--current", f"--namespace={name}"])
         return name

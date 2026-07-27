@@ -342,6 +342,12 @@ def _get(
     behaviour the alias used to provide."""
     indexes = [int(arg) for arg in args if arg.isdigit()]
     extra = [arg for arg in args if not arg.isdigit()]
+    # Contexts live in kubeconfig, not on the server, so kubectl rejects
+    # `get contexts`. Routing the spelling here keeps `kx get <thing>` the one
+    # way to relist anything — including the hint a kind mismatch prints.
+    if resource.lower() in ("context", "contexts"):
+        _context(indexes[0] if indexes else None)
+        return
     if decode or key is not None:
         _decode_secrets(resource, indexes, extra, decode, key, yes)
         return
