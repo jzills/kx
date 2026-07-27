@@ -1,7 +1,8 @@
 import json
 import pytest
-from unittest.mock import patch
-from kx.state import Query, State, StateService
+from unittest.mock import MagicMock, patch
+from kx.kinds import Kind
+from kx.state import Query, State, StateHistory, StateService, previous_lists
 
 
 def _patched(tmp_path):
@@ -478,3 +479,39 @@ class TestStateServiceFields:
             svc.save(state)
             with pytest.raises(ValueError, match="out of range"):
                 svc.fields(5)
+
+
+class TestPreviousLists:
+    def _service(self, states, cursor):
+        service = MagicMock()
+        service.load_history.return_value = StateHistory(states=states, cursor=cursor)
+        return service
+
+    def test_true_when_entry_one_step_back_lists_the_kind(self):
+        service = self._service(
+            [
+                State(resources={"db": "Namespace"}),
+                State(resources={"web-0": "Pod"}),
+            ],
+            cursor=1,
+        )
+        assert previous_lists(service, Kind.Namespace) is True
+
+    def test_false_when_entry_one_step_back_lists_something_else(self):
+        service = self._service(
+            [
+                State(resources={"api": "Deployment"}),
+                State(resources={"web-0": "Pod"}),
+            ],
+            cursor=1,
+        )
+        assert previous_lists(service, Kind.Namespace) is False
+
+    def test_false_at_the_start_of_history(self):
+        service = self._service([State(resources={"db": "Namespace"})], cursor=0)
+        assert previous_lists(service, Kind.Namespace) is False
+
+    def test_false_when_history_is_unreadable(self):
+        service = MagicMock()
+        service.load_history.side_effect = RuntimeError("No state found.")
+        assert previous_lists(service, Kind.Namespace) is False

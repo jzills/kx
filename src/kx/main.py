@@ -271,7 +271,7 @@ def _decode_secrets(
         return
     for position, index in enumerate(indexes):
         name, ns, kind = _state.fields(index)
-        ensure_kind(index, name, kind, expected)
+        ensure_kind(index, name, kind, expected, _state)
         try:
             with console.status("fetching secret"):
                 data = command.execute(index)
@@ -357,7 +357,7 @@ def _get(
         namespace = None
         for idx in indexes:
             name, ns, kind = _state.fields(idx)
-            ensure_kind(idx, name, kind, expected)
+            ensure_kind(idx, name, kind, expected, _state)
             names.append(name)
             namespace = ns
         has_namespace_flag = any(

@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from kx.commands.namespace import NamespaceCommand
 from kx.main import app
+from kx.state import State, StateHistory
 
 runner = CliRunner()
 
@@ -14,6 +15,18 @@ def _make_command(namespace_name="production"):
     state = MagicMock()
     state.fields.return_value = (namespace_name, "default", "Namespace")
     return NamespaceCommand(kubectl=kubectl, state=state), state, kubectl
+
+
+def _history_ending_in_pods(previous=None):
+    """Two entries with the cursor on the Pod listing, so the entry one step
+    back is `previous` — the only thing the `kx back` clause consults."""
+    return StateHistory(
+        states=[
+            State(resources=previous or {"web-0": "Pod"}, namespace="db"),
+            State(resources={"dragonfly-0": "Pod"}, namespace="db"),
+        ],
+        cursor=1,
+    )
 
 
 class TestNamespaceCommandExecute:
@@ -48,10 +61,27 @@ class TestNamespaceCommandExecute:
         kubectl = MagicMock()
         state = MagicMock()
         state.fields.return_value = ("dragonfly-0", "db", "Pod")
+        state.load_history.return_value = _history_ending_in_pods()
         cmd = NamespaceCommand(kubectl=kubectl, state=state)
         with pytest.raises(ValueError) as excinfo:
             cmd.execute(2)
         assert "not Namespace — run 'kx get namespace' to relist." in str(excinfo.value)
+        kubectl.run.assert_not_called()
+
+    def test_offers_back_when_previous_entry_lists_namespaces(self):
+        kubectl = MagicMock()
+        state = MagicMock()
+        state.fields.return_value = ("dragonfly-0", "db", "Pod")
+        state.load_history.return_value = _history_ending_in_pods(
+            previous={"db": "Namespace"}
+        )
+        cmd = NamespaceCommand(kubectl=kubectl, state=state)
+        with pytest.raises(ValueError) as excinfo:
+            cmd.execute(2)
+        assert (
+            "run 'kx get namespace' to relist, or 'kx back' for the previous "
+            "Namespace listing." in str(excinfo.value)
+        )
         kubectl.run.assert_not_called()
 
     def test_raises_on_kubectl_error(self):
