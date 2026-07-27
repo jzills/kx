@@ -6,10 +6,9 @@ pushing the fresh list as a new history entry so the user can pick a new index.
 The original command is never retried — the index→name mapping may have shifted.
 """
 
-from kubernetes.client.exceptions import ApiException
-
 from kx.commands.get import GetCommand
 from kx.index import IndexServiceProtocol
+from kx.lazy import loaded_api_exceptions
 from kx.kubectl import KubectlServiceProtocol
 from kx.state import StateServiceProtocol
 
@@ -47,7 +46,7 @@ class RefreshService:
     def matches(self, error: BaseException) -> bool:
         if isinstance(error, StaleResourceError):
             return True
-        if isinstance(error, ApiException):
+        if isinstance(error, loaded_api_exceptions()):
             return error.status == 404
         if isinstance(error, RuntimeError):
             return is_not_found(error)

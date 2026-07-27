@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from kubernetes import client
-
 from kx.k8s import load_config
+from kx.lazy import sdk_module
+
+client = sdk_module("kubernetes.client")
 
 
 @dataclass

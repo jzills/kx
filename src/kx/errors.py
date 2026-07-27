@@ -2,9 +2,9 @@ import functools
 from typing import Callable
 
 import typer
-from kubernetes.client.exceptions import ApiException
 
 from kx import console
+from kx.lazy import loaded_api_exceptions
 from kx.refresh import RefreshService, StaleResourceError
 
 _refresh_provider: Callable[[], RefreshService] | None = None
@@ -21,7 +21,7 @@ def set_refresh(provider: Callable[[], RefreshService]) -> None:
 
 
 def _message(error: BaseException) -> str:
-    if isinstance(error, ApiException):
+    if isinstance(error, loaded_api_exceptions()):
         return f"Kubernetes API error: {error.status} {error.reason}"
     return str(error)
 
@@ -36,7 +36,7 @@ def _try_refresh(error: BaseException) -> None:
         return
     try:
         recovered = refresh.recover()
-    except (RuntimeError, ValueError, ApiException):
+    except (RuntimeError, ValueError, *loaded_api_exceptions()):
         return
     if recovered is None:
         console.print_raw("Run 'kx get <resource>' to refresh the list.")
@@ -67,7 +67,7 @@ def handle_errors(func=None, *, refresh: bool = True):
         def wrapper(*args, **kwargs):
             try:
                 return inner(*args, **kwargs)
-            except (RuntimeError, ValueError, ApiException) as e:
+            except (RuntimeError, ValueError, *loaded_api_exceptions()) as e:
                 console.print_error(_message(e))
                 if refresh or isinstance(e, StaleResourceError):
                     _try_refresh(e)
