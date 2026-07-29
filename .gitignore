@@ -1,14 +1,10 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
-*.egg-info/
 docs/
 .superpowers/
 .claude/
 build/
 dist/
+
+# Leftovers from the Python implementation. Nothing in the repo creates these
+# any more; they are ignored so a stale local venv can't be committed.
+.venv/
+.coverage

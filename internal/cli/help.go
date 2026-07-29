@@ -116,10 +116,25 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 // [optional], with any trailing ellipsis.
 var argSpec = regexp.MustCompile(`([<\[])([^<>\[\]]+)[>\]](\.{3})?`)
 
-// positionalArgs reads a command's positional arguments out of its Use string,
-// where <name> is required and [name] optional. Cobra has no argument objects
-// to introspect, so the spec that documents the command is also what describes
-// it.
+// Arg is one positional argument declared in a command's Use string.
+type Arg struct {
+	Name     string
+	Required bool
+	Variadic bool
+}
+
+// UseSpec is everything a command's Use string declares about what follows the
+// command name.
+type UseSpec struct {
+	Args []Arg
+	// Passthrough is the flag placeholder's text ("kubectl flags", "scanner
+	// flags"), or "" for a command that forwards nothing.
+	Passthrough string
+}
+
+// ParseUse reads a command's argument spec out of its Use string, where <name>
+// is required and [name] optional. Cobra has no argument objects to introspect,
+// so the spec that documents the command is also what describes it.
 //
 // Groups are matched whole rather than split on whitespace, so the brackets and
 // any trailing ellipsis stay out of the name — splitting on spaces turns
@@ -127,26 +142,50 @@ var argSpec = regexp.MustCompile(`([<\[])([^<>\[\]]+)[>\]](\.{3})?`)
 // argument named "scanner". A group ending in "flags" documents flag
 // pass-through and names nothing the user supplies; any other multi-word group
 // is named by its last word, which is what "[-- command]" means.
-func positionalArgs(use string) []render.HelpItem {
-	var args []render.HelpItem
+func ParseUse(use string) UseSpec {
+	var spec UseSpec
 	for _, match := range argSpec.FindAllStringSubmatch(use, -1) {
-		open, body := match[1], strings.TrimSpace(match[2])
+		open, body, ellipsis := match[1], strings.TrimSpace(match[2]), match[3]
 		if strings.HasSuffix(body, "flags") {
+			spec.Passthrough = body
 			continue
 		}
 		fields := strings.Fields(body)
 		if len(fields) == 0 {
 			continue
 		}
-		doc := "optional"
-		if open == "<" {
-			doc = "required"
-		}
-		args = append(args, render.HelpItem{
-			Name: strings.TrimRight(fields[len(fields)-1], "."), Doc: doc,
+		name := strings.TrimRight(fields[len(fields)-1], ".")
+		spec.Args = append(spec.Args, Arg{
+			Name:     name,
+			Required: open == "<",
+			// The ellipsis sits either inside the brackets ("[key=value...]")
+			// or after them ("<index>..."); both mean repeatable.
+			Variadic: ellipsis != "" || strings.HasSuffix(fields[len(fields)-1], "..."),
 		})
 	}
+	return spec
+}
+
+func positionalArgs(use string) []render.HelpItem {
+	var args []render.HelpItem
+	for _, arg := range ParseUse(use).Args {
+		doc := "optional"
+		if arg.Required {
+			doc = "required"
+		}
+		args = append(args, render.HelpItem{Name: arg.Name, Doc: doc})
+	}
 	return args
+}
+
+// CommandOrder returns the command names in the order the root help screen
+// lists them, which is the order the README's command table uses too.
+func CommandOrder() []string {
+	var names []string
+	for _, section := range helpSections {
+		names = append(names, section.Commands...)
+	}
+	return names
 }
 
 // Execute runs the command tree, resolving a bare kind spelling to `kx get`.

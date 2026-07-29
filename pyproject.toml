@@ -1,37 +1,14 @@
+# Release metadata for the PyPI distribution.
+#
+# kx is a Go program. This file declares no dependencies and no build backend:
+# the published wheels carry a prebuilt static binary and are assembled by
+# scripts/build_wheels.py, which reads only the fields below. `pip install
+# kx-cli` therefore installs one executable and nothing else.
+#
+# The version is stamped here by release.yml so the repo records what was
+# released; the binary carries its own version through -ldflags.
 [project]
 name = "kx-cli"
 version = "0.0.11"
 description = "kubectl wrapper with index-based resource selection"
 readme = "README.md"
-requires-python = ">=3.11"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-]
-dependencies = [
-    "certifi",
-    "typer==0.27.0",
-    "kubernetes",
-    "rich",
-]
-
-[project.optional-dependencies]
-dev = [
-    "ruff",
-    "pre-commit",
-    "pytest",
-    "pytest-cov",
-]
-
-[project.scripts]
-kx = "kx.main:app"
-
-[build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]

@@ -1,1 +1,0 @@
-{"states": [{"resources": {"web-1": "Pod", "web-2": "Pod", "api-3": "Pod"}, "namespace": "prod", "query": {"resource": "pods", "args": ["-n", "prod"], "match": null}}, {"resources": {"api": "Deployment"}, "namespace": "prod", "query": {"resource": "deploy", "args": [], "match": "api"}}], "cursor": 1}

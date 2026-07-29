@@ -74,9 +74,10 @@ func TestResourceOrderIsStableAcrossLoads(t *testing.T) {
 	}
 }
 
-// The on-disk shape must stay byte-compatible with the Python implementation so
-// an existing ~/.kx/state.json keeps working across the upgrade.
-func TestSavedJSONMatchesPythonSchema(t *testing.T) {
+// The on-disk shape is a compatibility surface, not an implementation detail:
+// every installed kx reads whatever ~/.kx/state.json is already there, including
+// files written by older versions. Changing these keys silently breaks upgrades.
+func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 	service := newTestService(t, 10)
 	match := "web"
 	save(t, service, State{

@@ -27,8 +27,8 @@ type Resource struct {
 // preserve the order names were listed in and the order they appear in the
 // JSON object on disk. That rules out a Go map, whose iteration order is
 // randomized — a map here would resolve indexes to different resources on
-// different runs. The JSON representation is a plain object, unchanged from
-// the Python implementation, so state files round-trip across the two.
+// different runs. The JSON representation is a plain object, so a state file
+// written by any version of kx keeps resolving indexes the same way.
 type Resources struct {
 	entries []Resource
 }

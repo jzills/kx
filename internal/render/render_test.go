@@ -19,6 +19,15 @@ func styledCapture(t *testing.T, themeName string, render func(*Renderer)) strin
 	return buf.String()
 }
 
+// capture renders into a buffer. A buffer is not a terminal, so styling is off
+// and what comes back is pure layout.
+func capture(render func(*Renderer)) string {
+	var buf bytes.Buffer
+	renderer := New(&buf, &buf, "github-dark", false)
+	render(renderer)
+	return buf.String()
+}
+
 const esc = "\x1b["
 
 // Styling reaches a terminal that wants it.

@@ -219,7 +219,7 @@ func newEditCommand(services Services) *cobra.Command {
 
 func newExecCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec <index> [kubectl flags] [-- command]",
+		Use:   "exec <index> [kubectl flags] [-- command...]",
 		Short: "Open an interactive shell in an indexed pod (bash, falling back to sh).",
 		Long: "Runs a command inside an indexed pod. With no command, tries each\n" +
 			"configured shell in turn (bash, then sh by default).",

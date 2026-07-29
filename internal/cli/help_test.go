@@ -108,7 +108,7 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 		{"scan [index] [scanner flags]", []string{"index:optional"}},
 		{"top [kubectl flags]", nil},
 		{"scale <index> <replicas>", []string{"index:required", "replicas:required"}},
-		{"exec <index> [kubectl flags] [-- command]",
+		{"exec <index> [kubectl flags] [-- command...]",
 			[]string{"index:required", "command:optional"}},
 		{"label <index> [key=value...]", []string{"index:required", "key=value:optional"}},
 		{"tree [index]", []string{"index:optional"}},
@@ -120,6 +120,41 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 		}
 		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 			t.Errorf("positionalArgs(%q) = %v, want %v", tc.use, got, tc.want)
+		}
+	}
+}
+
+// The README's command table marks repeatable arguments, and the ellipsis sits
+// either inside the brackets or after them depending on the spelling — both
+// mean the same thing, and missing either understates the command.
+func TestParseUseDetectsRepeatableArgsAndPassthrough(t *testing.T) {
+	cases := []struct {
+		use         string
+		variadic    []bool
+		passthrough string
+	}{
+		{"describe <index>... [kubectl flags]", []bool{true}, "kubectl flags"},
+		{"secret [index]... [kubectl flags]", []bool{true}, "kubectl flags"},
+		{"label <index> [key=value...]", []bool{false, true}, ""},
+		{"exec <index> [kubectl flags] [-- command...]", []bool{false, true}, "kubectl flags"},
+		{"scan [index] [scanner flags]", []bool{false}, "scanner flags"},
+		{"scale <index> <replicas>", []bool{false, false}, ""},
+	}
+	for _, tc := range cases {
+		spec := ParseUse(tc.use)
+		if len(spec.Args) != len(tc.variadic) {
+			t.Errorf("ParseUse(%q) found %d args, want %d", tc.use, len(spec.Args), len(tc.variadic))
+			continue
+		}
+		for i, want := range tc.variadic {
+			if spec.Args[i].Variadic != want {
+				t.Errorf("ParseUse(%q) arg %q variadic = %v, want %v",
+					tc.use, spec.Args[i].Name, spec.Args[i].Variadic, want)
+			}
+		}
+		if spec.Passthrough != tc.passthrough {
+			t.Errorf("ParseUse(%q) passthrough = %q, want %q",
+				tc.use, spec.Passthrough, tc.passthrough)
 		}
 	}
 }
