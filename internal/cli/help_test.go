@@ -92,6 +92,38 @@ func TestKindAliasLeavesFlagsAndUnknownWords(t *testing.T) {
 
 // Every command on the root help screen must be listed in a section, or it is
 // invisible to anyone reading `kx --help`.
+// The Use string is the only description of a command's positional arguments
+// cobra keeps, so the help screen's Arguments section is parsed back out of it.
+// Bracket and ellipsis punctuation is part of that spec, not part of an
+// argument's name, and a two-word placeholder documents flag pass-through
+// rather than an argument the user names.
+func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
+	cases := []struct {
+		use  string
+		want []string
+	}{
+		{"get <resource> [kubectl flags]", []string{"resource:required"}},
+		{"describe <index>... [kubectl flags]", []string{"index:required"}},
+		{"secret [index]... [kubectl flags]", []string{"index:optional"}},
+		{"scan [index] [scanner flags]", []string{"index:optional"}},
+		{"top [kubectl flags]", nil},
+		{"scale <index> <replicas>", []string{"index:required", "replicas:required"}},
+		{"exec <index> [kubectl flags] [-- command]",
+			[]string{"index:required", "command:optional"}},
+		{"label <index> [key=value...]", []string{"index:required", "key=value:optional"}},
+		{"tree [index]", []string{"index:optional"}},
+	}
+	for _, tc := range cases {
+		var got []string
+		for _, arg := range positionalArgs(tc.use) {
+			got = append(got, arg.Name+":"+arg.Doc)
+		}
+		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
+			t.Errorf("positionalArgs(%q) = %v, want %v", tc.use, got, tc.want)
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {

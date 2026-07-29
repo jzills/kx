@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -111,25 +112,39 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	}
 }
 
+// argSpec matches one positional-argument group in a Use string: <required> or
+// [optional], with any trailing ellipsis.
+var argSpec = regexp.MustCompile(`([<\[])([^<>\[\]]+)[>\]](\.{3})?`)
+
 // positionalArgs reads a command's positional arguments out of its Use string,
 // where <name> is required and [name] optional. Cobra has no argument objects
 // to introspect, so the spec that documents the command is also what describes
 // it.
+//
+// Groups are matched whole rather than split on whitespace, so the brackets and
+// any trailing ellipsis stay out of the name — splitting on spaces turns
+// "[index]..." into the argument "index]..." and "[scanner flags]" into an
+// argument named "scanner". A group ending in "flags" documents flag
+// pass-through and names nothing the user supplies; any other multi-word group
+// is named by its last word, which is what "[-- command]" means.
 func positionalArgs(use string) []render.HelpItem {
 	var args []render.HelpItem
-	for _, token := range strings.Fields(use)[1:] {
-		switch {
-		case strings.HasPrefix(token, "<"):
-			args = append(args, render.HelpItem{
-				Name: strings.Trim(token, "<>."), Doc: "required"})
-		case strings.HasPrefix(token, "["):
-			// Flag pass-through placeholders aren't arguments the user names.
-			name := strings.Trim(token, "[]")
-			if strings.Contains(name, " ") || name == "kubectl" {
-				continue
-			}
-			args = append(args, render.HelpItem{Name: name, Doc: "optional"})
+	for _, match := range argSpec.FindAllStringSubmatch(use, -1) {
+		open, body := match[1], strings.TrimSpace(match[2])
+		if strings.HasSuffix(body, "flags") {
+			continue
 		}
+		fields := strings.Fields(body)
+		if len(fields) == 0 {
+			continue
+		}
+		doc := "optional"
+		if open == "<" {
+			doc = "required"
+		}
+		args = append(args, render.HelpItem{
+			Name: strings.TrimRight(fields[len(fields)-1], "."), Doc: doc,
+		})
 	}
 	return args
 }

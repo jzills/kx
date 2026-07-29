@@ -245,7 +245,7 @@ func imagesNoun(count int) string {
 }
 
 func newScanCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use: "scan [index] [scanner flags]",
 		Short: "Scan the unique container images of an indexed workload for vulnerabilities, " +
 			"or the whole namespace when no index is given; prints a severity summary table " +
@@ -327,4 +327,10 @@ func newScanCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	// Registered so they appear in the command's help; parsing is by hand.
+	cmd.Flags().String("engine", "",
+		"Vulnerability scanner to use; 'scout' is currently the only supported value")
+	cmd.Flags().Bool("full", false,
+		"Stream the scanner's full output instead of the summary table")
+	return cmd
 }

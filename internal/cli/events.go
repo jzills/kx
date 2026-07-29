@@ -85,7 +85,7 @@ func newEventsCommand(services Services) *cobra.Command {
 }
 
 func newTopCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "top [kubectl flags]",
 		Short: "List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits.",
 		Long: "Lists pod CPU and memory usage with kubectl top, assigns indexes,\n" +
@@ -117,4 +117,9 @@ func newTopCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	// Registered so they appear in the command's help; parsing is by hand.
+	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().Bool("no-limits", false,
+		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
+	return cmd
 }

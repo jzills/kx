@@ -202,6 +202,11 @@ func newEditCommand(services Services) *cobra.Command {
 			if err != nil || handled {
 				return err
 			}
+			// Cobra's arity check ran against the unstripped argv, so an
+			// argument list of nothing but kx's own flags reaches here empty.
+			if len(rest) == 0 {
+				return fmt.Errorf("edit requires an index")
+			}
 			index, err := parseIndex("index", rest[0])
 			if err != nil {
 				return err
