@@ -97,6 +97,37 @@ func TestYamlShowUnknownKeyYieldsEmpty(t *testing.T) {
 	}
 }
 
+// Two sibling subtrees at the same depth both holding the requested key. The
+// walk is breadth-first, and Go randomises map iteration, so the order siblings
+// enter the frontier varies run to run — an unordered walk answers the same
+// manifest differently on different runs.
+const ambiguousManifest = `
+apiVersion: v1
+kind: Pod
+alpha:
+  shared: from-alpha
+beta:
+  shared: from-beta
+`
+
+func TestYamlShowResolvesTiesTheSameWayEveryRun(t *testing.T) {
+	var seen []string
+	for i := 0; i < 40; i++ {
+		kubectl := &recordingKubectl{output: ambiguousManifest}
+		out, err := YamlCommand{Kubectl: kubectl, State: pod("web")}.
+			Execute(1, []string{"shared"})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		seen = append(seen, strings.TrimSpace(out))
+	}
+	for _, got := range seen {
+		if got != seen[0] {
+			t.Fatalf("same manifest resolved two ways: %q and %q", seen[0], got)
+		}
+	}
+}
+
 // PyYAML indents two spaces; yaml.v3 defaults to four, which would make
 // `kx yaml --show` disagree with the manifest kubectl printed.
 func TestYamlShowUsesTwoSpaceIndent(t *testing.T) {

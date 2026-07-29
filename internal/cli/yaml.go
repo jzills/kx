@@ -1,11 +1,22 @@
 package cli
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/jzills/kx/internal/kubectl"
 	"gopkg.in/yaml.v3"
 )
+
+// sortedKeys returns a map's keys in a stable order.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // YamlCommand prints an indexed resource's manifest, optionally narrowed to
 // named fields.
@@ -73,7 +84,14 @@ func findKeys(document any, keys []string) map[string]any {
 		for _, node := range frontier {
 			switch value := node.(type) {
 			case map[string]any:
-				for key, child := range value {
+				// Walked in sorted order because Go randomises map iteration:
+				// an unordered walk puts sibling subtrees into the frontier in
+				// a different order on every run, so a key present in two of
+				// them at the same depth resolves differently each time and
+				// `kx yaml --show` prints a different document for the same
+				// manifest.
+				for _, key := range sortedKeys(value) {
+					child := value[key]
 					if wanted[key] {
 						if _, seen := result[key]; !seen {
 							result[key] = child
