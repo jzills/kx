@@ -105,10 +105,14 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 	return headers, rows, nameIdx
 }
 
-// format lays out rows as a left-aligned, two-space-separated table. Every
+// Format lays out rows as a left-aligned, two-space-separated table. Every
 // cell is padded, including the last in a row, matching the Python
 // implementation byte-for-byte.
-func format(allRows [][]string) string {
+//
+// Exported for the same reason ParseTable is: `kx top` appends its own
+// percentage columns and has to lay them out identically to the listing they
+// extend, and a second copy of this would drift from it.
+func Format(allRows [][]string) string {
 	if len(allRows) == 0 {
 		return ""
 	}
@@ -184,7 +188,7 @@ func (Service) Add(output string) (string, []string) {
 		allRows = append(allRows, append([]string{strconv.Itoa(i + 1)}, row...))
 	}
 
-	return format(allRows), names
+	return Format(allRows), names
 }
 
 // Filter drops rows whose NAME doesn't contain term, case-insensitively.
@@ -206,7 +210,7 @@ func (Service) Filter(output, term string) string {
 		// a re-padded one.
 		return strings.Split(output, "\n")[0]
 	}
-	return format(allRows)
+	return Format(allRows)
 }
 
 // Resolve maps a 1-based index onto a resource name in state.

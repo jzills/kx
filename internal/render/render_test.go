@@ -293,6 +293,28 @@ func TestFlexColumnShrinksToFit(t *testing.T) {
 	}
 }
 
+// Table renders rows it does not own. Ellipsizing the flexed column in place
+// edits the caller's slice, so rendering the same rows again cuts an
+// already-cut value — the second table comes out narrower than the first for no
+// reason the caller can see.
+func TestFittingTheFlexColumnLeavesTheCallerRowsAlone(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	columns := []Column{{Header: "NAME"}, {Header: "DETAIL", Flex: true}}
+	rows := [][]Cell{{Plain("web"), Plain(long)}}
+
+	fitted := fitFlexColumn(columns, rows, []int{3, 200}, 40)
+
+	if rows[0][1].Text != long {
+		t.Errorf("caller's row was cut in place: %q", rows[0][1].Text)
+	}
+	if fitted[0][1].Text == long {
+		t.Error("the rendered row was not shortened to fit")
+	}
+	if !strings.HasSuffix(fitted[0][1].Text, "…") {
+		t.Errorf("shortened cell = %q, want an ellipsis marking the cut", fitted[0][1].Text)
+	}
+}
+
 // Without a flex column the table keeps its natural width, which is what every
 // other listing relies on.
 func TestTableWithoutFlexIsUnconstrained(t *testing.T) {

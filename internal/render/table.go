@@ -104,28 +104,7 @@ func (r *Renderer) Table(columns []Column, rows [][]Cell) {
 		}
 	}
 
-	// A flexed column gives back whatever the rest of the table overruns, so
-	// long values are cut instead of wrapping across two lines.
-	if flex := flexColumn(columns); flex >= 0 {
-		total := 0
-		for _, w := range widths {
-			total += w + 2*len(cellPad)
-		}
-		if available := r.width(); total > available {
-			shrunk := widths[flex] - (total - available)
-			if shrunk < minFlexWidth {
-				shrunk = minFlexWidth
-			}
-			if shrunk < widths[flex] {
-				widths[flex] = shrunk
-				for _, row := range rows {
-					if flex < len(row) {
-						row[flex].Text = ellipsize(row[flex].Text, shrunk)
-					}
-				}
-			}
-		}
-	}
+	rows = fitFlexColumn(columns, rows, widths, r.width())
 
 	var out strings.Builder
 
@@ -157,6 +136,44 @@ func (r *Renderer) Table(columns []Column, rows [][]Cell) {
 	}
 
 	r.write(out.String())
+}
+
+// fitFlexColumn shrinks the flexed column until the table fits in available,
+// ellipsizing its cells, and narrows widths[flex] to match. Returns the rows to
+// render.
+//
+// The shortened rows are returned rather than written back into the caller's
+// slice: Table takes rows it does not own, and cutting them in place would mean
+// rendering the same slice twice cuts an already-cut value the second time.
+func fitFlexColumn(columns []Column, rows [][]Cell, widths []int, available int) [][]Cell {
+	flex := flexColumn(columns)
+	if flex < 0 {
+		return rows
+	}
+	total := 0
+	for _, w := range widths {
+		total += w + 2*len(cellPad)
+	}
+	if total <= available {
+		return rows
+	}
+	shrunk := widths[flex] - (total - available)
+	if shrunk < minFlexWidth {
+		shrunk = minFlexWidth
+	}
+	if shrunk >= widths[flex] {
+		return rows
+	}
+	widths[flex] = shrunk
+
+	fitted := make([][]Cell, len(rows))
+	for i, row := range rows {
+		fitted[i] = append([]Cell(nil), row...)
+		if flex < len(fitted[i]) {
+			fitted[i][flex].Text = ellipsize(fitted[i][flex].Text, shrunk)
+		}
+	}
+	return fitted
 }
 
 func flexColumn(columns []Column) int {

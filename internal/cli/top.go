@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -106,7 +105,7 @@ func (c TopCommand) withUsagePercentages(output, namespace string) (string, erro
 			percentCell(row[memCol], limit.Memory),
 		))
 	}
-	return formatTable(table), nil
+	return index.Format(table), nil
 }
 
 // podLimit is a pod's summed limits. A nil quantity means the limit is
@@ -209,29 +208,4 @@ func indexOfHeader(headers []string, name string) int {
 		}
 	}
 	return -1
-}
-
-// formatTable lays out rows the way the index service does, so the appended
-// columns line up with the rest of the listing.
-func formatTable(rows [][]string) string {
-	if len(rows) == 0 {
-		return ""
-	}
-	widths := make([]int, len(rows[0]))
-	for _, row := range rows {
-		for i, cell := range row {
-			if i < len(widths) && len(cell) > widths[i] {
-				widths[i] = len(cell)
-			}
-		}
-	}
-	lines := make([]string, 0, len(rows))
-	for _, row := range rows {
-		cells := make([]string, len(row))
-		for i, cell := range row {
-			cells[i] = cell + strings.Repeat(" ", widths[i]-len(cell))
-		}
-		lines = append(lines, strings.Join(cells, "  "))
-	}
-	return strings.Join(lines, "\n")
 }
