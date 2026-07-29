@@ -1,6 +1,11 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+)
 
 // The leading run of numbers are indexes; everything after is kubectl's.
 func TestSplitLeadingIndexes(t *testing.T) {
@@ -71,6 +76,34 @@ func TestCheckFollow(t *testing.T) {
 		err := checkFollow(tc.args, tc.indexes)
 		if (err != nil) != tc.wantErr {
 			t.Errorf("checkFollow(%v, %d) = %v, wantErr %v", tc.args, tc.indexes, err, tc.wantErr)
+		}
+	}
+}
+
+// delete, yaml, describe, events, labels and annotations all take several
+// indexes in the Python CLI. Porting any of them as single-index is silent —
+// cobra rejects the second argument with a generic arity error — so the arity
+// is asserted here rather than left to a live comparison.
+func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
+	services := Services{}
+	commands := map[string]*cobra.Command{
+		"delete":      newDeleteCommand(services),
+		"yaml":        newYamlCommand(services),
+		"describe":    newDescribeCommand(services),
+		"events":      newEventsCommand(services),
+		"labels":      newMetadataReadCommand(services, "labels", "", "labels", "LABEL", true),
+		"annotations": newMetadataReadCommand(services, "annotations", "", "annotations", "ANNOTATION", false),
+		"logs":        newLogsCommand(services),
+	}
+	for name, cmd := range commands {
+		if cmd.Args == nil {
+			continue
+		}
+		if err := cmd.Args(cmd, []string{"1", "2"}); err != nil {
+			t.Errorf("%s rejects two indexes: %v", name, err)
+		}
+		if !strings.Contains(cmd.Use, "...") {
+			t.Errorf("%s: Use = %q, want it to show a repeatable index", name, cmd.Use)
 		}
 	}
 }

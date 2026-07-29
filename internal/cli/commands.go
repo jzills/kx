@@ -244,25 +244,30 @@ func newExecCommand(services Services) *cobra.Command {
 func newDeleteCommand(services Services) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:     "delete <index>",
+		Use:     "delete <index>...",
 		Short:   "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example: "  kx delete 3\n  kx delete 3 -y",
-		Args:    cobra.ExactArgs(1),
+		Example: "  kx delete 3\n  kx delete 3 5 -y",
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			indexes, err := parseIndexes("indexes", args)
 			if err != nil {
 				return err
 			}
-			message, err := DeleteCommand{
+			command := DeleteCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
 				Confirm: render.Confirm,
 				Status:  render.Status,
-			}.Execute(index, yes)
-			if err != nil {
-				return err
 			}
-			render.Success(message)
+			// Confirmed and reported one at a time, so declining one resource
+			// doesn't silently take the rest with it.
+			for _, index := range indexes {
+				message, err := command.Execute(index, yes)
+				if err != nil {
+					return err
+				}
+				render.Success(message)
+			}
 			return nil
 		},
 	}
@@ -314,7 +319,9 @@ func newRolloutCommand(services Services) *cobra.Command {
 				return err
 			}
 			if strings.TrimSpace(output) != "" {
-				render.Raw(strings.TrimRight(output, "\n"))
+				// Printed with its trailing newline intact, so consecutive
+				// manifests are separated the way kubectl's own output is.
+				render.Raw(strings.TrimRight(output, "\n") + "\n")
 			}
 			return nil
 		},
@@ -349,12 +356,12 @@ func newPortForwardCommand(services Services) *cobra.Command {
 func newYamlCommand(services Services) *cobra.Command {
 	var show string
 	cmd := &cobra.Command{
-		Use:     "yaml <index>",
+		Use:     "yaml <index>...",
 		Short:   "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example: "  kx yaml 1\n  kx yaml 1 --show metadata,spec",
-		Args:    cobra.ExactArgs(1),
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec",
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			indexes, err := parseIndexes("indexes", args)
 			if err != nil {
 				return err
 			}
@@ -366,12 +373,28 @@ func newYamlCommand(services Services) *cobra.Command {
 					}
 				}
 			}
-			output, err := YamlCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, fields)
-			if err != nil {
-				return err
+			command := YamlCommand{Kubectl: services.Kubectl, State: services.State}
+			for position, index := range indexes {
+				name, namespace, kind, err := services.State.Fields(index)
+				if err != nil {
+					return err
+				}
+				if position > 0 {
+					render.Raw("")
+				}
+				// Banner per manifest: without it, several manifests run
+				// together with nothing saying which is which.
+				render.Banner(string(kind), name, namespace, "")
+				stop := render.Status("fetching manifest")
+				output, err := command.Execute(index, fields)
+				stop()
+				if err != nil {
+					return err
+				}
+				// Printed with its trailing newline intact, so consecutive
+				// manifests are separated the way kubectl's own output is.
+				render.Raw(strings.TrimRight(output, "\n") + "\n")
 			}
-			render.Raw(strings.TrimRight(output, "\n"))
 			return nil
 		},
 	}
