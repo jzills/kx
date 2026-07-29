@@ -37,8 +37,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # -race because the spinner is the one thing in kx that runs concurrently,
+      # and a data race there would otherwise only ever show up on a user's
+      # terminal.
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
 
   lint:
     name: Lint & format
