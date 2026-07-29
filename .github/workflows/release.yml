@@ -67,6 +67,16 @@ jobs:
             test -x "$extract/kx/kx" || { echo "$archive has no executable at kx/kx"; exit 1; }
           done
 
+      # Windows ships as .zip and krew never selects it, so it is checked for
+      # its own layout rather than krew's.
+      - name: Verify the Windows archives
+        run: |
+          for archive in dist/kx_v*_windows_*.zip; do
+            test -f "$archive" || { echo "no Windows archives were built"; exit 1; }
+            python3 -m zipfile -l "$archive" | grep -q 'kx/kx\.exe' || {
+              echo "$archive has no kx/kx.exe"; exit 1; }
+          done
+
       - name: Check the bundled version matches the release
         run: |
           ACTUAL="$(./dist/binaries/kx_linux_amd64/kx --version)"
@@ -99,7 +109,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-archives
-          path: dist/kx_v*.tar.gz
+          path: |
+            dist/kx_v*.tar.gz
+            dist/kx_v*.zip
           if-no-files-found: error
 
   tag:
@@ -133,7 +145,7 @@ jobs:
           merge-multiple: true
 
       - name: Generate checksums
-        run: cd assets && sha256sum *.tar.gz > SHA256SUMS
+        run: cd assets && sha256sum *.tar.gz *.zip > SHA256SUMS
 
       - name: Create GitHub Release
         env:

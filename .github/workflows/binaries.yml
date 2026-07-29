@@ -54,6 +54,18 @@ jobs:
           done
           "$RUNNER_TEMP/kx_vdev_linux_amd64/kx/kx" --version
 
+      # Windows ships as .zip and krew never selects it, so it is checked for
+      # its own layout rather than krew's. The .exe suffix is what makes the
+      # binary runnable there and what pip installs it under, so its absence is
+      # a silent break rather than a visible one.
+      - name: Verify the Windows archives
+        run: |
+          for archive in dist/kx_vdev_windows_*.zip; do
+            test -f "$archive" || { echo "no Windows archives were built"; exit 1; }
+            python3 -m zipfile -l "$archive" | grep -q 'kx/kx\.exe' || {
+              echo "$archive has no kx/kx.exe"; exit 1; }
+          done
+
       - name: Build wheels
         run: python3 scripts/build_wheels.py --version 0.0.0.dev0 --binaries dist/binaries
 
@@ -66,6 +78,14 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install --quiet \
             dist/wheels/kx_cli-0.0.0.dev0-py3-none-manylinux_2_17_x86_64.whl
           "$RUNNER_TEMP/venv/bin/kx" --version
+
+      # A Windows wheel whose payload lost its .exe installs a file Windows will
+      # not execute, which no structural check on the linux wheels would catch.
+      - name: Check the Windows wheel carries kx.exe
+        run: |
+          python3 -m zipfile -l dist/wheels/kx_cli-0.0.0.dev0-py3-none-win_amd64.whl \
+            | grep -q 'data/scripts/kx\.exe' || {
+              echo "the win_amd64 wheel has no kx.exe"; exit 1; }
 
       - name: Check the wheels are publishable
         run: |
