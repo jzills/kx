@@ -37,6 +37,11 @@ binaries="$outdir/binaries"
 rm -rf "$binaries"
 mkdir -p "$binaries"
 
+# Resolved once, now that the directory exists. The zip step below runs from
+# inside the staging directory, where a relative outdir no longer points here.
+outdir="$(cd "$outdir" && pwd)"
+binaries="$outdir/binaries"
+
 for target in "${targets[@]}"; do
   read -r os arch <<<"$target"
   stage="$binaries/kx_${os}_${arch}"
@@ -66,7 +71,7 @@ for target in "${targets[@]}"; do
     # python3's zipfile rather than zip(1): the wheel build already requires
     # python3, and zip is not installed everywhere this script runs.
     (cd "$archive_root" &&
-      python3 -m zipfile -c "$(cd "$outdir" && pwd)/kx_v${version}_${os}_${arch}.zip" kx)
+      python3 -m zipfile -c "$outdir/kx_v${version}_${os}_${arch}.zip" kx)
   else
     tar -C "$archive_root" -czf "$outdir/kx_v${version}_${os}_${arch}.tar.gz" kx
   fi
