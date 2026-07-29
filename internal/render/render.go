@@ -6,6 +6,7 @@
 package render
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -29,6 +30,9 @@ type Renderer struct {
 	// degrade the same way the active theme's do.
 	lip    *lipgloss.Renderer
 	styles map[string]lipgloss.Style
+	// answers buffers the confirmation prompt's input stream. Held on the
+	// renderer so consecutive prompts share one buffer; see prompts().
+	answers *bufio.Reader
 }
 
 var current = New(os.Stdout, os.Stderr, theme.Default, false)

@@ -23,11 +23,23 @@ func (r *Renderer) Confirm(message string) error {
 	return r.confirmFrom(os.Stdin, message)
 }
 
+// prompts buffers the answer stream once and reuses it for every later prompt.
+//
+// bufio reads ahead past the newline it returns, so wrapping the stream afresh
+// for each prompt strands the remaining answers in the discarded buffer: piped
+// input to `kx delete 1 2` would delete the first resource and abort on the
+// second. One renderer reads from one source, so caching it here is enough.
+func (r *Renderer) prompts(in io.Reader) *bufio.Reader {
+	if r.answers == nil {
+		r.answers = bufio.NewReader(in)
+	}
+	return r.answers
+}
+
 func (r *Renderer) confirmFrom(in io.Reader, message string) error {
 	fmt.Fprint(r.out, r.emphasizePaths(message)+" "+r.style("muted", "[y/n] (n):")+" ")
 
-	reader := bufio.NewReader(in)
-	answer, err := reader.ReadString('\n')
+	answer, err := r.prompts(in).ReadString('\n')
 	if err != nil && answer == "" {
 		// EOF (a closed or empty stdin) is not consent.
 		fmt.Fprintln(r.out)

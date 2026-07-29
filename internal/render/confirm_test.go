@@ -47,6 +47,23 @@ func TestConfirmTreatsEOFAsNo(t *testing.T) {
 	}
 }
 
+// `kx delete 1 2` prompts once per resource against one stdin. bufio reads ahead
+// past the newline it returns, so wrapping that stream afresh for each prompt
+// leaves the later answers stranded in the discarded buffer — piped input then
+// deletes the first resource and aborts on the second.
+func TestConfirmKeepsAnswersForLaterPrompts(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := New(&buf, &buf, "github-dark", false)
+	answers := strings.NewReader("y\ny\n")
+
+	if err := renderer.confirmFrom(answers, "Delete Pod/one in prod?"); err != nil {
+		t.Fatalf("first prompt rejected a supplied answer: %v", err)
+	}
+	if err := renderer.confirmFrom(answers, "Delete Pod/two in prod?"); err != nil {
+		t.Errorf("second prompt rejected a supplied answer: %v", err)
+	}
+}
+
 func TestConfirmShowsTheQuestionAndDefault(t *testing.T) {
 	_, out := confirmWith(t, "y\n")
 	if !strings.Contains(out, "Delete Pod/nginx in prod?") {
