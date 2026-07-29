@@ -15,7 +15,7 @@ spec:
     resolving as you move between resource kinds and namespaces.
     Also distributed as "kx" on PyPI (https://pypi.org/project/kx-cli/).
   caveats: |
-    Index history is stored in ~/.kx/.
+    Index history is stored in ~/.kx/ (%USERPROFILE%\.kx on Windows).
   platforms:
   - selector: {matchLabels: {os: linux, arch: amd64}}
     {{addURIAndSha "https://github.com/jzills/kx/releases/download/{{ .TagName }}/kx_{{ .TagName }}_linux_amd64.tar.gz" .TagName }}
@@ -29,3 +29,11 @@ spec:
   - selector: {matchLabels: {os: darwin, arch: arm64}}
     {{addURIAndSha "https://github.com/jzills/kx/releases/download/{{ .TagName }}/kx_{{ .TagName }}_darwin_arm64.tar.gz" .TagName }}
     bin: kx/kx
+  # Windows ships as .zip, which krew extracts alongside .tar.gz, and krew
+  # only runs .exe entrypoints there — so the archive holds kx/kx.exe.
+  - selector: {matchLabels: {os: windows, arch: amd64}}
+    {{addURIAndSha "https://github.com/jzills/kx/releases/download/{{ .TagName }}/kx_{{ .TagName }}_windows_amd64.zip" .TagName }}
+    bin: kx/kx.exe
+  - selector: {matchLabels: {os: windows, arch: arm64}}
+    {{addURIAndSha "https://github.com/jzills/kx/releases/download/{{ .TagName }}/kx_{{ .TagName }}_windows_arm64.zip" .TagName }}
+    bin: kx/kx.exe

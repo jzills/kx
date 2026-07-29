@@ -24,9 +24,6 @@ dev = [
     "pytest",
     "pytest-cov",
 ]
-build = [
-    "pyinstaller",
-]
 
 [project.scripts]
 kx = "kx.main:app"

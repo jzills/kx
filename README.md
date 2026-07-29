@@ -13,7 +13,6 @@
 <div align="center">
 
 [![PyPI version](https://img.shields.io/pypi/v/kx-cli?style=flat-square&color=3fb950&labelColor=21262d)](https://pypi.org/project/kx-cli/)
-[![Python](https://img.shields.io/pypi/pyversions/kx-cli?style=flat-square&color=3fb950&labelColor=21262d)](https://pypi.org/project/kx-cli/)
 [![License](https://img.shields.io/github/license/jzills/kx?style=flat-square&color=3fb950&labelColor=21262d)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/jzills/kx/pr.yml?style=flat-square&color=3fb950&labelColor=21262d&label=CI)](https://github.com/jzills/kx/actions/workflows/pr.yml)
 
@@ -27,7 +26,8 @@
 
 ## Install
 
-Requires Python 3.11+ and `kubectl` on your PATH.
+Requires `kubectl` on your PATH. Every install path below delivers the same
+prebuilt binary — no Python runtime, no dependencies.
 
 With [uv](https://docs.astral.sh/uv/) (recommended):
 
@@ -47,16 +47,16 @@ With pip:
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required):
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
 ```
 
-Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
+Standalone binaries for linux, macOS and Windows (amd64/arm64) are attached to each [GitHub Release](https://github.com/jzills/kx/releases), with checksums in `SHA256SUMS`.
 
-On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans the bundle; later runs are unaffected until the next install. Get it over with up front:
+On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans the binary; later runs are unaffected until the next install. Get it over with up front:
 
 ```bash
 kx --version >/dev/null
