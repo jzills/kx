@@ -66,13 +66,31 @@ func isStale(err error) bool {
 	return IsNotFound(err)
 }
 
-// recover re-runs the query behind the current state entry and renders the
-// fresh listing. Returns false when there is nothing to refresh from — a state
-// entry not created by `kx get` has no query to replay.
-func recoverState(services Services) bool {
+// recoverOutcome is what a refresh attempt produced.
+type recoverOutcome int
+
+const (
+	// refreshed: the listing was re-run and rendered.
+	refreshed recoverOutcome = iota
+	// noQuery: the entry was not created by `kx get` — a tree walk or a triage
+	// sweep — so there is nothing to replay, and running a `kx get` is
+	// genuinely the way forward.
+	noQuery
+	// replayFailed: the replay broke on its own terms. Whatever went wrong is
+	// already on screen, and pointing the user at the command that just failed
+	// would only add noise.
+	replayFailed
+)
+
+// recoverState re-runs the query behind the current state entry and renders the
+// fresh listing.
+func recoverState(services Services) recoverOutcome {
 	current, err := services.State.Load()
-	if err != nil || current.Query == nil {
-		return false
+	if err != nil {
+		return replayFailed
+	}
+	if current.Query == nil {
+		return noQuery
 	}
 	query := current.Query
 	match := ""
@@ -83,25 +101,28 @@ func recoverState(services Services) bool {
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 	table, err := get.Execute(query.Resource, match, query.Args)
 	if err != nil {
-		return false
+		return replayFailed
 	}
-	refreshed, err := services.State.Load()
+	updated, err := services.State.Load()
 	if err != nil {
-		return false
+		return replayFailed
 	}
 
 	render.Raw("State was stale — refreshed, pick a new index:")
-	render.IndexedTable(table, query.Resource, refreshed.Namespace, "")
-	return true
+	render.IndexedTable(table, query.Resource, updated.Namespace, "")
+	return refreshed
 }
 
-// handleStale is called after a command fails. It renders the refreshed listing
-// when the failure means the index pointed at something that no longer exists.
+// handleStale reports a failure caused by a vanished resource, then refreshes
+// the listing under it.
+//
+// The error is rendered here rather than left to the entrypoint because the
+// fresh listing is what the user picks their next index from, so it has to be
+// the last thing on screen. Callers return SilentError so the entrypoint
+// doesn't print the same failure a second time.
 func handleStale(services Services, err error) {
-	if !isStale(err) {
-		return
-	}
-	if !recoverState(services) {
+	render.Error(err.Error())
+	if recoverState(services) == noQuery {
 		render.Raw("Run 'kx get <resource>' to refresh the list.")
 	}
 }

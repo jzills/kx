@@ -15,12 +15,14 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		err := inner(c, args)
-		if err != nil {
-			// Rendered here, before the entrypoint prints the error, so the
-			// refreshed listing appears under the failure that caused it.
-			handleStale(services, err)
+		if err == nil || !isStale(err) {
+			return err
 		}
-		return err
+		// Reported here, rather than by the entrypoint, so the refreshed
+		// listing lands under the failure that caused it. SilentError tells
+		// the entrypoint the failure has already reached the user.
+		handleStale(services, err)
+		return SilentError{Code: 1}
 	}
 	return cmd
 }
