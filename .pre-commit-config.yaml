@@ -1,19 +1,26 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.14
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
   - repo: local
     hooks:
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: sh -c 'unformatted="$(gofmt -l ./cmd ./internal ./tools)"; if [ -n "$unformatted" ]; then echo "gofmt would change:"; echo "$unformatted"; exit 1; fi'
+        pass_filenames: false
+        files: '\.go$'
+
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: go vet ./...
+        pass_filenames: false
+        files: '\.go$'
+
       - id: gen-command-table
         name: Regenerate README command table
         language: system
-        # Prefer the project's venv interpreter (which has the deps) when it
-        # exists, so `git commit` works without activating it first; fall back
-        # to `python` on PATH for CI, where deps live in the setup-python env
-        # and there is no .venv directory.
-        entry: sh -c 'if [ -x .venv/bin/python ]; then exec .venv/bin/python scripts/gen_command_table.py; else exec python scripts/gen_command_table.py; fi'
+        # Reads the command tree straight from internal/cli, so the table can't
+        # drift from the commands it documents. Exits non-zero when it rewrites
+        # the README, which is how pre-commit surfaces the change for staging.
+        entry: go run ./tools/gen-command-table
         pass_filenames: false
         always_run: true

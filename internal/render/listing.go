@@ -1,0 +1,263 @@
+package render
+
+import (
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/theme"
+)
+
+// Pod and workload phases worth coloring. Anything unlisted renders neutral
+// rather than guessing, so an unfamiliar status is never miscolored as healthy.
+var (
+	statusGreen = map[string]bool{
+		"Running": true, "Active": true, "Bound": true, "Available": true,
+		"Healthy": true, "Completed": true, "Succeeded": true,
+	}
+	statusYellow = map[string]bool{
+		"Pending": true, "Terminating": true, "Unknown": true,
+	}
+	statusRed = map[string]bool{
+		"Error": true, "CrashLoopBackOff": true, "OOMKilled": true, "Failed": true,
+		"Evicted": true, "ImagePullBackOff": true, "ErrImagePull": true,
+		"InvalidImageName": true,
+	}
+)
+
+// statusColor maps a STATUS cell onto a semantic style.
+func statusColor(status string) string {
+	switch {
+	case statusGreen[status]:
+		return theme.StatusOK
+	case statusRed[status]:
+		return theme.StatusBad
+	case statusYellow[status] || strings.Contains(status, "Init") || status == "ContainerCreating":
+		return theme.StatusWarn
+	default:
+		return theme.StatusNeutral
+	}
+}
+
+// kx top's usage-percentage thresholds. These mirror the diagnostic thresholds
+// (_MEMORY_WARN_THRESHOLD 0.75, _MEMORY_CRITICAL_THRESHOLD 0.90,
+// _CPU_WARN_THRESHOLD 0.90) re-expressed as plain percentages: a red 94% in
+// kx top means what a critical finding means in kx diag. Kept in sync by hand,
+// since render is a lower-level package than the commands.
+const (
+	memWarnPct     = 75
+	memCriticalPct = 90
+	cpuWarnPct     = 90 // CPU never reaches critical: throttling, not a crash.
+)
+
+// usagePctColor styles a "NN%" cell, returning "" to leave it unstyled.
+func usagePctColor(cell, resource string) string {
+	if !strings.HasSuffix(cell, "%") {
+		return ""
+	}
+	pct, err := strconv.Atoi(strings.TrimSuffix(cell, "%"))
+	if err != nil {
+		return ""
+	}
+	if resource == "memory" {
+		switch {
+		case pct >= memCriticalPct:
+			return theme.StatusBad
+		case pct >= memWarnPct:
+			return theme.StatusWarn
+		}
+		return ""
+	}
+	if pct >= cpuWarnPct {
+		return theme.StatusWarn
+	}
+	return ""
+}
+
+// Columns whose values read as magnitudes, so they align on the right edge.
+var rightAligned = map[string]bool{"X": true, "AGE": true, "CPU%": true, "MEM%": true}
+
+var leadingDigits = regexp.MustCompile(`^\d+`)
+
+// alignRestarts right-aligns the numeric prefix of the RESTARTS column so the
+// counts line up even when a cell carries a trailing annotation
+// ("17 (3h ago)"), which plain right-alignment of the whole cell would break.
+func alignRestarts(rows [][]string, col int) {
+	if col < 0 {
+		return
+	}
+	numWidth := 0
+	for _, row := range rows {
+		if col >= len(row) {
+			continue
+		}
+		if match := leadingDigits.FindString(row[col]); len(match) > numWidth {
+			numWidth = len(match)
+		}
+	}
+	if numWidth == 0 {
+		return
+	}
+	for _, row := range rows {
+		if col >= len(row) {
+			continue
+		}
+		match := leadingDigits.FindString(row[col])
+		if match == "" {
+			continue
+		}
+		row[col] = strings.Repeat(" ", numWidth-len(match)) + row[col]
+	}
+}
+
+func indexOf(headers []string, name string) int {
+	for i, header := range headers {
+		if header == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func itemLabel(count int) string {
+	if count == 1 {
+		return "1 item"
+	}
+	return strconv.Itoa(count) + " items"
+}
+
+// IndexedTable renders an indexed listing with its caption.
+//
+// Takes the text produced by the index service and re-parses it rather than
+// taking structured rows, so the caller stays a thin pass-through of whatever
+// columns kubectl chose to emit.
+func (r *Renderer) IndexedTable(text, resourceType, namespace, note string) {
+	headers, rows, _ := index.ParseTable(text)
+	if headers == nil {
+		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
+		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
+		// stderr) shows the zero-count caption instead of silence.
+		if strings.TrimSpace(text) != "" {
+			r.Raw(text)
+			return
+		}
+		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
+		return
+	}
+	if len(rows) == 0 {
+		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
+		return
+	}
+
+	alignRestarts(rows, indexOf(headers, "RESTARTS"))
+
+	statusCol := indexOf(headers, "STATUS")
+	cpuCol := indexOf(headers, "CPU%")
+	memCol := indexOf(headers, "MEM%")
+
+	columns := make([]Column, len(headers))
+	for i, header := range headers {
+		columns[i] = Column{Header: header, Right: rightAligned[header]}
+	}
+
+	cells := make([][]Cell, 0, len(rows))
+	for _, row := range rows {
+		rendered := make([]Cell, len(row))
+		for i, value := range row {
+			switch {
+			case i == statusCol:
+				rendered[i] = Styled(value, statusColor(value))
+			case i == cpuCol || i == memCol:
+				resource := "cpu"
+				if i == memCol {
+					resource = "memory"
+				}
+				if style := usagePctColor(value, resource); style != "" {
+					rendered[i] = Styled(value, style)
+					continue
+				}
+				rendered[i] = Plain(value)
+			default:
+				rendered[i] = Plain(value)
+			}
+		}
+		cells = append(cells, rendered)
+	}
+
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(rows)))
+	r.Table(columns, cells)
+	if note != "" {
+		r.Caption(note)
+	}
+}
+
+// KeyValueTable renders a two-column listing, used for labels and annotations.
+func (r *Renderer) KeyValueTable(header string, keys []string, values map[string]string) {
+	if len(keys) == 0 {
+		r.Caption("No " + strings.ToLower(header) + "s")
+		return
+	}
+	columns := []Column{{Header: strings.ToUpper(header)}, {Header: "VALUE"}}
+	rows := make([][]Cell, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, []Cell{Plain(key), Styled(values[key], theme.Muted)})
+	}
+	r.Table(columns, rows)
+}
+
+// ThemeList renders the theme registry, previewing each palette in its own
+// colors rather than the active theme's, so the list shows what you'd be
+// switching to.
+func (r *Renderer) ThemeList(active string) {
+	names := theme.Names()
+	r.Caption("Themes", "", itemLabel(len(names)))
+
+	columns := []Column{{Header: "X", Right: true}, {Header: ""}, {Header: "THEME"}, {Header: "PREVIEW"}}
+	rows := make([][]Cell, 0, len(names))
+	for position, name := range names {
+		rowStyle := theme.Muted
+		marker := ""
+		if name == active {
+			rowStyle = theme.Body
+			marker = "→"
+		}
+		rows = append(rows, []Cell{
+			Styled(strconv.Itoa(position+1), rowStyle),
+			Styled(marker, theme.Header),
+			Styled(name, rowStyle),
+			Plain(r.swatch(name)),
+		})
+	}
+	r.Table(columns, rows)
+}
+
+// swatchParts are the sample words shown in a theme preview, paired with the
+// style each is drawn in.
+var swatchParts = []struct{ Sample, Style string }{
+	{"✓ ok", theme.StatusOK},
+	{"! warn", theme.StatusWarn},
+	{"✗ error", theme.StatusBad},
+	{"header", theme.Header},
+	{"body", theme.Body},
+	{"muted", theme.Muted},
+}
+
+// swatch renders a preview in the named theme's own styles.
+//
+// The styles are built on the active renderer's lipgloss renderer, so a preview
+// degrades with everything else: piping `kx theme` must not emit color just
+// because each row builds its own palette.
+func (r *Renderer) swatch(name string) string {
+	specs, err := theme.Styles(name)
+	if err != nil {
+		return ""
+	}
+	styles := buildStyles(r.lip, specs)
+	parts := make([]string, 0, len(swatchParts))
+	for _, part := range swatchParts {
+		parts = append(parts, styles[part.Style].Render(part.Sample))
+	}
+	return strings.Join(parts, "  ")
+}

@@ -1,6 +1,9 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  # kx is a Go program. The transitive graph is the part that needs watching:
+  # client-go pins golang.org/x/net and x/text, and nothing else in the repo
+  # would ever propose a bump for them.
+  - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"

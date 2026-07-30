@@ -13,7 +13,6 @@
 <div align="center">
 
 [![PyPI version](https://img.shields.io/pypi/v/kx-cli?style=flat-square&color=3fb950&labelColor=21262d)](https://pypi.org/project/kx-cli/)
-[![Python](https://img.shields.io/pypi/pyversions/kx-cli?style=flat-square&color=3fb950&labelColor=21262d)](https://pypi.org/project/kx-cli/)
 [![License](https://img.shields.io/github/license/jzills/kx?style=flat-square&color=3fb950&labelColor=21262d)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/jzills/kx/pr.yml?style=flat-square&color=3fb950&labelColor=21262d&label=CI)](https://github.com/jzills/kx/actions/workflows/pr.yml)
 
@@ -27,7 +26,8 @@
 
 ## Install
 
-Requires Python 3.11+ and `kubectl` on your PATH.
+Requires `kubectl` on your PATH. Every install path below delivers the same
+prebuilt binary — no Python runtime, no dependencies.
 
 With [uv](https://docs.astral.sh/uv/) (recommended):
 
@@ -47,16 +47,16 @@ With pip:
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx` (no Python required):
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
 ```
 
-Standalone binaries (linux/macOS, amd64/arm64, no Python required) are attached to each [GitHub Release](https://github.com/jzills/kx/releases).
+Standalone binaries for linux, macOS and Windows (amd64/arm64) are attached to each [GitHub Release](https://github.com/jzills/kx/releases), with checksums in `SHA256SUMS`.
 
-On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans the bundle; later runs are unaffected until the next install. Get it over with up front:
+On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans the binary; later runs are unaffected until the next install. Get it over with up front:
 
 ```bash
 kx --version >/dev/null
@@ -82,33 +82,33 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--match/-m str] [--decode] [--key/-k str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
-| `kx secret [--match/-m str] [--decode] [--key/-k str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| `kx get <resource> [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx secret [<index>...] [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [--match/-m str] [--no-limits] [kubectl flags...]` | List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits. |
-| `kx describe <indexes>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
-| `kx events <indexes>...` | Show Kubernetes events for one or more indexed resources. |
-| `kx logs <index> [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
-| `kx scan [<index>] [--engine str] [--full] [kubectl flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
-| `kx labels <indexes>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx annotations <indexes>...` | Show annotations for one or more indexed resources. |
-| `kx label <index> [<pairs>...] [--remove str] [--overwrite]` | Set or remove labels on an indexed resource. |
-| `kx annotate <index> [<pairs>...] [--remove str] [--overwrite]` | Set or remove annotations on an indexed resource. |
-| `kx yaml <indexes>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
-| `kx delete <indexes>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
+| `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
+| `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
+| `kx logs <index>... [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| `kx labels <index>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
+| `kx annotations <index>...` | Show annotations for one or more indexed resources. |
+| `kx label <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove labels on an indexed resource. |
+| `kx annotate <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove annotations on an indexed resource. |
+| `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
+| `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
-| `kx exec <index> [<cmd>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
+| `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
 | `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
+| `kx scan [<index>] [--engine str] [--full] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
-| `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
 | `kx forward` | Navigate to the next kx get result. |
+| `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 <!-- commands-table-end -->
 
 ### Triage a namespace

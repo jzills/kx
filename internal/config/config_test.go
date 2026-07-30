@@ -1,0 +1,195 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func writeConfig(t *testing.T, contents string) Loader {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return Loader{Path: path}
+}
+
+func TestDefaultsWhenNoFile(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.NoColor {
+		t.Errorf("defaults = %+v", cfg)
+	}
+	if len(cfg.Shells) != 2 || cfg.Shells[0] != "bash" || cfg.Shells[1] != "sh" {
+		t.Errorf("Shells = %v, want [bash sh]", cfg.Shells)
+	}
+}
+
+func TestLoadsFromFile(t *testing.T) {
+	loader := writeConfig(t, `
+max_history = 3
+shells = ["zsh", "bash"]
+no_color = true
+theme = "solarized"
+`)
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MaxHistory != 3 || !cfg.NoColor || cfg.Theme != "solarized" {
+		t.Errorf("cfg = %+v", cfg)
+	}
+	if len(cfg.Shells) != 2 || cfg.Shells[0] != "zsh" {
+		t.Errorf("Shells = %v, want [zsh bash]", cfg.Shells)
+	}
+}
+
+func TestEnvironmentOverridesFile(t *testing.T) {
+	loader := writeConfig(t, "max_history = 3\ntheme = \"solarized\"\n")
+	t.Setenv("KX_MAX_HISTORY", "7")
+	t.Setenv("KX_THEME", "dracula")
+	t.Setenv("KX_SHELLS", "fish,sh")
+	t.Setenv("KX_NO_COLOR", "yes")
+
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.NoColor {
+		t.Errorf("cfg = %+v", cfg)
+	}
+	if len(cfg.Shells) != 2 || cfg.Shells[0] != "fish" {
+		t.Errorf("Shells = %v, want [fish sh]", cfg.Shells)
+	}
+}
+
+func TestNoColorEnvOffValues(t *testing.T) {
+	loader := writeConfig(t, "no_color = true\n")
+	t.Setenv("KX_NO_COLOR", "0")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.NoColor {
+		t.Error("KX_NO_COLOR=0 did not turn styling back on")
+	}
+}
+
+// A bool is not an acceptable max_history, and neither is a string or a
+// non-positive number.
+func TestInvalidMaxHistoryRejected(t *testing.T) {
+	for name, contents := range map[string]string{
+		"boolean":  "max_history = true",
+		"string":   `max_history = "10"`,
+		"zero":     "max_history = 0",
+		"negative": "max_history = -1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loader := writeConfig(t, contents)
+			if _, err := loader.Load(); err == nil {
+				t.Errorf("Load accepted max_history = %s", contents)
+			}
+		})
+	}
+}
+
+func TestNonIntegerEnvMaxHistoryRejected(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	t.Setenv("KX_MAX_HISTORY", "many")
+	_, err := loader.Load()
+	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+		t.Errorf("error = %v, want an integer complaint", err)
+	}
+}
+
+func TestMalformedTOMLReportsPath(t *testing.T) {
+	loader := writeConfig(t, "max_history = [unclosed")
+	_, err := loader.Load()
+	if err == nil {
+		t.Fatal("Load accepted malformed TOML")
+	}
+	if !strings.Contains(err.Error(), loader.Path) {
+		t.Errorf("error = %q, want it to name the config file", err)
+	}
+}
+
+func TestUnknownThemeRejectedWhenValidatorSupplied(t *testing.T) {
+	loader := writeConfig(t, `theme = "nonexistent"`)
+	loader.ThemeKnown = func(string) bool { return false }
+	_, err := loader.Load()
+	if err == nil || !strings.Contains(err.Error(), "unknown theme") {
+		t.Errorf("error = %v, want an unknown-theme complaint", err)
+	}
+}
+
+// Rewriting only the theme line keeps user comments and formatting intact.
+func TestSaveThemeReplacesExistingLinePreservingComments(t *testing.T) {
+	loader := writeConfig(t, "# my settings\nmax_history = 3\ntheme = \"old\"\n")
+	if err := loader.SaveTheme("new"); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+
+	data, err := os.ReadFile(loader.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `theme = "new"`) {
+		t.Errorf("theme not updated:\n%s", text)
+	}
+	if strings.Contains(text, `"old"`) {
+		t.Errorf("old theme still present:\n%s", text)
+	}
+	if !strings.Contains(text, "# my settings") || !strings.Contains(text, "max_history = 3") {
+		t.Errorf("SaveTheme clobbered unrelated config:\n%s", text)
+	}
+}
+
+func TestSaveThemeAppendsWhenAbsent(t *testing.T) {
+	loader := writeConfig(t, "max_history = 3\n")
+	if err := loader.SaveTheme("new"); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+
+	data, _ := os.ReadFile(loader.Path)
+	if !strings.Contains(string(data), `theme = "new"`) {
+		t.Errorf("theme not appended:\n%s", data)
+	}
+	if !strings.Contains(string(data), "max_history = 3") {
+		t.Errorf("SaveTheme clobbered existing config:\n%s", data)
+	}
+}
+
+func TestSaveThemeCreatesFile(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "nested", "config.toml")}
+	if err := loader.SaveTheme("new"); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+
+	data, err := os.ReadFile(loader.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `theme = "new"`) {
+		t.Errorf("file contents = %q", data)
+	}
+}
+
+func TestLoadAfterSaveTheme(t *testing.T) {
+	loader := writeConfig(t, "max_history = 3\n")
+	if err := loader.SaveTheme("persisted"); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Theme != "persisted" {
+		t.Errorf("Theme = %q, want persisted", cfg.Theme)
+	}
+}
