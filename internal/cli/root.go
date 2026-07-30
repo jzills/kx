@@ -124,7 +124,10 @@ func NewRoot(services Services, version string) *cobra.Command {
 
 func newGetCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get <resource> [kubectl flags]",
+		// The indexes are documented here because runGet accepts them —
+		// `kx get pods 1 3` re-fetches those two — and neither the help screen
+		// nor the README table mentioned it.
+		Use:   "get <resource> [index]... [kubectl flags]",
 		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"Unrecognized flags are passed through to kubectl, so `-n <namespace>`,\n" +

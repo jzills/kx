@@ -158,3 +158,21 @@ func TestImagesNoun(t *testing.T) {
 }
 
 var _ scanner.Service = (*fakeScanner)(nil)
+
+// `kx scan web` is a mistyped index, not a scanner flag. Sweeping the whole
+// namespace instead would act on something other than what was typed, and
+// outside --full the stray argument is dropped without a word.
+//
+// The guard returns before any cluster or scanner call, which is what makes it
+// testable without either.
+func TestScanRejectsANonNumericIndex(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"web"})
+	if err == nil {
+		t.Fatal("a non-numeric index was accepted")
+	}
+	if !strings.Contains(err.Error(), "'web' is not a valid int") {
+		t.Errorf("err = %v, want it to name the bad argument", err)
+	}
+}

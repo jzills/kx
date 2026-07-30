@@ -20,11 +20,15 @@ type TopCommand struct {
 	Index   Indexer
 }
 
-// Execute returns the indexed table to display.
-func (c TopCommand) Execute(filterTerm string, extraArgs []string, noLimits bool) (string, error) {
+// Execute returns the indexed table to display, and the namespace it was
+// listed from — resolving that costs a `kubectl config view` when no -n was
+// given, and the caller needs the same answer for the caption.
+func (c TopCommand) Execute(
+	filterTerm string, extraArgs []string, noLimits bool,
+) (table, namespace string, err error) {
 	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if filterTerm != "" {
 		output = c.Index.Filter(output, filterTerm)
@@ -41,19 +45,19 @@ func (c TopCommand) Execute(filterTerm string, extraArgs []string, noLimits bool
 		}
 	}
 
-	namespace := extractNamespace(extraArgs)
+	namespace = extractNamespace(extraArgs)
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
 	if !allNamespaces && !hasContainers && !noLimits {
 		output, err = c.withUsagePercentages(output, namespace)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if allNamespaces {
 		// Names aren't unique across namespaces — matches kx get's rule.
-		return output, nil
+		return output, namespace, nil
 	}
 
 	indexed, names := c.Index.Add(output)
@@ -72,10 +76,10 @@ func (c TopCommand) Execute(filterTerm string, extraArgs []string, noLimits bool
 			// listing, which is what the indexes were assigned against.
 			Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},
 		}); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, namespace, nil
 }
 
 // withUsagePercentages appends CPU%/MEM% columns computed against each pod's
