@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -21,14 +20,30 @@ const spinnerInterval = 250 * time.Millisecond
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
+// clearLine returns the cursor to column zero and erases the row, removing a
+// painted spinner frame.
+const clearLine = "\r\033[K"
+
 // Status shows a spinner while a command waits on the cluster, and returns the
 // function that stops it.
 //
 // A no-op off-terminal, so piped output and test captures never receive
-// spinner frames. Frames go to stderr so a spinner can never land in the middle
-// of output being piped to another program.
+// spinner frames. Frames go to the error stream so a spinner can never land in
+// the middle of output being piped to another program.
 func (r *Renderer) Status(message string) (stop func()) {
-	if !isTerminal(r.out) {
+	return r.status(message, isTerminal(r.out), spinnerDelay, spinnerInterval)
+}
+
+// status is Status with the terminal check and the timings injected.
+//
+// The seam exists because Status starts nothing unless stdout is a terminal,
+// and under `go test` it never is — so the goroutine below, the only
+// concurrency in kx and the stated reason CI runs with -race, was unreachable
+// from any test. Frames are written to r.err rather than to os.Stderr directly
+// for the same reason, and because a caller who redirected the error stream
+// should not still get spinner frames on the real one.
+func (r *Renderer) status(message string, enabled bool, delay, interval time.Duration) func() {
+	if !enabled {
 		return func() {}
 	}
 
@@ -37,13 +52,10 @@ func (r *Renderer) Status(message string) (stop func()) {
 		started  bool
 		finished bool
 		done     = make(chan struct{})
+		once     sync.Once
 	)
 
-	clear := func() {
-		fmt.Fprint(os.Stderr, "\r\033[K")
-	}
-
-	timer := time.AfterFunc(spinnerDelay, func() {
+	timer := time.AfterFunc(delay, func() {
 		mu.Lock()
 		if finished {
 			mu.Unlock()
@@ -52,7 +64,7 @@ func (r *Renderer) Status(message string) (stop func()) {
 		started = true
 		mu.Unlock()
 
-		ticker := time.NewTicker(spinnerInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		frame := 0
 		for {
@@ -63,7 +75,7 @@ func (r *Renderer) Status(message string) (stop func()) {
 				mu.Unlock()
 				return
 			}
-			fmt.Fprint(os.Stderr, "\r"+r.style(theme.Muted, spinnerFrames[frame]+" "+message+"…"))
+			fmt.Fprint(r.err, "\r"+r.style(theme.Muted, spinnerFrames[frame]+" "+message+"…"))
 			mu.Unlock()
 
 			frame = (frame + 1) % len(spinnerFrames)
@@ -75,19 +87,23 @@ func (r *Renderer) Status(message string) (stop func()) {
 		}
 	})
 
+	// once, because a stop called twice would close an already-closed channel
+	// and panic. Nothing does that today; nothing enforced that it couldn't.
 	return func() {
-		timer.Stop()
-		// The lock closes the race where the timer has fired but the first
-		// frame has not been painted, which would otherwise leave the spinner
-		// running after the command finished.
-		mu.Lock()
-		wasStarted := started
-		finished = true
-		mu.Unlock()
-		close(done)
-		if wasStarted {
-			clear()
-		}
+		once.Do(func() {
+			timer.Stop()
+			// The lock closes the race where the timer has fired but the first
+			// frame has not been painted, which would otherwise leave the
+			// spinner running after the command finished.
+			mu.Lock()
+			wasStarted := started
+			finished = true
+			mu.Unlock()
+			close(done)
+			if wasStarted {
+				fmt.Fprint(r.err, clearLine)
+			}
+		})
 	}
 }
 
