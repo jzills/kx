@@ -9,7 +9,7 @@ jobs:
   build-and-publish:
     name: Build and Publish
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
     outputs:
@@ -23,17 +23,18 @@ jobs:
           VERSION=$(bash .github/scripts/extract-version.sh "${GITHUB_REF#refs/heads/}")
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
+          go-version-file: go.mod
+          cache: true
 
-      - name: Install build tools
-        run: pip install build twine
+      - name: Run tests
+        run: go test ./...
 
-      - name: Install dev dependencies and run tests
-        run: pip install -e ".[dev]" && pytest -v
-
+      # The binary carries its version through -ldflags, so pyproject.toml is
+      # stamped only to keep the repo's recorded version honest and to supply
+      # the wheel metadata's name and description.
       - name: Set version in pyproject.toml
         run: |
           sed -i "s/^version = .*/version = \"${{ steps.version.outputs.value }}\"/" pyproject.toml
@@ -46,24 +47,72 @@ jobs:
           git commit -m "chore: bump version to ${{ steps.version.outputs.value }}"
           git push origin "${{ github.ref_name }}"
 
-      - name: Build distribution
-        run: python -m build
+      # Binaries first: the wheels package them, so unlike the PyInstaller
+      # pipeline the PyPI publish now depends on the build rather than
+      # preceding it.
+      - name: Cross-compile every target
+        run: scripts/build_binaries.sh "${{ steps.version.outputs.value }}"
+
+      - name: Verify the archives are krew-installable
+        run: |
+          for archive in dist/kx_v*.tar.gz; do
+            extract="$RUNNER_TEMP/$(basename "$archive" .tar.gz)"
+            mkdir -p "$extract"
+            tar -C "$extract" -xzf "$archive"
+            if [ -n "$(find "$extract" -type l)" ]; then
+              echo "$archive contains symlinks, which krew cannot extract:"
+              find "$extract" -type l
+              exit 1
+            fi
+            test -x "$extract/kx/kx" || { echo "$archive has no executable at kx/kx"; exit 1; }
+          done
+
+      # Windows ships as .zip and krew never selects it, so it is checked for
+      # its own layout rather than krew's.
+      - name: Verify the Windows archives
+        run: |
+          for archive in dist/kx_v*_windows_*.zip; do
+            test -f "$archive" || { echo "no Windows archives were built"; exit 1; }
+            python3 -m zipfile -l "$archive" | grep -q 'kx/kx\.exe' || {
+              echo "$archive has no kx/kx.exe"; exit 1; }
+          done
+
+      - name: Check the bundled version matches the release
+        run: |
+          ACTUAL="$(./dist/binaries/kx_linux_amd64/kx --version)"
+          EXPECTED="kx ${{ steps.version.outputs.value }}"
+          test "$ACTUAL" = "$EXPECTED" || { echo "expected '$EXPECTED', got '$ACTUAL'"; exit 1; }
+
+      - name: Build wheels
+        run: python3 scripts/build_wheels.py --version "${{ steps.version.outputs.value }}" --binaries dist/binaries
+
+      # An installed wheel whose binary lost its executable bit passes every
+      # structural check and still fails at the prompt, so the installed
+      # command is run before anything is published.
+      - name: Install a wheel and run the installed binary
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet \
+            "dist/wheels/kx_cli-${{ steps.version.outputs.value }}-py3-none-manylinux_2_17_x86_64.whl"
+          "$RUNNER_TEMP/venv/bin/kx" --version
 
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: twine upload --skip-existing dist/*
+        run: |
+          python3 -m pip install --quiet twine
+          python3 -m twine check dist/wheels/*.whl
+          python3 -m twine upload --skip-existing dist/wheels/*.whl
 
-  binaries:
-    name: Build Binaries
-    needs: build-and-publish
-    permissions:
-      contents: read
-    uses: ./.github/workflows/binaries.yml
-    with:
-      version: ${{ needs.build-and-publish.outputs.version }}
-      ref: ${{ github.ref_name }}
+      - name: Upload release archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-archives
+          path: |
+            dist/kx_v*.tar.gz
+            dist/kx_v*.zip
+          if-no-files-found: error
 
   tag:
     name: Create Release Tag
@@ -84,19 +133,19 @@ jobs:
   github-release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-and-publish, binaries, tag]
+    needs: [build-and-publish, tag]
     permissions:
       contents: write
       actions: write
     steps:
       - name: Download binary archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true
 
       - name: Generate checksums
-        run: cd assets && sha256sum *.tar.gz > SHA256SUMS
+        run: cd assets && sha256sum *.tar.gz *.zip > SHA256SUMS
 
       - name: Create GitHub Release
         env:

@@ -1,81 +1,104 @@
 name: Binaries
 
+# Build check for the release artifacts. The release workflow builds them
+# itself rather than calling this — one runner cross-compiles every target, so
+# there is no matrix to share and no ordering to coordinate.
 on:
-  workflow_call:
-    inputs:
-      version:
-        description: Release version (e.g. 1.2.3); archives are named kx_v<version>_<os>_<arch>.tar.gz
-        required: true
-        type: string
-      ref:
-        description: Git ref to build (the version-bumped release branch)
-        required: true
-        type: string
   pull_request:
     paths:
-      - kx.spec
-      - scripts/pyinstaller_entry.py
+      - "cmd/**"
+      - "internal/**"
+      - go.mod
+      - go.sum
+      - scripts/build_binaries.sh
+      - scripts/build_wheels.py
       - .github/workflows/binaries.yml
 
 jobs:
   build:
-    name: Build ${{ matrix.os_name }}/${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-latest, os_name: linux, arch: amd64 }
-          - { runner: ubuntu-24.04-arm, os_name: linux, arch: arm64 }
-          - { runner: macos-15-intel, os_name: darwin, arch: amd64 }
-          - { runner: macos-latest, os_name: darwin, arch: arm64 }
+    name: Cross-compile and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          go-version-file: go.mod
+          cache: true
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+      - name: Build every target
+        run: scripts/build_binaries.sh dev
 
-      - name: Install package and PyInstaller
-        run: pip install ".[build]"
-
-      - name: Build
-        run: pyinstaller kx.spec --noconfirm
-
-      - name: Smoke test
+      - name: Smoke test the native binary
         run: |
-          ./dist/kx/kx --version
-          ./dist/kx/kx --help > /dev/null
-          ./dist/kx/kx theme > /dev/null
+          ./dist/binaries/kx_linux_amd64/kx --version
+          ./dist/binaries/kx_linux_amd64/kx --help > /dev/null
+          ./dist/binaries/kx_linux_amd64/kx theme > /dev/null
 
-      - name: Check bundled version matches release
-        if: inputs.version != ''
+      # The artifact must be usable by krew, which cannot extract symlinks and
+      # expects the binary at kx/kx.
+      - name: Verify the archives are krew-installable
         run: |
-          ACTUAL="$(./dist/kx/kx --version)"
-          test "$ACTUAL" = "kx ${{ inputs.version }}" || { echo "expected 'kx ${{ inputs.version }}', got '$ACTUAL'"; exit 1; }
+          for archive in dist/kx_vdev_*.tar.gz; do
+            extract="$RUNNER_TEMP/$(basename "$archive" .tar.gz)"
+            mkdir -p "$extract"
+            tar -C "$extract" -xzf "$archive"
+            if [ -n "$(find "$extract" -type l)" ]; then
+              echo "$archive contains symlinks, which krew cannot extract:"
+              find "$extract" -type l
+              exit 1
+            fi
+            test -x "$extract/kx/kx" || { echo "$archive has no executable at kx/kx"; exit 1; }
+          done
+          "$RUNNER_TEMP/kx_vdev_linux_amd64/kx/kx" --version
 
-      - name: Package
-        # --dereference: krew's extractor rejects symlinks (macOS bundles
-        # contain them, e.g. _internal/Python -> Python.framework/...)
-        run: tar -C dist --dereference -czf "kx_v${{ inputs.version || 'dev' }}_${{ matrix.os_name }}_${{ matrix.arch }}.tar.gz" kx
-
-      - name: Verify archive is krew-installable
+      # Windows ships as .zip and krew never selects it, so it is checked for
+      # its own layout rather than krew's. The .exe suffix is what makes the
+      # binary runnable there and what pip installs it under, so its absence is
+      # a silent break rather than a visible one.
+      - name: Verify the Windows archives
         run: |
-          EXTRACT="$RUNNER_TEMP/kx-archive-check"
-          mkdir -p "$EXTRACT"
-          tar -C "$EXTRACT" -xzf kx_v*.tar.gz
-          if [ -n "$(find "$EXTRACT" -type l)" ]; then
-            echo "archive contains symlinks, which krew cannot extract:"; find "$EXTRACT" -type l; exit 1
-          fi
-          "$EXTRACT/kx/kx" --version
+          for archive in dist/kx_vdev_windows_*.zip; do
+            test -f "$archive" || { echo "no Windows archives were built"; exit 1; }
+            python3 -m zipfile -l "$archive" | grep -q 'kx/kx\.exe' || {
+              echo "$archive has no kx/kx.exe"; exit 1; }
+          done
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kx_${{ matrix.os_name }}_${{ matrix.arch }}
-          path: kx_v*.tar.gz
-          if-no-files-found: error
+      - name: Build wheels
+        run: python3 scripts/build_wheels.py --version 0.0.0.dev0 --binaries dist/binaries
+
+      # A wheel that installs a non-executable binary passes every structural
+      # check and still leaves `kx` failing with "permission denied", so the
+      # installed command is run rather than merely inspected.
+      - name: Install a wheel and run the installed binary
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet \
+            dist/wheels/kx_cli-0.0.0.dev0-py3-none-manylinux_2_17_x86_64.whl
+          "$RUNNER_TEMP/venv/bin/kx" --version
+
+      # A Windows wheel whose payload lost its .exe installs a file Windows will
+      # not execute, which no structural check on the linux wheels would catch.
+      - name: Check the Windows wheel carries kx.exe
+        run: |
+          python3 -m zipfile -l dist/wheels/kx_cli-0.0.0.dev0-py3-none-win_amd64.whl \
+            | grep -q 'data/scripts/kx\.exe' || {
+              echo "the win_amd64 wheel has no kx.exe"; exit 1; }
+
+      - name: Check the wheels are publishable
+        run: |
+          python3 -m pip install --quiet twine
+          python3 -m twine check dist/wheels/*.whl
+
+      # The reason the port happened: a CGO_ENABLED=0 binary links against no
+      # libc, so musl and old glibc are both fine. Regressing this would
+      # reopen #130 silently.
+      - name: Run on musl and on old glibc
+        run: |
+          binary="$PWD/dist/binaries/kx_linux_amd64/kx"
+          for image in alpine:3.20 debian:11-slim rockylinux:8; do
+            echo "--- $image ---"
+            docker run --rm -v "$binary:/kx:ro" "$image" /kx --version
+          done

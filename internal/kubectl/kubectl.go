@@ -1,0 +1,129 @@
+// Package kubectl wraps the kubectl binary. kx delegates all resource
+// operations to kubectl rather than the API server so that arbitrary flags pass
+// through untouched and kubectl keeps ownership of kubeconfig resolution, auth
+// and credential exec plugins.
+package kubectl
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+const missingKubectl = "kubectl not found on PATH — install kubectl " +
+	"(https://kubernetes.io/docs/tasks/tools/) and ensure it is on your PATH."
+
+// Service is the interface commands depend on, so tests can substitute a fake
+// without spawning processes.
+type Service interface {
+	// Run captures stdout and fails on a non-zero exit.
+	Run(args []string) (string, error)
+	// RunInteractive streams stdio through to the terminal and returns the
+	// exit code.
+	RunInteractive(args []string, quietStderr bool) (int, error)
+	// Probe runs silently and returns only the exit code.
+	Probe(args []string) int
+	CurrentNamespace() string
+	CurrentContext() string
+}
+
+// Exec is the real Service, shelling out to kubectl.
+type Exec struct{}
+
+// New returns a kubectl service backed by the kubectl binary.
+func New() *Exec { return &Exec{} }
+
+// command builds the exec.Cmd. A missing kubectl surfaces at Start/Run time as
+// exec.ErrNotFound; every entry point below translates it into an actionable
+// error rather than letting a bare "executable file not found" escape.
+func (Exec) command(args []string) *exec.Cmd {
+	return exec.Command("kubectl", args...)
+}
+
+func translate(err error) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return errors.New(missingKubectl)
+	}
+	return err
+}
+
+// Run captures stdout, returning the trimmed stderr as the error on a non-zero
+// exit so the caller can render kubectl's own message.
+func (e Exec) Run(args []string) (string, error) {
+	cmd := e.command(args)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return "", errors.New(strings.TrimSpace(stderr.String()))
+	}
+	if err != nil {
+		return "", translate(err)
+	}
+	return stdout.String(), nil
+}
+
+// RunInteractive wires stdio straight through, which is what `exec`, `edit` and
+// `port-forward` need to keep their TTY behavior.
+func (e Exec) RunInteractive(args []string, quietStderr bool) (int, error) {
+	cmd := e.command(args)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	if !quietStderr {
+		cmd.Stderr = os.Stderr
+	}
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	if err != nil {
+		return 1, translate(err)
+	}
+	return 0, nil
+}
+
+// Probe runs silently and reports only the exit code, used for shell detection.
+func (e Exec) Probe(args []string) int {
+	cmd := e.command(args)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		return 1
+	}
+	return 0
+}
+
+// CurrentNamespace reports the active namespace, falling back to "default".
+//
+// Best-effort: no kubeconfig or no current context exits non-zero. The
+// namespace is only a label here, so a failure must not become a command error.
+func (e Exec) CurrentNamespace() string {
+	out, err := e.Run([]string{"config", "view", "--minify", "-o", "jsonpath={..namespace}"})
+	if err != nil {
+		return "default"
+	}
+	if ns := strings.TrimSpace(out); ns != "" {
+		return ns
+	}
+	return "default"
+}
+
+// CurrentContext reports the active context, or "" when none is set, so context
+// listing still works instead of failing.
+func (e Exec) CurrentContext() string {
+	out, err := e.Run([]string{"config", "current-context"})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+var _ Service = (*Exec)(nil)
