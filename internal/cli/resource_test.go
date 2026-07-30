@@ -105,12 +105,91 @@ func TestDescribeSucceedingDoesNotProbe(t *testing.T) {
 	}
 }
 
-// A resource that still exists means the failure was something else, and must
-// not be reported as stale state.
-func TestDescribeFailureOnLiveResourceIsNotStale(t *testing.T) {
-	kubectl := &recordingKubectl{exitCode: 1, probeCode: 0}
-	if err := (DescribeCommand{Kubectl: kubectl, State: pod("nginx")}).Execute(1, nil); err != nil {
-		t.Errorf("err = %v, want nil for a live resource", err)
+// A resource that still exists means the failure was something else: not stale
+// state, but still a failure. kubectl has already printed why, so the exit code
+// is forwarded without a second message.
+//
+// Returning nil here is what made `kx describe 1 --bogus-flag` print kubectl's
+// error and then exit 0, so a shell could not tell it had failed.
+func TestDescribeFailureOnLiveResourceForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %#v, want SilentError", err)
+	}
+	if silent.Code != 3 {
+		t.Errorf("exit code = %d, want kubectl's 3", silent.Code)
+	}
+	// Not stale, so the refresh path must leave it alone.
+	if isStale(err) {
+		t.Error("a live resource's failure was classified as stale")
+	}
+}
+
+// The same failure against a resource that has gone is stale state, and keeps
+// routing into the refresh instead.
+func TestDescribeFailureOnVanishedResourceStaysStale(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+	if !isStale(err) {
+		t.Error("StaleResourceError is not classified as stale")
+	}
+}
+
+func TestEditAndPortForwardForwardTheExitCode(t *testing.T) {
+	t.Run("edit", func(t *testing.T) {
+		kubectl := &recordingKubectl{exitCode: 5, probeCode: 0}
+		err := EditCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+		var silent SilentError
+		if !errors.As(err, &silent) || silent.Code != 5 {
+			t.Errorf("err = %#v, want SilentError{5}", err)
+		}
+	})
+	t.Run("port-forward", func(t *testing.T) {
+		kubectl := &recordingKubectl{exitCode: 2, probeCode: 0}
+		err := PortForwardCommand{Kubectl: kubectl, State: pod("nginx")}.
+			Execute(1, "8080:80", nil)
+		var silent SilentError
+		if !errors.As(err, &silent) || silent.Code != 2 {
+			t.Errorf("err = %#v, want SilentError{2}", err)
+		}
+	})
+}
+
+func TestLogsForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 4, probeCode: 0}
+	err := LogsCommand{Kubectl: kubectl, State: pod("nginx"), Status: noStatus}.
+		Execute(1, nil)
+	var silent SilentError
+	if !errors.As(err, &silent) || silent.Code != 4 {
+		t.Errorf("err = %#v, want SilentError{4}", err)
+	}
+}
+
+// kubectl's stderr is suppressed for `kx exec -- cmd`, so kx has to report the
+// failure itself — but the container's exit code is what a script needs back,
+// not a flat 1.
+func TestExecForwardsTheContainerExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 42, probeCode: 0}
+	err := ExecCommand{Kubectl: kubectl, State: pod("nginx"), Shells: []string{"sh"}}.
+		Execute(1, []string{"false"}, nil)
+
+	var exit ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("err = %#v, want ExitError", err)
+	}
+	if exit.Code != 42 {
+		t.Errorf("exit code = %d, want the container's 42", exit.Code)
+	}
+	if !strings.Contains(exit.Message, "exit 42") {
+		t.Errorf("message = %q, want it to name the code", exit.Message)
 	}
 }
 

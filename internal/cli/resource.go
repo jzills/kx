@@ -34,9 +34,10 @@ func (c DescribeCommand) Execute(index int, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		// kubectl already printed its own message; the only thing left to
-		// decide is whether this was a stale index worth refreshing.
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		// kubectl already printed its own message; what is left is deciding
+		// whether this was a stale index worth refreshing, and forwarding the
+		// exit code either way.
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -58,7 +59,7 @@ func (c EditCommand) Execute(index int, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -192,7 +193,7 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 		return err
 	}
 	if code != 0 {
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -225,7 +226,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			return ensureExists(c.Kubectl, kind, name, namespace)
+			return forwardExit(c.Kubectl, kind, name, namespace, code)
 		}
 		return nil
 
@@ -237,8 +238,16 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		args := append([]string{
 			"logs", "-l", selector, "--prefix=true", "-n", namespace,
 		}, extraArgs...)
-		_, err = c.Kubectl.RunInteractive(args, false)
-		return err
+		code, err := c.Kubectl.RunInteractive(args, false)
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			// No per-resource staleness check: the selector may legitimately
+			// match nothing, and the workload itself was just read to build it.
+			return SilentError{Code: code}
+		}
+		return nil
 
 	default:
 		return fmt.Errorf("Logs are not supported for '%s'.", kind)
@@ -321,7 +330,13 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 			if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
 				return err
 			}
-			return fmt.Errorf("Command failed in container (exit %d).", code)
+			// The message has to be kx's own — kubectl's stderr is suppressed
+			// above — but the code belongs to the command that ran, so that
+			// `kx exec 1 -- test -f /x` is usable from a shell.
+			return ExitError{
+				Code:    code,
+				Message: fmt.Sprintf("Command failed in container (exit %d).", code),
+			}
 		}
 		return nil
 	}
