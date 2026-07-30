@@ -67,6 +67,16 @@ for target in "${targets[@]}"; do
   rm -rf "$archive_root"
   mkdir -p "$archive_root/kx"
   cp "$stage/kx${exe}" "$archive_root/kx/kx${exe}"
+
+  # krew-index rejects a plugin whose archive carries no license:
+  #
+  #   spec.platforms[0] failed to install: LICENSE (or alike) file is not
+  #   extracted from the archive as part of installation
+  #
+  # The PyInstaller archives satisfied this by accident — the bundle swept in
+  # kx_cli-<version>.dist-info/licenses/LICENSE along with every dependency's.
+  # A Go archive holds one file, so the requirement has to be met deliberately.
+  cp "$root/LICENSE" "$archive_root/kx/LICENSE"
   if [ "$os" = "windows" ]; then
     # python3's zipfile rather than zip(1): the wheel build already requires
     # python3, and zip is not installed everywhere this script runs.
