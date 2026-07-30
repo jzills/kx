@@ -51,6 +51,10 @@ jobs:
               exit 1
             fi
             test -x "$extract/kx/kx" || { echo "$archive has no executable at kx/kx"; exit 1; }
+            # krew-index refuses a plugin whose archive carries no license. The
+            # PyInstaller bundles satisfied this by accident, so v0.1.0 was the
+            # first release to trip it — at krew-index rather than here.
+            test -f "$extract/kx/LICENSE" || { echo "$archive has no kx/LICENSE"; exit 1; }
           done
           "$RUNNER_TEMP/kx_vdev_linux_amd64/kx/kx" --version
 
@@ -64,6 +68,8 @@ jobs:
             test -f "$archive" || { echo "no Windows archives were built"; exit 1; }
             python3 -m zipfile -l "$archive" | grep -q 'kx/kx\.exe' || {
               echo "$archive has no kx/kx.exe"; exit 1; }
+            python3 -m zipfile -l "$archive" | grep -q 'kx/LICENSE' || {
+              echo "$archive has no kx/LICENSE"; exit 1; }
           done
 
       - name: Build wheels
