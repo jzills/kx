@@ -55,6 +55,14 @@ func run() int {
 		if errors.As(err, &silent) {
 			return silent.Code
 		}
+		// Reported here rather than by the command, so the exit code survives
+		// alongside a message kx has to print itself because kubectl's was
+		// suppressed.
+		var exit cli.ExitError
+		if errors.As(err, &exit) {
+			render.Error(exit.Message)
+			return exit.Code
+		}
 		// A declined confirmation is the user's decision, not a failure to
 		// report back to them with an error marker.
 		var aborted render.ErrAborted
