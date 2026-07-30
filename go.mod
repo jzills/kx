@@ -2,6 +2,8 @@ module github.com/jzills/kx
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/lipgloss v1.1.0
