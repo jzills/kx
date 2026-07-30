@@ -41,6 +41,27 @@ func extractString(args []string, long, short string) (value string, rest []stri
 	return value, rest, nil
 }
 
+// hasFlag reports whether a flag appears in args, in any spelling extractString
+// accepts.
+//
+// Presence is not the same question as value. `-k ""` names a key the user
+// asked for and a whole-Secret dump they did not, so an explicitly empty value
+// has to be distinguishable from an absent flag — which the returned value
+// alone cannot do.
+func hasFlag(args []string, long, short string) bool {
+	for _, arg := range args {
+		switch {
+		case arg == long, short != "" && arg == short:
+			return true
+		case strings.HasPrefix(arg, long+"="):
+			return true
+		case short != "" && strings.HasPrefix(arg, short+"="):
+			return true
+		}
+	}
+	return false
+}
+
 // extractBool removes a boolean flag from args and reports whether it was
 // present.
 func extractBool(args []string, names ...string) (present bool, rest []string) {

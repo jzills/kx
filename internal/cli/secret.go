@@ -254,7 +254,7 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, y
 		if count == 1 {
 			noun = "Secret"
 		}
-		if err := render.Confirm(
+		if err := services.confirm()(
 			"Decode " + strconv.Itoa(count) + " " + noun + " in " + namespace + "?",
 		); err != nil {
 			return err
@@ -281,11 +281,15 @@ func secretFlags(args []string) ([]string, getOptions, error) {
 	options.Decode, rest = extractBool(rest, "--decode")
 	options.Yes, rest = extractBool(rest, "--yes", "-y")
 
+	// Presence, not emptiness: `-k ""` asks for a key that cannot exist, and
+	// must fail as a missing key rather than silently widening into a dump of
+	// every value in the Secret.
+	hasKey := hasFlag(rest, "--key", "-k")
 	key, rest, err := extractString(rest, "--key", "-k")
 	if err != nil {
 		return nil, options, err
 	}
-	if key != "" {
+	if hasKey {
 		options.Key, options.HasKey = key, true
 	}
 	return rest, options, nil

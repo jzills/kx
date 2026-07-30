@@ -9,6 +9,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -26,6 +27,20 @@ type Services struct {
 	// front so commands that never touch the API server don't pay for loading
 	// and validating a kubeconfig.
 	Kubernetes func() (kubernetes.Interface, error)
+	// Confirm asks for consent, returning an error to abort. Injected rather
+	// than called through the renderer so a test can answer the prompt; the
+	// renderer's own Confirm reads os.Stdin, which under `go test` is closed
+	// and therefore always declines.
+	Confirm func(string) error
+}
+
+// confirm is the consent prompt, falling back to the renderer's when a caller
+// left it unset — Services is constructed literally in several tests.
+func (s Services) confirm() func(string) error {
+	if s.Confirm != nil {
+		return s.Confirm
+	}
+	return render.Confirm
 }
 
 // NewServices builds the production service set from the loaded config.
@@ -36,6 +51,7 @@ func NewServices(cfg config.Config) Services {
 		Index:      index.Service{},
 		Config:     cfg,
 		Kubernetes: kubernetesClient,
+		Confirm:    render.Confirm,
 	}
 }
 
