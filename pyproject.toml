@@ -9,6 +9,6 @@
 # released; the binary carries its own version through -ldflags.
 [project]
 name = "kx-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "kubectl wrapper with index-based resource selection"
 readme = "README.md"
