@@ -1,6 +1,7 @@
 package index
 
 import (
+	"github.com/mattn/go-runewidth"
 	"strings"
 	"testing"
 )
@@ -216,5 +217,39 @@ func TestCountRows(t *testing.T) {
 	}
 	if count, tabular := CountRows(`{"kind":"List"}`); count != 0 || tabular {
 		t.Errorf("CountRows(json) = %d, %v; want 0, false", count, tabular)
+	}
+}
+
+// Padding is measured in terminal columns, not bytes, matching the tables
+// internal/render draws itself.
+//
+// "日本語" is 9 bytes but occupies 6 columns. Padding by byte length pads it to
+// 9 and every other cell to 9 bytes as well, so the rows come out visibly
+// different widths on a terminal. Every cell is padded, so the invariant is
+// simply that all rows render to the same display width.
+func TestFormatPadsByDisplayWidth(t *testing.T) {
+	out := Format([][]string{
+		{"NAME", "STATUS"},
+		{"日本語", "Running"},
+		{"web", "Running"},
+	})
+	seen := map[int][]string{}
+	for _, line := range strings.Split(out, "\n") {
+		w := runewidth.StringWidth(line)
+		seen[w] = append(seen[w], line)
+	}
+	if len(seen) != 1 {
+		t.Errorf("rows render at %d different display widths, want 1:\n%s\n%v",
+			len(seen), out, seen)
+	}
+}
+
+// ASCII is all kubectl emits for built-in resources, so the layout every other
+// test pins must be untouched by measuring in columns.
+func TestFormatIsUnchangedForASCII(t *testing.T) {
+	rows := [][]string{{"X", "NAME", "AGE"}, {"1", "web", "5d"}, {"2", "redis-longer", "3d"}}
+	want := "X  NAME          AGE\n1  web           5d \n2  redis-longer  3d "
+	if got := Format(rows); got != want {
+		t.Errorf("Format =\n%q\nwant\n%q", got, want)
 	}
 }

@@ -120,7 +120,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	updated := pattern.ReplaceAll(content,
+	// Literal: ReplaceAll expands $name and ${name} in the replacement, so a
+	// command whose Short or Example mentions a shell variable — $EDITOR,
+	// $KUBECONFIG — would render as an empty expansion in the README, with
+	// nothing failing to say so.
+	updated := pattern.ReplaceAllLiteral(content,
 		[]byte(sentinelStart+"\n"+rendered+"\n"+sentinelEnd))
 
 	if string(updated) == string(content) {

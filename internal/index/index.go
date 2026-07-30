@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Resolver is the subset of the state a resolve needs: the ordered resource
@@ -105,6 +107,13 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 	return headers, rows, nameIdx
 }
 
+// cellWidth measures a cell in terminal columns rather than bytes, matching
+// what internal/render does for the tables it draws itself. Identical to len()
+// for the ASCII kubectl emits for every built-in resource, so the layout the
+// tests pin is unchanged; it only stops a non-ASCII value in a custom column
+// from being padded several columns too wide.
+func cellWidth(cell string) int { return runewidth.StringWidth(cell) }
+
 // Format lays out rows as a left-aligned, two-space-separated table. Every
 // cell is padded, including the last in a row, matching the Python
 // implementation byte-for-byte.
@@ -119,8 +128,8 @@ func Format(allRows [][]string) string {
 	widths := make([]int, len(allRows[0]))
 	for _, row := range allRows {
 		for i, cell := range row {
-			if i < len(widths) && len(cell) > widths[i] {
-				widths[i] = len(cell)
+			if w := cellWidth(cell); i < len(widths) && w > widths[i] {
+				widths[i] = w
 			}
 		}
 	}
@@ -128,7 +137,7 @@ func Format(allRows [][]string) string {
 	for _, row := range allRows {
 		cells := make([]string, len(row))
 		for i, cell := range row {
-			cells[i] = cell + strings.Repeat(" ", widths[i]-len(cell))
+			cells[i] = cell + strings.Repeat(" ", widths[i]-cellWidth(cell))
 		}
 		lines = append(lines, strings.Join(cells, "  "))
 	}

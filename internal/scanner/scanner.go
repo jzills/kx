@@ -59,7 +59,13 @@ func (ExecService) Scan(argv []string) (int, error) {
 	if errors.Is(err, exec.ErrNotFound) {
 		return 1, missingBinary(argv)
 	}
-	return 0, err
+	if err != nil {
+		// A failure that is not an exit status has no exit code to report;
+		// answering 0 alongside an error reads as success to anything that
+		// checks the code first, as Capture and Probe already avoid doing.
+		return 1, err
+	}
+	return 0, nil
 }
 
 func (ExecService) Capture(argv []string) (string, string, int, error) {

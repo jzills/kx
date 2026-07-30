@@ -82,7 +82,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [<index>...] [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx secret [<index>...] [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [--match/-m str] [--no-limits] [kubectl flags...]` | List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits. |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |

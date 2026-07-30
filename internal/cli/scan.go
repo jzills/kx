@@ -280,6 +280,14 @@ func newScanCommand(services Services) *cobra.Command {
 			// A leading index selects one workload; without it the whole
 			// namespace is swept. Anything after belongs to the scanner.
 			indexArgs, extra := splitLeadingIndexes(rest)
+			// Scanner flags start with a dash, so a bare non-numeric first
+			// argument is a mistyped index. Sweeping the namespace instead
+			// would ignore what was typed and act on something else — and
+			// outside --full the stray argument is dropped entirely.
+			if len(indexArgs) == 0 && len(extra) > 0 && !strings.HasPrefix(extra[0], "-") {
+				return fmt.Errorf(
+					"Invalid value for 'index': '%s' is not a valid int.", extra[0])
+			}
 			var images []string
 			if len(indexArgs) == 0 {
 				namespace := services.Kubectl.CurrentNamespace()

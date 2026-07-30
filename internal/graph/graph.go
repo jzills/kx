@@ -96,24 +96,25 @@ func (b Builder) BuildResource(
 		root.Index = 1
 	}
 
-	// Pods are listed once and filtered client-side, mirroring how the
-	// namespace forest works: one call rather than one per owner.
-	pods, err := b.pods(ctx, namespace)
-	if err != nil {
-		return nil, nil, err
-	}
-
+	var err error
 	switch kind {
-	case kinds.Deployment:
-		err = b.treeDeployment(ctx, name, namespace, root, pods, c)
-	case kinds.ReplicaSet:
-		err = b.treeOwnedPods(ctx, kinds.ReplicaSet, name, namespace, root, pods, c)
-	case kinds.StatefulSet:
-		err = b.treeOwnedPods(ctx, kinds.StatefulSet, name, namespace, root, pods, c)
-	case kinds.DaemonSet:
-		err = b.treeOwnedPods(ctx, kinds.DaemonSet, name, namespace, root, pods, c)
-	case kinds.CronJob:
-		err = b.treeCronJob(ctx, name, namespace, root, pods, c)
+	case kinds.Deployment, kinds.ReplicaSet, kinds.StatefulSet, kinds.DaemonSet, kinds.CronJob:
+		// These descend to pods through ownership, so the namespace's pods are
+		// listed once here and filtered client-side rather than fetched per
+		// owner. Only these kinds pay for it: a Service selects its own pods by
+		// label, a Pod is one, and the rest graph nothing.
+		pods, podsErr := b.pods(ctx, namespace)
+		if podsErr != nil {
+			return nil, nil, podsErr
+		}
+		switch kind {
+		case kinds.Deployment:
+			err = b.treeDeployment(ctx, name, namespace, root, pods, c)
+		case kinds.CronJob:
+			err = b.treeCronJob(ctx, name, namespace, root, pods, c)
+		default:
+			err = b.treeOwnedPods(ctx, kind, name, namespace, root, pods, c)
+		}
 	case kinds.Service:
 		err = b.treeService(ctx, name, namespace, root, c)
 	case kinds.Pod:
@@ -311,8 +312,12 @@ type ownerRef struct {
 
 // BuildNamespace graphs the whole ownership forest for a namespace: every
 // workload controller as a root with its owned resources beneath, plus orphaned
-// Jobs, ReplicaSets and bare Pods so nothing is hidden. Each pod appears
-// exactly once.
+// Jobs, ReplicaSets and bare Pods so nothing is hidden.
+//
+// Every pod is reachable, and a pod with a single owner appears once. A pod
+// carrying owner references to two objects that are both present renders under
+// each of them — rare enough in practice that deduplicating would cost more
+// clarity than it buys, but it is not a uniqueness guarantee.
 //
 // Unlike BuildResource, the Namespace root is not indexed — children number
 // from 1.
