@@ -51,7 +51,7 @@ jobs:
       # denominator at 0%, so the number reflects the whole module.
       - name: Check coverage
         env:
-          FLOOR: "50.0"
+          FLOOR: "52.0"
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')"
           echo "total coverage: ${total}% (floor ${FLOOR}%)"
