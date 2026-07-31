@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -487,24 +488,69 @@ func TestExecFailsWhenNoShellFound(t *testing.T) {
 	}
 }
 
-// kubectl config set-context accepts any string, so a stale index pointing at a
-// Pod would otherwise make that pod's name the active namespace.
-func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
+// listings answers FieldsForKind the way the history search does: only entries
+// that list exactly one kind are searched, so an index is resolved against the
+// most recent listing of the kind the command named.
+type listings struct {
+	byKind map[kinds.Kind][]string
+}
+
+func (l listings) FieldsForKind(index int, kind kinds.Kind) (string, string, error) {
+	names := l.byKind[kind]
+	if len(names) == 0 {
+		return "", "", fmt.Errorf("No %s listing in history — run 'kx ns' to list them.", kind)
+	}
+	if index < 1 || index > len(names) {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the %s listing has %d items.", index, kind, len(names))
+	}
+	return names[index-1], "prod", nil
+}
+
+func namespaces(names ...string) listings {
+	return listings{byKind: map[kinds.Kind][]string{kinds.Namespace: names}}
+}
+
+// The report in #156: list namespaces, list pods, then switch by the number the
+// namespace listing showed. The pod listing is current, but `kx ns 2` has
+// already said which kind it means.
+func TestNamespaceSwitchResolvesAgainstTheNamespaceListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := SwitchCommand{Kubectl: kubectl, State: pod("nginx")}.namespace(1)
+	state := listings{byKind: map[kinds.Kind][]string{
+		kinds.Namespace: {"cilium-secrets", "db", "default"},
+		kinds.Pod:       {"homepage-6cd6cd57d5", "whoami-66896759c8"},
+	}}
+
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(2)
+	if err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if name != "db" {
+		t.Errorf("name = %q, want db — index 2 of the namespace listing", name)
+	}
+}
+
+// Nothing downstream validates the name, so a listing with no namespaces in it
+// has to fail here rather than hand an arbitrary string to set-context.
+func TestNamespaceSwitchWithoutANamespaceListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	state := listings{byKind: map[kinds.Kind][]string{kinds.Pod: {"nginx"}}}
+
+	_, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a namespace, want an error")
+		t.Fatal("switched with no namespace listing, want an error")
+	}
+	if !strings.Contains(err.Error(), "No Namespace listing") {
+		t.Errorf("err = %v, want it to say no namespace listing exists", err)
 	}
 	if len(kubectl.runs) != 0 {
-		t.Error("kubectl config was called for a wrong-kind index")
+		t.Error("kubectl config was called anyway")
 	}
 }
 
 func TestNamespaceSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("staging", kinds.Namespace),
-	}.namespace(1)
+	name, err := SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}.namespace(1)
 	if err != nil {
 		t.Fatalf("namespace: %v", err)
 	}
@@ -517,18 +563,33 @@ func TestNamespaceSwitch(t *testing.T) {
 	}
 }
 
-func TestContextSwitchRejectsResourceIndex(t *testing.T) {
-	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: pod("nginx")}.context(1)
+// Setting a namespace is a local kubeconfig edit that kubectl does not validate
+// — pointing at one before creating it is a normal thing to do — and every
+// staleness check in kx reacts to a failure rather than pre-empting one. So the
+// switch spends no round trip checking the namespace exists.
+func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	if _, err := (SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}).
+		namespace(1); err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if len(kubectl.probes) != 0 {
+		t.Errorf("namespace switch probed the cluster: %v", kubectl.probes)
+	}
+}
+
+func TestContextSwitchWithoutAContextListing(t *testing.T) {
+	state := listings{byKind: map[kinds.Kind][]string{kinds.Pod: {"nginx"}}}
+	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: state}.context(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a context, want an error")
+		t.Fatal("switched to a context with no context listing, want an error")
 	}
 }
 
 func TestContextSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("docker-desktop", ContextKind),
-	}.context(1)
+	state := listings{byKind: map[kinds.Kind][]string{ContextKind: {"docker-desktop"}}}
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.context(1)
 	if err != nil {
 		t.Fatalf("context: %v", err)
 	}
@@ -537,6 +598,11 @@ func TestContextSwitch(t *testing.T) {
 	}
 	if want := "config use-context docker-desktop"; joinArgs(kubectl.runs[0]) != want {
 		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+	// use-context rejects an unknown name itself, so kx spends no round trip
+	// checking what kubectl is about to check.
+	if len(kubectl.probes) != 0 {
+		t.Errorf("context switch probed the cluster: %v", kubectl.probes)
 	}
 }
 

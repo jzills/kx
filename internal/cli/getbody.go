@@ -102,9 +102,7 @@ func runGet(services Services, resource string, args []string, options getOption
 
 // switchTo activates an indexed namespace or context.
 func switchTo(services Services, label string, index int, isContext bool) error {
-	command := SwitchCommand{
-		Kubectl: services.Kubectl, State: services.State, Lister: services.State,
-	}
+	command := SwitchCommand{Kubectl: services.Kubectl, State: services.State}
 	stop := render.Status("switching " + label)
 	var name string
 	var err error

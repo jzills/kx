@@ -436,3 +436,109 @@ func TestPreviousListsOnMissingStateIsFalse(t *testing.T) {
 		t.Error("PreviousLists on missing state = true, want false")
 	}
 }
+
+// The sequence from #156: list namespaces, list pods, then switch by the number
+// the namespace listing showed. Resolving against the cursor's entry makes that
+// 2 a pod; resolving against the most recent namespace listing keeps it meaning
+// what the user saw.
+func TestFieldsForKindSearchesBackPastOtherKinds(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"cilium-secrets", "db", "default"}, kinds.Namespace), Namespace: "default"})
+	save(t, service, State{Resources: NewResources([]string{"homepage-6cd", "whoami-668"}, kinds.Pod), Namespace: "default"})
+
+	name, _, err := service.FieldsForKind(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsForKind: %v", err)
+	}
+	if name != "db" {
+		t.Errorf("name = %q, want db", name)
+	}
+
+	// The current entry still resolves normally for commands that want it.
+	current, _, _, err := service.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if current != "whoami-668" {
+		t.Errorf("Fields(2) = %q, want the current listing's second pod", current)
+	}
+}
+
+// The most recent listing of the kind wins, so relisting namespaces makes the
+// new numbering the one an index counts against.
+func TestFieldsForKindPrefersTheMostRecentListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"old-a", "old-b"}, kinds.Namespace), Namespace: "default"})
+	save(t, service, State{Resources: NewResources([]string{"new-a", "new-b"}, kinds.Namespace), Namespace: "default"})
+
+	name, _, err := service.FieldsForKind(1, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsForKind: %v", err)
+	}
+	if name != "new-a" {
+		t.Errorf("name = %q, want new-a", name)
+	}
+}
+
+// Searching back from the cursor rather than through the whole stack keeps
+// `kx back` meaningful: stepping back past a listing takes it out of reach.
+func TestFieldsForKindSearchesFromTheCursor(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"pod-a"}, kinds.Pod), Namespace: "default"})
+	save(t, service, State{Resources: NewResources([]string{"ns-a", "ns-b"}, kinds.Namespace), Namespace: "default"})
+
+	if _, err := service.Navigate(-1); err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+	if _, _, err := service.FieldsForKind(1, kinds.Namespace); err == nil {
+		t.Error("a namespace listing ahead of the cursor was still reachable")
+	}
+}
+
+// A mixed entry — a namespace-wide tree, a triage sweep — is skipped: index 2
+// there could be any kind, which is the ambiguity this resolution avoids.
+func TestFieldsForKindSkipsMixedEntries(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"ns-a", "ns-b"}, kinds.Namespace), Namespace: "default"})
+	save(t, service, State{
+		Resources: NewOrderedResources([]Resource{
+			{Name: "web", Kind: kinds.Deployment},
+			{Name: "web-abc", Kind: kinds.Pod},
+		}),
+		Namespace: "default",
+	})
+
+	name, _, err := service.FieldsForKind(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsForKind: %v", err)
+	}
+	if name != "ns-b" {
+		t.Errorf("name = %q, want ns-b — the mixed entry should be skipped", name)
+	}
+}
+
+// An index past the end of the listing is what a namespace created since it was
+// taken looks like, so the message points at relisting.
+func TestFieldsForKindOutOfRangeNamesTheRelist(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"a", "b"}, kinds.Namespace), Namespace: "default"})
+
+	_, _, err := service.FieldsForKind(9, kinds.Namespace)
+	if err == nil {
+		t.Fatal("index 9 of a 2-item listing resolved")
+	}
+	for _, want := range []string{"out of range", "2 items", "kx ns"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to mention %q", err, want)
+		}
+	}
+}
+
+func TestFieldsForKindWithNoSuchListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewResources([]string{"pod-a"}, kinds.Pod), Namespace: "default"})
+
+	if _, _, err := service.FieldsForKind(1, kinds.Namespace); err == nil {
+		t.Fatal("resolved a namespace with no namespace listing in history")
+	}
+}
