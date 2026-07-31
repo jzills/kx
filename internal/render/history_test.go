@@ -73,14 +73,18 @@ func TestStateHistoryListsSwitchTargets(t *testing.T) {
 	if !strings.Contains(out, "Switch targets") {
 		t.Errorf("output = %q, want a switch-targets block", out)
 	}
-	for _, want := range []string{"Namespaces", "istio-system", "Contexts", "docker-desktop"} {
+	for _, want := range []string{"Namespaces", "Contexts"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
 	}
-	// Summary only: the names belong to the expanded view, not this one.
-	if strings.Contains(out, "diagnostics") {
-		t.Errorf("output = %q, want slot contents left to --targets", out)
+	// Which kind and how many. The names in a slot and the scope it was listed
+	// in both belong to the expanded view; here they would need a column that is
+	// true of a namespace slot and a context slot at once.
+	for _, unwanted := range []string{"diagnostics", "istio-system", "docker-desktop"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output = %q, want %q left to --targets", out, unwanted)
+		}
 	}
 }
 

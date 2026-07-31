@@ -93,6 +93,11 @@ const emptyTargetsNote = "No switch targets yet — run kx ns or kx contexts to 
 // rather than the listings themselves: it sits at the same altitude as the
 // table above it, and `kx state --targets` is the expanded view.
 //
+// Which kind and how many, and nothing else. The scope each listing was taken
+// in has no column that is true of both rows — a context slot records a context
+// where a namespace slot records a namespace — and it is already carried by the
+// expanded view's caption, where it is positional and claims nothing.
+//
 // Nothing to show means no block at all — an empty table under a full history
 // reads as breakage rather than as an absence.
 func (r *Renderer) switchTargetSummary(history state.History) {
@@ -104,7 +109,6 @@ func (r *Renderer) switchTargetSummary(history state.History) {
 		}
 		rows = append(rows, []Cell{
 			Styled(kindLabel(entry.Resources), theme.Muted),
-			Styled(entry.Namespace, theme.Muted),
 			Styled(strconv.Itoa(entry.Resources.Len()), theme.Muted),
 		})
 	}
@@ -115,7 +119,6 @@ func (r *Renderer) switchTargetSummary(history state.History) {
 	r.Caption("Switch targets")
 	r.Table([]Column{
 		{Header: "KIND"},
-		{Header: "NAMESPACE"},
 		{Header: "ITEMS", Right: true},
 	}, rows)
 }
