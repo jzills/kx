@@ -116,17 +116,13 @@ func recoverState(services Services) recoverOutcome {
 	}
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-	table, err := get.Execute(query.Resource, match, query.Args)
-	if err != nil {
-		return replayFailed
-	}
-	updated, err := services.State.Load()
+	table, namespace, err := get.Execute(query.Resource, match, query.Args)
 	if err != nil {
 		return replayFailed
 	}
 
 	render.Raw("State was stale — refreshed, pick a new index:")
-	render.IndexedTable(table, query.Resource, updated.Namespace, "")
+	render.IndexedTable(table, query.Resource, namespace, "")
 	return refreshed
 }
 

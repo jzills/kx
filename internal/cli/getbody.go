@@ -80,21 +80,16 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 	stop := render.Status("fetching " + resource)
-	output, err := get.Execute(resource, options.Match, extra)
+	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()
 	if err != nil {
 		return err
 	}
 
-	namespace := ""
 	note := ""
 	if allNamespaces(extra) {
 		namespace = "all namespaces"
 		note = allNamespacesNote
-	} else if current, err := services.State.Load(); err == nil {
-		namespace = current.Namespace
-	} else {
-		namespace = "default"
 	}
 	render.IndexedTable(output, resource, namespace, note)
 	return nil

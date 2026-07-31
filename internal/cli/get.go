@@ -52,11 +52,18 @@ func allNamespaces(extraArgs []string) bool {
 }
 
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
-// the text to display.
-func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (string, error) {
+// the text to display and the namespace the listing came from.
+//
+// The namespace is returned rather than left for the caller to read back out of
+// saved state: an empty listing saves nothing, so a caller doing that would
+// caption it with whatever the previous entry's namespace was. Switching to an
+// empty namespace and running `kx get pods` reported the namespace you left.
+func (c GetCommand) Execute(
+	resource, filterTerm string, extraArgs []string,
+) (table, namespace string, err error) {
 	output, err := c.Kubectl.Run(append([]string{"get", resource}, extraArgs...))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if filterTerm != "" {
 		output = c.Index.Filter(output, filterTerm)
@@ -64,16 +71,17 @@ func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (st
 	if allNamespaces(extraArgs) {
 		// Names aren't unique across namespaces, so `-A` results are never
 		// indexed — returning unindexed output keeps dead X numbers off the
-		// screen.
-		return output, nil
+		// screen. The caller labels the scope; there is no single namespace.
+		return output, "", nil
+	}
+
+	namespace = extractNamespace(extraArgs)
+	if namespace == "" {
+		namespace = c.Kubectl.CurrentNamespace()
 	}
 
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
-		namespace := extractNamespace(extraArgs)
-		if namespace == "" {
-			namespace = c.Kubectl.CurrentNamespace()
-		}
 		var match *string
 		if filterTerm != "" {
 			match = &filterTerm
@@ -91,8 +99,8 @@ func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (st
 			},
 		}
 		if err := c.State.Save(entry); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, namespace, nil
 }

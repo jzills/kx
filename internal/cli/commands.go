@@ -534,18 +534,14 @@ func listSwitchTargets(services Services, isContext bool) error {
 	}
 
 	stop := render.Status("fetching namespaces")
-	output, err := GetCommand{
+	output, namespace, err := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 	}.Execute("namespaces", "", nil)
 	stop()
 	if err != nil {
 		return err
 	}
-	current, err := services.State.Load()
-	if err != nil {
-		return err
-	}
-	render.IndexedTable(output, "namespaces", current.Namespace, "")
+	render.IndexedTable(output, "namespaces", namespace, "")
 	return nil
 }
 
