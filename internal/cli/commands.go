@@ -520,18 +520,18 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 func listSwitchTargets(services Services, isContext bool) error {
 	if isContext {
 		stop := render.Status("fetching contexts")
-		output, err := ContextsCommand{
+		// The caption comes back with the listing rather than out of state: the
+		// listing no longer goes into history, so there is nothing there to read
+		// it from — on a fresh install nothing at all, and otherwise whatever
+		// resource listing happened to be current.
+		output, current, err := ContextsCommand{
 			Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 		}.Execute()
 		stop()
 		if err != nil {
 			return err
 		}
-		// Straight from kubeconfig rather than back out of state: the listing no
-		// longer goes into history, so there is nothing there to read it from —
-		// on a fresh install nothing at all, and otherwise whatever resource
-		// listing happened to be current.
-		render.IndexedTable(output, "Contexts", services.Kubectl.CurrentContext(), "")
+		render.IndexedTable(output, "Contexts", current, "")
 		return nil
 	}
 

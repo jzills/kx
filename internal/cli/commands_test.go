@@ -233,6 +233,23 @@ func TestContextListingCaptionsWithoutHistory(t *testing.T) {
 	}
 }
 
+// The caption rides back with the listing rather than coming from a second
+// lookup: `kubectl config current-context` is a subprocess, and listing contexts
+// should spawn it once.
+func TestContextListingReadsTheCurrentContextOnce(t *testing.T) {
+	kube := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop\n",
+	}
+	services := switchServices(t, kube)
+
+	if err := listSwitchTargets(services, true); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+	if kube.contextReads != 1 {
+		t.Errorf("read the current context %d times, want 1", kube.contextReads)
+	}
+}
+
 // `kx state --targets` reads the slots, which are not in the history stack, so
 // it must work when the stack is empty — that is the fresh-install shape.
 func TestStateTargetsRendersSlotsWithoutHistory(t *testing.T) {

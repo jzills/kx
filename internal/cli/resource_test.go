@@ -43,6 +43,9 @@ type recordingKubectl struct {
 	exitCode    int
 	probeCode   int
 	quietStderr bool
+	// contextReads counts CurrentContext calls, each of which is a kubectl
+	// subprocess in the real service.
+	contextReads int
 }
 
 func (k *recordingKubectl) Run(args []string) (string, error) {
@@ -62,7 +65,11 @@ func (k *recordingKubectl) Probe(args []string) int {
 }
 
 func (k *recordingKubectl) CurrentNamespace() string { return "prod" }
-func (k *recordingKubectl) CurrentContext() string   { return "test" }
+
+func (k *recordingKubectl) CurrentContext() string {
+	k.contextReads++
+	return "test"
+}
 
 func joinArgs(args []string) string { return strings.Join(args, " ") }
 
@@ -642,7 +649,7 @@ func TestContextsSavesWithContextKind(t *testing.T) {
 		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
 	}
 	states := &fakeState{}
-	if _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+	if _, _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
 		Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -662,11 +669,28 @@ func TestContextsDoesNotTouchHistory(t *testing.T) {
 		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
 	}
 	states := &fakeState{}
-	if _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+	if _, _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
 		Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 0 {
 		t.Errorf("pushed %d entries onto history, want 0", len(states.saved))
+	}
+}
+
+// The listing is saved with the active context already, so Execute hands it
+// back for the caption rather than making the caller fetch it.
+func TestContextsReturnsTheActiveContext(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	_, current, err := ContextsCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if current != "test" {
+		t.Errorf("context = %q, want the active context", current)
 	}
 }

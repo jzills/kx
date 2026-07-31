@@ -373,21 +373,30 @@ type ContextsCommand struct {
 	Index   Indexer
 }
 
-func (c ContextsCommand) Execute() (string, error) {
+// Execute lists the contexts and returns the indexed table along with the active
+// context, which captions it.
+//
+// The context is returned rather than left for the caller to fetch, the way
+// GetCommand.Execute returns its namespace: the listing is saved with it
+// already, and `kubectl config current-context` is a subprocess worth spawning
+// once. Reading it back out of state is not an option either — the listing goes
+// to the slot, not the history the caller can Load().
+func (c ContextsCommand) Execute() (table, context string, err error) {
 	output, err := c.Kubectl.Run([]string{"config", "get-contexts"})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	current := c.Kubectl.CurrentContext()
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
 		if err := c.State.SaveNamed(state.State{
 			Resources: state.NewResources(names, kinds.Context),
-			Namespace: c.Kubectl.CurrentContext(),
+			Namespace: current,
 		}); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, current, nil
 }
 
 // NamedResolver resolves an index against a kind's own slot rather than against
