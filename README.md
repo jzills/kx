@@ -164,7 +164,7 @@ or the full per-image CVE report with `--full`. Requires
 
 Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. `kx state --all` summarizes those slots under the history table, and `kx state --targets` expands them to the indexed listings the switch commands read, so you can pick a number without re-listing.
 
-To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual.
+To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual. It refreshes the slot as well, so the two spellings never disagree about what index 2 means. A narrowed listing counts, though: after `kx get ns -l team=platform`, `kx ns <index>` indexes into those namespaces rather than all of them. Run `kx ns` to list them all again.
 
 ## Configuration
 
