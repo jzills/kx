@@ -25,7 +25,7 @@ go vet ./...
 go test -race ./...
 ```
 
-`pre-commit run --all-files` runs the same three, plus the README command-table generator.
+`pre-commit run --all-files` runs the first two, plus the README command-table generator. It does **not** run the tests — a clean commit is not a passing one, so run `go test -race ./...` yourself.
 
 ## Stack
 
