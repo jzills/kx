@@ -28,6 +28,12 @@ const (
 	PersistentVolumeClaim   Kind = "PersistentVolumeClaim"
 	Node                    Kind = "Node"
 	Namespace               Kind = "Namespace"
+	// Context is the pseudo-kind used for kubeconfig contexts. Not a
+	// Kubernetes kind and never returned by Normalize — kubectl cannot `get`
+	// one — but it is stored in state so the context command can tell a context
+	// index from a resource index, which puts it on the same footing as the
+	// real kinds for everything that reads state.
+	Context Kind = "Context"
 )
 
 var kindMap = map[string]Kind{
@@ -89,6 +95,7 @@ var pluralDisplay = map[Kind]string{
 	PersistentVolumeClaim:   "PersistentVolumeClaims",
 	Node:                    "Nodes",
 	Namespace:               "Namespaces",
+	Context:                 "Contexts",
 }
 
 // IsKindSpelling reports whether token names a known resource type.
@@ -114,6 +121,11 @@ func PluralDisplay(resourceType string) string {
 			return plural
 		}
 		return string(kind) + "s"
+	}
+	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
+	// It is still named by its canonical kind in captions and errors.
+	if plural, ok := pluralDisplay[Kind(resourceType)]; ok {
+		return plural
 	}
 	return resourceType
 }

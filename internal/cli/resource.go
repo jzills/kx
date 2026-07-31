@@ -361,51 +361,62 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	)
 }
 
-// ContextKind is the pseudo-kind used for kubeconfig contexts. Not a
-// Kubernetes kind, but stored in state so the context command can tell a
-// context index from a resource index.
-const ContextKind kinds.Kind = "Context"
-
 // ContextsCommand lists kubeconfig contexts and indexes them.
+//
+// The listing goes to the context slot and nowhere else. A context is a
+// kubeconfig entry rather than a server resource — there is no
+// `kubectl describe context` — so nothing that reads the history stack can do
+// anything with one, and pushing it there only evicts work the stack is for.
 type ContextsCommand struct {
 	Kubectl kubectl.Service
-	State   StateWriter
+	State   NamedStateWriter
 	Index   Indexer
 }
 
-func (c ContextsCommand) Execute() (string, error) {
+// Execute lists the contexts and returns the indexed table along with the active
+// context, which captions it.
+//
+// The context is returned rather than left for the caller to fetch, the way
+// GetCommand.Execute returns its namespace: the listing is saved with it
+// already, and `kubectl config current-context` is a subprocess worth spawning
+// once. Reading it back out of state is not an option either — the listing goes
+// to the slot, not the history the caller can Load().
+func (c ContextsCommand) Execute() (table, context string, err error) {
 	output, err := c.Kubectl.Run([]string{"config", "get-contexts"})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	current := c.Kubectl.CurrentContext()
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
-		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, ContextKind),
-			Namespace: c.Kubectl.CurrentContext(),
+		if err := c.State.SaveNamed(state.State{
+			Resources: state.NewResources(names, kinds.Context),
+			Namespace: current,
 		}); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, current, nil
 }
 
-// ExpectingResolver resolves an index for a command that has already named the
-// kind it wants, so every way the resolve can fail is reported in those terms.
-type ExpectingResolver interface {
-	FieldsExpecting(index int, expected kinds.Kind) (name, namespace string, err error)
+// NamedResolver resolves an index against a kind's own slot rather than against
+// the history cursor.
+type NamedResolver interface {
+	FieldsNamed(index int, kind kinds.Kind) (name, namespace string, err error)
 }
 
 // SwitchCommand activates an indexed namespace or context.
 //
-// The index is resolved against the most recent listing of the kind the command
-// names, not against the current entry. `kx ns 2` has already said which kind it
+// The index is resolved against the slot for the kind the command names, not
+// against the current history entry. `kx ns 2` has already said which kind it
 // means, so an intervening `kx get pods` should not turn that 2 into a pod —
 // which is what made the sequence `kx ns` / `kx get pod` / `kx ns 2` fail (#156).
 //
-// The kind check is not optional: `kubectl config set-context --namespace`
-// accepts any string and validates nothing against the server, so a stale index
-// pointing at a Pod would otherwise make that pod's name the active namespace.
+// Reading the slot is also what keeps a stale index from making a pod's name the
+// active namespace: `kubectl config set-context --namespace` accepts any string
+// and validates nothing against the server, and only namespace listings ever
+// reach the namespace slot. There is deliberately no fallback to the current
+// entry when the slot is empty — that fallback is the defect.
 //
 // Nothing here checks the namespace exists either. Setting one is a local
 // kubeconfig edit that kubectl does not validate — pointing at a namespace
@@ -414,11 +425,11 @@ type ExpectingResolver interface {
 // running ahead of one.
 type SwitchCommand struct {
 	Kubectl kubectl.Service
-	State   ExpectingResolver
+	State   NamedResolver
 }
 
 func (c SwitchCommand) namespace(index int) (string, error) {
-	name, _, err := c.State.FieldsExpecting(index, kinds.Namespace)
+	name, _, err := c.State.FieldsNamed(index, kinds.Namespace)
 	if err != nil {
 		return "", err
 	}
@@ -427,7 +438,7 @@ func (c SwitchCommand) namespace(index int) (string, error) {
 }
 
 func (c SwitchCommand) context(index int) (string, error) {
-	name, _, err := c.State.FieldsExpecting(index, ContextKind)
+	name, _, err := c.State.FieldsNamed(index, kinds.Context)
 	if err != nil {
 		return "", err
 	}

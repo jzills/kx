@@ -175,9 +175,10 @@ func KeyValueTable(header string, keys []string, values map[string]string) {
 	current.KeyValueTable(header, keys, values)
 }
 
-func ThemeList(active string)            { current.ThemeList(active) }
-func StateHistory(history state.History) { current.StateHistory(history) }
-func State(entry state.State)            { current.State(entry) }
+func ThemeList(active string)             { current.ThemeList(active) }
+func StateHistory(history state.History)  { current.StateHistory(history) }
+func State(entry state.State)             { current.State(entry) }
+func SwitchTargets(history state.History) { current.SwitchTargets(history) }
 
 // pipeWidth is the width used off-terminal. Wide enough that piped or
 // redirected output is never truncated, matching the Python console.

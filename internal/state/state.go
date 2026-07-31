@@ -154,10 +154,17 @@ type State struct {
 // Names satisfies index.Resolver.
 func (s State) Names() []string { return s.Resources.Names() }
 
-// History is the stack of listings with a cursor marking the current entry.
+// History is the stack of listings with a cursor marking the current entry,
+// plus the per-kind slots that sit outside the stack.
 type History struct {
 	States []State `json:"states"`
 	Cursor int     `json:"cursor"`
+	// Named holds the most recent listing of each slotted kind, keyed by kind.
+	// It is deliberately outside States: `kx ns` runs often enough that pushing
+	// every namespace listing onto the stack evicted the work the stack is for,
+	// and a slot cannot be displaced by MaxHistory. Absent in files written
+	// before slots existed, which read as an empty map.
+	Named map[kinds.Kind]State `json:"named,omitempty"`
 }
 
 // ErrNoState is returned when no state file exists yet.
@@ -242,6 +249,10 @@ func (s *Service) loadHistory() (History, error) {
 	var raw struct {
 		States []map[string]json.RawMessage `json:"states"`
 		Cursor int                          `json:"cursor"`
+		// Absent in files written before slots existed, which read as nil.
+		// Decoded per entry like the stack, so a slot cannot smuggle in the
+		// empty listing the loop below exists to reject.
+		Named map[kinds.Kind]map[string]json.RawMessage `json:"named"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return History{}, unreadable(err)
@@ -249,29 +260,72 @@ func (s *Service) loadHistory() (History, error) {
 
 	history := History{Cursor: raw.Cursor, States: make([]State, 0, len(raw.States))}
 	for _, entry := range raw.States {
-		if _, ok := entry["resources"]; !ok {
-			return History{}, unreadable(errors.New("'resources'"))
-		}
-		encoded, err := json.Marshal(entry)
+		state, err := decodeEntry(entry)
 		if err != nil {
 			return History{}, unreadable(err)
 		}
-		var state State
-		if err := json.Unmarshal(encoded, &state); err != nil {
-			return History{}, unreadable(err)
-		}
+		// Only the stack gets this. A slot records the scope it was listed in,
+		// and a context slot's scope is a context, which is legitimately empty
+		// when the kubeconfig has no current one — defaulting it to "default"
+		// would caption the listing with a context that does not exist.
 		if state.Namespace == "" {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)
 	}
+	for kind, entry := range raw.Named {
+		state, err := decodeEntry(entry)
+		if err != nil {
+			// Drop the slot rather than condemn the file, which is where this
+			// parts company with the stack above. The recoveries differ: a bad
+			// stack entry is answered by the `kx get <resource>` the unreadable
+			// error names, but no `kx get` refills a slot, and an absent one
+			// already reports itself as "run 'kx ns'" — the right instruction
+			// for the thing that is actually broken. The history is unrelated
+			// and survives.
+			continue
+		}
+		if history.Named == nil {
+			history.Named = make(map[kinds.Kind]State, len(raw.Named))
+		}
+		history.Named[kind] = state
+	}
 	if len(history.States) == 0 {
-		return History{}, unreadable(errors.New("no state entries"))
+		if len(history.Named) == 0 {
+			return History{}, unreadable(errors.New("no state entries"))
+		}
+		// Slots but no stack: `kx ns` on a fresh install writes a slot before
+		// any `kx get` has pushed an entry. The file is well-formed; it just
+		// has nothing for the stack readers yet, which Load reports as
+		// ErrNoState rather than as corruption.
+		history.Cursor = 0
+		return history, nil
 	}
 	if history.Cursor < 0 || history.Cursor >= len(history.States) {
 		return History{}, unreadable(errors.New("'cursor' out of range"))
 	}
 	return history, nil
+}
+
+// decodeEntry turns one raw state object into a State.
+//
+// A missing "resources" key is rejected rather than silently becoming an empty
+// listing — Go's zero values accept what Python's dict access raised KeyError
+// on, and an empty entry makes every index unresolvable with no explanation.
+// Callers decide what an undecodable entry costs; see loadHistory.
+func decodeEntry(entry map[string]json.RawMessage) (State, error) {
+	if _, ok := entry["resources"]; !ok {
+		return State{}, errors.New("'resources'")
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		return State{}, err
+	}
+	var state State
+	if err := json.Unmarshal(encoded, &state); err != nil {
+		return State{}, err
+	}
+	return state, nil
 }
 
 // saveHistory writes the stack via a sibling temp file and an atomic rename, so
@@ -316,6 +370,10 @@ func (s *Service) saveHistory(history History) error {
 
 // Save pushes a new entry, truncating any entries ahead of the cursor and
 // trimming the stack to MaxHistory.
+//
+// A listing of a slotted kind also refreshes that kind's slot, so `kx get ns`
+// serves both readers: the stack, for `kx describe <n>` on a namespace, and the
+// slot, for `kx ns <n>`. Only `kx ns` itself skips the stack, via SaveNamed.
 func (s *Service) Save(state State) error {
 	maxHistory := s.MaxHistory
 	if maxHistory < 1 {
@@ -323,14 +381,25 @@ func (s *Service) Save(state State) error {
 	}
 
 	var states []State
+	var named map[kinds.Kind]State
 	if history, err := s.loadHistory(); err == nil {
-		states = append(states, history.States[:history.Cursor+1]...)
+		// A slots-only file has no stack to truncate against.
+		if len(history.States) > 0 {
+			states = append(states, history.States[:history.Cursor+1]...)
+		}
+		named = history.Named
 	}
 	states = append(states, state)
 	if len(states) > maxHistory {
 		states = states[len(states)-maxHistory:]
 	}
-	return s.saveHistory(History{States: states, Cursor: len(states) - 1})
+	if kind := soleKind(state); slottedKinds[kind] {
+		if named == nil {
+			named = map[kinds.Kind]State{}
+		}
+		named[kind] = state
+	}
+	return s.saveHistory(History{States: states, Cursor: len(states) - 1, Named: named})
 }
 
 // Load returns the entry at the cursor.
@@ -338,6 +407,9 @@ func (s *Service) Load() (State, error) {
 	history, err := s.loadHistory()
 	if err != nil {
 		return State{}, err
+	}
+	if len(history.States) == 0 {
+		return State{}, ErrNoState
 	}
 	return history.States[history.Cursor], nil
 }
@@ -361,6 +433,9 @@ func (s *Service) Navigate(delta int) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	if len(history.States) == 0 {
+		return State{}, ErrNoState
+	}
 	history.Cursor = clamp(history.Cursor+delta, len(history.States)-1)
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
@@ -373,6 +448,9 @@ func (s *Service) NavigateTo(position int) (State, error) {
 	history, err := s.loadHistory()
 	if err != nil {
 		return State{}, err
+	}
+	if len(history.States) == 0 {
+		return State{}, ErrNoState
 	}
 	history.Cursor = clamp(position-1, len(history.States)-1)
 	if err := s.saveHistory(history); err != nil {
@@ -387,6 +465,9 @@ func (s *Service) Drop(position int) (History, error) {
 	history, err := s.loadHistory()
 	if err != nil {
 		return History{}, err
+	}
+	if len(history.States) == 0 {
+		return History{}, ErrNoState
 	}
 	if len(history.States) == 1 {
 		return History{}, errors.New("Cannot drop the only state entry.")
@@ -522,6 +603,91 @@ func (s *Service) PreviousLists(kind kinds.Kind) bool {
 		}
 	}
 	return false
+}
+
+// slottedKinds are the kinds kept in a slot as well as, or instead of, the
+// history stack.
+//
+// Both are switch targets rather than things you act on by index, and both are
+// listed often enough that stacking every listing crowds out the work the stack
+// exists for. Nothing else earns a slot: a slot only pays off for a listing
+// whose indexes are consumed by a command that already names the kind.
+var slottedKinds = map[kinds.Kind]bool{
+	kinds.Namespace: true,
+	kinds.Context:   true,
+}
+
+// listCommandFor names the command that relists kind, for the hints below.
+// Namespaces and contexts have a shorter spelling than `kx get <kind>`, and it
+// is the one their errors should teach.
+func listCommandFor(kind kinds.Kind) string {
+	switch kind {
+	case kinds.Namespace:
+		return "kx ns"
+	case kinds.Context:
+		return "kx contexts"
+	default:
+		return "kx get " + strings.ToLower(string(kind))
+	}
+}
+
+// SaveNamed records a listing in its per-kind slot without pushing it onto the
+// history stack.
+//
+// This is the `kx ns` path. Keeping it out of the stack is the point: switching
+// namespaces is the most frequent thing kx does, and every switch used to cost
+// a history entry, so `kx back` walked through namespace listings instead of
+// the work between them.
+func (s *Service) SaveNamed(entry State) error {
+	kind := soleKind(entry)
+	if kind == "" {
+		return fmt.Errorf("state: a slot needs a single-kind listing")
+	}
+	history, err := s.loadHistory()
+	if err != nil {
+		// No usable stack yet. The slot is independent of it, so it is still
+		// worth writing — `kx ns` on a fresh install must leave something for
+		// `kx ns 2` to resolve against.
+		history = History{States: []State{}, Cursor: 0}
+	}
+	if history.Named == nil {
+		history.Named = map[kinds.Kind]State{}
+	}
+	history.Named[kind] = entry
+	return s.saveHistory(history)
+}
+
+// FieldsNamed resolves an index against the slot for kind.
+//
+// The slot, not the history cursor: `kx ns 2` has already said which kind it
+// means, so an intervening `kx get pods` must not turn that 2 into a pod, which
+// is what made the sequence in #156 fail. There is no fallback to the current
+// entry — that fallback *is* the bug.
+func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string, err error) {
+	relist := listCommandFor(kind)
+	plural := kinds.PluralDisplay(string(kind))
+
+	history, err := s.loadHistory()
+	if err != nil && !errors.Is(err, ErrNoState) {
+		// An unreadable state file already explains itself.
+		return "", "", err
+	}
+	entry, ok := history.Named[kind]
+	if !ok {
+		return "", "", fmt.Errorf(
+			"No %s listing yet — run '%s' to list them.", plural, relist)
+	}
+
+	name, err = index.Resolve(entry, idx)
+	if err != nil {
+		// index.Resolve says "current state", which would be wrong here: the
+		// count comes from the slot, not from whatever the cursor is on, and
+		// relisting is what fixes it.
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
+			idx, describeCurrent(entry), relist)
+	}
+	return name, entry.Namespace, nil
 }
 
 // compile-time checks that the service satisfies the interfaces its consumers
