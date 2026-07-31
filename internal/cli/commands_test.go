@@ -119,11 +119,16 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 
 // switchServices wires the real state service against a temp file, so the
 // listing path and the switch path meet the way they do in the tool.
+//
+// The package renderer is a global these tests have to write to — it is nil
+// until configured, and they drive the listing path, which renders. Restoring
+// it is registered here rather than left to each caller: a test that swaps in
+// its own buffer and then fails before putting it back leaves every later test
+// in the package writing somewhere it does not expect.
 func switchServices(t *testing.T, kube kubectl.Service) Services {
 	t.Helper()
-	// The package renderer is nil until configured, and these tests drive the
-	// listing path, which renders.
 	render.Configure("default", true)
+	t.Cleanup(func() { render.Configure("default", true) })
 	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
 	return Services{
 		Kubectl: kube, State: store, Index: index.Service{}, Config: config.Default(),
@@ -261,7 +266,6 @@ func TestStateTargetsRendersSlotsWithoutHistory(t *testing.T) {
 
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
-	defer render.Configure("default", true)
 
 	cmd := newStateCommand(services)
 	cmd.SetArgs([]string{"--targets"})
@@ -303,7 +307,6 @@ func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
 		cmd := newStateCommand(services)
 		cmd.SetArgs([]string{tc.flag})
 		err := cmd.Execute()
-		render.Configure("default", true)
 
 		if err != nil {
 			t.Errorf("kx state %s on an absent state file: %v", tc.flag, err)
