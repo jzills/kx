@@ -250,33 +250,45 @@ func (s *Service) loadHistory() (History, error) {
 		States []map[string]json.RawMessage `json:"states"`
 		Cursor int                          `json:"cursor"`
 		// Absent in files written before slots existed, which read as nil.
-		Named map[kinds.Kind]State `json:"named"`
+		// Decoded per entry like the stack, so a slot cannot smuggle in the
+		// empty listing the loop below exists to reject.
+		Named map[kinds.Kind]map[string]json.RawMessage `json:"named"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return History{}, unreadable(err)
 	}
 
-	history := History{
-		Cursor: raw.Cursor,
-		States: make([]State, 0, len(raw.States)),
-		Named:  raw.Named,
-	}
+	history := History{Cursor: raw.Cursor, States: make([]State, 0, len(raw.States))}
 	for _, entry := range raw.States {
-		if _, ok := entry["resources"]; !ok {
-			return History{}, unreadable(errors.New("'resources'"))
-		}
-		encoded, err := json.Marshal(entry)
+		state, err := decodeEntry(entry)
 		if err != nil {
 			return History{}, unreadable(err)
 		}
-		var state State
-		if err := json.Unmarshal(encoded, &state); err != nil {
-			return History{}, unreadable(err)
-		}
+		// Only the stack gets this. A slot records the scope it was listed in,
+		// and a context slot's scope is a context, which is legitimately empty
+		// when the kubeconfig has no current one — defaulting it to "default"
+		// would caption the listing with a context that does not exist.
 		if state.Namespace == "" {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)
+	}
+	for kind, entry := range raw.Named {
+		state, err := decodeEntry(entry)
+		if err != nil {
+			// Drop the slot rather than condemn the file, which is where this
+			// parts company with the stack above. The recoveries differ: a bad
+			// stack entry is answered by the `kx get <resource>` the unreadable
+			// error names, but no `kx get` refills a slot, and an absent one
+			// already reports itself as "run 'kx ns'" — the right instruction
+			// for the thing that is actually broken. The history is unrelated
+			// and survives.
+			continue
+		}
+		if history.Named == nil {
+			history.Named = make(map[kinds.Kind]State, len(raw.Named))
+		}
+		history.Named[kind] = state
 	}
 	if len(history.States) == 0 {
 		if len(history.Named) == 0 {
@@ -293,6 +305,27 @@ func (s *Service) loadHistory() (History, error) {
 		return History{}, unreadable(errors.New("'cursor' out of range"))
 	}
 	return history, nil
+}
+
+// decodeEntry turns one raw state object into a State.
+//
+// A missing "resources" key is rejected rather than silently becoming an empty
+// listing — Go's zero values accept what Python's dict access raised KeyError
+// on, and an empty entry makes every index unresolvable with no explanation.
+// Callers decide what an undecodable entry costs; see loadHistory.
+func decodeEntry(entry map[string]json.RawMessage) (State, error) {
+	if _, ok := entry["resources"]; !ok {
+		return State{}, errors.New("'resources'")
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		return State{}, err
+	}
+	var state State
+	if err := json.Unmarshal(encoded, &state); err != nil {
+		return State{}, err
+	}
+	return state, nil
 }
 
 // saveHistory writes the stack via a sibling temp file and an atomic rename, so

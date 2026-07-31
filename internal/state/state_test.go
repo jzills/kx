@@ -767,6 +767,59 @@ func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
 	}
 }
 
+// A slot entry is decoded the way a stack entry is, so one with no "resources"
+// key cannot become an empty listing that answers every index with a count of
+// zero. It drops instead, and the empty-slot message names the command that
+// refills it — where condemning the whole file would name `kx get`, which
+// refills the stack and not the slot.
+func TestSlotWithoutResourcesDropsAndKeepsTheHistory(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"states":[{"resources":{"nginx":"Pod"},"namespace":"prod","query":null}],` +
+		`"cursor":0,"named":{"Namespace":{"namespace":"prod"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, _, err := service.FieldsNamed(1, kinds.Namespace)
+	if err == nil {
+		t.Fatal("FieldsNamed against a resource-less slot succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "No Namespaces listing yet") {
+		t.Errorf("error = %q, want it to report an empty slot rather than a count", err)
+	}
+	if !strings.Contains(err.Error(), "kx ns") {
+		t.Errorf("error = %q, want it to name the command that refills the slot", err)
+	}
+
+	// The stack is unrelated to the broken slot and must survive it.
+	name, _, kind, err := service.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields: %v — a bad slot took the history with it", err)
+	}
+	if name != "nginx" || kind != kinds.Pod {
+		t.Errorf("Fields(1) = %q/%q, want nginx/Pod", kind, name)
+	}
+}
+
+// A bad entry in the stack still condemns the file: there the unreadable error
+// names `kx get <resource>`, which is exactly what rebuilds it.
+func TestStackEntryWithoutResourcesIsStillFatal(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"states":[{"namespace":"prod","query":null}],"cursor":0,` +
+		`"named":{"Namespace":{"resources":{"prod":"Namespace"},"namespace":"prod"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := service.Load()
+	if err == nil {
+		t.Fatal("Load succeeded on a stack entry with no resources")
+	}
+	if !strings.Contains(err.Error(), "kx get <resource>") {
+		t.Errorf("error = %q, want it to name the recovery step", err)
+	}
+}
+
 // The slot is an additive key: the history shape older versions read is
 // untouched, so an upgrade is reversible.
 func TestNamedSlotIsAnAdditiveKey(t *testing.T) {
