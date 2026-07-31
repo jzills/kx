@@ -7,8 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/mattn/go-runewidth"
+	"unicode/utf8"
 )
 
 // Resolver is the subset of the state a resolve needs: the ordered resource
@@ -34,25 +33,35 @@ func Resolve(state Resolver, index int) (string, error) {
 	return names[index-1], nil
 }
 
-// span is a half-open column range in the header line. end < 0 means
-// end-of-line.
+// span is a half-open column range in the header line, measured in runes.
+// end < 0 means end-of-line.
 type span struct {
 	start, end int
 }
 
 var columnRE = regexp.MustCompile(`\S+\s*`)
 
-// slice extracts a span from a row, tolerating rows shorter than the header
-// (Python's slicing yields "" past the end; Go would panic).
+// slice extracts a span from a row.
+//
+// Offsets are rune counts rather than byte counts, because that is the unit
+// kubectl lays its columns out in: its table printer pads with text/tabwriter,
+// which measures cells in runes. A row carrying a multi-byte value keeps its
+// columns at the same rune offsets as the header but at different byte
+// offsets, so byte slicing cuts every column after that value in the wrong
+// place.
+//
+// Rows shorter than the header yield "" past the end, the way Python's slicing
+// did; Go would panic.
 func (s span) slice(row string) string {
-	if s.start >= len(row) {
+	runes := []rune(row)
+	if s.start >= len(runes) {
 		return ""
 	}
 	end := s.end
-	if end < 0 || end > len(row) {
-		end = len(row)
+	if end < 0 || end > len(runes) {
+		end = len(runes)
 	}
-	return strings.TrimSpace(row[s.start:end])
+	return strings.TrimSpace(string(runes[s.start:end]))
 }
 
 // parseOutput splits kubectl table output into headers, rows and the position
@@ -65,10 +74,17 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 	}
 
 	header := lines[0]
+	// FindAllStringIndex reports byte offsets; the spans are kept in runes so
+	// they line up with rows that carry multi-byte values. Headers are ASCII in
+	// every table kubectl prints, so this conversion is a no-op in practice —
+	// it is the rows that diverge.
 	matches := columnRE.FindAllStringIndex(header, -1)
 	spans := make([]span, 0, len(matches))
 	for _, m := range matches {
-		spans = append(spans, span{start: m[0], end: m[1]})
+		spans = append(spans, span{
+			start: utf8.RuneCountInString(header[:m[0]]),
+			end:   utf8.RuneCountInString(header[:m[1]]),
+		})
 	}
 	if len(spans) == 0 {
 		return nil, nil, 0
@@ -107,12 +123,16 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 	return headers, rows, nameIdx
 }
 
-// cellWidth measures a cell in terminal columns rather than bytes, matching
-// what internal/render does for the tables it draws itself. Identical to len()
-// for the ASCII kubectl emits for every built-in resource, so the layout the
-// tests pin is unchanged; it only stops a non-ASCII value in a custom column
-// from being padded several columns too wide.
-func cellWidth(cell string) int { return runewidth.StringWidth(cell) }
+// cellWidth measures a cell the way kubectl's own table printer does — in
+// runes, via text/tabwriter — so that a table Format lays out parses back
+// through parseOutput with its columns in the same places.
+//
+// Deliberately not terminal width: "日本語" is three runes and six columns, and
+// kubectl pads it to three. parseOutput reads both kubectl's output and
+// Format's, so the two have to agree, and kubectl is the one that cannot be
+// changed. What the user actually sees is laid out by render.Table, which does
+// measure in terminal columns.
+func cellWidth(cell string) int { return utf8.RuneCountInString(cell) }
 
 // Format lays out rows as a left-aligned, two-space-separated table. Every
 // cell is padded, including the last in a row, matching the Python

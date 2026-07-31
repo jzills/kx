@@ -1,7 +1,6 @@
 package index
 
 import (
-	"github.com/mattn/go-runewidth"
 	"strings"
 	"testing"
 )
@@ -220,14 +219,15 @@ func TestCountRows(t *testing.T) {
 	}
 }
 
-// Padding is measured in terminal columns, not bytes, matching the tables
-// internal/render draws itself.
+// Padding is measured in runes, which is the unit kubectl's own table printer
+// uses (text/tabwriter). Both kubectl's output and Format's flow into
+// parseOutput, so the two have to agree on where a column starts.
 //
-// "日本語" is 9 bytes but occupies 6 columns. Padding by byte length pads it to
-// 9 and every other cell to 9 bytes as well, so the rows come out visibly
-// different widths on a terminal. Every cell is padded, so the invariant is
-// simply that all rows render to the same display width.
-func TestFormatPadsByDisplayWidth(t *testing.T) {
+// Not terminal width: "日本語" is three runes and six columns. kubectl pads it
+// to three, so kx must too, or a round trip through parseOutput cuts the
+// columns after it in the wrong place. What the user sees is laid out by
+// render.Table, which does measure in terminal columns.
+func TestFormatPadsByRuneCount(t *testing.T) {
 	out := Format([][]string{
 		{"NAME", "STATUS"},
 		{"日本語", "Running"},
@@ -235,21 +235,74 @@ func TestFormatPadsByDisplayWidth(t *testing.T) {
 	})
 	seen := map[int][]string{}
 	for _, line := range strings.Split(out, "\n") {
-		w := runewidth.StringWidth(line)
-		seen[w] = append(seen[w], line)
+		seen[len([]rune(line))] = append(seen[len([]rune(line))], line)
 	}
 	if len(seen) != 1 {
-		t.Errorf("rows render at %d different display widths, want 1:\n%s\n%v",
-			len(seen), out, seen)
+		t.Errorf("rows have %d different rune counts, want 1:\n%s\n%v", len(seen), out, seen)
 	}
 }
 
 // ASCII is all kubectl emits for built-in resources, so the layout every other
-// test pins must be untouched by measuring in columns.
+// test pins must be untouched.
 func TestFormatIsUnchangedForASCII(t *testing.T) {
 	rows := [][]string{{"X", "NAME", "AGE"}, {"1", "web", "5d"}, {"2", "redis-longer", "3d"}}
 	want := "X  NAME          AGE\n1  web           5d \n2  redis-longer  3d "
 	if got := Format(rows); got != want {
 		t.Errorf("Format =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// The real defect #160 was filed for: a multi-byte value shifts every later
+// column's byte offset, so byte slicing cut them in the wrong place. This is
+// kubectl's actual layout, captured from
+// `kubectl get cm -o custom-columns=NAME:...,NOTE:...,KIND:.kind` with a CJK
+// annotation — note that KIND begins at rune 30 on every row, byte 30 on the
+// ASCII rows and byte 36 on the CJK one.
+func TestParseTableHandlesMultiByteValues(t *testing.T) {
+	output := "NAME                 NOTE     KIND\n" +
+		"alpha                日本語      ConfigMap\n" +
+		"beta                 abcdef   ConfigMap"
+
+	headers, rows, nameIdx := ParseTable(output)
+	if headers == nil {
+		t.Fatal("ParseTable returned no headers")
+	}
+	if got := strings.Join(headers, "|"); got != "NAME|NOTE|KIND" {
+		t.Fatalf("headers = %q", got)
+	}
+	if nameIdx != 0 {
+		t.Errorf("nameIdx = %d, want 0", nameIdx)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	for i, want := range [][]string{
+		{"alpha", "日本語", "ConfigMap"},
+		{"beta", "abcdef", "ConfigMap"},
+	} {
+		if got := strings.Join(rows[i], "|"); got != strings.Join(want, "|") {
+			t.Errorf("row %d = %q, want %q", i, got, strings.Join(want, "|"))
+		}
+	}
+}
+
+// Add indexes that same table and Format re-emits it; render then parses the
+// result back. The round trip has to survive a multi-byte value, or the
+// listing loses a column between being built and being drawn.
+func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
+	output := "NAME                 NOTE     KIND\n" +
+		"alpha                日本語      ConfigMap\n" +
+		"beta                 abcdef   ConfigMap"
+
+	indexed, names := Service{}.Add(output)
+	if strings.Join(names, "|") != "alpha|beta" {
+		t.Fatalf("names = %v", names)
+	}
+	headers, rows, _ := ParseTable(indexed)
+	if got := strings.Join(headers, "|"); got != "X|NAME|NOTE|KIND" {
+		t.Fatalf("re-parsed headers = %q\n%s", got, indexed)
+	}
+	if got := strings.Join(rows[0], "|"); got != "1|alpha|日本語|ConfigMap" {
+		t.Errorf("re-parsed row = %q, want 1|alpha|日本語|ConfigMap\n%s", got, indexed)
 	}
 }
