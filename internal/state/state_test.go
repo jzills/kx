@@ -532,3 +532,208 @@ func TestDescribeCurrentOnAMixedListing(t *testing.T) {
 		t.Errorf("err = %q, want a neutral count for a mixed listing", err)
 	}
 }
+
+func namespaces(names ...string) Resources {
+	return NewResources(names, kinds.Namespace)
+}
+
+// The reported sequence from #156: a namespace listing, an unrelated listing on
+// top of it, then a switch. The switch resolves against the namespace slot, so
+// the intervening pods never enter into it.
+func TestNamedSlotSurvivesAnInterveningListing(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{Resources: namespaces("default", "prod"), Namespace: "default"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	save(t, service, State{Resources: pods("nginx", "redis"), Namespace: "default"})
+
+	name, _, err := service.FieldsNamed(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsNamed: %v", err)
+	}
+	if name != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, want %q", name, "prod")
+	}
+}
+
+// SaveNamed is the `kx ns` path: it must not push onto the history stack, which
+// is the whole point of the slot.
+func TestSaveNamedDoesNotTouchHistory(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "default"})
+	if err := service.SaveNamed(State{Resources: namespaces("default", "prod"), Namespace: "default"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("len(States) = %d, want 1 — SaveNamed pushed onto history", len(history.States))
+	}
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := current.Names(); len(got) != 1 || got[0] != "nginx" {
+		t.Errorf("current entry = %v, want [nginx]", got)
+	}
+}
+
+// `kx get ns` is the escape hatch for describing or labelling a namespace, so it
+// writes both: history (for `kx describe <n>`) and the slot (for `kx ns <n>`).
+func TestSaveOfANamespaceListingPopulatesBoth(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: namespaces("default", "prod"), Namespace: "default"})
+
+	name, _, kind, err := service.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if name != "prod" || kind != kinds.Namespace {
+		t.Errorf("Fields(2) = %q/%q, want prod/Namespace", kind, name)
+	}
+	named, _, err := service.FieldsNamed(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsNamed: %v", err)
+	}
+	if named != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, want %q", named, "prod")
+	}
+}
+
+// A listing of anything else leaves the namespace slot alone.
+func TestSaveOfAnotherKindDoesNotPopulateTheSlot(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "default"})
+
+	if _, _, err := service.FieldsNamed(1, kinds.Namespace); err == nil {
+		t.Fatal("FieldsNamed on an unpopulated slot succeeded, want an error")
+	}
+}
+
+// The eviction defect that sank the per-kind history search: the slot is not in
+// the stack, so a full stack cannot displace it.
+func TestNamedSlotSurvivesHistoryEviction(t *testing.T) {
+	service := newTestService(t, 2)
+	if err := service.SaveNamed(State{Resources: namespaces("default", "prod"), Namespace: "default"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		save(t, service, State{Resources: pods("nginx"), Namespace: "default"})
+	}
+
+	name, _, err := service.FieldsNamed(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsNamed after eviction: %v", err)
+	}
+	if name != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, want %q", name, "prod")
+	}
+}
+
+// An empty slot must say how to fill it rather than falling back to the current
+// listing, which is the bug this whole change removes.
+func TestFieldsNamedOnEmptySlotNamesTheRelist(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "default"})
+
+	_, _, err := service.FieldsNamed(1, kinds.Namespace)
+	if err == nil {
+		t.Fatal("FieldsNamed on an empty slot succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "kx ns") {
+		t.Errorf("error = %q, want it to name 'kx ns'", err.Error())
+	}
+}
+
+// Out of range against the slot reports the slot's own size, not the current
+// listing's — they are different listings and the counts differ.
+func TestFieldsNamedOutOfRangeReportsTheSlotSize(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{Resources: namespaces("default", "prod"), Namespace: "default"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	save(t, service, State{Resources: pods("a", "b", "c", "d", "e"), Namespace: "default"})
+
+	_, _, err := service.FieldsNamed(4, kinds.Namespace)
+	if err == nil {
+		t.Fatal("FieldsNamed(4) against a 2-entry slot succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "2 Namespaces") {
+		t.Errorf("error = %q, want it to report '2 Namespaces'", err.Error())
+	}
+}
+
+// The slot records the namespace its listing came from, so a context switch is
+// captioned with the context it moved to.
+func TestFieldsNamedReturnsTheSlotNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{
+		Resources: NewResources([]string{"docker-desktop", "prod"}, kinds.Context),
+		Namespace: "docker-desktop",
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	_, namespace, err := service.FieldsNamed(2, kinds.Context)
+	if err != nil {
+		t.Fatalf("FieldsNamed: %v", err)
+	}
+	if namespace != "docker-desktop" {
+		t.Errorf("namespace = %q, want %q", namespace, "docker-desktop")
+	}
+}
+
+// A state file written before slots existed has no "named" key. It must keep
+// loading and resolving exactly as it did.
+func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
+	service := newTestService(t, 10)
+	legacy := `{"states":[{"resources":{"nginx":"Pod"},"namespace":"prod","query":null}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	name, namespace, kind, err := service.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if name != "nginx" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("Fields(1) = %q/%q/%q, want nginx/prod/Pod", name, namespace, kind)
+	}
+	if _, _, err := service.FieldsNamed(1, kinds.Namespace); err == nil {
+		t.Error("FieldsNamed on a file with no slots succeeded, want an error")
+	}
+}
+
+// The slot is an additive key: the history shape older versions read is
+// untouched, so an upgrade is reversible.
+func TestNamedSlotIsAnAdditiveKey(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+	if err := service.SaveNamed(State{Resources: namespaces("default"), Namespace: "prod"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	data, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	for _, key := range []string{"states", "cursor", "named"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("state.json is missing the %q key", key)
+		}
+	}
+	var named map[string]State
+	if err := json.Unmarshal(raw["named"], &named); err != nil {
+		t.Fatalf("Unmarshal named: %v", err)
+	}
+	if _, ok := named["Namespace"]; !ok {
+		t.Errorf("named = %v, want a 'Namespace' slot", named)
+	}
+}

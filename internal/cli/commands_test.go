@@ -1,10 +1,18 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // The leading run of numbers are indexes; everything after is kubectl's.
@@ -105,5 +113,121 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 		if !strings.Contains(cmd.Use, "...") {
 			t.Errorf("%s: Use = %q, want it to show a repeatable index", name, cmd.Use)
 		}
+	}
+}
+
+// switchServices wires the real state service against a temp file, so the
+// listing path and the switch path meet the way they do in the tool.
+func switchServices(t *testing.T, kube kubectl.Service) Services {
+	t.Helper()
+	// The package renderer is nil until configured, and these tests drive the
+	// listing path, which renders.
+	render.Configure("default", true)
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	return Services{
+		Kubectl: kube, State: store, Index: index.Service{}, Config: config.Default(),
+	}
+}
+
+const namespaceTable = "NAME      STATUS   AGE\n" +
+	"default   Active   91d\n" +
+	"prod      Active   91d\n"
+
+// The whole of #156, through the real call path: list namespaces, list
+// something else on top, then switch. The 2 counts against namespaces.
+func TestNamespaceListThenSwitchIgnoresAnInterveningListing(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable}
+	services := switchServices(t, kube)
+
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	name, err := SwitchCommand{Kubectl: kube, State: services.State}.namespace(2)
+	if err != nil {
+		t.Fatalf("namespace(2): %v", err)
+	}
+	if name != "prod" {
+		t.Errorf("namespace(2) = %q, want prod — resolved against the wrong listing", name)
+	}
+}
+
+// `kx ns` is a switch listing, so it leaves the history stack alone. This is the
+// churn half of #156: namespace listings used to crowd out the work between them.
+func TestNamespaceListingDoesNotTouchHistory(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable}
+	services := switchServices(t, kube)
+
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := listSwitchTargets(services, false); err != nil {
+			t.Fatalf("listSwitchTargets: %v", err)
+		}
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("history has %d entries, want 1 — `kx ns` pushed onto the stack", len(history.States))
+	}
+	current, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := current.Names(); len(got) != 1 || got[0] != "nginx" {
+		t.Errorf("current entry = %v, want [nginx] — the pods listing was displaced", got)
+	}
+}
+
+// `kx get ns` is the escape hatch: it behaves like any other listing, so
+// `kx describe <n>` still works on a namespace, and it refreshes the slot too.
+func TestGetNamespacesPopulatesHistoryAndSlot(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "namespaces", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	name, _, kind, err := services.State.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields(2): %v", err)
+	}
+	if name != "prod" || kind != kinds.Namespace {
+		t.Errorf("Fields(2) = %s/%s, want Namespace/prod", kind, name)
+	}
+	slotName, _, err := services.State.FieldsNamed(2, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsNamed(2): %v", err)
+	}
+	if slotName != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, want prod", slotName)
+	}
+}
+
+// Contexts no longer land in history, so the caption cannot come from the
+// current entry: on a fresh install there is none, and otherwise it would name
+// whatever resource listing happened to be there.
+func TestContextListingCaptionsWithoutHistory(t *testing.T) {
+	kube := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop\n",
+	}
+	services := switchServices(t, kube)
+
+	if err := listSwitchTargets(services, true); err != nil {
+		t.Fatalf("listSwitchTargets on empty history: %v", err)
 	}
 }

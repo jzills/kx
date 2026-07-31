@@ -525,17 +525,21 @@ func listSwitchTargets(services Services, isContext bool) error {
 		if err != nil {
 			return err
 		}
-		current, err := services.State.Load()
-		if err != nil {
-			return err
-		}
-		render.IndexedTable(output, "Contexts", current.Namespace, "")
+		// Straight from kubeconfig rather than back out of state: the listing no
+		// longer goes into history, so there is nothing there to read it from —
+		// on a fresh install nothing at all, and otherwise whatever resource
+		// listing happened to be current.
+		render.IndexedTable(output, "Contexts", services.Kubectl.CurrentContext(), "")
 		return nil
 	}
 
 	stop := render.Status("fetching namespaces")
+	// Slot only: `kx ns` is a switch listing, not work. `kx get ns` remains the
+	// way to put namespaces in history for `kx describe <n>` and friends.
 	output, namespace, err := GetCommand{
-		Kubectl: services.Kubectl, State: services.State, Index: services.Index,
+		Kubectl: services.Kubectl,
+		State:   slotOnly{writer: services.State},
+		Index:   services.Index,
 	}.Execute("namespaces", "", nil)
 	stop()
 	if err != nil {

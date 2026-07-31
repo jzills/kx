@@ -513,31 +513,73 @@ func (l listings) FieldsExpecting(index int, expected kinds.Kind) (string, strin
 	return l.names[index-1], "prod", nil
 }
 
-func namespaces(names ...string) listings {
-	return listings{kind: kinds.Namespace, names: names}
+// slots answers FieldsNamed from per-kind slots, the way the state service
+// does: the index counts against that kind's own listing, and a kind with no
+// listing has nothing to resolve against.
+type slots map[kinds.Kind][]string
+
+func (s slots) FieldsNamed(index int, kind kinds.Kind) (string, string, error) {
+	names, ok := s[kind]
+	if !ok {
+		return "", "", fmt.Errorf(
+			"No %s listing yet — run 'kx %s' to list them.", kind, strings.ToLower(string(kind)))
+	}
+	if index < 1 || index > len(names) {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the last %s listing had %d.", index, kind, len(names))
+	}
+	return names[index-1], "prod", nil
 }
 
-// kubectl config set-context accepts any string, so a stale index pointing at a
-// Pod would otherwise make that pod's name the active namespace.
-func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
+func namespaceSlot(names ...string) slots {
+	return slots{kinds.Namespace: names}
+}
+
+// The sequence from #156. Whatever is in history — here a pods listing — the
+// index counts against the namespace slot, because `kx ns 2` already said which
+// kind it means.
+func TestNamespaceSwitchReadsTheSlotNotTheCurrentListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
+	state := slots{
+		kinds.Namespace: {"default", "staging"},
+		kinds.Pod:       {"nginx", "redis"},
+	}
+
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(2)
+	if err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if name != "staging" {
+		t.Errorf("name = %q, want staging — index 2 resolved against the wrong listing", name)
+	}
+	want := "config set-context --current --namespace=staging"
+	if got := joinArgs(kubectl.runs[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+// An unpopulated slot must not fall back to the current listing: that fallback
+// is what let a pod's name become the active namespace, and kubectl config
+// set-context validates nothing that would catch it.
+func TestNamespaceSwitchWithoutANamespaceListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	state := slots{kinds.Pod: {"nginx"}}
 
 	_, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a namespace, want an error")
+		t.Fatal("switched with no namespace listing, want an error")
 	}
-	if !strings.Contains(err.Error(), "not Namespace") {
-		t.Errorf("err = %v, want a kind mismatch", err)
+	if !strings.Contains(err.Error(), "No Namespace listing") {
+		t.Errorf("err = %v, want it to report an empty slot", err)
 	}
 	if len(kubectl.runs) != 0 {
-		t.Error("kubectl config was called for a wrong-kind index")
+		t.Error("kubectl config was called with no namespace listing")
 	}
 }
 
 func TestNamespaceSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}.namespace(1)
+	name, err := SwitchCommand{Kubectl: kubectl, State: namespaceSlot("staging")}.namespace(1)
 	if err != nil {
 		t.Fatalf("namespace: %v", err)
 	}
@@ -556,7 +598,7 @@ func TestNamespaceSwitch(t *testing.T) {
 // switch spends no round trip checking the namespace exists.
 func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	if _, err := (SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}).
+	if _, err := (SwitchCommand{Kubectl: kubectl, State: namespaceSlot("staging")}).
 		namespace(1); err != nil {
 		t.Fatalf("namespace: %v", err)
 	}
@@ -566,7 +608,7 @@ func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
 }
 
 func TestContextSwitchWithoutAContextListing(t *testing.T) {
-	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
+	state := slots{kinds.Pod: {"nginx"}}
 	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: state}.context(1)
 	if err == nil {
 		t.Fatal("switched to a context with no context listing, want an error")
@@ -575,7 +617,7 @@ func TestContextSwitchWithoutAContextListing(t *testing.T) {
 
 func TestContextSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	state := listings{kind: ContextKind, names: []string{"docker-desktop"}}
+	state := slots{kinds.Context: {"docker-desktop"}}
 	name, err := SwitchCommand{Kubectl: kubectl, State: state}.context(1)
 	if err != nil {
 		t.Fatalf("context: %v", err)
@@ -604,10 +646,27 @@ func TestContextsSavesWithContextKind(t *testing.T) {
 		Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(states.saved) != 1 {
-		t.Fatalf("saved %d entries, want 1", len(states.saved))
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
 	}
-	if kind, _ := states.saved[0].Resources.Kind("docker-desktop"); kind != ContextKind {
-		t.Errorf("kind = %q, want %q", kind, ContextKind)
+	if kind, _ := states.named[0].Resources.Kind("docker-desktop"); kind != kinds.Context {
+		t.Errorf("kind = %q, want %q", kind, kinds.Context)
+	}
+}
+
+// A context is a kubeconfig entry, not a server resource — there is no
+// `kubectl describe context` — so nothing downstream can consume one from the
+// history stack, and putting it there only evicts work.
+func TestContextsDoesNotTouchHistory(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	states := &fakeState{}
+	if _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("pushed %d entries onto history, want 0", len(states.saved))
 	}
 }

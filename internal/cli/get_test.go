@@ -39,6 +39,9 @@ func (f *fakeKubectl) CurrentNamespace() string {
 
 type fakeState struct {
 	saved []state.State
+	// named records slot writes separately, so a test can tell the two
+	// destinations apart — which is the whole distinction `kx ns` turns on.
+	named []state.State
 	err   error
 }
 
@@ -47,6 +50,14 @@ func (f *fakeState) Save(s state.State) error {
 		return f.err
 	}
 	f.saved = append(f.saved, s)
+	return nil
+}
+
+func (f *fakeState) SaveNamed(s state.State) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.named = append(f.named, s)
 	return nil
 }
 

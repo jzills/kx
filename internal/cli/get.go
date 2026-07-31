@@ -19,6 +19,24 @@ type StateWriter interface {
 	Save(state.State) error
 }
 
+// NamedStateWriter writes a listing to its per-kind slot instead of the history
+// stack.
+type NamedStateWriter interface {
+	SaveNamed(state.State) error
+}
+
+// slotOnly routes a listing into its per-kind slot, leaving the history stack
+// untouched.
+//
+// `kx ns` runs through GetCommand like any other listing, but must not push an
+// entry: switching namespaces is the most frequent thing kx does, and stacking
+// every listing evicted the work the stack exists for. Swapping the writer
+// rather than teaching GetCommand about kinds keeps that decision at the one
+// call site that makes it.
+type slotOnly struct{ writer NamedStateWriter }
+
+func (s slotOnly) Save(entry state.State) error { return s.writer.SaveNamed(entry) }
+
 // GetCommand lists resources and saves the listing so later commands can
 // resolve indexes against it.
 type GetCommand struct {
