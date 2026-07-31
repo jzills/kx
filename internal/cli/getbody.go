@@ -61,11 +61,12 @@ func runGet(services Services, resource string, args []string, options getOption
 		names := make([]string, 0, len(indexes))
 		namespace := ""
 		for _, index := range indexes {
-			name, ns, kind, err := services.State.Fields(index)
+			// FieldsExpecting rather than Fields: the resource type was named on
+			// the command line, so an out-of-range index or an empty history can
+			// be reported against that kind instead of against whatever listing
+			// happens to be current.
+			name, ns, err := services.State.FieldsExpecting(index, expected)
 			if err != nil {
-				return err
-			}
-			if err := kinds.EnsureKind(index, name, kind, expected, services.State); err != nil {
 				return err
 			}
 			names = append(names, name)

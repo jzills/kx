@@ -418,72 +418,88 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	return name, current.Namespace, kind, nil
 }
 
-// listsOnly reports whether every resource in an entry is of one kind, which is
-// what makes an index in that entry unambiguously that kind.
-//
-// A mixed entry — a namespace-wide tree, a triage sweep — is skipped rather
-// than searched: index 2 there could be anything, so resolving against it would
-// reintroduce exactly the mismatch this avoids.
-func listsOnly(entry State, kind kinds.Kind) bool {
+// soleKind returns the kind every resource in an entry shares, or "" when the
+// entry spans several — a namespace-wide tree, a triage sweep.
+func soleKind(entry State) kinds.Kind {
 	entries := entry.Resources.Entries()
 	if len(entries) == 0 {
-		return false
+		return ""
 	}
-	for _, e := range entries {
-		if e.Kind != kind {
-			return false
+	first := entries[0].Kind
+	for _, e := range entries[1:] {
+		if e.Kind != first {
+			return ""
 		}
 	}
-	return true
+	return first
 }
 
-// FieldsForKind resolves an index against the most recent entry that lists only
-// kind, searching back from the cursor rather than using the cursor's entry.
+// describeCurrent names the listing an index was counted against — "1 Service",
+// "14 Pods", or "3 items" when the entry spans kinds — so an out-of-range error
+// can say what it was counting.
+func describeCurrent(entry State) string {
+	count := entry.Resources.Len()
+	kind := soleKind(entry)
+	if kind == "" {
+		if count == 1 {
+			return "1 item"
+		}
+		return fmt.Sprintf("%d items", count)
+	}
+	if count == 1 {
+		return "1 " + string(kind)
+	}
+	return fmt.Sprintf("%d %s", count, kinds.PluralDisplay(string(kind)))
+}
+
+// FieldsExpecting resolves an index for a command that has already named the
+// kind it wants.
 //
-// `kx ns 2` says which kind it means, so an intervening `kx get pods` should not
-// silently turn that 2 into a pod. Searching back from the cursor rather than
-// through the whole stack keeps "most recent" meaning what the user last saw,
-// so `kx back` still moves what an index resolves against.
-func (s *Service) FieldsForKind(idx int, kind kinds.Kind) (name, namespace string, err error) {
-	history, err := s.loadHistory()
+// Fields resolves the index first and checks the kind afterwards, so the two
+// failures that happen before the check — an index past the end of the current
+// listing, and no state at all — were reported without reference to the kind
+// asked for. `kx ns 2` against a one-row Services listing said "current state
+// has 1 item (run 'kx state' to view)", which describes a different resource
+// and points somewhere unhelpful. Every failure here names the kind instead.
+func (s *Service) FieldsExpecting(
+	idx int, expected kinds.Kind,
+) (name, namespace string, err error) {
+	// The relist command is spelled the way EnsureKind spells it, so all three
+	// failures point at the same place.
+	relist := "kx get " + strings.ToLower(string(expected))
+	plural := kinds.PluralDisplay(string(expected))
+
+	current, err := s.Load()
 	if err != nil {
+		if errors.Is(err, ErrNoState) {
+			return "", "", fmt.Errorf(
+				"No state found — run '%s' to list %s first.", relist, plural)
+		}
+		// An unreadable state file already explains itself.
 		return "", "", err
 	}
-	for i := history.Cursor; i >= 0; i-- {
-		entry := history.States[i]
-		if !listsOnly(entry, kind) {
-			continue
-		}
-		name, resolveErr := index.Resolve(entry, idx)
-		if resolveErr != nil {
-			// index.Resolve says "current state", which would be wrong here —
-			// the count comes from a historical entry, and a namespace created
-			// since it was taken simply isn't in it. Relisting is the fix, so
-			// the message names that rather than `kx state`.
-			noun := "items"
-			if entry.Resources.Len() == 1 {
-				noun = "item"
-			}
-			return "", "", fmt.Errorf(
-				"Index %d is out of range — the %s listing has %d %s (run 'kx %s' to relist).",
-				idx, kind, entry.Resources.Len(), noun, listCommandFor(kind))
-		}
-		return name, entry.Namespace, nil
+
+	name, err = index.Resolve(current, idx)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the current listing has %s. Run '%s' to relist %s%s.",
+			idx, describeCurrent(current), relist, plural, s.backHint(expected))
 	}
-	return "", "", fmt.Errorf(
-		"No %s listing in history — run 'kx %s' to list them.",
-		kind, listCommandFor(kind))
+
+	kind, _ := current.Resources.Kind(name)
+	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
+		return "", "", err
+	}
+	return name, current.Namespace, nil
 }
 
-// listCommandFor names the command that produces a listing of kind, for the
-// hint above.
-func listCommandFor(kind kinds.Kind) string {
-	switch kind {
-	case kinds.Namespace:
-		return "ns"
-	default:
-		return "get " + strings.ToLower(string(kind))
+// backHint offers `kx back` when the entry one step back lists the kind asked
+// for, matching the clause EnsureKind appends.
+func (s *Service) backHint(expected kinds.Kind) string {
+	if !s.PreviousLists(expected) {
+		return ""
 	}
+	return fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
 }
 
 // PreviousLists reports whether the entry one step back lists kind, so

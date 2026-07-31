@@ -390,10 +390,10 @@ func (c ContextsCommand) Execute() (string, error) {
 	return indexed, nil
 }
 
-// KindResolver resolves an index against the most recent listing of one kind,
-// rather than against whatever the history cursor happens to be on.
-type KindResolver interface {
-	FieldsForKind(index int, kind kinds.Kind) (name, namespace string, err error)
+// ExpectingResolver resolves an index for a command that has already named the
+// kind it wants, so every way the resolve can fail is reported in those terms.
+type ExpectingResolver interface {
+	FieldsExpecting(index int, expected kinds.Kind) (name, namespace string, err error)
 }
 
 // SwitchCommand activates an indexed namespace or context.
@@ -403,23 +403,22 @@ type KindResolver interface {
 // means, so an intervening `kx get pods` should not turn that 2 into a pod —
 // which is what made the sequence `kx ns` / `kx get pod` / `kx ns 2` fail (#156).
 //
-// Resolving by kind is also what keeps a stale index from making a pod's name
-// the active namespace: `kubectl config set-context --namespace` accepts any
-// string, and only entries listing namespaces are searched.
+// The kind check is not optional: `kubectl config set-context --namespace`
+// accepts any string and validates nothing against the server, so a stale index
+// pointing at a Pod would otherwise make that pod's name the active namespace.
 //
-// Nothing here checks the namespace against the server. Setting a namespace is
-// a local kubeconfig edit that kubectl itself does not validate — pointing at
-// one before creating it is a normal thing to do — and kx probes nothing else
-// ahead of acting on it either: every staleness check in the tool reacts to a
-// failure rather than pre-empting one. A namespace that has gone shows up the
-// way it does under kubectl, as a listing with nothing in it.
+// Nothing here checks the namespace exists either. Setting one is a local
+// kubeconfig edit that kubectl does not validate — pointing at a namespace
+// before creating it is a normal thing to do — and kx pre-empts nothing
+// elsewhere: every staleness check in the tool reacts to a failure rather than
+// running ahead of one.
 type SwitchCommand struct {
 	Kubectl kubectl.Service
-	State   KindResolver
+	State   ExpectingResolver
 }
 
 func (c SwitchCommand) namespace(index int) (string, error) {
-	name, _, err := c.State.FieldsForKind(index, kinds.Namespace)
+	name, _, err := c.State.FieldsExpecting(index, kinds.Namespace)
 	if err != nil {
 		return "", err
 	}
@@ -428,7 +427,7 @@ func (c SwitchCommand) namespace(index int) (string, error) {
 }
 
 func (c SwitchCommand) context(index int) (string, error) {
-	name, _, err := c.State.FieldsForKind(index, ContextKind)
+	name, _, err := c.State.FieldsExpecting(index, ContextKind)
 	if err != nil {
 		return "", err
 	}

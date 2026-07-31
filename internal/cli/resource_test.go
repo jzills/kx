@@ -488,63 +488,50 @@ func TestExecFailsWhenNoShellFound(t *testing.T) {
 	}
 }
 
-// listings answers FieldsForKind the way the history search does: only entries
-// that list exactly one kind are searched, so an index is resolved against the
-// most recent listing of the kind the command named.
+// listings answers FieldsExpecting from a single current listing, the way the
+// state service does: the index counts against that listing, and the kind has
+// to match what the command asked for.
 type listings struct {
-	byKind map[kinds.Kind][]string
+	kind  kinds.Kind
+	names []string
 }
 
-func (l listings) FieldsForKind(index int, kind kinds.Kind) (string, string, error) {
-	names := l.byKind[kind]
-	if len(names) == 0 {
-		return "", "", fmt.Errorf("No %s listing in history — run 'kx ns' to list them.", kind)
-	}
-	if index < 1 || index > len(names) {
+func (l listings) FieldsExpecting(index int, expected kinds.Kind) (string, string, error) {
+	if len(l.names) == 0 {
 		return "", "", fmt.Errorf(
-			"Index %d is out of range — the %s listing has %d items.", index, kind, len(names))
+			"No state found — run 'kx get %s' to list them first.", expected)
 	}
-	return names[index-1], "prod", nil
+	if index < 1 || index > len(l.names) {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the current listing has %d %s. Run 'kx get %s' to relist.",
+			index, len(l.names), l.kind, expected)
+	}
+	if l.kind != expected {
+		return "", "", fmt.Errorf("Index %d is %s/%s, not %s — run 'kx get %s' to relist.",
+			index, l.kind, l.names[index-1], expected, expected)
+	}
+	return l.names[index-1], "prod", nil
 }
 
 func namespaces(names ...string) listings {
-	return listings{byKind: map[kinds.Kind][]string{kinds.Namespace: names}}
+	return listings{kind: kinds.Namespace, names: names}
 }
 
-// The report in #156: list namespaces, list pods, then switch by the number the
-// namespace listing showed. The pod listing is current, but `kx ns 2` has
-// already said which kind it means.
-func TestNamespaceSwitchResolvesAgainstTheNamespaceListing(t *testing.T) {
+// kubectl config set-context accepts any string, so a stale index pointing at a
+// Pod would otherwise make that pod's name the active namespace.
+func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	state := listings{byKind: map[kinds.Kind][]string{
-		kinds.Namespace: {"cilium-secrets", "db", "default"},
-		kinds.Pod:       {"homepage-6cd6cd57d5", "whoami-66896759c8"},
-	}}
-
-	name, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(2)
-	if err != nil {
-		t.Fatalf("namespace: %v", err)
-	}
-	if name != "db" {
-		t.Errorf("name = %q, want db — index 2 of the namespace listing", name)
-	}
-}
-
-// Nothing downstream validates the name, so a listing with no namespaces in it
-// has to fail here rather than hand an arbitrary string to set-context.
-func TestNamespaceSwitchWithoutANamespaceListing(t *testing.T) {
-	kubectl := &recordingKubectl{}
-	state := listings{byKind: map[kinds.Kind][]string{kinds.Pod: {"nginx"}}}
+	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
 
 	_, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(1)
 	if err == nil {
-		t.Fatal("switched with no namespace listing, want an error")
+		t.Fatal("switched to a Pod as a namespace, want an error")
 	}
-	if !strings.Contains(err.Error(), "No Namespace listing") {
-		t.Errorf("err = %v, want it to say no namespace listing exists", err)
+	if !strings.Contains(err.Error(), "not Namespace") {
+		t.Errorf("err = %v, want a kind mismatch", err)
 	}
 	if len(kubectl.runs) != 0 {
-		t.Error("kubectl config was called anyway")
+		t.Error("kubectl config was called for a wrong-kind index")
 	}
 }
 
@@ -579,7 +566,7 @@ func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
 }
 
 func TestContextSwitchWithoutAContextListing(t *testing.T) {
-	state := listings{byKind: map[kinds.Kind][]string{kinds.Pod: {"nginx"}}}
+	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
 	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: state}.context(1)
 	if err == nil {
 		t.Fatal("switched to a context with no context listing, want an error")
@@ -588,7 +575,7 @@ func TestContextSwitchWithoutAContextListing(t *testing.T) {
 
 func TestContextSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	state := listings{byKind: map[kinds.Kind][]string{ContextKind: {"docker-desktop"}}}
+	state := listings{kind: ContextKind, names: []string{"docker-desktop"}}
 	name, err := SwitchCommand{Kubectl: kubectl, State: state}.context(1)
 	if err != nil {
 		t.Fatalf("context: %v", err)
