@@ -495,31 +495,6 @@ func TestExecFailsWhenNoShellFound(t *testing.T) {
 	}
 }
 
-// listings answers FieldsExpecting from a single current listing, the way the
-// state service does: the index counts against that listing, and the kind has
-// to match what the command asked for.
-type listings struct {
-	kind  kinds.Kind
-	names []string
-}
-
-func (l listings) FieldsExpecting(index int, expected kinds.Kind) (string, string, error) {
-	if len(l.names) == 0 {
-		return "", "", fmt.Errorf(
-			"No state found — run 'kx get %s' to list them first.", expected)
-	}
-	if index < 1 || index > len(l.names) {
-		return "", "", fmt.Errorf(
-			"Index %d is out of range — the current listing has %d %s. Run 'kx get %s' to relist.",
-			index, len(l.names), l.kind, expected)
-	}
-	if l.kind != expected {
-		return "", "", fmt.Errorf("Index %d is %s/%s, not %s — run 'kx get %s' to relist.",
-			index, l.kind, l.names[index-1], expected, expected)
-	}
-	return l.names[index-1], "prod", nil
-}
-
 // slots answers FieldsNamed from per-kind slots, the way the state service
 // does: the index counts against that kind's own listing, and a kind with no
 // listing has nothing to resolve against.
