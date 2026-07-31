@@ -613,6 +613,66 @@ func TestSaveOfAnotherKindDoesNotPopulateTheSlot(t *testing.T) {
 	}
 }
 
+// A file holding slots and no stack is a shape that did not exist before slots:
+// `kx ns` on a fresh install writes one, ahead of any `kx get`. It is
+// well-formed, so every stack reader has to report an empty stack rather than
+// the corruption an entry-less "states" used to mean.
+func TestSlotsOnlyFileReadsAsAnEmptyStack(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{
+		Resources: namespaces("default", "prod"), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	for name, read := range map[string]func() error{
+		"Load":       func() error { _, err := service.Load(); return err },
+		"Navigate":   func() error { _, err := service.Navigate(-1); return err },
+		"NavigateTo": func() error { _, err := service.NavigateTo(1); return err },
+		"Drop":       func() error { _, err := service.Drop(1); return err },
+		"Fields":     func() error { _, _, _, err := service.Fields(1); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := read(); err != ErrNoState {
+				t.Errorf("%s on a slots-only file = %v, want ErrNoState", name, err)
+			}
+		})
+	}
+
+	// Empty stack, not an empty file: what `kx ns 2` reads is still there.
+	if name, _, err := service.FieldsNamed(2, kinds.Namespace); err != nil || name != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, %v; want prod, nil", name, err)
+	}
+	// And nothing above wrote the cursor into a stack that has no entry to
+	// point at — Navigate and Drop both save when they succeed.
+	if _, err := service.LoadHistory(); err != nil {
+		t.Errorf("LoadHistory after the stack readers ran: %v", err)
+	}
+}
+
+// The shape resolves itself: the first `kx get` after a fresh-install `kx ns`
+// builds a stack on top of the slot rather than starting the file over.
+func TestSaveOntoASlotsOnlyFileBuildsTheStack(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{
+		Resources: namespaces("default", "prod"), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load after the first get: %v", err)
+	}
+	if got := current.Names(); len(got) != 1 || got[0] != "nginx" {
+		t.Errorf("current entry = %v, want [nginx]", got)
+	}
+	if name, _, err := service.FieldsNamed(2, kinds.Namespace); err != nil || name != "prod" {
+		t.Errorf("FieldsNamed(2) = %q, %v; want prod, nil — the slot was dropped", name, err)
+	}
+}
+
 // The eviction defect that sank the per-kind history search: the slot is not in
 // the stack, so a full stack cannot displace it.
 func TestNamedSlotSurvivesHistoryEviction(t *testing.T) {
