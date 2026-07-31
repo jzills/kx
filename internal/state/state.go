@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -415,6 +416,90 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	}
 	kind, _ = current.Resources.Kind(name)
 	return name, current.Namespace, kind, nil
+}
+
+// soleKind returns the kind every resource in an entry shares, or "" when the
+// entry spans several — a namespace-wide tree, a triage sweep.
+func soleKind(entry State) kinds.Kind {
+	entries := entry.Resources.Entries()
+	if len(entries) == 0 {
+		return ""
+	}
+	first := entries[0].Kind
+	for _, e := range entries[1:] {
+		if e.Kind != first {
+			return ""
+		}
+	}
+	return first
+}
+
+// describeCurrent names the listing an index was counted against — "1 Service",
+// "14 Pods", or "3 items" when the entry spans kinds — so an out-of-range error
+// can say what it was counting.
+func describeCurrent(entry State) string {
+	count := entry.Resources.Len()
+	kind := soleKind(entry)
+	if kind == "" {
+		if count == 1 {
+			return "1 item"
+		}
+		return fmt.Sprintf("%d items", count)
+	}
+	if count == 1 {
+		return "1 " + string(kind)
+	}
+	return fmt.Sprintf("%d %s", count, kinds.PluralDisplay(string(kind)))
+}
+
+// FieldsExpecting resolves an index for a command that has already named the
+// kind it wants.
+//
+// Fields resolves the index first and checks the kind afterwards, so the two
+// failures that happen before the check — an index past the end of the current
+// listing, and no state at all — were reported without reference to the kind
+// asked for. `kx ns 2` against a one-row Services listing said "current state
+// has 1 item (run 'kx state' to view)", which describes a different resource
+// and points somewhere unhelpful. Every failure here names the kind instead.
+func (s *Service) FieldsExpecting(
+	idx int, expected kinds.Kind,
+) (name, namespace string, err error) {
+	// The relist command is spelled the way EnsureKind spells it, so all three
+	// failures point at the same place.
+	relist := "kx get " + strings.ToLower(string(expected))
+	plural := kinds.PluralDisplay(string(expected))
+
+	current, err := s.Load()
+	if err != nil {
+		if errors.Is(err, ErrNoState) {
+			return "", "", fmt.Errorf(
+				"No state found — run '%s' to list %s first.", relist, plural)
+		}
+		// An unreadable state file already explains itself.
+		return "", "", err
+	}
+
+	name, err = index.Resolve(current, idx)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the current listing has %s. Run '%s' to relist %s%s.",
+			idx, describeCurrent(current), relist, plural, s.backHint(expected))
+	}
+
+	kind, _ := current.Resources.Kind(name)
+	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
+		return "", "", err
+	}
+	return name, current.Namespace, nil
+}
+
+// backHint offers `kx back` when the entry one step back lists the kind asked
+// for, matching the clause EnsureKind appends.
+func (s *Service) backHint(expected kinds.Kind) string {
+	if !s.PreviousLists(expected) {
+		return ""
+	}
+	return fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
 }
 
 // PreviousLists reports whether the entry one step back lists kind, so

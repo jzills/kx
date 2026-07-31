@@ -183,11 +183,8 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 	}
 
 	for position, index := range indexes {
-		name, namespace, kind, err := services.State.Fields(index)
+		name, namespace, err := services.State.FieldsExpecting(index, expected)
 		if err != nil {
-			return err
-		}
-		if err := kinds.EnsureKind(index, name, kind, expected, services.State); err != nil {
 			return err
 		}
 
@@ -198,7 +195,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 			// A NotFound here means the saved index outlived the Secret; the
 			// explicit type triggers the refresh path.
 			if IsNotFound(err) {
-				return StaleResourceError{Kind: kind, Name: name}
+				return StaleResourceError{Kind: expected, Name: name}
 			}
 			return err
 		}
@@ -206,7 +203,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 		if options.HasKey {
 			value, ok := secret.Values[options.Key]
 			if !ok {
-				return fmt.Errorf("No key '%s' in %s/%s", options.Key, kind, name)
+				return fmt.Errorf("No key '%s' in %s/%s", options.Key, expected, name)
 			}
 			// Raw and unwrapped so the value stays substitutable in shell.
 			return writeValue(value)

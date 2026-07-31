@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -487,13 +488,47 @@ func TestExecFailsWhenNoShellFound(t *testing.T) {
 	}
 }
 
+// listings answers FieldsExpecting from a single current listing, the way the
+// state service does: the index counts against that listing, and the kind has
+// to match what the command asked for.
+type listings struct {
+	kind  kinds.Kind
+	names []string
+}
+
+func (l listings) FieldsExpecting(index int, expected kinds.Kind) (string, string, error) {
+	if len(l.names) == 0 {
+		return "", "", fmt.Errorf(
+			"No state found — run 'kx get %s' to list them first.", expected)
+	}
+	if index < 1 || index > len(l.names) {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the current listing has %d %s. Run 'kx get %s' to relist.",
+			index, len(l.names), l.kind, expected)
+	}
+	if l.kind != expected {
+		return "", "", fmt.Errorf("Index %d is %s/%s, not %s — run 'kx get %s' to relist.",
+			index, l.kind, l.names[index-1], expected, expected)
+	}
+	return l.names[index-1], "prod", nil
+}
+
+func namespaces(names ...string) listings {
+	return listings{kind: kinds.Namespace, names: names}
+}
+
 // kubectl config set-context accepts any string, so a stale index pointing at a
 // Pod would otherwise make that pod's name the active namespace.
 func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := SwitchCommand{Kubectl: kubectl, State: pod("nginx")}.namespace(1)
+	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
+
+	_, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(1)
 	if err == nil {
 		t.Fatal("switched to a Pod as a namespace, want an error")
+	}
+	if !strings.Contains(err.Error(), "not Namespace") {
+		t.Errorf("err = %v, want a kind mismatch", err)
 	}
 	if len(kubectl.runs) != 0 {
 		t.Error("kubectl config was called for a wrong-kind index")
@@ -502,9 +537,7 @@ func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
 
 func TestNamespaceSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("staging", kinds.Namespace),
-	}.namespace(1)
+	name, err := SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}.namespace(1)
 	if err != nil {
 		t.Fatalf("namespace: %v", err)
 	}
@@ -517,18 +550,33 @@ func TestNamespaceSwitch(t *testing.T) {
 	}
 }
 
-func TestContextSwitchRejectsResourceIndex(t *testing.T) {
-	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: pod("nginx")}.context(1)
+// Setting a namespace is a local kubeconfig edit that kubectl does not validate
+// — pointing at one before creating it is a normal thing to do — and every
+// staleness check in kx reacts to a failure rather than pre-empting one. So the
+// switch spends no round trip checking the namespace exists.
+func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	if _, err := (SwitchCommand{Kubectl: kubectl, State: namespaces("staging")}).
+		namespace(1); err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if len(kubectl.probes) != 0 {
+		t.Errorf("namespace switch probed the cluster: %v", kubectl.probes)
+	}
+}
+
+func TestContextSwitchWithoutAContextListing(t *testing.T) {
+	state := listings{kind: kinds.Pod, names: []string{"nginx"}}
+	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: state}.context(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a context, want an error")
+		t.Fatal("switched to a context with no context listing, want an error")
 	}
 }
 
 func TestContextSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("docker-desktop", ContextKind),
-	}.context(1)
+	state := listings{kind: ContextKind, names: []string{"docker-desktop"}}
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.context(1)
 	if err != nil {
 		t.Fatalf("context: %v", err)
 	}
@@ -537,6 +585,11 @@ func TestContextSwitch(t *testing.T) {
 	}
 	if want := "config use-context docker-desktop"; joinArgs(kubectl.runs[0]) != want {
 		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+	// use-context rejects an unknown name itself, so kx spends no round trip
+	// checking what kubectl is about to check.
+	if len(kubectl.probes) != 0 {
+		t.Errorf("context switch probed the cluster: %v", kubectl.probes)
 	}
 }
 

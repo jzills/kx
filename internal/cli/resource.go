@@ -390,25 +390,36 @@ func (c ContextsCommand) Execute() (string, error) {
 	return indexed, nil
 }
 
+// ExpectingResolver resolves an index for a command that has already named the
+// kind it wants, so every way the resolve can fail is reported in those terms.
+type ExpectingResolver interface {
+	FieldsExpecting(index int, expected kinds.Kind) (name, namespace string, err error)
+}
+
 // SwitchCommand activates an indexed namespace or context.
 //
-// Both are the same shape: resolve an index, refuse it if it names the wrong
-// kind, then hand the name to kubectl config. The kind check is not optional —
-// `kubectl config set-context --namespace` accepts any string, so a stale index
-// pointing at a Pod would silently make that pod's name the active namespace.
+// The index is resolved against the most recent listing of the kind the command
+// names, not against the current entry. `kx ns 2` has already said which kind it
+// means, so an intervening `kx get pods` should not turn that 2 into a pod —
+// which is what made the sequence `kx ns` / `kx get pod` / `kx ns 2` fail (#156).
+//
+// The kind check is not optional: `kubectl config set-context --namespace`
+// accepts any string and validates nothing against the server, so a stale index
+// pointing at a Pod would otherwise make that pod's name the active namespace.
+//
+// Nothing here checks the namespace exists either. Setting one is a local
+// kubeconfig edit that kubectl does not validate — pointing at a namespace
+// before creating it is a normal thing to do — and kx pre-empts nothing
+// elsewhere: every staleness check in the tool reacts to a failure rather than
+// running ahead of one.
 type SwitchCommand struct {
 	Kubectl kubectl.Service
-	State   IndexResolver
-	// Lister supplies the `kx back` hint when the kind check fails.
-	Lister kinds.PreviousLister
+	State   ExpectingResolver
 }
 
 func (c SwitchCommand) namespace(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+	name, _, err := c.State.FieldsExpecting(index, kinds.Namespace)
 	if err != nil {
-		return "", err
-	}
-	if err := kinds.EnsureKind(index, name, kind, kinds.Namespace, c.Lister); err != nil {
 		return "", err
 	}
 	_, err = c.Kubectl.Run([]string{"config", "set-context", "--current", "--namespace=" + name})
@@ -416,13 +427,12 @@ func (c SwitchCommand) namespace(index int) (string, error) {
 }
 
 func (c SwitchCommand) context(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+	name, _, err := c.State.FieldsExpecting(index, ContextKind)
 	if err != nil {
 		return "", err
 	}
-	if err := kinds.EnsureKind(index, name, kind, ContextKind, c.Lister); err != nil {
-		return "", err
-	}
+	// use-context rejects a name that isn't there with a message of its own,
+	// which is the whole of the validation either switch needs.
 	_, err = c.Kubectl.Run([]string{"config", "use-context", name})
 	return name, err
 }

@@ -508,22 +508,9 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 			if err != nil {
 				return err
 			}
-			command := SwitchCommand{
-				Kubectl: services.Kubectl, State: services.State, Lister: services.State,
-			}
-			stop := render.Status("switching " + use)
-			var name string
-			if isContext {
-				name, err = command.context(index)
-			} else {
-				name, err = command.namespace(index)
-			}
-			stop()
-			if err != nil {
-				return err
-			}
-			render.Success(fmt.Sprintf("Switched to '%s'", name))
-			return nil
+			// Shared with `kx get contexts <index>`, which routes here too, so
+			// the stale-namespace relist lives in one place.
+			return switchTo(services, use, index, isContext)
 		},
 	}
 }
@@ -547,18 +534,14 @@ func listSwitchTargets(services Services, isContext bool) error {
 	}
 
 	stop := render.Status("fetching namespaces")
-	output, err := GetCommand{
+	output, namespace, err := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 	}.Execute("namespaces", "", nil)
 	stop()
 	if err != nil {
 		return err
 	}
-	current, err := services.State.Load()
-	if err != nil {
-		return err
-	}
-	render.IndexedTable(output, "namespaces", current.Namespace, "")
+	render.IndexedTable(output, "namespaces", namespace, "")
 	return nil
 }
 

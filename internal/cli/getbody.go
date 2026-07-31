@@ -61,11 +61,12 @@ func runGet(services Services, resource string, args []string, options getOption
 		names := make([]string, 0, len(indexes))
 		namespace := ""
 		for _, index := range indexes {
-			name, ns, kind, err := services.State.Fields(index)
+			// FieldsExpecting rather than Fields: the resource type was named on
+			// the command line, so an out-of-range index or an empty history can
+			// be reported against that kind instead of against whatever listing
+			// happens to be current.
+			name, ns, err := services.State.FieldsExpecting(index, expected)
 			if err != nil {
-				return err
-			}
-			if err := kinds.EnsureKind(index, name, kind, expected, services.State); err != nil {
 				return err
 			}
 			names = append(names, name)
@@ -80,21 +81,16 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 	stop := render.Status("fetching " + resource)
-	output, err := get.Execute(resource, options.Match, extra)
+	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()
 	if err != nil {
 		return err
 	}
 
-	namespace := ""
 	note := ""
 	if allNamespaces(extra) {
 		namespace = "all namespaces"
 		note = allNamespacesNote
-	} else if current, err := services.State.Load(); err == nil {
-		namespace = current.Namespace
-	} else {
-		namespace = "default"
 	}
 	render.IndexedTable(output, resource, namespace, note)
 	return nil
@@ -102,9 +98,7 @@ func runGet(services Services, resource string, args []string, options getOption
 
 // switchTo activates an indexed namespace or context.
 func switchTo(services Services, label string, index int, isContext bool) error {
-	command := SwitchCommand{
-		Kubectl: services.Kubectl, State: services.State, Lister: services.State,
-	}
+	command := SwitchCommand{Kubectl: services.Kubectl, State: services.State}
 	stop := render.Status("switching " + label)
 	var name string
 	var err error

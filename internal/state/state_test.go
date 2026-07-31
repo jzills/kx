@@ -436,3 +436,99 @@ func TestPreviousListsOnMissingStateIsFalse(t *testing.T) {
 		t.Error("PreviousLists on missing state = true, want false")
 	}
 }
+
+// The messages an index command gets when it has named its kind.
+//
+// Fields resolves the index before the kind is checked, so these two shapes
+// used to be reported without reference to the kind asked for: an out-of-range
+// index described whatever listing was current, and an empty history said to
+// run `kx get <resource>` for a command that knew the resource.
+func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
+	t.Run("out of range names the current listing and the relist", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{
+			Resources: NewResources([]string{"api"}, kinds.Service),
+			Namespace: "prod",
+		})
+
+		_, _, err := service.FieldsExpecting(2, kinds.Namespace)
+		if err == nil {
+			t.Fatal("index 2 of a 1-item listing resolved")
+		}
+		for _, want := range []string{
+			"Index 2 is out of range",
+			"the current listing has 1 Service",
+			"kx get namespace",
+			"Namespaces",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %q\n  missing %q", err, want)
+			}
+		}
+	})
+
+	t.Run("no state names the kind rather than <resource>", func(t *testing.T) {
+		service := newTestService(t, 10)
+
+		_, _, err := service.FieldsExpecting(1, kinds.Deployment)
+		if err == nil {
+			t.Fatal("resolved against no state")
+		}
+		if !strings.Contains(err.Error(), "kx get deployment") {
+			t.Errorf("err = %q, want it to name the deployment relist", err)
+		}
+		if strings.Contains(err.Error(), "<resource>") {
+			t.Errorf("err = %q, still the generic message", err)
+		}
+	})
+
+	t.Run("wrong kind keeps the existing message", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+		_, _, err := service.FieldsExpecting(1, kinds.Namespace)
+		if err == nil {
+			t.Fatal("a Pod resolved as a Namespace")
+		}
+		if !strings.Contains(err.Error(), "Index 1 is Pod/nginx, not Namespace") {
+			t.Errorf("err = %q, want the existing mismatch wording", err)
+		}
+	})
+
+	t.Run("a match resolves", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{
+			Resources: NewResources([]string{"a", "b"}, kinds.Namespace),
+			Namespace: "prod",
+		})
+
+		name, namespace, err := service.FieldsExpecting(2, kinds.Namespace)
+		if err != nil {
+			t.Fatalf("FieldsExpecting: %v", err)
+		}
+		if name != "b" || namespace != "prod" {
+			t.Errorf("got %q in %q, want b in prod", name, namespace)
+		}
+	})
+}
+
+// A mixed entry has no single kind to name, so the count is described in
+// neutral terms rather than mislabelled as one of them.
+func TestDescribeCurrentOnAMixedListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewOrderedResources([]Resource{
+			{Name: "web", Kind: kinds.Deployment},
+			{Name: "web-abc", Kind: kinds.Pod},
+		}),
+		Namespace: "prod",
+	})
+
+	_, _, err := service.FieldsExpecting(9, kinds.Namespace)
+	if err == nil {
+		t.Fatal("index 9 resolved")
+	}
+	if !strings.Contains(err.Error(), "2 items") {
+		t.Errorf("err = %q, want a neutral count for a mixed listing", err)
+	}
+}
