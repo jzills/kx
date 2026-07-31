@@ -34,8 +34,17 @@ func entryLabel(count int) string {
 	return strconv.Itoa(count) + " entries"
 }
 
+// emptyHistoryNote explains an empty stack, since `kx ns` writing a slot rather
+// than a history entry means you can reach this without anything being wrong.
+const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
+
 // StateHistory renders the history stack, marking the entry the cursor is on.
 func (r *Renderer) StateHistory(history state.History) {
+	if len(history.States) == 0 {
+		// Caption alone, no header row, matching how an empty listing renders.
+		r.Caption(emptyHistoryNote)
+		return
+	}
 	r.Caption("History", "", entryLabel(len(history.States)))
 
 	columns := []Column{
