@@ -104,7 +104,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
-| `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
+| `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
 | `kx forward` | Navigate to the next kx get result. |
@@ -162,7 +162,9 @@ or the full per-image CVE report with `--full`. Requires
 
 `kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
 
-Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual.
+Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. `kx state --all` summarizes those slots under the history table, and `kx state --targets` expands them to the indexed listings the switch commands read, so you can pick a number without re-listing.
+
+To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual.
 
 ## Configuration
 

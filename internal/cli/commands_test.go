@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,5 +230,69 @@ func TestContextListingCaptionsWithoutHistory(t *testing.T) {
 
 	if err := listSwitchTargets(services, true); err != nil {
 		t.Fatalf("listSwitchTargets on empty history: %v", err)
+	}
+}
+
+// `kx state --targets` reads the slots, which are not in the history stack, so
+// it must work when the stack is empty — that is the fresh-install shape.
+func TestStateTargetsRendersSlotsWithoutHistory(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable}
+	services := switchServices(t, kube)
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	defer render.Configure("default", true)
+
+	cmd := newStateCommand(services)
+	cmd.SetArgs([]string{"--targets"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state --targets: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"Namespaces", "default", "prod", "NAME"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// The flag is registered, so it shows up in --help rather than working silently.
+func TestStateTargetsFlagIsRegistered(t *testing.T) {
+	cmd := newStateCommand(Services{})
+	if cmd.Flags().Lookup("targets") == nil {
+		t.Error("kx state has no --targets flag")
+	}
+	if flag := cmd.Flags().ShorthandLookup("t"); flag == nil || flag.Name != "targets" {
+		t.Error("kx state has no -t shorthand for --targets")
+	}
+}
+
+// No state file at all is the first thing a new install has. `--targets` and
+// `--all` each describe their own view rather than reporting the raw
+// "No state found", which names a command neither of them is about.
+func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
+	for _, tc := range []struct{ flag, want string }{
+		{"--targets", "No switch targets yet"},
+		{"--all", "No history yet"},
+	} {
+		services := switchServices(t, &recordingKubectl{})
+		var out bytes.Buffer
+		render.SetOutput(&out, &out, "github-dark")
+
+		cmd := newStateCommand(services)
+		cmd.SetArgs([]string{tc.flag})
+		err := cmd.Execute()
+		render.Configure("default", true)
+
+		if err != nil {
+			t.Errorf("kx state %s on an absent state file: %v", tc.flag, err)
+		}
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("kx state %s output = %q, want %q", tc.flag, out.String(), tc.want)
+		}
 	}
 }

@@ -43,3 +43,113 @@ func TestStateHistoryWithEntriesRendersTheTable(t *testing.T) {
 		}
 	}
 }
+
+func slotHistory() state.History {
+	return state.History{
+		States: []state.State{{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "kube-system",
+		}},
+		Cursor: 0,
+		Named: map[kinds.Kind]state.State{
+			kinds.Namespace: {
+				Resources: state.NewResources(
+					[]string{"default", "diagnostics", "istio-system"}, kinds.Namespace),
+				Namespace: "istio-system",
+			},
+			kinds.Context: {
+				Resources: state.NewResources([]string{"docker-desktop"}, kinds.Context),
+				Namespace: "docker-desktop",
+			},
+		},
+	}
+}
+
+// The slots are what `kx ns <n>` resolves against, so `kx state --all` has to
+// show they exist — otherwise half the state kx keeps is invisible.
+func TestStateHistoryListsSwitchTargets(t *testing.T) {
+	out := capture(func(r *Renderer) { r.StateHistory(slotHistory()) })
+
+	if !strings.Contains(out, "Switch targets") {
+		t.Errorf("output = %q, want a switch-targets block", out)
+	}
+	for _, want := range []string{"Namespaces", "istio-system", "Contexts", "docker-desktop"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+	// Summary only: the names belong to the expanded view, not this one.
+	if strings.Contains(out, "diagnostics") {
+		t.Errorf("output = %q, want slot contents left to --targets", out)
+	}
+}
+
+// Nothing to show means no empty table: the block appears when there is one.
+func TestStateHistoryOmitsSwitchTargetsWhenThereAreNone(t *testing.T) {
+	history := state.History{
+		States: []state.State{{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+		}},
+		Cursor: 0,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if strings.Contains(out, "Switch targets") {
+		t.Errorf("output = %q, want no switch-targets block when there are no slots", out)
+	}
+}
+
+// The expanded view is the one you read an index off before switching, so it
+// has to carry the numbers.
+func TestSwitchTargetsRendersIndexedListings(t *testing.T) {
+	out := capture(func(r *Renderer) { r.SwitchTargets(slotHistory()) })
+
+	for _, want := range []string{
+		"Namespaces", "istio-system", "diagnostics", "Contexts", "docker-desktop",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+	if !strings.Contains(out, "NAME") {
+		t.Errorf("output = %q, want an indexed listing with a NAME column", out)
+	}
+	// The history stack is a different view; --targets is focused.
+	if strings.Contains(out, "History") {
+		t.Errorf("output = %q, want no history block", out)
+	}
+}
+
+func TestSwitchTargetsWithNoSlotsSaysHowToFillThem(t *testing.T) {
+	out := capture(func(r *Renderer) { r.SwitchTargets(state.History{}) })
+
+	if !strings.Contains(out, "No switch targets yet") {
+		t.Errorf("output = %q, want it to report empty slots", out)
+	}
+	if !strings.Contains(out, "kx ns") {
+		t.Errorf("output = %q, want it to name what fills them", out)
+	}
+}
+
+// Slots but no stack is the fresh-install shape: `kx ns` fills a slot without
+// pushing an entry. That is the moment the summary is most worth showing, so
+// the empty-history note must not swallow it.
+func TestStateHistoryShowsSwitchTargetsWithNoEntries(t *testing.T) {
+	history := state.History{
+		Named: map[kinds.Kind]state.State{
+			kinds.Namespace: {
+				Resources: state.NewResources([]string{"default", "prod"}, kinds.Namespace),
+				Namespace: "prod",
+			},
+		},
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if !strings.Contains(out, "No history yet") {
+		t.Errorf("output = %q, want the empty-history note", out)
+	}
+	if !strings.Contains(out, "Switch targets") {
+		t.Errorf("output = %q, want the switch-targets block alongside it", out)
+	}
+}

@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -550,17 +552,32 @@ func listSwitchTargets(services Services, isContext bool) error {
 }
 
 func newStateCommand(services Services) *cobra.Command {
-	var all bool
+	var all, targets bool
 	cmd := &cobra.Command{
-		Use:     "state [position]",
-		Short:   "Show current state, jump to a history position, or list all entries with --all.",
-		Example: "  kx state\n  kx state --all\n  kx state 2",
-		Args:    cobra.MaximumNArgs(1),
+		Use:   "state [position]",
+		Short: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets.",
+		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
+			"  kx state 2",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
+			// Both read the whole file, and the slots live outside the stack, so
+			// --targets works on a history that is empty — the shape a fresh
+			// install has after `kx ns`.
+			if all || targets {
 				history, err := services.State.LoadHistory()
+				// No state file yet is not a failure for either view — it is
+				// the shape a new install has. Each renderer says what fills
+				// the thing it shows; ErrNoState names `kx get`, which is only
+				// half the answer and the wrong half for --targets.
+				if errors.Is(err, state.ErrNoState) {
+					history, err = state.History{}, nil
+				}
 				if err != nil {
 					return err
+				}
+				if targets {
+					render.SwitchTargets(history)
+					return nil
 				}
 				render.StateHistory(history)
 				return nil
@@ -586,6 +603,8 @@ func newStateCommand(services Services) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show the full history stack")
+	cmd.Flags().BoolVarP(&targets, "targets", "t", false,
+		"Show the namespace and context listings the switch commands index into")
 	return cmd
 }
 
