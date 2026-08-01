@@ -176,3 +176,32 @@ func TestScanRejectsANonNumericIndex(t *testing.T) {
 		t.Errorf("err = %v, want it to name the bad argument", err)
 	}
 }
+
+// The selector, the banner label and the empty-result message all describe the
+// same scope and have to agree; they live on one type for that reason.
+func TestScanScopeDescribesOneNamespace(t *testing.T) {
+	scope := scanScope{Namespace: "prod"}
+	if got := strings.Join(scope.selector(), " "); got != "-n prod" {
+		t.Errorf("selector = %q, want %q", got, "-n prod")
+	}
+	if got := scope.label(); got != "prod" {
+		t.Errorf("label = %q, want the namespace", got)
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "'prod'") {
+		t.Errorf("emptyMessage = %q, want it to name the namespace", got)
+	}
+}
+
+func TestScanScopeDescribesAllNamespaces(t *testing.T) {
+	scope := scanScope{All: true}
+	if got := strings.Join(scope.selector(), " "); got != "--all-namespaces" {
+		t.Errorf("selector = %q, want %q", got, "--all-namespaces")
+	}
+	// The literal string kx get -A already prints for the same scope.
+	if got := scope.label(); got != "all namespaces" {
+		t.Errorf("label = %q, want %q", got, "all namespaces")
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "any namespace") {
+		t.Errorf("emptyMessage = %q, want it to cover every namespace", got)
+	}
+}

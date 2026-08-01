@@ -23,6 +23,41 @@ var scannableKinds = map[kinds.Kind]bool{
 // as a single kubectl selector.
 const namespaceScanKinds = "deployments,statefulsets,daemonsets,cronjobs,jobs,pods"
 
+// scanScope is the namespace selection for a sweep: one namespace, or all of
+// them. The kubectl selector, the banner label and the empty-result message
+// all have to agree about the scope, so they live together rather than being
+// rebuilt at each call site.
+//
+// An empty Namespace does not mean "all" — client-go spells it that way and
+// diag's Sweep relies on it, but here the whole bug being fixed is a scope
+// that was wrong silently, so the choice is explicit.
+type scanScope struct {
+	Namespace string
+	All       bool
+}
+
+func (s scanScope) selector() []string {
+	if s.All {
+		return []string{"--all-namespaces"}
+	}
+	return []string{"-n", s.Namespace}
+}
+
+// label is the banner's scope text, matching what kx get -A prints.
+func (s scanScope) label() string {
+	if s.All {
+		return "all namespaces"
+	}
+	return s.Namespace
+}
+
+func (s scanScope) emptyMessage() string {
+	if s.All {
+		return "no container images found in any namespace."
+	}
+	return fmt.Sprintf("no container images found in namespace '%s'.", s.Namespace)
+}
+
 // ScanCommand resolves container images and hands them to a scanner.
 type ScanCommand struct {
 	Kubectl kubectl.Service
