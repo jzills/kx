@@ -10,6 +10,7 @@ import (
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/theme"
 )
 
@@ -195,22 +196,55 @@ func TestRenderDiagUsesTheActivePalette(t *testing.T) {
 	}
 }
 
-// The same page value must always render the same bytes: ages come from the
-// page's capture time, not from the clock.
-func TestRenderDiagIsDeterministic(t *testing.T) {
-	page := DiagPage{
+// Ages must be measured from the page's capture time, not the clock: moving
+// Captured forward has to move the rendered age with it. If age were bound to
+// time.Now() these two renders would be identical, which is the regression
+// this guards. (An earlier version of this test rendered the same page twice
+// back-to-back, which formatAgeAt's whole-minute bucketing would satisfy even
+// with age still wired to the real clock — it could not fail on the
+// regression it named.)
+func TestRenderDiagAgesFollowTheCaptureTime(t *testing.T) {
+	report := criticalReport(t)
+	event := report.WarningEvents[0].LastTimestamp
+
+	atFourMinutes := DiagPage{
 		Meta: testMeta(t), Single: true,
-		Reports: []diagnostics.Report{criticalReport(t)},
+		Reports: []diagnostics.Report{report},
 	}
-	first, err := RenderDiag(page)
+	atFourMinutes.Captured = event.Add(4 * time.Minute)
+
+	atTwoHours := DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{report},
+	}
+	atTwoHours.Captured = event.Add(2 * time.Hour)
+
+	early, err := RenderDiag(atFourMinutes)
 	if err != nil {
 		t.Fatalf("RenderDiag returned %v", err)
 	}
-	second, err := RenderDiag(page)
+	late, err := RenderDiag(atTwoHours)
 	if err != nil {
 		t.Fatalf("RenderDiag returned %v", err)
 	}
-	if !bytes.Equal(first, second) {
+
+	if bytes.Equal(early, late) {
+		t.Fatal("moving Captured did not change the rendered age — age is not bound to the capture time")
+	}
+	if want := render.FormatAgeAt(atFourMinutes.Captured, event); !strings.Contains(string(early), want) {
+		t.Errorf("page captured 4m after the event does not contain %q", want)
+	}
+	if want := render.FormatAgeAt(atTwoHours.Captured, event); !strings.Contains(string(late), want) {
+		t.Errorf("page captured 2h after the event does not contain %q", want)
+	}
+
+	// The weaker property, kept alongside the real one above: the same page
+	// value rendered twice must still be byte-equal.
+	again, err := RenderDiag(atFourMinutes)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !bytes.Equal(early, again) {
 		t.Error("two renders of the same page produced different bytes")
 	}
 }
