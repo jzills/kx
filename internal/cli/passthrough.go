@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -17,8 +18,10 @@ import (
 // flags and leave everything else untouched for kubectl.
 
 // extractString removes a string flag and its value from args, accepting
-// "--long value", "--long=value", "-s value" and "-s=value". A flag given more
-// than once keeps the last value, matching pflag.
+// "--long value", "--long=value", "-s value", "-s=value" and the attached
+// shorthand "-svalue" (the spelling kubectl users type constantly, e.g.
+// "-nprod"). A flag given more than once keeps the last value, matching
+// pflag.
 func extractString(args []string, long, short string) (value string, rest []string, err error) {
 	rest = make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -34,6 +37,11 @@ func extractString(args []string, long, short string) (value string, rest []stri
 			value = strings.TrimPrefix(arg, long+"=")
 		case short != "" && strings.HasPrefix(arg, short+"="):
 			value = strings.TrimPrefix(arg, short+"=")
+		// Attached shorthand, e.g. "-nprod". Checked last and guarded on
+		// length so a bare "-n" still falls into the exact-match case above
+		// and takes the following argument instead of being trimmed to "".
+		case short != "" && len(arg) > len(short) && strings.HasPrefix(arg, short):
+			value = strings.TrimPrefix(arg, short)
 		default:
 			rest = append(rest, arg)
 		}
@@ -48,6 +56,11 @@ func extractString(args []string, long, short string) (value string, rest []stri
 // asked for and a whole-Secret dump they did not, so an explicitly empty value
 // has to be distinguishable from an absent flag — which the returned value
 // alone cannot do.
+//
+// This must recognise exactly the spellings extractString consumes,
+// attached shorthand included — a caller that checks presence before
+// extracting the value (like scan's --namespace/--all-namespaces guard)
+// would otherwise miss a spelling extractString quietly consumes anyway.
 func hasFlag(args []string, long, short string) bool {
 	for _, arg := range args {
 		switch {
@@ -57,13 +70,20 @@ func hasFlag(args []string, long, short string) bool {
 			return true
 		case short != "" && strings.HasPrefix(arg, short+"="):
 			return true
+		case short != "" && len(arg) > len(short) && strings.HasPrefix(arg, short):
+			return true
 		}
 	}
 	return false
 }
 
 // extractBool removes a boolean flag from args and reports whether it was
-// present.
+// present. Each name also accepts "<name>=<value>" (e.g. "-A=true"), with the
+// value parsed by strconv.ParseBool: "=false" means the flag counts as
+// absent, and a value that fails to parse (e.g. "=banana") counts as present,
+// since the user plainly meant to pass the flag. Attached shorthand
+// ("-Atrue") is deliberately not supported — booleans don't take attached
+// values, so that spelling isn't real.
 func extractBool(args []string, names ...string) (present bool, rest []string) {
 	rest = make([]string, 0, len(args))
 	for _, arg := range args {
@@ -71,11 +91,20 @@ func extractBool(args []string, names ...string) (present bool, rest []string) {
 		for _, name := range names {
 			if arg == name {
 				matched = true
+				present = true
+				break
+			}
+			if strings.HasPrefix(arg, name+"=") {
+				matched = true
+				if parsed, err := strconv.ParseBool(strings.TrimPrefix(arg, name+"=")); err == nil {
+					present = parsed
+				} else {
+					present = true
+				}
 				break
 			}
 		}
 		if matched {
-			present = true
 			continue
 		}
 		rest = append(rest, arg)

@@ -372,7 +372,7 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				name, namespace, kind, err := services.State.Fields(index)
+				name, resourceNamespace, kind, err := services.State.Fields(index)
 				if err != nil {
 					return err
 				}
@@ -380,7 +380,7 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				render.Banner(string(kind), name, namespace, imagesNoun(len(images)))
+				render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
 			}
 
 			if full {
