@@ -114,9 +114,11 @@ func TestGetForwardsExtraArgsToKubectl(t *testing.T) {
 // current one, or later commands resolve indexes against the wrong namespace.
 func TestGetRecordsExplicitNamespace(t *testing.T) {
 	for name, args := range map[string][]string{
-		"short flag": {"-n", "staging"},
-		"long flag":  {"--namespace", "staging"},
-		"equals":     {"--namespace=staging"},
+		"short flag":         {"-n", "staging"},
+		"long flag":          {"--namespace", "staging"},
+		"equals":             {"--namespace=staging"},
+		"short equals":       {"-n=staging"},
+		"attached shorthand": {"-nstaging"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			states := &fakeState{}
@@ -134,7 +136,9 @@ func TestGetRecordsExplicitNamespace(t *testing.T) {
 // Names aren't unique across namespaces, so -A results are never indexed —
 // dead X numbers would resolve to the wrong resource.
 func TestGetAllNamespacesIsNotIndexed(t *testing.T) {
-	for _, flag := range []string{"-A", "--all-namespaces"} {
+	for _, flag := range []string{
+		"-A", "--all-namespaces", "--all-namespaces=true", "-A=true",
+	} {
 		states := &fakeState{}
 		kubectl := &fakeKubectl{output: podsOutput}
 		output, _, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
@@ -147,6 +151,40 @@ func TestGetAllNamespacesIsNotIndexed(t *testing.T) {
 		if len(states.saved) != 0 {
 			t.Errorf("%s saved state, want none", flag)
 		}
+	}
+}
+
+// "=false" is a request for the ordinary single-namespace listing, so it must
+// index like any other. Reading it as "all namespaces" would silently drop the
+// indexes the user is about to use.
+func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
+	for _, flag := range []string{"--all-namespaces=false", "-A=false"} {
+		states := &fakeState{}
+		kubectl := &fakeKubectl{output: podsOutput}
+		output, _, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if output == podsOutput {
+			t.Errorf("%s output was not indexed:\n%s", flag, output)
+		}
+		if len(states.saved) != 1 {
+			t.Errorf("%s saved %d states, want 1", flag, len(states.saved))
+		}
+	}
+}
+
+// kubectl takes the last value when a flag is repeated; the recorded namespace
+// has to agree with the one the listing actually came from.
+func TestGetRecordsTheLastNamespaceWhenRepeated(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: podsOutput, namespace: "default"}
+	args := []string{"-n", "first", "-n", "second"}
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", args); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if states.saved[0].Namespace != "second" {
+		t.Errorf("saved namespace = %q, want second", states.saved[0].Namespace)
 	}
 }
 

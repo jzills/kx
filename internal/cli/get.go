@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"strings"
-
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
@@ -48,25 +46,24 @@ type GetCommand struct {
 // extractNamespace finds an explicit namespace in the pass-through flags, so
 // the saved state records the namespace the listing actually came from rather
 // than the context's current one.
+// The spellings themselves are extractString's business rather than this
+// function's. A second matcher living here drifted from that one: `-nprod` and
+// `-n=prod` went unrecognised, so the state recorded the current namespace
+// while kubectl listed the one that was asked for, and every index afterwards
+// resolved against the wrong namespace.
+//
+// The flag stays in extraArgs for kubectl, so the stripped remainder is
+// discarded; extractString builds a new slice and never mutates its input. So
+// is the error, which fires only when the flag ends the argv with no value —
+// kubectl rejects that before any listing reaches the state.
 func extractNamespace(extraArgs []string) string {
-	for i, arg := range extraArgs {
-		if (arg == "-n" || arg == "--namespace") && i+1 < len(extraArgs) {
-			return extraArgs[i+1]
-		}
-		if strings.HasPrefix(arg, "--namespace=") {
-			return strings.SplitN(arg, "=", 2)[1]
-		}
-	}
-	return ""
+	namespace, _, _ := extractString(extraArgs, "--namespace", "-n")
+	return namespace
 }
 
 func allNamespaces(extraArgs []string) bool {
-	for _, arg := range extraArgs {
-		if arg == "-A" || arg == "--all-namespaces" {
-			return true
-		}
-	}
-	return false
+	present, _ := extractBool(extraArgs, "--all-namespaces", "-A")
+	return present
 }
 
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
