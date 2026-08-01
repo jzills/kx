@@ -205,3 +205,60 @@ func TestScanScopeDescribesAllNamespaces(t *testing.T) {
 		t.Errorf("emptyMessage = %q, want it to cover every namespace", got)
 	}
 }
+
+// The regression test for the actual bug: `kx scan -n prod` used to sweep the
+// current namespace and report it as though it were prod.
+func TestCollectSweepsTheNamespaceItIsGiven(t *testing.T) {
+	kubectl := &fakeKubectl{
+		namespace: "kube-system",
+		output:    `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	images, err := command.Collect(scanScope{Namespace: "prod"}, "scout")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if strings.Join(images, ",") != "api:v1" {
+		t.Errorf("images = %v, want [api:v1]", images)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "-n prod") {
+		t.Errorf("argv = %q, want it to sweep 'prod'", argv)
+	}
+	if strings.Contains(argv, "kube-system") {
+		t.Errorf("argv = %q, swept the current namespace instead", argv)
+	}
+}
+
+func TestCollectAllNamespacesUsesTheClusterWideSelector(t *testing.T) {
+	kubectl := &fakeKubectl{
+		output: `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	if _, err := command.Collect(scanScope{All: true}, "scout"); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "--all-namespaces") {
+		t.Errorf("argv = %q, want the cluster-wide selector", argv)
+	}
+	if strings.Contains(argv, "-n ") {
+		t.Errorf("argv = %q, want no single-namespace selector", argv)
+	}
+}
+
+// An empty sweep names the scope it searched, so the message is actionable.
+func TestCollectReportsAnEmptyScope(t *testing.T) {
+	kubectl := &fakeKubectl{output: `{"items":[]}`}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	_, err := command.Collect(scanScope{All: true}, "scout")
+	if err == nil {
+		t.Fatal("an empty sweep succeeded")
+	}
+	if !strings.Contains(err.Error(), "any namespace") {
+		t.Errorf("err = %v, want it to name the scope", err)
+	}
+}

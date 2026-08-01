@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -100,15 +101,17 @@ func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
 	return images, nil
 }
 
-// CollectNamespace resolves the unique images across every workload in a
-// namespace.
-func (c ScanCommand) CollectNamespace(namespace, engine string) ([]string, error) {
+// Collect resolves the unique images across every workload in scope.
+func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	if _, err := c.EnsureAvailable(engine); err != nil {
 		return nil, err
 	}
 
-	stop := c.Status("resolving images in " + namespace)
-	raw, err := c.Kubectl.Run([]string{"get", namespaceScanKinds, "-n", namespace, "-o", "json"})
+	stop := c.Status("resolving images in " + scope.label())
+	args := []string{"get", namespaceScanKinds}
+	args = append(args, scope.selector()...)
+	args = append(args, "-o", "json")
+	raw, err := c.Kubectl.Run(args)
 	stop()
 	if err != nil {
 		return nil, err
@@ -126,7 +129,7 @@ func (c ScanCommand) CollectNamespace(namespace, engine string) ([]string, error
 	}
 	images = dedupe(images)
 	if len(images) == 0 {
-		return nil, fmt.Errorf("no container images found in namespace '%s'.", namespace)
+		return nil, errors.New(scope.emptyMessage())
 	}
 	return images, nil
 }
@@ -326,7 +329,7 @@ func newScanCommand(services Services) *cobra.Command {
 			var images []string
 			if len(indexArgs) == 0 {
 				namespace := services.Kubectl.CurrentNamespace()
-				images, err = command.CollectNamespace(namespace, engine)
+				images, err = command.Collect(scanScope{Namespace: namespace}, engine)
 				if err != nil {
 					return err
 				}
