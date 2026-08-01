@@ -176,3 +176,136 @@ func TestScanRejectsANonNumericIndex(t *testing.T) {
 		t.Errorf("err = %v, want it to name the bad argument", err)
 	}
 }
+
+// The selector, the banner label and the empty-result message all describe the
+// same scope and have to agree; they live on one type for that reason.
+func TestScanScopeDescribesOneNamespace(t *testing.T) {
+	scope := scanScope{Namespace: "prod"}
+	if got := strings.Join(scope.selector(), " "); got != "-n prod" {
+		t.Errorf("selector = %q, want %q", got, "-n prod")
+	}
+	if got := scope.label(); got != "prod" {
+		t.Errorf("label = %q, want the namespace", got)
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "'prod'") {
+		t.Errorf("emptyMessage = %q, want it to name the namespace", got)
+	}
+}
+
+func TestScanScopeDescribesAllNamespaces(t *testing.T) {
+	scope := scanScope{All: true}
+	if got := strings.Join(scope.selector(), " "); got != "--all-namespaces" {
+		t.Errorf("selector = %q, want %q", got, "--all-namespaces")
+	}
+	// The literal string kx get -A already prints for the same scope.
+	if got := scope.label(); got != "all namespaces" {
+		t.Errorf("label = %q, want %q", got, "all namespaces")
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "any namespace") {
+		t.Errorf("emptyMessage = %q, want it to cover every namespace", got)
+	}
+}
+
+// The regression test for the actual bug: `kx scan -n prod` used to sweep the
+// current namespace and report it as though it were prod.
+func TestCollectSweepsTheNamespaceItIsGiven(t *testing.T) {
+	kubectl := &fakeKubectl{
+		namespace: "kube-system",
+		output:    `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	images, err := command.Collect(scanScope{Namespace: "prod"}, "scout")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if strings.Join(images, ",") != "api:v1" {
+		t.Errorf("images = %v, want [api:v1]", images)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "-n prod") {
+		t.Errorf("argv = %q, want it to sweep 'prod'", argv)
+	}
+	if strings.Contains(argv, "kube-system") {
+		t.Errorf("argv = %q, swept the current namespace instead", argv)
+	}
+}
+
+func TestCollectAllNamespacesUsesTheClusterWideSelector(t *testing.T) {
+	kubectl := &fakeKubectl{
+		output: `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	if _, err := command.Collect(scanScope{All: true}, "scout"); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "--all-namespaces") {
+		t.Errorf("argv = %q, want the cluster-wide selector", argv)
+	}
+	if strings.Contains(argv, "-n ") {
+		t.Errorf("argv = %q, want no single-namespace selector", argv)
+	}
+}
+
+// An empty sweep names the scope it searched, so the message is actionable.
+func TestCollectReportsAnEmptyScope(t *testing.T) {
+	kubectl := &fakeKubectl{output: `{"items":[]}`}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	_, err := command.Collect(scanScope{All: true}, "scout")
+	if err == nil {
+		t.Fatal("an empty sweep succeeded")
+	}
+	if !strings.Contains(err.Error(), "any namespace") {
+		t.Errorf("err = %v, want it to name the scope", err)
+	}
+}
+
+// An index resolves a name from one namespace's listing; scanning that name
+// somewhere else finds a different resource or nothing at all.
+func TestScanRejectsANamespaceFlagAlongsideAnIndex(t *testing.T) {
+	for _, argv := range [][]string{
+		{"1", "-n", "prod"},
+		{"1", "--namespace=prod"},
+		{"1", "-A"},
+		{"1", "--all-namespaces"},
+	} {
+		quietRender(t)
+		cmd := newScanCommand(Services{})
+		err := cmd.RunE(cmd, argv)
+		if err == nil {
+			t.Fatalf("kx scan %v was accepted", argv)
+		}
+		if !strings.Contains(err.Error(), "cannot be combined with an index") {
+			t.Errorf("kx scan %v: err = %v", argv, err)
+		}
+	}
+}
+
+// `-n ""` is still a namespace flag for the purpose of the guards, which is the
+// distinction hasFlag exists to preserve.
+func TestScanRejectsAnEmptyNamespaceFlagAlongsideAnIndex(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "-n", ""})
+	if err == nil {
+		t.Fatal("kx scan 1 -n \"\" was accepted")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined with an index") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestScanRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"-n", "prod", "-A"})
+	if err == nil {
+		t.Fatal("-n and -A were accepted together")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("err = %v", err)
+	}
+}
