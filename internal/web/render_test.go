@@ -248,3 +248,98 @@ func TestRenderDiagAgesFollowTheCaptureTime(t *testing.T) {
 		t.Error("two renders of the same page produced different bytes")
 	}
 }
+
+func sweepPage(t *testing.T) DiagPage {
+	t.Helper()
+	warning := diagnostics.Report{
+		Kind: kinds.PersistentVolumeClaim, Name: "storage-pending",
+		Namespace: "diagnostics", Verdict: diagnostics.Warning,
+		Findings: []diagnostics.Finding{
+			{Severity: diagnostics.Warning, Summary: "Volume is Pending"},
+		},
+	}
+	return DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics",
+		Checked: 14, Healthy: 12,
+		Reports: []diagnostics.Report{criticalReport(t), warning},
+	}
+}
+
+func TestRenderDiagSweepIndexesRows(t *testing.T) {
+	out, err := RenderDiag(sweepPage(t))
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+
+	for _, want := range []string{
+		"14 checked",
+		"12 healthy resources not shown",
+		`<span class="index">1</span>`,
+		`<span class="index">2</span>`,
+		"storage-pending",
+		"Volume is Pending",
+		// The drill-down is the same report block, so the detail is present.
+		"CrashLoopBackOff",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("sweep page is missing %q", want)
+		}
+	}
+	if !strings.Contains(html, "<details") {
+		t.Error("sweep rows are not expandable")
+	}
+}
+
+// A cluster-wide sweep saves no state, so there are no indexes to print. The
+// namespace takes the column instead, matching render.Triage.
+func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
+	page := sweepPage(t)
+	page.AllNamespaces = true
+	page.Scope = "all namespaces"
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+
+	if strings.Contains(html, `<span class="index">1</span>`) {
+		t.Error("an all-namespaces sweep printed indexes")
+	}
+	if !strings.Contains(html, "NAMESPACE") {
+		t.Error("an all-namespaces sweep did not print a namespace column")
+	}
+	if !strings.Contains(html, "all namespaces") {
+		t.Error("scope caption missing")
+	}
+}
+
+func TestRenderDiagSweepAllHealthy(t *testing.T) {
+	page := sweepPage(t)
+	page.Reports = nil
+	page.Healthy = 14
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "all healthy") {
+		t.Error("an all-healthy sweep did not say so")
+	}
+}
+
+// A name collision drops a row from the indexed listing; the page has to say
+// which, or the absence looks like a bug.
+func TestRenderDiagSweepReportsDroppedRows(t *testing.T) {
+	page := sweepPage(t)
+	page.Dropped = []string{"Service/api-gateway"}
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "Service/api-gateway") {
+		t.Error("dropped row was not reported")
+	}
+}

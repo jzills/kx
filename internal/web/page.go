@@ -178,4 +178,7 @@ var funcs = template.FuncMap{
 		}
 		return c.TerminatedReason
 	},
+	// Indexes are 1-based, matching every other kx listing; templates have no
+	// arithmetic of their own.
+	"add": func(a, b int) int { return a + b },
 }

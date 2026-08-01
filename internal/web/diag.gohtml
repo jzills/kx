@@ -111,5 +111,44 @@
     <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
   </div>
   {{template "report" $r}}
+{{else}}
+  <div class="block">
+    {{if .Reports}}
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+      <div class="table-wrap">
+        <div class="sweep-head">
+          {{if .AllNamespaces}}
+            <div class="kind">KIND</div><div>NAMESPACE</div>
+          {{else}}
+            <div class="index">X</div><div class="kind">KIND</div>
+          {{end}}
+          <div>NAME</div><div>VERDICT</div><div class="finding">TOP FINDING</div><div></div>
+        </div>
+        {{range $i, $r := .Reports}}
+        <details class="row {{severityClass $r.Verdict}}">
+          <summary>
+            {{if $.AllNamespaces}}
+              <span class="kind">{{$r.Kind}}</span><span class="dim">{{$r.Namespace}}</span>
+            {{else}}
+              <span class="index">{{add $i 1}}</span><span class="kind">{{$r.Kind}}</span>
+            {{end}}
+            <span>{{$r.Name}}</span>
+            <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
+            <span class="finding">{{with $r.Findings}}{{(index . 0).Summary}}{{end}}</span>
+            <span class="marker">›</span>
+          </summary>
+          <div class="drawer">{{template "report" $r}}</div>
+        </details>
+        {{end}}
+      </div>
+      <footer>
+        {{.Healthy}} healthy {{if eq .Healthy 1}}resource{{else}}resources{{end}} not shown
+        {{- if .AllNamespaces}} · indexes not saved for all-namespace listings{{else}} · kx diag &lt;index&gt; for the same detail in your terminal{{end}}
+        {{- range .Dropped}}<br>{{.}} shares a name with an indexed resource and was omitted{{end}}
+      </footer>
+    {{else}}
+      <p class="caption">Mixed · {{.Scope}} · <span class="status-ok">{{.Checked}} checked · all healthy</span></p>
+    {{end}}
+  </div>
 {{end}}
 {{end}}
