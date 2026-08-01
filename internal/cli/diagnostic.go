@@ -80,16 +80,27 @@ func (c TriageCommand) Execute(
 		return unhealthy[i].Verdict > unhealthy[j].Verdict
 	})
 
+	// A cluster-wide sweep neither saves state nor drops rows: there are no
+	// indexes to build entries for, and none to protect from a repeated name.
+	if allNamespaces {
+		return render.TriageResult{
+			Namespace:     namespace,
+			AllNamespaces: true,
+			Checked:       len(reports),
+			Reports:       unhealthy,
+			Healthy:       len(reports) - len(unhealthy),
+		}, nil
+	}
+
 	// State is keyed by name alone, so a rare cross-kind name collision keeps
 	// the earlier (more severe) row and drops the later one rather than letting
-	// an index resolve to the wrong resource. With no state to protect, a
-	// cluster-wide sweep shows every unhealthy resource instead.
+	// an index resolve to the wrong resource.
 	seen := map[string]bool{}
 	var entries []state.Resource
 	var displayed []diagnostics.Report
 	var dropped []string
 	for _, report := range unhealthy {
-		if !allNamespaces && seen[report.Name] {
+		if seen[report.Name] {
 			dropped = append(dropped, string(report.Kind)+"/"+report.Name)
 			continue
 		}
@@ -98,7 +109,7 @@ func (c TriageCommand) Execute(
 		displayed = append(displayed, report)
 	}
 
-	if len(displayed) > 0 && !allNamespaces {
+	if len(displayed) > 0 {
 		if err := c.Save(state.State{
 			Resources: state.NewOrderedResources(entries),
 			Namespace: namespace,
@@ -108,12 +119,11 @@ func (c TriageCommand) Execute(
 	}
 
 	return render.TriageResult{
-		Namespace:     namespace,
-		AllNamespaces: allNamespaces,
-		Checked:       len(reports),
-		Reports:       displayed,
-		Healthy:       len(reports) - len(unhealthy),
-		Dropped:       dropped,
+		Namespace: namespace,
+		Checked:   len(reports),
+		Reports:   displayed,
+		Healthy:   len(reports) - len(unhealthy),
+		Dropped:   dropped,
 	}, nil
 }
 

@@ -7,12 +7,12 @@ import (
 	"github.com/jzills/kx/internal/theme"
 )
 
-// TriageResult is a namespace sweep, ready to render.
 // AllNamespacesNote explains why an -A listing has no indexes, since the
 // absence is otherwise indistinguishable from a bug.
 const AllNamespacesNote = "indexes not saved for all-namespace listings — " +
 	"scope to a namespace (-n or kx ns) to select"
 
+// TriageResult is a namespace sweep, ready to render.
 type TriageResult struct {
 	Namespace string
 	// AllNamespaces swaps the index column for a namespace one. A cluster-wide
@@ -64,27 +64,19 @@ func (r *Renderer) Triage(result TriageResult) {
 	//
 	// A cluster-wide sweep has no indexes to print, so NAMESPACE takes the
 	// column instead — without it two rows called web-abc are indistinguishable.
-	columns := []Column{
-		{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"},
-		{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
-	}
+	var columns []Column
 	if result.AllNamespaces {
 		columns = []Column{
 			{Header: "KIND"}, {Header: "NAMESPACE"}, {Header: "NAME"},
 			{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
 		}
+	} else {
+		columns = []Column{
+			{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"},
+			{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
+		}
 	}
-	// Names are truncated against their own budget rather than left to the flex
-	// column: with everything else fixed, a very long name would otherwise
-	// squeeze TOP FINDING out entirely. NAMESPACE comes out of the same budget,
-	// since it is the widest thing the -A shape adds.
-	nameBudget := r.width() - 51
-	if result.AllNamespaces {
-		nameBudget -= widestNamespace(result.Reports)
-	}
-	if nameBudget < 8 {
-		nameBudget = 8
-	}
+	nameBudget := triageNameBudget(r.width(), result)
 
 	rows := make([][]Cell, 0, len(result.Reports))
 	for position, report := range result.Reports {
@@ -94,23 +86,25 @@ func (r *Renderer) Triage(result TriageResult) {
 			// `kx diag <index>` away.
 			top = report.Findings[0].Summary
 		}
-		row := []Cell{
-			Styled(strconv.Itoa(position+1), theme.Muted),
-			Plain(string(report.Kind)),
-			Plain(ellipsize(report.Name, nameBudget)),
-			Styled(report.Verdict.String(), severityStyle(report.Verdict)),
-			Styled(top, theme.Body),
-		}
+		// The shapes share their last three cells and differ only in what
+		// leads: an index and a kind, or a kind and the namespace standing in
+		// for the index that a cluster-wide sweep has none of.
+		var lead []Cell
 		if result.AllNamespaces {
-			row = []Cell{
+			lead = []Cell{
 				Plain(string(report.Kind)),
 				Styled(report.Namespace, theme.Muted),
-				Plain(ellipsize(report.Name, nameBudget)),
-				Styled(report.Verdict.String(), severityStyle(report.Verdict)),
-				Styled(top, theme.Body),
+			}
+		} else {
+			lead = []Cell{
+				Styled(strconv.Itoa(position+1), theme.Muted),
+				Plain(string(report.Kind)),
 			}
 		}
-		rows = append(rows, row)
+		rows = append(rows, append(lead,
+			Plain(ellipsize(report.Name, nameBudget)),
+			Styled(report.Verdict.String(), severityStyle(report.Verdict)),
+			Styled(top, theme.Body)))
 	}
 	r.Table(columns, rows)
 
@@ -130,6 +124,39 @@ func (r *Renderer) Triage(result TriageResult) {
 		r.line(r.style(theme.Muted,
 			name+" shares a name with an indexed resource and was omitted"))
 	}
+}
+
+// What the NAME column can never have: two-space padding on both sides of all
+// five columns, the widest KIND the sweep emits, and the widest VERDICT.
+const (
+	triageKindWidth    = 21 // PersistentVolumeClaim
+	triageVerdictWidth = 8  // critical, warnings
+	triageIndexWidth   = 2  // room for a two-digit index
+	triageFixedWidth   = 5*2*len(cellPad) + triageKindWidth + triageVerdictWidth
+)
+
+// minNameWidth is the point below which a name carries nothing.
+const minNameWidth = 8
+
+// triageNameBudget is the room the NAME column gets.
+//
+// Names are truncated against their own budget rather than left to the flex
+// column: with everything else fixed, a very long name would otherwise squeeze
+// TOP FINDING out entirely.
+//
+// The first column is an index or a namespace depending on the shape. NAMESPACE
+// replaces X rather than joining it, so only one of the two is ever charged to
+// the name.
+func triageNameBudget(width int, result TriageResult) int {
+	scope := triageIndexWidth
+	if result.AllNamespaces {
+		scope = widestNamespace(result.Reports)
+	}
+	budget := width - triageFixedWidth - scope
+	if budget < minNameWidth {
+		budget = minNameWidth
+	}
+	return budget
 }
 
 // widestNamespace is how much room the -A shape's NAMESPACE column needs.
