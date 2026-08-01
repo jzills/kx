@@ -53,7 +53,7 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 	if err != nil {
 		return Data{}, err
 	}
-	data.WarningEvents = s.warningEvents(kind, name, pods, all)
+	data.WarningEvents = s.warningEvents(kind, name, namespace, pods, all)
 	return data, nil
 }
 
@@ -271,18 +271,27 @@ func (s Service) fetchLogTail(
 
 // warningEvents groups a resource's warning events, and those of its pods, by
 // reason and involved object.
+//
+// Targets are namespace-qualified because Filter matches on name and kind
+// alone, which identify an object only within a namespace. A cluster-wide sweep
+// hands this every namespace's events at once, so an unscoped match would give
+// a healthy resource its namesake's warnings — and warnings drive findings, so
+// the row would surface as someone else's failure. An empty namespace matches
+// anywhere, for a caller that doesn't know the scope it is asking about.
 func (s Service) warningEvents(
-	kind kinds.Kind, name string, pods []corev1.Pod, all []corev1.Event,
+	kind kinds.Kind, name, namespace string, pods []corev1.Pod, all []corev1.Event,
 ) []EventSummary {
 	// Deduplicated: for a bare Pod the workload target equals its pod target.
 	type target struct {
-		name string
-		kind kinds.Kind
+		name      string
+		kind      kinds.Kind
+		namespace string
 	}
-	targets := []target{{name, kind}}
-	seen := map[target]bool{{name, kind}: true}
+	first := target{name, kind, namespace}
+	targets := []target{first}
+	seen := map[target]bool{first: true}
 	for i := range pods {
-		key := target{pods[i].Name, kinds.Pod}
+		key := target{pods[i].Name, kinds.Pod, pods[i].Namespace}
 		if !seen[key] {
 			seen[key] = true
 			targets = append(targets, key)
@@ -298,6 +307,9 @@ func (s Service) warningEvents(
 	for _, t := range targets {
 		for _, event := range s.Events.Filter(all, t.name, t.kind) {
 			if event.Type != "Warning" {
+				continue
+			}
+			if t.namespace != "" && eventNamespace(event) != t.namespace {
 				continue
 			}
 			key := groupKey{event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name}
@@ -328,4 +340,17 @@ func (s Service) warningEvents(
 		summaries = append(summaries, *groups[key])
 	}
 	return summaries
+}
+
+// eventNamespace is the namespace an event belongs to.
+//
+// The involved object's reference is authoritative when set, but the API
+// routinely leaves that field empty; the event's own metadata carries the
+// namespace either way, since an event lives in the namespace of what it
+// describes.
+func eventNamespace(event corev1.Event) string {
+	if event.InvolvedObject.Namespace != "" {
+		return event.InvolvedObject.Namespace
+	}
+	return event.Namespace
 }

@@ -92,7 +92,8 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			Pods:    diagnoseAll(recentPods),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(kinds.CronJob, cronJob.Name, recentPods, allEvents)
+		data.WarningEvents = s.warningEvents(
+			kinds.CronJob, cronJob.Name, data.Namespace, recentPods, allEvents)
 		results = append(results, data)
 	}
 
@@ -167,7 +168,8 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			data.Job = jobHealthFrom(entry.object.(*batchv1.Job))
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(entry.kind, entry.name, owned, allEvents)
+		data.WarningEvents = s.warningEvents(
+			entry.kind, entry.name, entry.namespace, owned, allEvents)
 		results = append(results, data)
 	}
 
@@ -178,9 +180,16 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	if err != nil {
 		return nil, err
 	}
-	endpointsByName := map[string]*corev1.Endpoints{}
+	// Namespace-qualified for the same reason usageKey is: a Service shares its
+	// name with the Endpoints object, and that name repeats across namespaces.
+	// Keyed by name alone, a cluster-wide sweep would give both Services
+	// whichever Endpoints was listed last — and no endpoints is a Critical
+	// finding, so a broken Service would be scored healthy and never shown.
+	type endpointsKey struct{ namespace, name string }
+	endpointsFor := map[endpointsKey]*corev1.Endpoints{}
 	for i := range endpointsList.Items {
-		endpointsByName[endpointsList.Items[i].Name] = &endpointsList.Items[i]
+		item := &endpointsList.Items[i]
+		endpointsFor[endpointsKey{item.Namespace, item.Name}] = item
 	}
 
 	services, err := s.Client.CoreV1().Services(namespace).List(ctx, list)
@@ -192,6 +201,12 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		var matched []corev1.Pod
 		if len(service.Spec.Selector) > 0 {
 			for j := range pods.Items {
+				// A selector reaches only its own namespace: app=web means
+				// something different in each one, so a cluster-wide sweep must
+				// not hand this Service another namespace's pods.
+				if pods.Items[j].Namespace != service.Namespace {
+					continue
+				}
 				if graph.MatchesSelector(pods.Items[j], service.Spec.Selector) {
 					matched = append(matched, pods.Items[j])
 				}
@@ -199,11 +214,13 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		}
 		data := Data{
 			Kind: kinds.Service, Name: service.Name, Namespace: service.Namespace,
-			Service: serviceHealthFrom(service, endpointsByName[service.Name]),
-			Pods:    diagnoseAll(matched),
+			Service: serviceHealthFrom(
+				service, endpointsFor[endpointsKey{service.Namespace, service.Name}]),
+			Pods: diagnoseAll(matched),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(kinds.Service, service.Name, matched, allEvents)
+		data.WarningEvents = s.warningEvents(
+			kinds.Service, service.Name, service.Namespace, matched, allEvents)
 		results = append(results, data)
 	}
 
@@ -216,8 +233,9 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		claim := &claims.Items[i]
 		results = append(results, Data{
 			Kind: kinds.PersistentVolumeClaim, Name: claim.Name, Namespace: claim.Namespace,
-			PVC:           &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))},
-			WarningEvents: s.warningEvents(kinds.PersistentVolumeClaim, claim.Name, nil, allEvents),
+			PVC: &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))},
+			WarningEvents: s.warningEvents(
+				kinds.PersistentVolumeClaim, claim.Name, claim.Namespace, nil, allEvents),
 		})
 	}
 
@@ -233,7 +251,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			Pods: diagnoseAll(single),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(kinds.Pod, pod.Name, single, allEvents)
+		data.WarningEvents = s.warningEvents(kinds.Pod, pod.Name, pod.Namespace, single, allEvents)
 		results = append(results, data)
 	}
 
