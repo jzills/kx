@@ -205,6 +205,13 @@ tbody tr:last-child td { border-bottom: none; }
 
 .scan-grid { grid-template-columns: minmax(14rem, 1.6fr) 6rem 4rem 4rem 4rem 4rem 1.25rem; }
 
+/* The -A shape drops the index column and adds NAMESPACE, so its leading two
+   tracks are kind and namespace rather than index and kind. */
+.row.ns-grid > summary,
+.sweep-head.ns-grid {
+  grid-template-columns: 11rem 10rem minmax(9rem, 1fr) 6.5rem minmax(12rem, 1.6fr) 1.25rem;
+}
+
 .row .index, .sweep-head .index { text-align: right; color: var(--muted); }
 
 .row .finding {

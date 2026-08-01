@@ -343,3 +343,79 @@ func TestRenderDiagSweepReportsDroppedRows(t *testing.T) {
 		t.Error("dropped row was not reported")
 	}
 }
+
+// The -A layout emits KIND and NAMESPACE where the indexed layout emits an
+// index and a kind, so it needs its own column widths. Without the modifier
+// class the kind renders into a slot sized for a two-digit index.
+func TestRenderDiagAllNamespacesUsesItsOwnGrid(t *testing.T) {
+	page := sweepPage(t)
+	page.AllNamespaces = true
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+	// Checked via the literal class attribute, not a bare "ns-grid"
+	// substring: the embedded stylesheet's own selector
+	// (".sweep-head.ns-grid") also contains that text, so a bare substring
+	// check can't tell a class actually applied to an element from the CSS
+	// rule that targets it. The header and a row are checked separately, via
+	// their full class attributes, so a fix that applies the modifier to
+	// only one of the two still fails here.
+	if !strings.Contains(html, `class="sweep-head ns-grid"`) {
+		t.Error("the -A header did not get its own grid")
+	}
+	if !strings.Contains(html, `class="row status-bad ns-grid"`) {
+		t.Error("the -A rows did not get their own grid")
+	}
+
+	// The indexed layout must NOT pick it up. Checking for the quoted
+	// occurrence (an HTML attribute value ending in ns-grid) rather than the
+	// bare word, again to avoid matching the stylesheet's own CSS selectors,
+	// which contain no quote characters.
+	indexed, err := RenderDiag(sweepPage(t))
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if strings.Contains(string(indexed), `ns-grid"`) {
+		t.Error("the indexed layout wrongly used the -A grid")
+	}
+}
+
+// Kind, Namespace, Name, finding summaries and dropped-row names are all
+// cluster-controlled, and this task put them in new markup — the sweep
+// table, the <details><summary> row, and the footer. They must be escaped
+// exactly like the single-resource view's TestRenderDiagEscapesClusterContent
+// already requires. AllNamespaces is set because that is the branch that
+// prints Namespace at all.
+func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
+	page := sweepPage(t)
+	page.AllNamespaces = true
+	page.Reports[0].Kind = kinds.Kind(`<script>kind</script>`)
+	page.Reports[0].Namespace = `<b>ns</b>`
+	page.Reports[1].Name = `<script>alert(1)</script>`
+	page.Reports[1].Findings[0].Summary = `he said "boom" & <b>left</b>`
+	page.Dropped = []string{`<script>dropped</script>`}
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+
+	for _, forbidden := range []string{
+		"<script>kind",
+		"<script>alert",
+		"<script>dropped",
+		"<b>ns</b>",
+		"<b>left</b>",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("unescaped cluster content in output: %q", forbidden)
+		}
+	}
+	if !strings.Contains(html, "&lt;script&gt;") {
+		t.Error("script tag was not escaped")
+	}
+}

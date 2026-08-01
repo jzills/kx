@@ -116,7 +116,7 @@
     {{if .Reports}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
       <div class="table-wrap">
-        <div class="sweep-head">
+        <div class="sweep-head{{if .AllNamespaces}} ns-grid{{end}}">
           {{if .AllNamespaces}}
             <div class="kind">KIND</div><div>NAMESPACE</div>
           {{else}}
@@ -125,7 +125,7 @@
           <div>NAME</div><div>VERDICT</div><div class="finding">TOP FINDING</div><div></div>
         </div>
         {{range $i, $r := .Reports}}
-        <details class="row {{severityClass $r.Verdict}}">
+        <details class="row {{severityClass $r.Verdict}}{{if $.AllNamespaces}} ns-grid{{end}}">
           <summary>
             {{if $.AllNamespaces}}
               <span class="kind">{{$r.Kind}}</span><span class="dim">{{$r.Namespace}}</span>
