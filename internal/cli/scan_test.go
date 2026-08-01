@@ -262,3 +262,50 @@ func TestCollectReportsAnEmptyScope(t *testing.T) {
 		t.Errorf("err = %v, want it to name the scope", err)
 	}
 }
+
+// An index resolves a name from one namespace's listing; scanning that name
+// somewhere else finds a different resource or nothing at all.
+func TestScanRejectsANamespaceFlagAlongsideAnIndex(t *testing.T) {
+	for _, argv := range [][]string{
+		{"1", "-n", "prod"},
+		{"1", "--namespace=prod"},
+		{"1", "-A"},
+		{"1", "--all-namespaces"},
+	} {
+		quietRender(t)
+		cmd := newScanCommand(Services{})
+		err := cmd.RunE(cmd, argv)
+		if err == nil {
+			t.Fatalf("kx scan %v was accepted", argv)
+		}
+		if !strings.Contains(err.Error(), "cannot be combined with an index") {
+			t.Errorf("kx scan %v: err = %v", argv, err)
+		}
+	}
+}
+
+// `-n ""` is still a namespace flag for the purpose of the guards, which is the
+// distinction hasFlag exists to preserve.
+func TestScanRejectsAnEmptyNamespaceFlagAlongsideAnIndex(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "-n", ""})
+	if err == nil {
+		t.Fatal("kx scan 1 -n \"\" was accepted")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined with an index") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestScanRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"-n", "prod", "-A"})
+	if err == nil {
+		t.Fatal("-n and -A were accepted together")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("err = %v", err)
+	}
+}

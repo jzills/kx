@@ -286,13 +286,14 @@ func newScanCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "scan [index] [scanner flags]",
 		Short: "Scan the unique container images of an indexed workload for vulnerabilities, " +
-			"or the whole namespace when no index is given; prints a severity summary table " +
+			"or a whole namespace when no index is given (-n to pick one, -A for every " +
+			"namespace); prints a severity summary table " +
 			"by default, or the raw scanner output with --full. Requires the Docker Scout " +
 			"CLI plugin (https://docs.docker.com/scout/).",
 		Long: "Resolves the unique container images of a workload and scans each for\n" +
 			"vulnerabilities, printing a severity summary table.\n\n" +
 			"Requires the Docker Scout CLI plugin: https://docs.docker.com/scout/",
-		Example:            "  kx scan\n  kx scan 1\n  kx scan 1 --full",
+		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -307,6 +308,20 @@ func newScanCommand(services Services) *cobra.Command {
 				engine = "scout"
 			}
 			full, rest := extractBool(rest, "--full")
+
+			// Presence is checked before extractString consumes the flag:
+			// `-n ""` is a namespace flag the guards below still have to see,
+			// and the returned value alone cannot tell it from an absent one.
+			hasNamespace := hasFlag(rest, "--namespace", "-n")
+			namespace, rest, err := extractString(rest, "--namespace", "-n")
+			if err != nil {
+				return err
+			}
+			all, rest := extractBool(rest, "--all-namespaces", "-A")
+			if hasNamespace && all {
+				return errors.New(
+					"'--all-namespaces' and '--namespace' cannot be combined.")
+			}
 
 			command := ScanCommand{
 				Kubectl: services.Kubectl,
@@ -326,14 +341,32 @@ func newScanCommand(services Services) *cobra.Command {
 				return fmt.Errorf(
 					"Invalid value for 'index': '%s' is not a valid int.", extra[0])
 			}
+			// An index already carries the namespace it was listed from, so a
+			// scope flag next to one is a contradiction rather than a refinement.
+			scopeFlag := ""
+			if hasNamespace {
+				scopeFlag = "--namespace"
+			}
+			if all {
+				scopeFlag = "--all-namespaces"
+			}
+			if len(indexArgs) > 0 && scopeFlag != "" {
+				return fmt.Errorf(
+					"'%s' cannot be combined with an index — an index already "+
+						"carries the namespace it was listed from. Drop the flag, "+
+						"or drop the index to sweep the namespace instead.", scopeFlag)
+			}
 			var images []string
 			if len(indexArgs) == 0 {
-				namespace := services.Kubectl.CurrentNamespace()
-				images, err = command.Collect(scanScope{Namespace: namespace}, engine)
+				scope := scanScope{Namespace: namespace, All: all}
+				if !scope.All && scope.Namespace == "" {
+					scope.Namespace = services.Kubectl.CurrentNamespace()
+				}
+				images, err = command.Collect(scope, engine)
 				if err != nil {
 					return err
 				}
-				render.ScopeBanner("Mixed", namespace, imagesNoun(len(images)))
+				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {
@@ -378,5 +411,9 @@ func newScanCommand(services Services) *cobra.Command {
 		"Vulnerability scanner to use; 'scout' is currently the only supported value")
 	cmd.Flags().Bool("full", false,
 		"Stream the scanner's full output instead of the summary table")
+	cmd.Flags().StringP("namespace", "n", "",
+		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false,
+		"Sweep every namespace")
 	return cmd
 }
