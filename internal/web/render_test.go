@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,10 @@ func criticalReport(t *testing.T) diagnostics.Report {
 		WarningEvents: []diagnostics.EventSummary{{
 			Reason: "BackOff", Message: "Back-off restarting failed container",
 			Kind: "Pod", Name: "api-gateway-7d4f9c-2xk8p", Count: 34,
-			LastTimestamp: time.Now().Add(-4 * time.Minute),
+			// Fixed, 4 minutes before testMeta's Captured (09:41:22 UTC) rather
+			// than time.Now(): the fixture must not be clock-dependent, or two
+			// renders of "the same" report would render different ages.
+			LastTimestamp: time.Date(2026, 8, 1, 9, 37, 22, 0, time.UTC),
 		}},
 	}
 }
@@ -188,5 +192,25 @@ func TestRenderDiagUsesTheActivePalette(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "--background:#282a36;") {
 		t.Error("dracula's background did not reach the page")
+	}
+}
+
+// The same page value must always render the same bytes: ages come from the
+// page's capture time, not from the clock.
+func TestRenderDiagIsDeterministic(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	first, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	second, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("two renders of the same page produced different bytes")
 	}
 }

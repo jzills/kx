@@ -157,7 +157,10 @@ var funcs = template.FuncMap{
 	"statusClass":   func(status string) string { return styleClass(render.StatusStyle(status)) },
 	"severityClass": severityClass,
 	"severityIcon":  severityIcon,
-	"age":           render.FormatAge,
+	// age is a stub so the templates parse; RenderDiag and RenderScan rebind
+	// it per call to a closure over the page's own Captured time, so the same
+	// page value always renders the same bytes rather than reading the clock.
+	"age": func(time.Time) string { return "" },
 	"cpuUsage": func(c diagnostics.ContainerDiagnostic) Usage {
 		return usageOf(c.CPUUsage, c.CPULimit, "cpu")
 	},
