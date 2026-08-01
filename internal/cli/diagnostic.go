@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -45,7 +46,19 @@ type TriageCommand struct {
 	Save        func(state.State) error
 }
 
-func (c TriageCommand) Execute(ctx context.Context, namespace string) (render.TriageResult, error) {
+// Execute sweeps one namespace, or every namespace when allNamespaces is set —
+// which the sweep spells as an empty namespace, the way client-go's listers do.
+//
+// A cluster-wide sweep saves no state and reports no dropped rows. Both exist
+// only to protect indexes, and indexes are what a cross-namespace listing
+// cannot have: state is keyed by name alone, and names repeat across
+// namespaces. kx get -A follows the same rule.
+func (c TriageCommand) Execute(
+	ctx context.Context, namespace string, allNamespaces bool,
+) (render.TriageResult, error) {
+	if allNamespaces {
+		namespace = ""
+	}
 	all, err := c.Diagnostics.Sweep(ctx, namespace)
 	if err != nil {
 		return render.TriageResult{}, err
@@ -66,6 +79,18 @@ func (c TriageCommand) Execute(ctx context.Context, namespace string) (render.Tr
 	sort.SliceStable(unhealthy, func(i, j int) bool {
 		return unhealthy[i].Verdict > unhealthy[j].Verdict
 	})
+
+	// A cluster-wide sweep neither saves state nor drops rows: there are no
+	// indexes to build entries for, and none to protect from a repeated name.
+	if allNamespaces {
+		return render.TriageResult{
+			Namespace:     namespace,
+			AllNamespaces: true,
+			Checked:       len(reports),
+			Reports:       unhealthy,
+			Healthy:       len(reports) - len(unhealthy),
+		}, nil
+	}
 
 	// State is keyed by name alone, so a rare cross-kind name collision keeps
 	// the earlier (more severe) row and drops the later one rather than letting
@@ -103,16 +128,40 @@ func (c TriageCommand) Execute(ctx context.Context, namespace string) (render.Tr
 }
 
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     use + " [index]",
-		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag.",
+		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases: aliases,
 		Long: "Analyses health signals — replica counts, container states, resource\n" +
 			"usage and warning events — and reports findings by severity.\n" +
-			"With no index, sweeps every workload in the current namespace.",
-		Example: "  kx " + use + "\n  kx " + use + " 1",
+			"With no index, sweeps every workload in the current namespace, or in\n" +
+			"the namespace given by -n, or in every namespace with -A.",
+		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n  kx " + use + " -A",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			namespace, _ := cmd.Flags().GetString("namespace")
+			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
+
+			if cmd.Flags().Changed("namespace") && allNamespaces {
+				return errors.New(
+					"'--all-namespaces' and '--namespace' cannot be combined.")
+			}
+			// An index already carries the namespace it was listed from, so a
+			// scope flag next to one is a contradiction rather than a refinement.
+			scopeFlag := ""
+			if cmd.Flags().Changed("namespace") {
+				scopeFlag = "--namespace"
+			}
+			if allNamespaces {
+				scopeFlag = "--all-namespaces"
+			}
+			if len(args) > 0 && scopeFlag != "" {
+				return fmt.Errorf(
+					"'%s' cannot be combined with an index — an index already "+
+						"carries the namespace it was listed from. Drop the flag, "+
+						"or drop the index to sweep the namespace instead.", scopeFlag)
+			}
+
 			client, err := services.Kubernetes()
 			if err != nil {
 				return err
@@ -121,11 +170,17 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
-				namespace := services.Kubectl.CurrentNamespace()
-				stop := render.Status("sweeping namespace")
+				if namespace == "" {
+					namespace = services.Kubectl.CurrentNamespace()
+				}
+				sweeping := "sweeping namespace"
+				if allNamespaces {
+					sweeping = "sweeping all namespaces"
+				}
+				stop := render.Status(sweeping)
 				result, err := TriageCommand{
 					Diagnostics: service, Save: services.State.Save,
-				}.Execute(ctx, namespace)
+				}.Execute(ctx, namespace, allNamespaces)
 				stop()
 				if err != nil {
 					return err
@@ -150,4 +205,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			return nil
 		},
 	}
+	cmd.Flags().StringP("namespace", "n", "",
+		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false,
+		"Sweep every namespace; results are not indexed")
+	return cmd
 }

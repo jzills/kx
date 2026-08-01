@@ -148,6 +148,57 @@ func TestTriageIndexColumnIsLabelled(t *testing.T) {
 	}
 }
 
+// A cluster-wide sweep saves no state, so there are no indexes to print: the
+// X column gives way to NAMESPACE, without which two rows called web-abc are
+// indistinguishable. The footer swaps the per-index hint for the note kx get -A
+// prints, since neither listing can be selected from.
+func TestTriageAllNamespacesSwapsTheIndexColumnForNamespace(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			AllNamespaces: true, Checked: 3, Healthy: 1,
+			Reports: []diagnostics.Report{{
+				Kind: kinds.Pod, Name: "api", Namespace: "prod",
+				Verdict:  diagnostics.Critical,
+				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
+			}},
+		})
+	})
+	lines := strings.Split(out, "\n")
+
+	if got := strings.Fields(lines[0]); len(got) == 0 || !strings.Contains(lines[0], "all namespaces") {
+		t.Errorf("caption = %q, want it scoped to all namespaces", lines[0])
+	}
+	header := strings.Fields(lines[1])
+	if len(header) < 2 || header[0] != "KIND" || header[1] != "NAMESPACE" {
+		t.Errorf("header = %q, want KIND then NAMESPACE and no X column", lines[1])
+	}
+	if !strings.Contains(lines[2], "prod") {
+		t.Errorf("row = %q, want the namespace shown", lines[2])
+	}
+	if !strings.Contains(out, AllNamespacesNote) {
+		t.Errorf("footer does not explain the missing indexes:\n%s", out)
+	}
+	if strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("footer offers indexes that were never saved:\n%s", out)
+	}
+}
+
+// NAMESPACE replaces the index column rather than joining it, so a name is
+// charged for one scope column, not two. Charging for both truncates names that
+// had room — the terminal is never as wide as the test harness's 1000 columns.
+func TestTriageNameBudgetChargesForOneScopeColumn(t *testing.T) {
+	const terminal = 120
+	reports := []diagnostics.Report{{Namespace: "prod"}}
+
+	indexed := triageNameBudget(terminal, TriageResult{})
+	all := triageNameBudget(terminal, TriageResult{AllNamespaces: true, Reports: reports})
+
+	if want := indexed + triageIndexWidth - width("NAMESPACE"); all != want {
+		t.Errorf("all-namespaces budget = %d, want %d — the dropped index column"+
+			" should return its width to the name", all, want)
+	}
+}
+
 // The table header sits directly under the caption, as in every other indexed
 // listing. The Python renderer printed a blank line between them, alone among
 // them; another deliberate divergence, pinned so it can't drift back.

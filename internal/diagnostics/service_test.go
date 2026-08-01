@@ -294,17 +294,37 @@ func TestAttachUsageMatchesOnPodAndContainer(t *testing.T) {
 	}}
 	cpu := mustQuantity(t, "250m")
 	lookup := map[usageKey]usageValue{
-		{pod: "web-1", container: "app"}: {cpu: cpu},
+		{namespace: ns, pod: "web-1", container: "app"}: {cpu: cpu},
 		// A container in another pod with the same name must not match.
-		{pod: "other", container: "sidecar"}: {cpu: cpu},
+		{namespace: ns, pod: "other", container: "sidecar"}: {cpu: cpu},
 	}
-	attachUsage(pods, lookup)
+	attachUsage(pods, ns, lookup)
 
 	if pods[0].Containers[0].CPUUsage == nil {
 		t.Error("app got no usage")
 	}
 	if pods[0].Containers[1].CPUUsage != nil {
 		t.Error("sidecar picked up another pod's usage")
+	}
+}
+
+// A cluster-wide sweep sees every namespace at once, and pod names are only
+// unique within one. Usage must not cross that boundary, or two pods sharing a
+// name would report each other's figures — and usage drives real findings.
+func TestAttachUsageDoesNotCrossNamespaces(t *testing.T) {
+	pods := []PodDiagnostic{{
+		Name:       "web-1",
+		Containers: []ContainerDiagnostic{{Name: "app"}},
+	}}
+	lookup := map[usageKey]usageValue{
+		{namespace: "elsewhere", pod: "web-1", container: "app"}: {
+			cpu: mustQuantity(t, "250m"),
+		},
+	}
+	attachUsage(pods, ns, lookup)
+
+	if pods[0].Containers[0].CPUUsage != nil {
+		t.Error("app took usage from a same-named pod in another namespace")
 	}
 }
 

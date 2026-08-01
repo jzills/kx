@@ -51,6 +51,65 @@ func mustSweep(t *testing.T, s Service) map[string]Data {
 	return swept(t, results)
 }
 
+// metaIn places an object outside the default namespace. The cluster-wide
+// sweeps below all turn on a namesake pair, which needs both halves.
+func metaIn(namespace, name string, uid types.UID) metav1.ObjectMeta {
+	return metav1.ObjectMeta{Name: name, Namespace: namespace, UID: uid}
+}
+
+// sweptCluster indexes by "namespace/Kind/name". swept's key cannot serve a
+// cluster-wide sweep: names repeat across namespaces, which is the whole point
+// of the rows below.
+func sweptCluster(t *testing.T, s Service) map[string]Data {
+	t.Helper()
+	results, err := s.Sweep(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	byKey := make(map[string]Data, len(results))
+	for _, data := range results {
+		byKey[data.Namespace+"/"+string(data.Kind)+"/"+data.Name] = data
+	}
+	return byKey
+}
+
+// An empty namespace sweeps the whole cluster. Each row then has to carry the
+// namespace it actually came from: labelling them all from the argument would
+// stamp every row with the empty string, and the caller can no longer tell one
+// web-abc from another.
+func TestSweepAcrossAllNamespacesLabelsEachRow(t *testing.T) {
+	cluster := service(
+		&appsv1.Deployment{ObjectMeta: meta("web", "d1")},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "api", Namespace: "staging", UID: "d2",
+		}},
+	)
+
+	results, err := cluster.Sweep(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	indexed := swept(t, results)
+	if len(indexed) != 2 {
+		t.Fatalf("cluster-wide sweep found %s, want both deployments", keys(indexed))
+	}
+	if got := indexed["Deployment/web"].Namespace; got != ns {
+		t.Errorf("web namespace = %q, want %q", got, ns)
+	}
+	if got := indexed["Deployment/api"].Namespace; got != "staging" {
+		t.Errorf("api namespace = %q, want staging", got)
+	}
+
+	// A scoped sweep still sees only its own namespace.
+	scoped, err := cluster.Sweep(context.Background(), "staging")
+	if err != nil {
+		t.Fatalf("Sweep(staging): %v", err)
+	}
+	if only := swept(t, scoped); len(only) != 1 || only["Deployment/api"].Namespace != "staging" {
+		t.Errorf("scoped sweep = %s, want only Deployment/api", keys(only))
+	}
+}
+
 // A Deployment claims its pods through the ReplicaSets it owns, so they must
 // not also surface as unowned pods.
 func TestSweepDeploymentClaimsItsPods(t *testing.T) {
@@ -258,6 +317,96 @@ func TestSweepAttachesWarningEvents(t *testing.T) {
 	}
 	if events[0].Count != 2 {
 		t.Errorf("count = %d, want 2", events[0].Count)
+	}
+}
+
+// warningIn is warning for another namespace. It leaves InvolvedObject.Namespace
+// unset exactly as the API routinely does, so the match has to fall back to the
+// event's own metadata rather than trusting the reference.
+func warningIn(namespace, name, reason, kind, object string) *corev1.Event {
+	event := warning(name, reason, kind, object, 1)
+	event.Namespace = namespace
+	return event
+}
+
+// Events are matched on the involved object's name and kind, which identify it
+// only within a namespace. A cluster-wide sweep holds every namespace's events
+// at once, so an unscoped match hands a healthy resource its namesake's
+// warnings — and warnings drive findings, so the row lands in the triage table
+// as someone else's failure.
+func TestSweepAcrossAllNamespacesKeepsEventsInTheirNamespace(t *testing.T) {
+	indexed := sweptCluster(t, service(
+		podWith("web-0", "p1", corev1.PodRunning, nil),
+		&corev1.Pod{
+			ObjectMeta: metaIn("staging", "web-0", "p2"),
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+		warning("e1", "ProdUnhealthy", "Pod", "web-0", 1),
+		warningIn("staging", "e2", "StagingUnhealthy", "Pod", "web-0"),
+	))
+
+	for _, want := range []struct{ namespace, reason string }{
+		{ns, "ProdUnhealthy"},
+		{"staging", "StagingUnhealthy"},
+	} {
+		events := indexed[want.namespace+"/Pod/web-0"].WarningEvents
+		if len(events) != 1 || events[0].Reason != want.reason {
+			t.Errorf("%s events = %+v, want only %s", want.namespace, events, want.reason)
+		}
+	}
+}
+
+// A Service is paired with the Endpoints object of the same name, which is the
+// same name in every namespace. Keyed by name alone, two namespaces' Services
+// share whichever Endpoints was listed last — and no endpoints is a Critical
+// finding, so a broken Service can be scored healthy and drop out of the table
+// altogether.
+func TestSweepAcrossAllNamespacesPairsEachServiceWithItsOwnEndpoints(t *testing.T) {
+	selector := corev1.ServiceSpec{Selector: map[string]string{"app": "web"}}
+	indexed := sweptCluster(t, service(
+		&corev1.Service{ObjectMeta: meta("web", "s1"), Spec: selector},
+		&corev1.Service{ObjectMeta: metaIn("staging", "web", "s2"), Spec: selector},
+		&corev1.Endpoints{ObjectMeta: meta("web", "e1")},
+		&corev1.Endpoints{
+			ObjectMeta: metaIn("staging", "web", "e2"),
+			Subsets: []corev1.EndpointSubset{{
+				Addresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}},
+			}},
+		},
+	))
+
+	if got := indexed[ns+"/Service/web"].Service; got == nil || got.ReadyAddresses != 0 {
+		t.Errorf("prod service = %+v, want its own empty endpoints", got)
+	}
+	if got := indexed["staging/Service/web"].Service; got == nil || got.ReadyAddresses != 1 {
+		t.Errorf("staging service = %+v, want its own ready endpoint", got)
+	}
+}
+
+// A Service selects pods within its own namespace — label sets are not unique
+// across a cluster, and app=web means something different in every namespace.
+// Unscoped, a cluster-wide sweep hands a Service the foreign pods that happen
+// to share its labels, and their findings land on its row.
+func TestSweepAcrossAllNamespacesMatchesOnlyPodsInTheServiceNamespace(t *testing.T) {
+	labels := map[string]string{"app": "web"}
+	local := podWith("web-prod", "p1", corev1.PodRunning, nil)
+	local.Labels = labels
+	foreign := &corev1.Pod{
+		ObjectMeta: metaIn("staging", "web-staging", "p2"),
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	foreign.Labels = labels
+
+	indexed := sweptCluster(t, service(
+		&corev1.Service{
+			ObjectMeta: meta("web", "s1"),
+			Spec:       corev1.ServiceSpec{Selector: labels},
+		},
+		local, foreign,
+	))
+
+	if got := podNames(indexed[ns+"/Service/web"]); len(got) != 1 || got[0] != "web-prod" {
+		t.Errorf("service pods = %v, want only [web-prod]", got)
 	}
 }
 

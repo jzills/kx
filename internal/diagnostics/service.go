@@ -46,14 +46,14 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 	for i := range pods {
 		data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
 	}
-	attachUsage(data.Pods, s.usageLookup(ctx, namespace))
+	attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
 	s.attachLogs(ctx, data.Pods, namespace)
 
 	all, err := s.Events.Get(ctx, namespace)
 	if err != nil {
 		return Data{}, err
 	}
-	data.WarningEvents = s.warningEvents(kind, name, pods, all)
+	data.WarningEvents = s.warningEvents(kind, name, namespace, pods, all)
 	return data, nil
 }
 
@@ -131,15 +131,26 @@ func phaseOr(phase string) string {
 }
 
 // usageKey identifies a container's metrics entry.
-type usageKey struct{ pod, container string }
+//
+// Namespace-qualified because a cluster-wide sweep sees every namespace at
+// once, and pod names are only unique within one. Two pods called web-abc in
+// different namespaces would otherwise share a key, and whichever the metrics
+// list returned last would supply usage figures for both — wrong numbers
+// driving real findings.
+type usageKey struct{ namespace, pod, container string }
 
 type usageValue struct{ cpu, memory *resource.Quantity }
 
-// usageLookup fetches container metrics for a namespace in one call.
+// usageLookup fetches container metrics for a namespace in one call, or for
+// every namespace when the namespace is empty.
 //
 // Failure is swallowed — metrics-server not being installed is the same
 // condition kx top surfaces directly, and it must not take the rest of kx diag
-// down with it. Usage-based findings simply don't appear.
+// down with it. Usage-based findings simply don't appear. That silence is why
+// the all-namespaces path is spelled out rather than left to string
+// concatenation: an empty namespace built ".../namespaces//pods", which the
+// API server rejects, and every usage finding vanished cluster-wide without a
+// word.
 func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey]usageValue {
 	lookup := map[usageKey]usageValue{}
 
@@ -152,9 +163,11 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 		return lookup
 	}
 
-	raw, err := client.Get().
-		AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + namespace + "/pods").
-		DoRaw(ctx)
+	path := "/apis/metrics.k8s.io/v1beta1/pods"
+	if namespace != "" {
+		path = "/apis/metrics.k8s.io/v1beta1/namespaces/" + namespace + "/pods"
+	}
+	raw, err := client.Get().AbsPath(path).DoRaw(ctx)
 	if err != nil {
 		return lookup
 	}
@@ -162,7 +175,8 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 	var metrics struct {
 		Items []struct {
 			Metadata struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 			Containers []struct {
 				Name  string `json:"name"`
@@ -186,17 +200,17 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 			if memory, err := resource.ParseQuantity(container.Usage.Memory); err == nil {
 				value.memory = &memory
 			}
-			lookup[usageKey{item.Metadata.Name, container.Name}] = value
+			lookup[usageKey{item.Metadata.Namespace, item.Metadata.Name, container.Name}] = value
 		}
 	}
 	return lookup
 }
 
-func attachUsage(pods []PodDiagnostic, lookup map[usageKey]usageValue) {
+func attachUsage(pods []PodDiagnostic, namespace string, lookup map[usageKey]usageValue) {
 	for i := range pods {
 		for j := range pods[i].Containers {
 			container := &pods[i].Containers[j]
-			if usage, ok := lookup[usageKey{pods[i].Name, container.Name}]; ok {
+			if usage, ok := lookup[usageKey{namespace, pods[i].Name, container.Name}]; ok {
 				container.CPUUsage = usage.cpu
 				container.MemoryUsage = usage.memory
 			}
@@ -257,18 +271,27 @@ func (s Service) fetchLogTail(
 
 // warningEvents groups a resource's warning events, and those of its pods, by
 // reason and involved object.
+//
+// Targets are namespace-qualified because Filter matches on name and kind
+// alone, which identify an object only within a namespace. A cluster-wide sweep
+// hands this every namespace's events at once, so an unscoped match would give
+// a healthy resource its namesake's warnings — and warnings drive findings, so
+// the row would surface as someone else's failure. An empty namespace matches
+// anywhere, for a caller that doesn't know the scope it is asking about.
 func (s Service) warningEvents(
-	kind kinds.Kind, name string, pods []corev1.Pod, all []corev1.Event,
+	kind kinds.Kind, name, namespace string, pods []corev1.Pod, all []corev1.Event,
 ) []EventSummary {
 	// Deduplicated: for a bare Pod the workload target equals its pod target.
 	type target struct {
-		name string
-		kind kinds.Kind
+		name      string
+		kind      kinds.Kind
+		namespace string
 	}
-	targets := []target{{name, kind}}
-	seen := map[target]bool{{name, kind}: true}
+	first := target{name, kind, namespace}
+	targets := []target{first}
+	seen := map[target]bool{first: true}
 	for i := range pods {
-		key := target{pods[i].Name, kinds.Pod}
+		key := target{pods[i].Name, kinds.Pod, pods[i].Namespace}
 		if !seen[key] {
 			seen[key] = true
 			targets = append(targets, key)
@@ -284,6 +307,9 @@ func (s Service) warningEvents(
 	for _, t := range targets {
 		for _, event := range s.Events.Filter(all, t.name, t.kind) {
 			if event.Type != "Warning" {
+				continue
+			}
+			if t.namespace != "" && eventNamespace(event) != t.namespace {
 				continue
 			}
 			key := groupKey{event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name}
@@ -314,4 +340,17 @@ func (s Service) warningEvents(
 		summaries = append(summaries, *groups[key])
 	}
 	return summaries
+}
+
+// eventNamespace is the namespace an event belongs to.
+//
+// The involved object's reference is authoritative when set, but the API
+// routinely leaves that field empty; the event's own metadata carries the
+// namespace either way, since an event lives in the namespace of what it
+// describes.
+func eventNamespace(event corev1.Event) string {
+	if event.InvolvedObject.Namespace != "" {
+		return event.InvolvedObject.Namespace
+	}
+	return event.Namespace
 }
