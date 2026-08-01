@@ -28,6 +28,12 @@ type Options struct {
 // The page is a single small document, so this is generous.
 const shutdownGrace = 2 * time.Second
 
+// readHeaderTimeout bounds how long a client gets to finish sending request
+// headers. Good practice for any server accepting connections regardless, and
+// it also keeps a slow-header client distinct from the no-request, browser-
+// preconnect connections shutdownGrace has to tolerate below.
+const readHeaderTimeout = 5 * time.Second
+
 // Serve hands out one already-rendered page until ctx is cancelled.
 //
 // It binds 127.0.0.1 and nothing else: the page carries pod logs, event
@@ -42,8 +48,12 @@ func Serve(ctx context.Context, page []byte, opts Options) error {
 		return err
 	}
 
-	url := "http://" + listener.Addr().String()
-	server := &http.Server{Handler: pageHandler(page)}
+	addr := listener.Addr().String()
+	url := "http://" + addr
+	server := &http.Server{
+		Handler:           pageHandler(page, addr),
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
 
 	failed := make(chan error, 1)
 	go func() {
@@ -73,13 +83,41 @@ func Serve(ctx context.Context, page []byte, opts Options) error {
 
 	stop, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	return server.Shutdown(stop)
+	if err := server.Shutdown(stop); err != nil {
+		// A connection the browser opened and never used — a preconnect, say —
+		// cannot be drained inside the grace window: net/http does not treat a
+		// brand-new connection as idle until it has sat unused for 5s, well
+		// past shutdownGrace. Forcing it closed is the right end for an
+		// ordinary Ctrl-C, not an error to report — stopping a server you
+		// asked to stop is not a failure.
+		if errors.Is(err, context.DeadlineExceeded) {
+			return server.Close()
+		}
+		return err
+	}
+	return nil
 }
 
 // pageHandler answers every path with the same document. There is one page, so
 // there is nothing to route.
-func pageHandler(page []byte) http.Handler {
+//
+// The Host header is checked because binding loopback is not by itself
+// enough: a hostname an attacker controls can resolve to 127.0.0.1, and
+// requests to it are same-origin, so a page carrying pod logs and CVE
+// inventories would be readable cross-site. Only the address we actually
+// bound is accepted.
+func pageHandler(page []byte, addr string) http.Handler {
+	_, port, _ := net.SplitHostPort(addr)
+	allowed := map[string]bool{
+		"127.0.0.1:" + port: true,
+		"localhost:" + port: true,
+		"[::1]:" + port:     true,
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowed[r.Host] {
+			http.Error(w, "unexpected Host", http.StatusForbidden)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		// Nothing is cached: a reload should re-fetch, not resurrect a page
 		// from a previous run on the same ephemeral port.
