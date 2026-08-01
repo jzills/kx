@@ -20,9 +20,9 @@ type getOptions struct {
 }
 
 // allNamespacesNote explains why an -A listing has no indexes, since the
-// absence is otherwise indistinguishable from a bug.
-const allNamespacesNote = "indexes not saved for all-namespace listings — " +
-	"scope to a namespace (-n or kx ns) to select"
+// absence is otherwise indistinguishable from a bug. It lives in render so the
+// triage sweep can print the same sentence for the same reason.
+const allNamespacesNote = render.AllNamespacesNote
 
 // runGet is the shared body of `get` and `secret`.
 //

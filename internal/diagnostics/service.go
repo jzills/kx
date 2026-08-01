@@ -46,7 +46,7 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 	for i := range pods {
 		data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
 	}
-	attachUsage(data.Pods, s.usageLookup(ctx, namespace))
+	attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
 	s.attachLogs(ctx, data.Pods, namespace)
 
 	all, err := s.Events.Get(ctx, namespace)
@@ -131,15 +131,26 @@ func phaseOr(phase string) string {
 }
 
 // usageKey identifies a container's metrics entry.
-type usageKey struct{ pod, container string }
+//
+// Namespace-qualified because a cluster-wide sweep sees every namespace at
+// once, and pod names are only unique within one. Two pods called web-abc in
+// different namespaces would otherwise share a key, and whichever the metrics
+// list returned last would supply usage figures for both — wrong numbers
+// driving real findings.
+type usageKey struct{ namespace, pod, container string }
 
 type usageValue struct{ cpu, memory *resource.Quantity }
 
-// usageLookup fetches container metrics for a namespace in one call.
+// usageLookup fetches container metrics for a namespace in one call, or for
+// every namespace when the namespace is empty.
 //
 // Failure is swallowed — metrics-server not being installed is the same
 // condition kx top surfaces directly, and it must not take the rest of kx diag
-// down with it. Usage-based findings simply don't appear.
+// down with it. Usage-based findings simply don't appear. That silence is why
+// the all-namespaces path is spelled out rather than left to string
+// concatenation: an empty namespace built ".../namespaces//pods", which the
+// API server rejects, and every usage finding vanished cluster-wide without a
+// word.
 func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey]usageValue {
 	lookup := map[usageKey]usageValue{}
 
@@ -152,9 +163,11 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 		return lookup
 	}
 
-	raw, err := client.Get().
-		AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/" + namespace + "/pods").
-		DoRaw(ctx)
+	path := "/apis/metrics.k8s.io/v1beta1/pods"
+	if namespace != "" {
+		path = "/apis/metrics.k8s.io/v1beta1/namespaces/" + namespace + "/pods"
+	}
+	raw, err := client.Get().AbsPath(path).DoRaw(ctx)
 	if err != nil {
 		return lookup
 	}
@@ -162,7 +175,8 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 	var metrics struct {
 		Items []struct {
 			Metadata struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 			Containers []struct {
 				Name  string `json:"name"`
@@ -186,17 +200,17 @@ func (s Service) usageLookup(ctx context.Context, namespace string) map[usageKey
 			if memory, err := resource.ParseQuantity(container.Usage.Memory); err == nil {
 				value.memory = &memory
 			}
-			lookup[usageKey{item.Metadata.Name, container.Name}] = value
+			lookup[usageKey{item.Metadata.Namespace, item.Metadata.Name, container.Name}] = value
 		}
 	}
 	return lookup
 }
 
-func attachUsage(pods []PodDiagnostic, lookup map[usageKey]usageValue) {
+func attachUsage(pods []PodDiagnostic, namespace string, lookup map[usageKey]usageValue) {
 	for i := range pods {
 		for j := range pods[i].Containers {
 			container := &pods[i].Containers[j]
-			if usage, ok := lookup[usageKey{pods[i].Name, container.Name}]; ok {
+			if usage, ok := lookup[usageKey{namespace, pods[i].Name, container.Name}]; ok {
 				container.CPUUsage = usage.cpu
 				container.MemoryUsage = usage.memory
 			}

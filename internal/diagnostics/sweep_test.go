@@ -51,6 +51,43 @@ func mustSweep(t *testing.T, s Service) map[string]Data {
 	return swept(t, results)
 }
 
+// An empty namespace sweeps the whole cluster. Each row then has to carry the
+// namespace it actually came from: labelling them all from the argument would
+// stamp every row with the empty string, and the caller can no longer tell one
+// web-abc from another.
+func TestSweepAcrossAllNamespacesLabelsEachRow(t *testing.T) {
+	cluster := service(
+		&appsv1.Deployment{ObjectMeta: meta("web", "d1")},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "api", Namespace: "staging", UID: "d2",
+		}},
+	)
+
+	results, err := cluster.Sweep(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	indexed := swept(t, results)
+	if len(indexed) != 2 {
+		t.Fatalf("cluster-wide sweep found %s, want both deployments", keys(indexed))
+	}
+	if got := indexed["Deployment/web"].Namespace; got != ns {
+		t.Errorf("web namespace = %q, want %q", got, ns)
+	}
+	if got := indexed["Deployment/api"].Namespace; got != "staging" {
+		t.Errorf("api namespace = %q, want staging", got)
+	}
+
+	// A scoped sweep still sees only its own namespace.
+	scoped, err := cluster.Sweep(context.Background(), "staging")
+	if err != nil {
+		t.Fatalf("Sweep(staging): %v", err)
+	}
+	if only := swept(t, scoped); len(only) != 1 || only["Deployment/api"].Namespace != "staging" {
+		t.Errorf("scoped sweep = %s, want only Deployment/api", keys(only))
+	}
+}
+
 // A Deployment claims its pods through the ReplicaSets it owns, so they must
 // not also surface as unowned pods.
 func TestSweepDeploymentClaimsItsPods(t *testing.T) {

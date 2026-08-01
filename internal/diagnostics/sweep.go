@@ -13,7 +13,12 @@ import (
 )
 
 // Sweep diagnoses every workload in a namespace, plus orphan pods — pods not
-// owned by anything swept, such as bare pods.
+// owned by anything swept, such as bare pods. An empty namespace sweeps every
+// namespace, which is how client-go's listers already spell it.
+//
+// Each result takes its namespace from the object rather than from the
+// argument, so a cluster-wide sweep labels its rows correctly instead of
+// stamping them all with the empty string it was called with.
 //
 // One list call per kind and one events fetch. No log tails: logs feed the
 // detailed LOGS section only, never findings, so the sweep skips them entirely
@@ -82,21 +87,22 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		}
 
 		data := Data{
-			Kind: kinds.CronJob, Name: cronJob.Name, Namespace: namespace,
+			Kind: kinds.CronJob, Name: cronJob.Name, Namespace: cronJob.Namespace,
 			CronJob: health,
 			Pods:    diagnoseAll(recentPods),
 		}
-		attachUsage(data.Pods, usage)
+		attachUsage(data.Pods, data.Namespace, usage)
 		data.WarningEvents = s.warningEvents(kinds.CronJob, cronJob.Name, recentPods, allEvents)
 		results = append(results, data)
 	}
 
 	// Workload controllers, each claiming the pods it owns.
 	type workload struct {
-		kind   kinds.Kind
-		name   string
-		object any
-		owners map[types.UID]bool
+		kind      kinds.Kind
+		name      string
+		namespace string
+		object    any
+		owners    map[types.UID]bool
 	}
 	var workloads []workload
 
@@ -112,7 +118,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 				owners[replicaSets.Items[j].UID] = true
 			}
 		}
-		workloads = append(workloads, workload{kinds.Deployment, deployment.Name, deployment, owners})
+		workloads = append(workloads, workload{kinds.Deployment, deployment.Name, deployment.Namespace, deployment, owners})
 	}
 
 	statefulSets, err := s.Client.AppsV1().StatefulSets(namespace).List(ctx, list)
@@ -122,7 +128,8 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	for i := range statefulSets.Items {
 		object := &statefulSets.Items[i]
 		workloads = append(workloads, workload{
-			kinds.StatefulSet, object.Name, object, map[types.UID]bool{object.UID: true}})
+			kinds.StatefulSet, object.Name, object.Namespace, object,
+			map[types.UID]bool{object.UID: true}})
 	}
 
 	daemonSets, err := s.Client.AppsV1().DaemonSets(namespace).List(ctx, list)
@@ -132,7 +139,8 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	for i := range daemonSets.Items {
 		object := &daemonSets.Items[i]
 		workloads = append(workloads, workload{
-			kinds.DaemonSet, object.Name, object, map[types.UID]bool{object.UID: true}})
+			kinds.DaemonSet, object.Name, object.Namespace, object,
+			map[types.UID]bool{object.UID: true}})
 	}
 
 	for i := range jobs.Items {
@@ -141,7 +149,8 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			continue
 		}
 		workloads = append(workloads, workload{
-			kinds.Job, job.Name, job, map[types.UID]bool{job.UID: true}})
+			kinds.Job, job.Name, job.Namespace, job,
+			map[types.UID]bool{job.UID: true}})
 	}
 
 	for _, entry := range workloads {
@@ -150,14 +159,14 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			claimedPods[owned[i].UID] = true
 		}
 		data := Data{
-			Kind: entry.kind, Name: entry.name, Namespace: namespace,
+			Kind: entry.kind, Name: entry.name, Namespace: entry.namespace,
 			Pods: diagnoseAll(owned),
 		}
 		data.Replicas = replicaHealthFrom(entry.kind, entry.object)
 		if entry.kind == kinds.Job {
 			data.Job = jobHealthFrom(entry.object.(*batchv1.Job))
 		}
-		attachUsage(data.Pods, usage)
+		attachUsage(data.Pods, data.Namespace, usage)
 		data.WarningEvents = s.warningEvents(entry.kind, entry.name, owned, allEvents)
 		results = append(results, data)
 	}
@@ -189,11 +198,11 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			}
 		}
 		data := Data{
-			Kind: kinds.Service, Name: service.Name, Namespace: namespace,
+			Kind: kinds.Service, Name: service.Name, Namespace: service.Namespace,
 			Service: serviceHealthFrom(service, endpointsByName[service.Name]),
 			Pods:    diagnoseAll(matched),
 		}
-		attachUsage(data.Pods, usage)
+		attachUsage(data.Pods, data.Namespace, usage)
 		data.WarningEvents = s.warningEvents(kinds.Service, service.Name, matched, allEvents)
 		results = append(results, data)
 	}
@@ -206,7 +215,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	for i := range claims.Items {
 		claim := &claims.Items[i]
 		results = append(results, Data{
-			Kind: kinds.PersistentVolumeClaim, Name: claim.Name, Namespace: namespace,
+			Kind: kinds.PersistentVolumeClaim, Name: claim.Name, Namespace: claim.Namespace,
 			PVC:           &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))},
 			WarningEvents: s.warningEvents(kinds.PersistentVolumeClaim, claim.Name, nil, allEvents),
 		})
@@ -220,10 +229,10 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		}
 		single := []corev1.Pod{*pod}
 		data := Data{
-			Kind: kinds.Pod, Name: pod.Name, Namespace: namespace,
+			Kind: kinds.Pod, Name: pod.Name, Namespace: pod.Namespace,
 			Pods: diagnoseAll(single),
 		}
-		attachUsage(data.Pods, usage)
+		attachUsage(data.Pods, data.Namespace, usage)
 		data.WarningEvents = s.warningEvents(kinds.Pod, pod.Name, single, allEvents)
 		results = append(results, data)
 	}
