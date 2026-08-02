@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,11 +24,125 @@ const sarif = `{
   }]
 }`
 
-func TestParseCounts(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(sarif)
+// realSarif is trimmed from `docker scout cves --format sarif nginx:1.21`
+// (Scout 1.22.0, which emits 408 rules and 410 results), keeping one rule per
+// case that matters: a rule with one package, a rule covering two packages
+// whose results disagree about being fixed, and a Go module purl.
+func realSarif(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "scout.sarif.json"))
 	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
+		t.Fatalf("reading fixture returned %v", err)
 	}
+	return string(raw)
+}
+
+func TestParseFindingsReadsEveryResult(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	// One finding per result, including the one whose rule index is bogus.
+	if len(findings) != 5 {
+		t.Fatalf("got %d findings, want 5", len(findings))
+	}
+
+	first := findings[0]
+	if first.ID != "CVE-2021-22945" {
+		t.Errorf("ID = %q", first.ID)
+	}
+	if first.Severity != "CRITICAL" {
+		t.Errorf("Severity = %q", first.Severity)
+	}
+	if first.Package != "curl" {
+		t.Errorf("Package = %q, want curl", first.Package)
+	}
+	// The purl version is percent-encoded; %2B is a plus.
+	if first.Installed != "7.74.0-1.3+deb11u1" {
+		t.Errorf("Installed = %q", first.Installed)
+	}
+	if first.FixedIn != "7.74.0-1.3+deb11u2" {
+		t.Errorf("FixedIn = %q", first.FixedIn)
+	}
+	if first.URL != "https://scout.docker.com/v/CVE-2021-22945" {
+		t.Errorf("URL = %q", first.URL)
+	}
+}
+
+// A rule covering two packages emits two results whose fixed versions differ.
+// Reading the fix from the rule would claim a fix for a package that has none.
+func TestParseFindingsTakesFixedVersionPerResult(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var nghttp2, nginx Finding
+	for _, f := range findings {
+		switch f.Package {
+		case "nghttp2":
+			nghttp2 = f
+		case "nginx":
+			nginx = f
+		}
+	}
+	if nghttp2.FixedIn != "1.43.0-1+deb11u1" {
+		t.Errorf("nghttp2 FixedIn = %q", nghttp2.FixedIn)
+	}
+	// "not fixed" is prose, not a version. It must not reach the page as one.
+	if nginx.FixedIn != "" {
+		t.Errorf("nginx FixedIn = %q, want empty for an unfixed package", nginx.FixedIn)
+	}
+}
+
+// A Go module keeps its path; collapsing it to the last segment would turn
+// golang.org/x/crypto into "crypto".
+func TestParseFindingsKeepsModulePaths(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "golang.org/x/crypto" {
+			found = true
+			if f.Installed != "v0.28.0" {
+				t.Errorf("Installed = %q", f.Installed)
+			}
+		}
+	}
+	if !found {
+		t.Error("the Go module's full path was not preserved")
+	}
+}
+
+// The counts the terminal table prints must not change.
+func TestCountBySeverityMatchesTheOldTally(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	counts := CountBySeverity(findings)
+	want := map[string]int{
+		"CRITICAL": 1, "HIGH": 1, "MEDIUM": 0, "LOW": 2, "UNSPECIFIED": 1,
+	}
+	for severity, expected := range want {
+		if counts[severity] != expected {
+			t.Errorf("%s = %d, want %d", severity, counts[severity], expected)
+		}
+	}
+}
+
+func mustParseFindings(t *testing.T, document string) []Finding {
+	t.Helper()
+	findings, err := Scout{}.ParseFindings(document)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	return findings
+}
+
+func TestParseCounts(t *testing.T) {
+	counts := CountBySeverity(mustParseFindings(t, sarif))
 	want := map[string]int{"CRITICAL": 2, "HIGH": 1, "MEDIUM": 1, "LOW": 0, "UNSPECIFIED": 1}
 	for severity, expected := range want {
 		if counts[severity] != expected {
@@ -37,10 +153,7 @@ func TestParseCounts(t *testing.T) {
 
 // Every bucket is present even at zero, so the table always has a full row.
 func TestParseCountsAlwaysHasEveryBucket(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(`{"runs":[]}`)
-	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
-	}
+	counts := CountBySeverity(mustParseFindings(t, `{"runs":[]}`))
 	for _, severity := range Severities {
 		if _, ok := counts[severity]; !ok {
 			t.Errorf("bucket %q is missing", severity)
@@ -57,10 +170,7 @@ func TestParseCountsHandlesBadRuleIndexes(t *testing.T) {
 		`{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleIndex":-1}]}]}`,
 	}
 	for _, document := range cases {
-		counts, err := Scout{}.ParseCounts(document)
-		if err != nil {
-			t.Fatalf("ParseCounts: %v", err)
-		}
+		counts := CountBySeverity(mustParseFindings(t, document))
 		if counts["UNSPECIFIED"] != 1 {
 			t.Errorf("UNSPECIFIED = %d, want 1 for %s", counts["UNSPECIFIED"], document)
 		}
@@ -70,12 +180,9 @@ func TestParseCountsHandlesBadRuleIndexes(t *testing.T) {
 // An unrecognized severity label falls into UNSPECIFIED rather than creating a
 // bucket the table has no column for.
 func TestParseCountsUnknownSeverity(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(
-		`{"runs":[{"tool":{"driver":{"rules":[{"properties":{"cvssV3_severity":"SEVERE"}}]}},` +
-			`"results":[{"ruleIndex":0}]}]}`)
-	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
-	}
+	counts := CountBySeverity(mustParseFindings(t,
+		`{"runs":[{"tool":{"driver":{"rules":[{"properties":{"cvssV3_severity":"SEVERE"}}]}},`+
+			`"results":[{"ruleIndex":0}]}]}`))
 	if counts["UNSPECIFIED"] != 1 {
 		t.Errorf("UNSPECIFIED = %d, want 1", counts["UNSPECIFIED"])
 	}
@@ -85,8 +192,8 @@ func TestParseCountsUnknownSeverity(t *testing.T) {
 }
 
 func TestParseCountsRejectsGarbage(t *testing.T) {
-	if _, err := (Scout{}).ParseCounts("not json"); err == nil {
-		t.Error("ParseCounts accepted non-JSON")
+	if _, err := (Scout{}).ParseFindings("not json"); err == nil {
+		t.Error("ParseFindings accepted non-JSON")
 	}
 }
 

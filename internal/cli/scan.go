@@ -180,12 +180,16 @@ func (c ScanCommand) Summarize(engineName string, images []string) ([]scanner.Im
 			rows = append(rows, scanner.ImageScan{Image: image, Error: lastLine(stderr)})
 			continue
 		}
-		counts, err := engine.ParseCounts(stdout)
+		findings, err := engine.ParseFindings(stdout)
 		if err != nil {
 			rows = append(rows, scanner.ImageScan{Image: image, Error: "unparseable output"})
 			continue
 		}
-		rows = append(rows, scanner.ImageScan{Image: image, Counts: counts})
+		rows = append(rows, scanner.ImageScan{
+			Image:    image,
+			Counts:   scanner.CountBySeverity(findings),
+			Findings: findings,
+		})
 	}
 	return rows, nil
 }

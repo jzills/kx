@@ -1,0 +1,81 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "docker scout",
+          "rules": [
+            {
+              "id": "CVE-2021-22945",
+              "helpUri": "https://scout.docker.com/v/CVE-2021-22945",
+              "properties": {
+                "affected_version": "<7.74.0-1.3+deb11u2",
+                "cvssV3_severity": "CRITICAL",
+                "fixed_version": "7.74.0-1.3+deb11u2",
+                "purls": ["pkg:deb/debian/curl@7.74.0-1.3%2Bdeb11u1?os_distro=bullseye"]
+              }
+            },
+            {
+              "id": "CVE-2023-44487",
+              "helpUri": "https://scout.docker.com/v/CVE-2023-44487",
+              "properties": {
+                "affected_version": "<1.43.0-1+deb11u1",
+                "cvssV3_severity": "LOW",
+                "fixed_version": "1.43.0-1+deb11u1",
+                "purls": [
+                  "pkg:deb/debian/nghttp2@1.43.0-1?os_distro=bullseye",
+                  "pkg:deb/debian/nginx@1.21.6-1~bullseye?os_distro=bullseye"
+                ]
+              }
+            },
+            {
+              "id": "CVE-2024-45337",
+              "helpUri": "https://scout.docker.com/v/CVE-2024-45337",
+              "properties": {
+                "cvssV3_severity": "HIGH",
+                "fixed_version": "0.31.0",
+                "purls": ["pkg:golang/golang.org/x/crypto@v0.28.0"]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2021-22945",
+          "ruleIndex": 0,
+          "message": {
+            "text": "Vulnerability    :CVE-2021-22945\nSeverity         :CRITICAL\nPackage          :pkg:deb/debian/curl@7.74.0-1.3%2Bdeb11u1?os_distro=bullseye\nAffected range   :<7.74.0-1.3+deb11u2\nFixed version    :7.74.0-1.3+deb11u2\n"
+          }
+        },
+        {
+          "ruleId": "CVE-2023-44487",
+          "ruleIndex": 1,
+          "message": {
+            "text": "Vulnerability    :CVE-2023-44487\nSeverity         :LOW\nPackage          :pkg:deb/debian/nghttp2@1.43.0-1?os_distro=bullseye\nAffected range   :<1.43.0-1+deb11u1\nFixed version    :1.43.0-1+deb11u1\n"
+          }
+        },
+        {
+          "ruleId": "CVE-2023-44487",
+          "ruleIndex": 1,
+          "message": {
+            "text": "Vulnerability    :CVE-2023-44487\nSeverity         :LOW\nPackage          :pkg:deb/debian/nginx@1.21.6-1~bullseye?os_distro=bullseye\nAffected range   :>0\nFixed version    :not fixed\n"
+          }
+        },
+        {
+          "ruleId": "CVE-2024-45337",
+          "ruleIndex": 2,
+          "message": {
+            "text": "Vulnerability    :CVE-2024-45337\nSeverity         :HIGH\nPackage          :pkg:golang/golang.org/x/crypto@v0.28.0\nAffected range   :<0.31.0\nFixed version    :0.31.0\n"
+          }
+        },
+        {
+          "ruleId": "CVE-9999-0000",
+          "ruleIndex": 99,
+          "message": { "text": "Vulnerability    :CVE-9999-0000\n" }
+        }
+      ]
+    }
+  ]
+}
