@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/web"
 )
 
 func decode(t *testing.T, document string) map[string]json.RawMessage {
@@ -307,5 +308,81 @@ func TestScanRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be combined") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// scanPage is the only place a ScanPage's fields are set, so a direct test
+// pins each one to its source without needing a live cluster or a served
+// page — swapping Scope for something else, or dropping a row, fails this
+// directly rather than only showing up once a page is rendered.
+func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
+	rows := []scanner.ImageScan{
+		{Image: "api:v1", Counts: map[string]int{"critical": 1}},
+	}
+	page := scanPage("prod", rows, web.Meta{Title: "t"})
+
+	if page.Scope != "prod" {
+		t.Errorf("Scope = %q, want prod", page.Scope)
+	}
+	if len(page.Images) != 1 || page.Images[0].Image != "api:v1" {
+		t.Errorf("Images = %+v, want the one api:v1 row", page.Images)
+	}
+	if page.Meta.Title != "t" {
+		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
+	}
+}
+
+func TestScanRegistersHTMLFlags(t *testing.T) {
+	cmd := newScanCommand(Services{})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// --port is hand-parsed like every other scan flag, so a bad value has to
+// fail the same deliberate way a bad index does rather than crash on Atoi's
+// error or silently fall back to 0 (which would mean "pick a free port").
+func TestScanRejectsANonIntegerPort(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"--port", "abc"})
+	if err == nil {
+		t.Fatal("a non-integer --port was accepted")
+	}
+	if !strings.Contains(err.Error(), "'--port'") || !strings.Contains(err.Error(), "'abc' is not a valid int") {
+		t.Errorf("err = %v, want it to name the bad --port value", err)
+	}
+}
+
+// --full streams Scout's own output to the terminal; serving a page instead is
+// incoherent, so the combination is rejected rather than silently picking one.
+func TestScanRejectsFullWithHTML(t *testing.T) {
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "--full", "--html"})
+	if err == nil {
+		t.Fatal("--full with --html was accepted")
+	}
+	if !strings.Contains(err.Error(), "--full") || !strings.Contains(err.Error(), "--html") {
+		t.Errorf("error %q names neither flag", err)
+	}
+}
+
+// The kx flags must be consumed so they never reach the scanner.
+func TestScanDoesNotForwardHTMLFlagsToTheScanner(t *testing.T) {
+	rest := []string{"1", "--html", "--port", "9000", "--no-open", "--only-fixed"}
+	html, rest := extractBool(rest, "--html")
+	port, rest, err := extractString(rest, "--port", "")
+	if err != nil {
+		t.Fatalf("extractString returned %v", err)
+	}
+	noOpen, rest := extractBool(rest, "--no-open")
+
+	if !html || !noOpen || port != "9000" {
+		t.Fatalf("html=%v port=%q noOpen=%v", html, port, noOpen)
+	}
+	if len(rest) != 2 || rest[0] != "1" || rest[1] != "--only-fixed" {
+		t.Errorf("rest = %v, want the index and the scanner's own flag", rest)
 	}
 }

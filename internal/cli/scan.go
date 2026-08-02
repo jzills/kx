@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -286,6 +287,12 @@ func imagesNoun(count int) string {
 	return strconv.Itoa(count) + " images"
 }
 
+// scanPage builds the HTML page from the same rows the terminal summary
+// renders, so the two views cannot drift apart.
+func scanPage(scope string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
+	return web.ScanPage{Meta: meta, Scope: scope, Images: rows}
+}
+
 func newScanCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "scan [index] [scanner flags]",
@@ -312,6 +319,25 @@ func newScanCommand(services Services) *cobra.Command {
 				engine = "scout"
 			}
 			full, rest := extractBool(rest, "--full")
+			html, rest := extractBool(rest, "--html")
+			noOpen, rest := extractBool(rest, "--no-open")
+			portText, rest, err := extractString(rest, "--port", "")
+			if err != nil {
+				return err
+			}
+			port := 0
+			if portText != "" {
+				if port, err = strconv.Atoi(portText); err != nil {
+					return fmt.Errorf(
+						"Invalid value for '--port': '%s' is not a valid int.", portText)
+				}
+			}
+			if full && html {
+				return errors.New(
+					"'--full' cannot be combined with '--html' — the HTML report " +
+						"already carries every finding.")
+			}
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
 			// Presence is checked before extractString consumes the flag:
 			// `-n ""` is a namespace flag the guards below still have to see,
@@ -360,6 +386,10 @@ func newScanCommand(services Services) *cobra.Command {
 						"carries the namespace it was listed from. Drop the flag, "+
 						"or drop the index to sweep the namespace instead.", scopeFlag)
 			}
+			// pageScope captions the HTML page. Captured in each branch
+			// because an indexed scan is scoped by the workload it resolved
+			// rather than by the namespace being swept.
+			var pageScope string
 			var images []string
 			if len(indexArgs) == 0 {
 				scope := scanScope{Namespace: namespace, All: all}
@@ -371,6 +401,7 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+				pageScope = scope.label()
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {
@@ -385,6 +416,7 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 			}
 
 			if full {
@@ -407,7 +439,23 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			render.ScanSummary(rows)
-			return nil
+			if !htmlOpts.Enabled {
+				return nil
+			}
+			indexArg := ""
+			if len(indexArgs) > 0 {
+				indexArg = indexArgs[0]
+			}
+			meta, err := pageMeta(services.Config.Theme, "kx scan · "+pageScope,
+				invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
+			if err != nil {
+				return err
+			}
+			page, err := web.RenderScan(scanPage(pageScope, rows, meta))
+			if err != nil {
+				return err
+			}
+			return servePage(cmd.Context(), page, htmlOpts)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
@@ -419,5 +467,11 @@ func newScanCommand(services Services) *cobra.Command {
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace")
+	cmd.Flags().Bool("html", false,
+		"Render the report as HTML and serve it in a browser")
+	cmd.Flags().Int("port", 0,
+		"Port to serve the HTML report on; 0 picks a free one")
+	cmd.Flags().Bool("no-open", false,
+		"Serve the HTML report without opening a browser")
 	return cmd
 }
