@@ -113,7 +113,9 @@
   {{template "report" $r}}
 {{else}}
   <div class="block">
-    {{if .Reports}}
+    {{if eq .Checked 0}}
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+    {{else if .Reports}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
       <div class="table-wrap">
         <div class="sweep-head{{if .AllNamespaces}} ns-grid{{end}}">

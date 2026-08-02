@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
 )
 
@@ -417,5 +418,214 @@ func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 	}
 	if !strings.Contains(html, "&lt;script&gt;") {
 		t.Error("script tag was not escaped")
+	}
+}
+
+// A sweep that examined nothing must not claim health it never checked.
+// render.Triage (internal/render/triage.go) branches on Checked == 0 before
+// it ever looks at Reports, printing "Mixed · <ns> · 0 checked" with no
+// health claim. Before this fix, diag.gohtml's body branched on {{if
+// .Reports}} only, so a zero-Checked sweep fell into the "reports empty"
+// branch alongside a genuinely all-healthy one and rendered "0 checked · all
+// healthy" — a health verdict on zero examined resources.
+func TestRenderDiagSweepZeroCheckedMakesNoHealthClaim(t *testing.T) {
+	page := sweepPage(t)
+	page.Reports = nil
+	page.Checked = 0
+	page.Healthy = 0
+
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+	if strings.Contains(html, "all healthy") {
+		t.Error("a sweep that checked nothing claimed everything was healthy")
+	}
+	if !strings.Contains(html, "0 checked") {
+		t.Error("a zero-checked sweep did not report its count")
+	}
+}
+
+// mediaQueryBlock returns the declaration text inside the first rule whose
+// prelude contains query, matched by counting braces rather than by a
+// regexp, so nested rules inside the block (there are two) don't end the
+// scan early. Scoping to the block matters: ".ns-grid" and ".scan-grid"
+// already appear elsewhere in the stylesheet's desktop rules, so a check
+// against the whole file would pass whether or not the mobile rule actually
+// mentions them.
+func mediaQueryBlock(t *testing.T, css, query string) string {
+	t.Helper()
+	start := strings.Index(css, query)
+	if start < 0 {
+		t.Fatalf("stylesheet does not contain %q", query)
+	}
+	relOpen := strings.IndexByte(css[start:], '{')
+	if relOpen < 0 {
+		t.Fatalf("no opening brace found after %q", query)
+	}
+	open := start + relOpen
+
+	depth := 0
+	for i := open; i < len(css); i++ {
+		switch css[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return css[open+1 : i]
+			}
+		}
+	}
+	t.Fatalf("no matching closing brace found for the %q block", query)
+	return ""
+}
+
+// Carried defect: .row.ns-grid > summary and .row > summary.scan-grid are
+// compound selectors (two classes plus a type), giving them higher
+// specificity than the plain ".row > summary, .sweep-head" rule inside
+// @media (max-width: 720px) — and @media contributes no specificity of its
+// own. Unless the mobile rule repeats both modifiers at the same
+// specificity, the desktop grid wins the cascade under 720px and neither
+// the -A sweep nor the scan page collapses to the narrow layout.
+//
+// This checks the necessary condition — that the selector list inside the
+// media query actually names both modifiers — which is what a fix of this
+// kind changes. It cannot check the sufficient one, that the mobile rule
+// then wins the cascade in an actual browser at an actual viewport width:
+// that is a rendering question no Go string comparison can answer, and
+// nothing in this package parses or computes CSS specificity outside this
+// test. Reasoning about the specificity arithmetic (above, and in the CSS
+// comments beside both rules) is what stands in for that.
+func TestMobileCollapseSelectorListCoversGridModifiers(t *testing.T) {
+	block := mediaQueryBlock(t, stylesheet, "@media (max-width: 720px)")
+	for _, modifier := range []string{".ns-grid", ".scan-grid"} {
+		if !strings.Contains(block, modifier) {
+			t.Errorf("the mobile collapse rule does not mention %s, so it loses "+
+				"the specificity contest against the desktop rule and never "+
+				"collapses under 720px", modifier)
+		}
+	}
+}
+
+func scanPage(t *testing.T) ScanPage {
+	t.Helper()
+	return ScanPage{
+		Meta: testMeta(t), Scope: "diagnostics",
+		Images: []scanner.ImageScan{
+			{
+				Image:  "ghcr.io/jzills/api-gateway:1.8.3",
+				Counts: map[string]int{"CRITICAL": 1, "HIGH": 2, "MEDIUM": 0, "LOW": 1, "UNSPECIFIED": 0},
+				Findings: []scanner.Finding{
+					{ID: "CVE-2021-22945", Severity: "CRITICAL", Package: "curl",
+						Installed: "7.74.0-1.3+deb11u1", FixedIn: "7.74.0-1.3+deb11u2",
+						URL: "https://scout.docker.com/v/CVE-2021-22945"},
+					{ID: "CVE-2023-44487", Severity: "LOW", Package: "nginx",
+						Installed: "1.21.6-1~bullseye"},
+				},
+			},
+			{Image: "ghcr.io/jzills/ledger:0.4.0", Error: "manifest unknown"},
+		},
+	}
+}
+
+func TestRenderScanListsImagesAndCVEs(t *testing.T) {
+	out, err := RenderScan(scanPage(t))
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+
+	for _, want := range []string{
+		"ghcr.io/jzills/api-gateway:1.8.3",
+		"CVE-2021-22945",
+		"curl",
+		// html/template's text escaper renders "+" as the numeric character
+		// reference "&#43;" in every HTML text context, not just this one —
+		// it is not conditioned on the value being page data versus a
+		// literal in the template. That is what a browser decodes back to
+		// "+", so this is the correctly escaped form of
+		// "7.74.0-1.3+deb11u2", the version this task's own fixture carries;
+		// a literal "+" byte in the output would mean escaping had been
+		// bypassed (e.g. with template.HTML), which the brief forbids.
+		"7.74.0-1.3&#43;deb11u2",
+		"https://scout.docker.com/v/CVE-2021-22945",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("scan page is missing %q", want)
+		}
+	}
+}
+
+// A package with no fix must show a dash, not an empty cell that reads as
+// missing data.
+func TestRenderScanShowsDashWhenUnfixed(t *testing.T) {
+	out, err := RenderScan(scanPage(t))
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if !strings.Contains(string(out), `<td class="dim">—</td>`) {
+		t.Error("an unfixed CVE did not render a dash")
+	}
+}
+
+// A failed scan keeps its message and must not show zeroes, which would read
+// as a clean result.
+func TestRenderScanKeepsFailureMessages(t *testing.T) {
+	out, err := RenderScan(scanPage(t))
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "manifest unknown") {
+		t.Error("the failure message is missing")
+	}
+	if !strings.Contains(html, "scan failed") {
+		t.Error("the failed row is not labelled")
+	}
+}
+
+// Image names and scanner errors both come from outside kx.
+func TestRenderScanEscapesImageNames(t *testing.T) {
+	page := scanPage(t)
+	page.Images[1].Image = `<script>alert(1)</script>`
+	page.Images[1].Error = `<b>nope</b>`
+
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if strings.Contains(string(out), "<script>alert(1)") || strings.Contains(string(out), "<b>nope</b>") {
+		t.Error("unescaped scanner content reached the page")
+	}
+}
+
+// An image scanned clean gets no severity bands (a zero total is a special
+// case in severityBar: without it, dividing by a zero total panics) and the
+// drawer says so in words rather than showing an empty table. If the
+// template stopped calling severityBar and instead always drew one full
+// band, or rendered the findings table unconditionally instead of branching
+// on {{if .Findings}}, this would catch it.
+func TestRenderScanHealthyImageIsEmptyNotZero(t *testing.T) {
+	page := ScanPage{
+		Meta: testMeta(t), Scope: "diagnostics",
+		Images: []scanner.ImageScan{{
+			Image:  "ghcr.io/jzills/quiet:1.0.0",
+			Counts: map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNSPECIFIED": 0},
+		}},
+	}
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "No vulnerabilities found") {
+		t.Error("a clean image did not render the empty state")
+	}
+	for _, band := range []string{`<i class="crit"`, `<i class="high"`, `<i class="med"`, `<i class="low"`} {
+		if strings.Contains(html, band) {
+			t.Errorf("a clean image rendered a %s severity band", band)
+		}
 	}
 }

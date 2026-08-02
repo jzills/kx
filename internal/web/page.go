@@ -63,6 +63,40 @@ type ScanPage struct {
 	Images []scanner.ImageScan
 }
 
+// Segment is one band of the stacked severity bar.
+type Segment struct {
+	Class string
+	Pct   int
+}
+
+// severityBar turns severity counts into the bands of a stacked bar. An image
+// with no findings gets no bands rather than a full-width empty one.
+func severityBar(counts map[string]int) []Segment {
+	total := 0
+	for _, severity := range scanner.Severities {
+		total += counts[severity]
+	}
+	if total == 0 {
+		return nil
+	}
+	classes := map[string]string{
+		"CRITICAL": "crit", "HIGH": "high", "MEDIUM": "med",
+		"LOW": "low", "UNSPECIFIED": "low",
+	}
+	var bands []Segment
+	for _, severity := range scanner.Severities {
+		count := counts[severity]
+		if count == 0 {
+			continue
+		}
+		bands = append(bands, Segment{
+			Class: classes[severity],
+			Pct:   count * 100 / total,
+		})
+	}
+	return bands
+}
+
 // Usage is a container's consumption of one resource against its limit.
 //
 // Known is false when no limit is set, which the page draws as an em dash.
@@ -180,5 +214,8 @@ var funcs = template.FuncMap{
 	},
 	// Indexes are 1-based, matching every other kx listing; templates have no
 	// arithmetic of their own.
-	"add": func(a, b int) int { return a + b },
+	"add":         func(a, b int) int { return a + b },
+	"severityBar": severityBar,
+	"severities":  func() []string { return scanner.Severities },
+	"count":       func(counts map[string]int, severity string) int { return counts[severity] },
 }
