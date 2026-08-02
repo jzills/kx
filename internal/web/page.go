@@ -112,9 +112,13 @@ type Usage struct {
 
 // usageOf converts a usage/limit pair into a drawable percentage.
 //
-// MilliValue is used for both CPU and memory: it is exact for CPU, and for
-// memory a byte count multiplied by 1000 stays well inside int64 for any
-// limit a container can actually carry.
+// Integer arithmetic, multiplying before dividing, matching
+// diagnostics.usagePercent and cli.percentCell exactly — the page and the
+// terminal must not disagree by a point on the same container.
+//
+// MilliValue scales by 1000 and the percentage by a further 100, so a byte
+// count is held at 100,000×: int64 overflows above roughly 92 TB of usage,
+// which no container limit reaches. CPU is exact at milli scale.
 func usageOf(used, limit *resource.Quantity, kind string) Usage {
 	if used == nil || limit == nil || limit.IsZero() {
 		return Usage{}

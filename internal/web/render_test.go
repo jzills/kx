@@ -566,6 +566,23 @@ func gridCollapseSelectors(t *testing.T, css string) string {
 // and TestMobileCollapseExcludesScanGrid already establish the media query's
 // own selector list separately, so there is no need to also exclude its
 // interior here beyond the cut.
+// cssRule returns the declaration block of the rule that begins with prefix,
+// comments stripped first so a mention inside prose cannot satisfy a caller —
+// the same trap desktopCSS strips comments to avoid.
+func cssRule(t *testing.T, css, prefix string) string {
+	t.Helper()
+	stripped := stripCSSComments(css)
+	at := strings.Index(stripped, prefix)
+	if at < 0 {
+		t.Fatalf("stylesheet has no rule beginning %q", prefix)
+	}
+	end := strings.Index(stripped[at:], "}")
+	if end < 0 {
+		t.Fatalf("rule %q is never closed", prefix)
+	}
+	return stripped[at : at+end+1]
+}
+
 func desktopCSS(t *testing.T, css string) string {
 	t.Helper()
 	stripped := stripCSSComments(css)
@@ -602,6 +619,32 @@ func TestDesktopNsGridRuleExists(t *testing.T) {
 		t.Error("the desktop .ns-grid rule (.row.ns-grid > summary, " +
 			".sweep-head.ns-grid) is missing outside the mobile media query " +
 			"— the -A sweep would silently fall back to the indexed grid")
+	}
+}
+
+// .event-msg must declare no colour of its own. It shares its element with a
+// .status-* class on a failed scan (<p class="event-msg status-warn">), and
+// both are single-class selectors, so whichever is written later wins. When
+// .event-msg carried "color: var(--body)" it sat later in the sheet and the
+// error message rendered in body colour, silently dropping the warning colour
+// the markup asks for.
+func TestEventMsgDeclaresNoColour(t *testing.T) {
+	rule := cssRule(t, stylesheet, ".event-msg {")
+	if strings.Contains(rule, "color:") {
+		t.Errorf(".event-msg declares a colour (%q); it must inherit, or it "+
+			"outranks the .status-* class beside it on a failed scan row", rule)
+	}
+}
+
+// A failed scan's message must actually reach the page in the warning colour.
+// The rule above is the mechanism; this is the outcome.
+func TestRenderScanFailureMessageKeepsItsWarningClass(t *testing.T) {
+	out, err := RenderScan(scanPage(t))
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if !strings.Contains(string(out), `<p class="event-msg status-warn">`) {
+		t.Error("the failed scan's message lost its status-warn class")
 	}
 }
 

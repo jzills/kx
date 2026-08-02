@@ -170,7 +170,11 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .event { display: flex; flex-direction: column; gap: 0.15rem; }
 .event + .event { margin-top: 0.85rem; }
 .event-head { font-family: var(--mono); font-size: var(--step-0); color: var(--muted); margin: 0; }
-.event-msg { font-size: var(--step-0); color: var(--body); margin: 0; }
+/* No colour of its own: it inherits body from .row (in a drawer) or from the
+   page, and declaring it here would outrank an equal-specificity .status-*
+   alongside it — which is how a failed scan's error message rendered in body
+   colour instead of the warning colour it asks for. */
+.event-msg { font-size: var(--step-0); margin: 0; }
 
 .row { color: var(--body); border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
 .row:last-of-type { border-bottom: none; }

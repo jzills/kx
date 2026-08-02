@@ -399,7 +399,12 @@ func newScanCommand(services Services) *cobra.Command {
 			// pageScope captions the HTML page. Captured in each branch
 			// because an indexed scan is scoped by the workload it resolved
 			// rather than by the namespace being swept.
-			var pageScope string
+			//
+			// pageTitle is the browser tab's name, which wants the bare
+			// subject and not the caption's "Mixed" kind label — a tab
+			// reading "kx scan · Mixed · prod" says less than "kx scan ·
+			// prod". kx diag titles itself the same way.
+			var pageScope, pageTitle string
 			var images []string
 			if len(indexArgs) == 0 {
 				scope := scanScope{Namespace: namespace, All: all}
@@ -419,6 +424,7 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
 				pageScope = sweepPageScope(scope.label())
+				pageTitle = scope.label()
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {
@@ -434,6 +440,7 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
+				pageTitle = string(kind) + "/" + name
 			}
 
 			if full {
@@ -463,7 +470,7 @@ func newScanCommand(services Services) *cobra.Command {
 			if len(indexArgs) > 0 {
 				indexArg = indexArgs[0]
 			}
-			meta, err := pageMeta(services.Config.Theme, "kx scan · "+pageScope,
+			meta, err := pageMeta(services.Config.Theme, "kx scan · "+pageTitle,
 				invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
 			if err != nil {
 				return err
