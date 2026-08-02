@@ -1,5 +1,6 @@
-// Package scanner runs a container image vulnerability scanner and rolls its
-// output up into severity counts.
+// Package scanner runs a container image vulnerability scanner and parses its
+// output into per-vulnerability findings, which are then rolled up into
+// severity counts.
 //
 // This is the one place kx shells out to something other than kubectl, so the
 // scanner is behind an Engine interface: adding a second one is a matter of
@@ -166,13 +167,24 @@ type Finding struct {
 // The counts the summary table prints are derived from the findings rather
 // than parsed separately, so the table and the HTML CVE list cannot disagree
 // about which bucket anything landed in.
+//
+// A Severity outside the canonical list counts as UNSPECIFIED rather than
+// being dropped: ParseFindings never produces one today, but this is exported
+// beside a multi-engine Engine interface, and a future engine's own severity
+// vocabulary should lose a label to the catch-all, not out of the total.
 func CountBySeverity(findings []Finding) map[string]int {
+	known := make(map[string]bool, len(Severities))
 	counts := make(map[string]int, len(Severities))
 	for _, severity := range Severities {
+		known[severity] = true
 		counts[severity] = 0
 	}
 	for _, finding := range findings {
-		counts[finding.Severity]++
+		severity := finding.Severity
+		if !known[severity] {
+			severity = "UNSPECIFIED"
+		}
+		counts[severity]++
 	}
 	return counts
 }
@@ -246,13 +258,18 @@ func (Scout) ParseFindings(stdout string) ([]Finding, error) {
 				}
 			}
 
-			// The message is per-result and therefore authoritative; the rule's
-			// values above are only a fallback for one that does not parse.
+			// The message is per-result and therefore authoritative. Once it
+			// yields a purl, the rule's values are abandoned wholesale rather
+			// than field by field: a rule's fixed_version describes only one
+			// of its packages, so keeping it beside a package the message
+			// named is exactly how a fix gets promised for a package that has
+			// none.
 			if purl := purlPattern.FindString(result.Message.Text); purl != "" {
 				finding.Package, finding.Installed = parsePurl(purl)
-			}
-			if fixed, ok := messageField(result.Message.Text, "Fixed version"); ok {
-				finding.FixedIn = fixedVersion(fixed)
+				finding.FixedIn = ""
+				if fixed, ok := messageField(result.Message.Text, "Fixed version"); ok {
+					finding.FixedIn = fixedVersion(fixed)
+				}
 			}
 
 			findings = append(findings, finding)

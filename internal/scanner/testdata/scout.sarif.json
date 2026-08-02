@@ -37,6 +37,16 @@
                 "fixed_version": "0.31.0",
                 "purls": ["pkg:golang/golang.org/x/crypto@v0.28.0"]
               }
+            },
+            {
+              "id": "CVE-2018-25032",
+              "helpUri": "https://scout.docker.com/v/CVE-2018-25032",
+              "properties": {
+                "affected_version": "<1.2.11.dfsg-2+deb11u2",
+                "cvssV3_severity": "MEDIUM",
+                "fixed_version": "1.2.11.dfsg-2+deb11u2",
+                "purls": ["pkg:deb/debian/zlib1g@1.2.11.dfsg-2+deb11u1?os_distro=bullseye"]
+              }
             }
           ]
         }
@@ -74,6 +84,20 @@
           "ruleId": "CVE-9999-0000",
           "ruleIndex": 99,
           "message": { "text": "Vulnerability    :CVE-9999-0000\n" }
+        },
+        {
+          "ruleId": "CVE-2023-44487",
+          "ruleIndex": 1,
+          "message": {
+            "text": "Vulnerability    :CVE-2023-44487\nSeverity         :LOW\nPackage          :pkg:deb/debian/libssl1.1@1.1.1n-0%2Bdeb11u4?os_distro=bullseye\nAffected range   :<1.1.1n-0+deb11u5\n"
+          }
+        },
+        {
+          "ruleId": "CVE-2018-25032",
+          "ruleIndex": 3,
+          "message": {
+            "text": "Vulnerability    :CVE-2018-25032\nSeverity         :MEDIUM\n"
+          }
         }
       ]
     }
