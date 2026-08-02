@@ -128,6 +128,38 @@ func (c TriageCommand) Execute(
 	}, nil
 }
 
+// sweepPage builds the HTML page for a namespace sweep from the same
+// TriageResult the terminal table renders, so the two shapes cannot drift
+// apart: Scope and AllNamespaces are derived from the result rather than
+// re-threaded through the caller's own namespace/allNamespaces variables.
+func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
+	scope := result.Namespace
+	if result.AllNamespaces {
+		scope = "all namespaces"
+	}
+	return web.DiagPage{
+		Meta:          meta,
+		Scope:         scope,
+		AllNamespaces: result.AllNamespaces,
+		Checked:       result.Checked,
+		Healthy:       result.Healthy,
+		Reports:       result.Reports,
+		Dropped:       result.Dropped,
+	}
+}
+
+// resourcePage builds the HTML page for one indexed resource: a sweep of one,
+// always Single so the template renders it inline rather than behind a
+// <details>.
+func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
+	return web.DiagPage{
+		Meta:    meta,
+		Scope:   report.Namespace,
+		Single:  true,
+		Reports: []diagnostics.Report{report},
+	}
+}
+
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     use + " [index]",
@@ -203,15 +235,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderDiag(web.DiagPage{
-					Meta:          meta,
-					Scope:         scope,
-					AllNamespaces: allNamespaces,
-					Checked:       result.Checked,
-					Healthy:       result.Healthy,
-					Reports:       result.Reports,
-					Dropped:       result.Dropped,
-				})
+				page, err := web.RenderDiag(sweepPage(result, meta))
 				if err != nil {
 					return err
 				}
@@ -240,12 +264,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
-			page, err := web.RenderDiag(web.DiagPage{
-				Meta:    meta,
-				Scope:   report.Namespace,
-				Single:  true,
-				Reports: []diagnostics.Report{report},
-			})
+			page, err := web.RenderDiag(resourcePage(report, meta))
 			if err != nil {
 				return err
 			}
