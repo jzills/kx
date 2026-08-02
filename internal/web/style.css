@@ -98,6 +98,10 @@ thead th {
 tbody td { padding: var(--pad-y) var(--pad-x); border-bottom: 1px solid var(--border); }
 tbody tr:last-child td { border-bottom: none; }
 
+a { color: var(--accent); }
+a:hover { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .num { text-align: right; }
 .dim { color: var(--muted); }
 
@@ -168,7 +172,7 @@ tbody tr:last-child td { border-bottom: none; }
 .event-head { font-family: var(--mono); font-size: var(--step-0); color: var(--muted); margin: 0; }
 .event-msg { font-size: var(--step-0); color: var(--body); margin: 0; }
 
-.row { border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
+.row { color: var(--body); border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
 .row:last-of-type { border-bottom: none; }
 .row.status-bad { border-left-color: var(--status-bad); }
 .row.status-warn { border-left-color: var(--status-warn); }
@@ -230,7 +234,6 @@ tbody tr:last-child td { border-bottom: none; }
 
 .row .finding {
   font-family: var(--sans);
-  color: var(--body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
