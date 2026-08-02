@@ -172,3 +172,12 @@ func TestDiagRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestDiagnosticRegistersHTMLFlags(t *testing.T) {
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", []string{"diag"})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
