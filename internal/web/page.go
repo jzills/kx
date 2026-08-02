@@ -119,7 +119,7 @@ func usageOf(used, limit *resource.Quantity, kind string) Usage {
 	if used == nil || limit == nil || limit.IsZero() {
 		return Usage{}
 	}
-	pct := int(float64(used.MilliValue()) / float64(limit.MilliValue()) * 100)
+	pct := int(used.MilliValue() * 100 / limit.MilliValue())
 	return Usage{Known: true, Pct: pct, Class: styleClass(render.UsageStyle(pct, kind))}
 }
 
