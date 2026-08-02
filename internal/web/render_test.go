@@ -482,30 +482,101 @@ func mediaQueryBlock(t *testing.T, css, query string) string {
 	return ""
 }
 
-// Carried defect: .row.ns-grid > summary and .row > summary.scan-grid are
-// compound selectors (two classes plus a type), giving them higher
-// specificity than the plain ".row > summary, .sweep-head" rule inside
-// @media (max-width: 720px) — and @media contributes no specificity of its
-// own. Unless the mobile rule repeats both modifiers at the same
-// specificity, the desktop grid wins the cascade under 720px and neither
-// the -A sweep nor the scan page collapses to the narrow layout.
+// stripCSSComments removes every /* ... */ span. CSS comments cannot nest,
+// so cutting at the first "/*"/"*/" pair repeatedly is exact; a comment with
+// no closing marker (shouldn't happen in valid CSS) discards the rest of the
+// string rather than looping.
+func stripCSSComments(css string) string {
+	var out strings.Builder
+	for {
+		start := strings.Index(css, "/*")
+		if start < 0 {
+			out.WriteString(css)
+			break
+		}
+		out.WriteString(css[:start])
+		rest := css[start+2:]
+		end := strings.Index(rest, "*/")
+		if end < 0 {
+			break
+		}
+		css = rest[end+2:]
+	}
+	return out.String()
+}
+
+// gridCollapseSelectors returns the selector list of the mobile collapse
+// rule — the first rule inside @media (max-width: 720px), the one setting
+// grid-template-columns — with comments stripped first and the declaration
+// body (after the first "{") cut off, so a check against it can only be
+// satisfied by the selectors themselves.
+//
+// Both steps matter, and a prior round of this test skipped both: the rule
+// has its own explanatory comment describing why ".ns-grid" and
+// ".scan-grid" must be repeated here, and that comment contains those exact
+// two substrings. Scoping to the media-query block (mediaQueryBlock, above)
+// is not enough on its own — the comment sits inside that block too — so a
+// check against the raw block passed whether or not the selector list
+// itself named either modifier. The reviewer's targeted mutation (delete
+// just the selectors, keep the comment) is what exposed this; a whole-file
+// revert to pre-task HEAD had removed the comment along with everything
+// else, which is why it looked like conclusive mutation evidence at the
+// time and wasn't.
+func gridCollapseSelectors(t *testing.T, css string) string {
+	t.Helper()
+	block := stripCSSComments(mediaQueryBlock(t, css, "@media (max-width: 720px)"))
+	brace := strings.IndexByte(block, '{')
+	if brace < 0 {
+		t.Fatal("the mobile collapse rule has no declaration block")
+	}
+	return block[:brace]
+}
+
+// Carried defect: .row.ns-grid > summary is a compound selector (two classes
+// plus a type), giving it higher specificity than the plain ".row >
+// summary, .sweep-head" rule inside @media (max-width: 720px) — and @media
+// contributes no specificity of its own. Unless the mobile rule repeats the
+// modifier at the same specificity, the desktop grid wins the cascade under
+// 720px and the -A sweep never collapses to the narrow layout.
 //
 // This checks the necessary condition — that the selector list inside the
-// media query actually names both modifiers — which is what a fix of this
+// media query actually names the modifier — which is what a fix of this
 // kind changes. It cannot check the sufficient one, that the mobile rule
 // then wins the cascade in an actual browser at an actual viewport width:
 // that is a rendering question no Go string comparison can answer, and
 // nothing in this package parses or computes CSS specificity outside this
 // test. Reasoning about the specificity arithmetic (above, and in the CSS
-// comments beside both rules) is what stands in for that.
-func TestMobileCollapseSelectorListCoversGridModifiers(t *testing.T) {
-	block := mediaQueryBlock(t, stylesheet, "@media (max-width: 720px)")
-	for _, modifier := range []string{".ns-grid", ".scan-grid"} {
-		if !strings.Contains(block, modifier) {
-			t.Errorf("the mobile collapse rule does not mention %s, so it loses "+
-				"the specificity contest against the desktop rule and never "+
-				"collapses under 720px", modifier)
-		}
+// comment beside the rule) is what stands in for that.
+func TestMobileCollapseCoversNsGrid(t *testing.T) {
+	selectors := gridCollapseSelectors(t, stylesheet)
+	if !strings.Contains(selectors, ".ns-grid") {
+		t.Error("the mobile collapse rule's selector list does not mention " +
+			".ns-grid, so it loses the specificity contest against the " +
+			"desktop rule and never collapses under 720px")
+	}
+}
+
+// The scan page deliberately does not join the diag sweep's mobile
+// collapse — see the comment beside .scan-grid's desktop rule in style.css.
+// A scan row's columns (image, severity stack, five counts) have no pair as
+// droppable as the diag sweep's KIND/FINDING, so forcing them into the same
+// 3-column template would wrap the extra cells onto additional implicit
+// rows rather than collapsing sensibly; the scan page keeps its desktop
+// grid at every width and relies on .table-wrap's own horizontal scroll
+// instead, the same mechanism the CVE detail table inside each row's drawer
+// already depends on unconditionally.
+//
+// This pins that decision the same way TestMobileCollapseCoversNsGrid pins
+// the opposite one for .ns-grid: if a later change added ".scan-grid" back
+// into this selector list, the scan page would silently inherit the
+// diag-shaped collapse.
+func TestMobileCollapseExcludesScanGrid(t *testing.T) {
+	selectors := gridCollapseSelectors(t, stylesheet)
+	if strings.Contains(selectors, ".scan-grid") {
+		t.Error("the mobile collapse rule's selector list mentions " +
+			".scan-grid, which would force the scan page into the " +
+			"diag-shaped 3-column collapse instead of its own grid plus " +
+			"horizontal scroll")
 	}
 }
 
@@ -570,8 +641,46 @@ func TestRenderScanShowsDashWhenUnfixed(t *testing.T) {
 	}
 }
 
+// rowContaining returns the <details>...</details> block enclosing the
+// first occurrence of marker, so an assertion can be scoped to one image's
+// row instead of the whole page.
+func rowContaining(t *testing.T, html, marker string) string {
+	t.Helper()
+	at := strings.Index(html, marker)
+	if at < 0 {
+		t.Fatalf("html does not contain %q", marker)
+	}
+	start := strings.LastIndex(html[:at], "<details")
+	if start < 0 {
+		t.Fatalf("no <details> found before %q", marker)
+	}
+	relEnd := strings.Index(html[at:], "</details>")
+	if relEnd < 0 {
+		t.Fatalf("no </details> found after %q", marker)
+	}
+	return html[start : at+relEnd+len("</details>")]
+}
+
 // A failed scan keeps its message and must not show zeroes, which would read
 // as a clean result.
+//
+// The zero-count check is load-bearing, not decorative: scanPage's failed
+// image (Error set, Counts left nil) would satisfy "the row is labelled" and
+// "the message is present" even if a regression made the template render
+// counts unconditionally instead of dashing them out on error — reading a
+// severity out of a nil Counts map returns Go's int zero value rather than
+// panicking, so the row would silently show "0" in every count column. The
+// check is anchored to the literal markup a zero count renders as
+// (`<span class="num dim">0</span>`), not a bare "0": the inlined stylesheet
+// is full of bare "0"s (padding, border widths, opacity), so that would
+// never be able to fail on this regression.
+//
+// The check is scoped to the failed row specifically (rowContaining), not
+// the whole page: scanPage's other image has legitimate zero counts of its
+// own (MEDIUM and UNSPECIFIED are both 0 for a real, successfully scanned
+// image), which correctly render the very same markup and would make a
+// whole-page check fail regardless of whether the failed row itself was
+// right.
 func TestRenderScanKeepsFailureMessages(t *testing.T) {
 	out, err := RenderScan(scanPage(t))
 	if err != nil {
@@ -583,6 +692,10 @@ func TestRenderScanKeepsFailureMessages(t *testing.T) {
 	}
 	if !strings.Contains(html, "scan failed") {
 		t.Error("the failed row is not labelled")
+	}
+	failedRow := rowContaining(t, html, "manifest unknown")
+	if strings.Contains(failedRow, `<span class="num dim">0</span>`) {
+		t.Error("a failed scan rendered a zero count instead of a dash")
 	}
 }
 
@@ -598,6 +711,66 @@ func TestRenderScanEscapesImageNames(t *testing.T) {
 	}
 	if strings.Contains(string(out), "<script>alert(1)") || strings.Contains(string(out), "<b>nope</b>") {
 		t.Error("unescaped scanner content reached the page")
+	}
+}
+
+// style.css's ".row > summary.scan-grid, .sweep-head.scan-grid" rule only
+// matches because scan.gohtml puts the "scan-grid" class on <summary>
+// itself (paired with "row" only via the ">" combinator to its ancestor
+// <details>), not on <details> the way ".ns-grid" pairs with ".row"
+// (compare TestRenderDiagAllNamespacesUsesItsOwnGrid, which pins that
+// placement for ns-grid). Moving the class from <summary> to <details> —
+// the ns-grid shape — would silently stop the CSS selector from matching
+// anything, since ".row.scan-grid > summary" (an unstyled summary) is a
+// different selector than ".row > summary.scan-grid", and no other test in
+// this file checks where the class actually lives, only that the grid
+// renders content correctly.
+func TestRenderScanPutsGridClassOnHeaderAndSummary(t *testing.T) {
+	out, err := RenderScan(scanPage(t))
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, `<div class="sweep-head scan-grid">`) {
+		t.Error("the scan header did not get its own grid")
+	}
+	if !strings.Contains(html, `<summary class="scan-grid">`) {
+		t.Error("scan rows did not get their own grid on the <summary> element itself")
+	}
+}
+
+// scanner.Severities has five buckets, not four: CountBySeverity folds any
+// finding ParseFindings could not map to a known severity into UNSPECIFIED,
+// deliberately, so it isn't dropped from the total (internal/scanner/scanner.go).
+// Before this fix, scan.gohtml only had CRIT/HIGH/MED/LOW columns — an image
+// whose findings were all UNSPECIFIED would show every visible count as
+// zero, reading as a clean scan while its drawer listed real CVEs
+// underneath. render.ScanSummary (internal/render/scan.go) has always had a
+// UNSPEC column for exactly this reason, and page.go's own package doc says
+// the page and terminal must not disagree about severity.
+func TestRenderScanShowsUnspecifiedCounts(t *testing.T) {
+	page := ScanPage{
+		Meta: testMeta(t), Scope: "diagnostics",
+		Images: []scanner.ImageScan{{
+			Image:  "ghcr.io/jzills/mystery:2.1.0",
+			Counts: map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNSPECIFIED": 3},
+			Findings: []scanner.Finding{
+				{ID: "CVE-2024-00001", Severity: "UNSPECIFIED", Package: "libfoo", Installed: "1.0"},
+				{ID: "CVE-2024-00002", Severity: "UNSPECIFIED", Package: "libbar", Installed: "2.0"},
+				{ID: "CVE-2024-00003", Severity: "UNSPECIFIED", Package: "libbaz", Installed: "3.0"},
+			},
+		}},
+	}
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, `<span class="num dim">3</span>`) {
+		t.Error("an image with only UNSPECIFIED findings did not show its UNSPEC count")
+	}
+	if !strings.Contains(html, "CVE-2024-00001") {
+		t.Error("an image with only UNSPECIFIED findings did not list its CVEs in the drawer")
 	}
 }
 

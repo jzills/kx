@@ -205,13 +205,18 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* Plain ".scan-grid" alone is one class (0,1,0) — less specific than
    ".row > summary" (0,1,1), which would otherwise keep the diag page's
-   six-column layout under the scan page's seven-column summary row. Pairing
+   six-column layout under the scan page's eight-column summary row. Pairing
    it with the element it actually decorates gives it the specificity to
    win, the same way .ns-grid below pairs with .row rather than standing
-   alone. */
+   alone.
+
+   This class lives on the <summary> itself (scan.gohtml), not on its
+   parent the way ns-grid pairs with .row -- so the selector below is
+   ".row > summary.scan-grid", not ".row.scan-grid > summary". Moving the
+   class to <details> would silently stop this matching. */
 .row > summary.scan-grid,
 .sweep-head.scan-grid {
-  grid-template-columns: minmax(14rem, 1.6fr) 6rem 4rem 4rem 4rem 4rem 1.25rem;
+  grid-template-columns: minmax(14rem, 1.6fr) 6rem 4rem 4rem 4rem 4rem 4rem 1.25rem;
 }
 
 /* The -A shape drops the index column and adds NAMESPACE, so its leading two
@@ -269,14 +274,25 @@ footer {
 }
 
 @media (max-width: 720px) {
-  /* .ns-grid and .scan-grid's desktop rules above are compound selectors
-     with higher specificity than the plain rule here, and @media adds no
-     specificity of its own — so without repeating both modifiers in this
-     selector list, the -A sweep and the scan page would keep their full
-     desktop grid under 720px instead of collapsing with everything else. */
+  /* .ns-grid's desktop rule above is a compound selector with higher
+     specificity than the plain rule here, and @media adds no specificity of
+     its own — so without repeating the modifier in this selector list, the
+     -A sweep would keep its full desktop grid under 720px instead of
+     collapsing with everything else.
+
+     .scan-grid is deliberately NOT repeated here. This collapse works for
+     the diag sweep because KIND and FINDING (hidden below) are the two
+     columns it can afford to drop, leaving INDEX/NAMESPACE, NAME, VERDICT
+     and the marker. A scan row has no equivalent pair to drop: image,
+     severity stack, and five counts are all signal, and forcing them into
+     this same 3-column template wraps the extra cells onto additional
+     implicit rows rather than collapsing sensibly. Instead the scan page
+     keeps its desktop grid at every width and relies on .table-wrap's own
+     horizontal scroll — the same mechanism the CVE detail table inside
+     each row's drawer already depends on unconditionally, at every width,
+     elsewhere on this same page. */
   .row > summary, .sweep-head,
-  .row.ns-grid > summary, .sweep-head.ns-grid,
-  .row > summary.scan-grid, .sweep-head.scan-grid {
+  .row.ns-grid > summary, .sweep-head.ns-grid {
     grid-template-columns: 2rem 1fr 1.25rem;
   }
   .row > summary .kind, .row > summary .finding,

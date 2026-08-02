@@ -1,12 +1,12 @@
 {{define "body"}}
 <div class="block">
-  <p class="caption">Mixed · {{.Scope}} · {{len .Images}} images</p>
+  <p class="caption">Mixed · {{.Scope}} · {{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}</p>
 
   <div class="table-wrap">
     <div class="sweep-head scan-grid">
       <div>IMAGE</div><div>SEVERITY</div>
       <div class="num">CRIT</div><div class="num">HIGH</div>
-      <div class="num">MED</div><div class="num">LOW</div><div></div>
+      <div class="num">MED</div><div class="num">LOW</div><div class="num">UNSPEC</div><div></div>
     </div>
 
     {{range .Images}}
@@ -16,13 +16,14 @@
         {{if .Error}}
           <span class="status-warn">scan failed</span>
           <span class="num dim">—</span><span class="num dim">—</span>
-          <span class="num dim">—</span><span class="num dim">—</span>
+          <span class="num dim">—</span><span class="num dim">—</span><span class="num dim">—</span>
         {{else}}
           <span class="stack">{{range severityBar .Counts}}<i class="{{.Class}}" style="width:{{.Pct}}%"></i>{{end}}</span>
           <span class="num {{if gt (count .Counts "CRITICAL") 0}}status-bad{{else}}dim{{end}}">{{count .Counts "CRITICAL"}}</span>
           <span class="num {{if gt (count .Counts "HIGH") 0}}status-bad{{else}}dim{{end}}">{{count .Counts "HIGH"}}</span>
           <span class="num {{if gt (count .Counts "MEDIUM") 0}}status-warn{{else}}dim{{end}}">{{count .Counts "MEDIUM"}}</span>
           <span class="num dim">{{count .Counts "LOW"}}</span>
+          <span class="num dim">{{count .Counts "UNSPECIFIED"}}</span>
         {{end}}
         <span class="marker">›</span>
       </summary>
