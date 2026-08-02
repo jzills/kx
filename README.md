@@ -158,6 +158,23 @@ or the full per-image CVE report with `--full`. Requires
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
 
+### View reports in a browser
+
+`kx diag --html` and `kx scan --html` render the same analysis as a page and
+open it in your browser instead of printing to the terminal; Ctrl-C stops the
+server. It binds `127.0.0.1` only, and nothing is written to disk — the report
+lives in memory for as long as the command runs.
+
+The page is drawn in your active theme, so `kx theme dracula` restyles it too.
+Sweep rows expand into that resource's full report, and image rows expand
+into the CVEs behind their severity counts — detail the terminal has no room
+for. None of it costs an extra API or scanner call: both were already
+gathered to build the table you'd see without `--html`.
+
+`--port` serves on a specific port instead of picking a free one, and
+`--no-open` skips launching a browser — the URL still prints, so you can
+open it yourself.
+
 ## State
 
 `kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
