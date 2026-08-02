@@ -123,6 +123,26 @@ func TestRenderDiagShowsDashWhenNoLimit(t *testing.T) {
 	}
 }
 
+// usageOf must agree with kx diag's finding text (usagePercent in
+// internal/diagnostics/findings.go) and kx top's MEM%/CPU% columns
+// (percentCell in internal/cli/top.go), both of which compute this as a
+// scaled-integer ratio. A float64 division used to do the same arithmetic in
+// floating point and round down at ratios where the two disagree: 29Mi of
+// 50Mi is the smallest such case (documented in the fix-wave review) —
+// exact integer math gives 58%, but
+// float64(29000)/float64(50000)*100 evaluates to 57.99999999999999, which
+// int() truncates to 57.
+func TestUsageOfMatchesIntegerArithmetic(t *testing.T) {
+	got := usageOf(quantity(t, "29Mi"), quantity(t, "50Mi"), "memory")
+	if !got.Known {
+		t.Fatal("usageOf reported the limit as unknown")
+	}
+	if got.Pct != 58 {
+		t.Errorf("Pct = %d, want 58 — the page must not disagree with kx diag "+
+			"and kx top over one point of rounding", got.Pct)
+	}
+}
+
 // Log lines and event messages are cluster-controlled. Anything a pod can
 // print into its own logs must not become markup.
 func TestRenderDiagEscapesClusterContent(t *testing.T) {
@@ -532,6 +552,59 @@ func gridCollapseSelectors(t *testing.T, css string) string {
 	return block[:brace]
 }
 
+// desktopCSS returns the stylesheet with every comment stripped and the
+// mobile collapse's whole @media block cut away, leaving only the rules that
+// apply at every viewport width. Comments are stripped from the FULL
+// stylesheet first — not just inside the media block — because the desktop
+// ".scan-grid" rule has its own explanatory comment (immediately above it in
+// style.css) that names ".scan-grid" and ".row.scan-grid > summary" in
+// prose; without stripping it, a check for those selectors could pass
+// against the comment alone with the rule itself deleted, the same class of
+// gap gridCollapseSelectors' own doc comment describes. @media (max-width:
+// 720px) is the last rule in style.css, so cutting the text at its start
+// leaves exactly the desktop-only rules before it; TestMobileCollapseCoversNsGrid
+// and TestMobileCollapseExcludesScanGrid already establish the media query's
+// own selector list separately, so there is no need to also exclude its
+// interior here beyond the cut.
+func desktopCSS(t *testing.T, css string) string {
+	t.Helper()
+	stripped := stripCSSComments(css)
+	at := strings.Index(stripped, "@media (max-width: 720px)")
+	if at < 0 {
+		t.Fatal("stylesheet does not contain the mobile collapse's @media rule")
+	}
+	return stripped[:at]
+}
+
+// Nothing else in this file pins that the DESKTOP ".scan-grid" rule still
+// exists: TestMobileCollapseExcludesScanGrid only looks inside the mobile
+// @media block, where .scan-grid is deliberately absent. Deleting the
+// desktop rule entirely would leave every test in this package green while
+// the scan page silently fell back to the diag sweep's six-column grid with
+// eight cells, at every viewport width, not just under 720px.
+func TestDesktopScanGridRuleExists(t *testing.T) {
+	desktop := desktopCSS(t, stylesheet)
+	if !strings.Contains(desktop, ".row > summary.scan-grid") ||
+		!strings.Contains(desktop, ".sweep-head.scan-grid") {
+		t.Error("the desktop .scan-grid rule (.row > summary.scan-grid, " +
+			".sweep-head.scan-grid) is missing outside the mobile media " +
+			"query — the scan page would silently fall back to diag's grid")
+	}
+}
+
+// Same gap, -A sweep side: TestMobileCollapseCoversNsGrid only pins that the
+// mobile rule's selector list repeats the ".ns-grid" modifier, not that the
+// desktop rule it is repeating alongside still exists at all.
+func TestDesktopNsGridRuleExists(t *testing.T) {
+	desktop := desktopCSS(t, stylesheet)
+	if !strings.Contains(desktop, ".row.ns-grid > summary") ||
+		!strings.Contains(desktop, ".sweep-head.ns-grid") {
+		t.Error("the desktop .ns-grid rule (.row.ns-grid > summary, " +
+			".sweep-head.ns-grid) is missing outside the mobile media query " +
+			"— the -A sweep would silently fall back to the indexed grid")
+	}
+}
+
 // Carried defect: .row.ns-grid > summary is a compound selector (two classes
 // plus a type), giving it higher specificity than the plain ".row >
 // summary, .sweep-head" rule inside @media (max-width: 720px) — and @media
@@ -580,6 +653,62 @@ func TestMobileCollapseExcludesScanGrid(t *testing.T) {
 	}
 }
 
+// .row's own colour must be set (var(--body)), and declared textually AFTER
+// the .status-bad/.status-warn/.status-ok/.status-neutral rules it ties with
+// at equal specificity (0,1,0): a CSS specificity tie is broken by source
+// order, later wins. Without this, a severity class on a row (<details
+// class="row status-bad">, diag.gohtml/scan.gohtml) tints every descendant
+// that has no colour rule of its own — CVE package/installed cells, pod
+// logs, finding summaries — via inheritance from the <details> element
+// itself, contradicting those same descendants' own per-row classification
+// (e.g. a LOW-severity CVE rendering red inside a row with one CRITICAL
+// finding).
+//
+// This can only be checked textually, the same way TestMobileCollapseCoversNsGrid
+// pins a specificity contest no Go test here can render an actual cascade
+// for: reasoning about the arithmetic (also recorded in style.css's own
+// comments beside the similar .scan-grid/.ns-grid rules) stands in for it.
+func TestRowSetsItsOwnColorAfterSeverityClasses(t *testing.T) {
+	rowAt := strings.Index(stylesheet, ".row {")
+	if rowAt < 0 {
+		t.Fatal(".row rule not found in the stylesheet")
+	}
+	badAt := strings.Index(stylesheet, ".status-bad {")
+	if badAt < 0 {
+		t.Fatal(".status-bad rule not found in the stylesheet")
+	}
+	if rowAt < badAt {
+		t.Error(".row is declared before .status-bad in the stylesheet; at " +
+			"equal specificity the severity colour would win the cascade on " +
+			"the row itself and bleed into every uncoloured descendant")
+	}
+
+	end := strings.Index(stylesheet[rowAt:], "}")
+	if end < 0 {
+		t.Fatal(".row rule has no closing brace")
+	}
+	rowRule := stylesheet[rowAt : rowAt+end]
+	if !strings.Contains(rowRule, "color: var(--body)") {
+		t.Error(".row does not set its own color to var(--body), so a " +
+			"severity-classed row still tints every descendant with no " +
+			"colour rule of its own")
+	}
+}
+
+// style.css previously styled no anchors at all, so the CVE ID links
+// scan.gohtml renders (<a href="{{.URL}}">) fell back to the browser's
+// default link colour — roughly #0000EE, about 2:1 contrast against
+// github-dark's #0d1117 background and effectively invisible on nine of
+// kx's ten palettes. The CVE ID is the primary key of the table this
+// feature exists to show.
+func TestAnchorsUseThePaletteAccent(t *testing.T) {
+	if !strings.Contains(stylesheet, "a { color: var(--accent); }") {
+		t.Error("anchors are not coloured through the palette's accent " +
+			"custom property, so links fall back to the browser's default " +
+			"colour regardless of theme")
+	}
+}
+
 func scanPage(t *testing.T) ScanPage {
 	t.Helper()
 	return ScanPage{
@@ -598,6 +727,31 @@ func scanPage(t *testing.T) ScanPage {
 			},
 			{Image: "ghcr.io/jzills/ledger:0.4.0", Error: "manifest unknown"},
 		},
+	}
+}
+
+// "Mixed · " is the cross-kind sweep label (see diag.gohtml's own "Mixed ·
+// {{.Scope}}" caption, which appears only in its sweep branch). An indexed
+// scan's kind is already known and printed right beside it in Scope
+// (cli/scan.go's pageScope), so the template must render Scope verbatim
+// rather than assuming every scan is a sweep. Every scan fixture in this file
+// otherwise uses Scope: "diagnostics" — a bare namespace indistinguishable
+// from a real sweep's own scope string — which is why a hardcoded "Mixed · "
+// prefix here went uncaught until an indexed-shaped Scope was tried.
+func TestRenderScanCaptionRendersScopeVerbatim(t *testing.T) {
+	page := scanPage(t)
+	page.Scope = "Deployment/web · prod"
+
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+	if strings.Contains(html, "Mixed") {
+		t.Error("an indexed scan's page caption said \"Mixed\", the cross-kind sweep label")
+	}
+	if !strings.Contains(html, `<p class="caption">Deployment/web · prod ·`) {
+		t.Error("the page caption did not render the indexed scope verbatim")
 	}
 }
 
@@ -711,6 +865,63 @@ func TestRenderScanEscapesImageNames(t *testing.T) {
 	}
 	if strings.Contains(string(out), "<script>alert(1)") || strings.Contains(string(out), "<b>nope</b>") {
 		t.Error("unescaped scanner content reached the page")
+	}
+}
+
+// TestRenderScanEscapesImageNames above mutates the image row that has Error
+// set, so the drawer renders the error message and the CVE table
+// (scan.gohtml's {{else if .Findings}} branch) is never reached — ID,
+// Package, Installed and URL have no escaping coverage anywhere else. URL in
+// particular flows into an href attribute, a URL context html/template
+// escapes with urlFilter rather than the plain text escaper the other three
+// fields go through, so it needs its own case: a dangerous scheme such as
+// "javascript:" is not encoded, it is replaced wholesale with the literal
+// "#ZgotmplZ".
+func TestRenderScanEscapesFindingFields(t *testing.T) {
+	page := ScanPage{
+		Meta: testMeta(t), Scope: "diagnostics",
+		Images: []scanner.ImageScan{{
+			Image:  "ghcr.io/jzills/api-gateway:1.8.3",
+			Counts: map[string]int{"CRITICAL": 1, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNSPECIFIED": 0},
+			Findings: []scanner.Finding{{
+				ID:        `<script>alert("id")</script>`,
+				Severity:  "CRITICAL",
+				Package:   `<b>package</b>`,
+				Installed: `<i>installed</i>`,
+				URL:       `javascript:alert(1)`,
+			}},
+		}},
+	}
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	html := string(out)
+
+	for _, forbidden := range []string{
+		"<script>alert",
+		"<b>package</b>",
+		"<i>installed</i>",
+		"javascript:alert",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("unescaped or unneutralised cluster content reached the CVE table: %q", forbidden)
+		}
+	}
+
+	// Positive assertions: each field must actually have rendered in its
+	// escaped form, not simply be absent — a template that stopped emitting
+	// a field would satisfy every check above just as well as one that
+	// correctly escaped it.
+	for _, want := range []string{
+		`&lt;script&gt;alert(&#34;id&#34;)&lt;/script&gt;`,
+		`&lt;b&gt;package&lt;/b&gt;`,
+		`&lt;i&gt;installed&lt;/i&gt;`,
+		`href="#ZgotmplZ"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the CVE table is missing %q", want)
+		}
 	}
 }
 
