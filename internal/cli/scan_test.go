@@ -336,6 +336,16 @@ func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
 	}
 }
 
+// A namespace sweep's page must carry the same "Mixed · " cross-kind label
+// the terminal's ScopeBanner prints; an indexed scan's pageScope is built
+// separately (in the index branch, string(kind)+"/"+name+" · "+namespace) and
+// never calls this, which is what keeps it unlabelled.
+func TestSweepPageScopeAddsTheMixedLabel(t *testing.T) {
+	if got := sweepPageScope("prod"); got != "Mixed · prod" {
+		t.Errorf("sweepPageScope(%q) = %q, want %q", "prod", got, "Mixed · prod")
+	}
+}
+
 func TestScanRegistersHTMLFlags(t *testing.T) {
 	cmd := newScanCommand(Services{})
 	for _, name := range []string{"html", "port", "no-open"} {

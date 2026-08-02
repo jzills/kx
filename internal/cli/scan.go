@@ -293,6 +293,16 @@ func scanPage(scope string, rows []scanner.ImageScan, meta web.Meta) web.ScanPag
 	return web.ScanPage{Meta: meta, Scope: scope, Images: rows}
 }
 
+// sweepPageScope captions a namespace sweep's page with the same "Mixed · "
+// cross-kind label render.ScopeBanner already printed to the terminal above
+// it. scan.gohtml renders Scope verbatim rather than assuming every scan is a
+// sweep — an indexed scan's kind is already known, so its own pageScope (built
+// separately, where the index branch is handled) never goes through this and
+// carries no such label.
+func sweepPageScope(scopeLabel string) string {
+	return "Mixed · " + scopeLabel
+}
+
 func newScanCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "scan [index] [scanner flags]",
@@ -396,12 +406,19 @@ func newScanCommand(services Services) *cobra.Command {
 				if !scope.All && scope.Namespace == "" {
 					scope.Namespace = services.Kubectl.CurrentNamespace()
 				}
+				// Reassigned so the invocation line built below (scopeArgs)
+				// names the resolved namespace, not whatever -n was left as —
+				// which is empty on the common path where it defaults from
+				// the current context. diagnostic.go's namespace resolution
+				// does the same (reassigns before building its own
+				// invocation line) for the same reason.
+				namespace = scope.Namespace
 				images, err = command.Collect(scope, engine)
 				if err != nil {
 					return err
 				}
 				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
-				pageScope = scope.label()
+				pageScope = sweepPageScope(scope.label())
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {

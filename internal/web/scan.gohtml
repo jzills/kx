@@ -1,6 +1,6 @@
 {{define "body"}}
 <div class="block">
-  <p class="caption">Mixed · {{.Scope}} · {{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}</p>
+  <p class="caption">{{.Scope}} · {{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}</p>
 
   <div class="table-wrap">
     <div class="sweep-head scan-grid">
