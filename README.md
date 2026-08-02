@@ -161,7 +161,7 @@ or the full per-image CVE report with `--full`. Requires
 ### View reports in a browser
 
 `kx diag --html` and `kx scan --html` render the same analysis as a page and
-open it in your browser instead of printing to the terminal; Ctrl-C stops the
+open it in your browser as well as printing to the terminal; Ctrl-C stops the
 server. It binds `127.0.0.1` only, and nothing is written to disk — the report
 lives in memory for as long as the command runs.
 
