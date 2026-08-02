@@ -327,6 +327,10 @@ func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
 	if len(page.Images) != 1 || page.Images[0].Image != "api:v1" {
 		t.Errorf("Images = %+v, want the one api:v1 row", page.Images)
 	}
+	if page.Images[0].Counts["critical"] != 1 {
+		t.Errorf("Counts = %+v, want the critical count carried through — it "+
+			"feeds the page's severity bars", page.Images[0].Counts)
+	}
 	if page.Meta.Title != "t" {
 		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
 	}
@@ -346,7 +350,7 @@ func TestScanRegistersHTMLFlags(t *testing.T) {
 // error or silently fall back to 0 (which would mean "pick a free port").
 func TestScanRejectsANonIntegerPort(t *testing.T) {
 	quietRender(t)
-	cmd := newScanCommand(Services{})
+	cmd := newScanCommand(argvServices(t))
 	err := cmd.RunE(cmd, []string{"--port", "abc"})
 	if err == nil {
 		t.Fatal("a non-integer --port was accepted")
@@ -359,7 +363,7 @@ func TestScanRejectsANonIntegerPort(t *testing.T) {
 // --full streams Scout's own output to the terminal; serving a page instead is
 // incoherent, so the combination is rejected rather than silently picking one.
 func TestScanRejectsFullWithHTML(t *testing.T) {
-	cmd := newScanCommand(Services{})
+	cmd := newScanCommand(argvServices(t))
 	err := cmd.RunE(cmd, []string{"1", "--full", "--html"})
 	if err == nil {
 		t.Fatal("--full with --html was accepted")
@@ -369,20 +373,24 @@ func TestScanRejectsFullWithHTML(t *testing.T) {
 	}
 }
 
-// The kx flags must be consumed so they never reach the scanner.
-func TestScanDoesNotForwardHTMLFlagsToTheScanner(t *testing.T) {
-	rest := []string{"1", "--html", "--port", "9000", "--no-open", "--only-fixed"}
-	html, rest := extractBool(rest, "--html")
-	port, rest, err := extractString(rest, "--port", "")
-	if err != nil {
-		t.Fatalf("extractString returned %v", err)
+// --no-open is extracted before --port, so a typo'd --no-open literal in
+// RunE would leave the token "--no-open" in argv for the following
+// extractString(rest, "--port", "") call to swallow as --port's own value,
+// rather than --port failing on a missing one. Calling extractBool/
+// extractString directly (as this file used to) would agree with whatever
+// literal the test itself passes and could never see a typo in RunE; only
+// real argv through cli.Execute proves the wiring (see argv_test.go's note
+// on why argument handling is exercised this way).
+func TestScanConsumesNoOpenBeforePort(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"scan", "--port", "--no-open"})
+	if err == nil {
+		t.Fatal("kx scan --port --no-open was accepted")
 	}
-	noOpen, rest := extractBool(rest, "--no-open")
-
-	if !html || !noOpen || port != "9000" {
-		t.Fatalf("html=%v port=%q noOpen=%v", html, port, noOpen)
-	}
-	if len(rest) != 2 || rest[0] != "1" || rest[1] != "--only-fixed" {
-		t.Errorf("rest = %v, want the index and the scanner's own flag", rest)
+	want := "flag needs an argument: --port"
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q — a typo'd --no-open would let --port "+
+			"swallow it as a value and report it as an invalid int instead",
+			err.Error(), want)
 	}
 }
