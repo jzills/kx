@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -508,22 +510,9 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 			if err != nil {
 				return err
 			}
-			command := SwitchCommand{
-				Kubectl: services.Kubectl, State: services.State, Lister: services.State,
-			}
-			stop := render.Status("switching " + use)
-			var name string
-			if isContext {
-				name, err = command.context(index)
-			} else {
-				name, err = command.namespace(index)
-			}
-			stop()
-			if err != nil {
-				return err
-			}
-			render.Success(fmt.Sprintf("Switched to '%s'", name))
-			return nil
+			// Shared with `kx get contexts <index>`, which routes here too, so
+			// the stale-namespace relist lives in one place.
+			return switchTo(services, use, index, isContext)
 		},
 	}
 }
@@ -531,49 +520,64 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 func listSwitchTargets(services Services, isContext bool) error {
 	if isContext {
 		stop := render.Status("fetching contexts")
-		output, err := ContextsCommand{
+		// The caption comes back with the listing rather than out of state: the
+		// listing no longer goes into history, so there is nothing there to read
+		// it from — on a fresh install nothing at all, and otherwise whatever
+		// resource listing happened to be current.
+		output, current, err := ContextsCommand{
 			Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 		}.Execute()
 		stop()
 		if err != nil {
 			return err
 		}
-		current, err := services.State.Load()
-		if err != nil {
-			return err
-		}
-		render.IndexedTable(output, "Contexts", current.Namespace, "")
+		render.IndexedTable(output, "Contexts", current, "")
 		return nil
 	}
 
 	stop := render.Status("fetching namespaces")
-	output, err := GetCommand{
-		Kubectl: services.Kubectl, State: services.State, Index: services.Index,
+	// Slot only: `kx ns` is a switch listing, not work. `kx get ns` remains the
+	// way to put namespaces in history for `kx describe <n>` and friends.
+	output, namespace, err := GetCommand{
+		Kubectl: services.Kubectl,
+		State:   slotOnly{writer: services.State},
+		Index:   services.Index,
 	}.Execute("namespaces", "", nil)
 	stop()
 	if err != nil {
 		return err
 	}
-	current, err := services.State.Load()
-	if err != nil {
-		return err
-	}
-	render.IndexedTable(output, "namespaces", current.Namespace, "")
+	render.IndexedTable(output, "namespaces", namespace, "")
 	return nil
 }
 
 func newStateCommand(services Services) *cobra.Command {
-	var all bool
+	var all, targets bool
 	cmd := &cobra.Command{
-		Use:     "state [position]",
-		Short:   "Show current state, jump to a history position, or list all entries with --all.",
-		Example: "  kx state\n  kx state --all\n  kx state 2",
-		Args:    cobra.MaximumNArgs(1),
+		Use:   "state [position]",
+		Short: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets.",
+		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
+			"  kx state 2",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
+			// Both read the whole file, and the slots live outside the stack, so
+			// --targets works on a history that is empty — the shape a fresh
+			// install has after `kx ns`.
+			if all || targets {
 				history, err := services.State.LoadHistory()
+				// No state file yet is not a failure for either view — it is
+				// the shape a new install has. Each renderer says what fills
+				// the thing it shows; ErrNoState names `kx get`, which is only
+				// half the answer and the wrong half for --targets.
+				if errors.Is(err, state.ErrNoState) {
+					history, err = state.History{}, nil
+				}
 				if err != nil {
 					return err
+				}
+				if targets {
+					render.SwitchTargets(history)
+					return nil
 				}
 				render.StateHistory(history)
 				return nil
@@ -599,6 +603,8 @@ func newStateCommand(services Services) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show the full history stack")
+	cmd.Flags().BoolVarP(&targets, "targets", "t", false,
+		"Show the namespace and context listings the switch commands index into")
 	return cmd
 }
 

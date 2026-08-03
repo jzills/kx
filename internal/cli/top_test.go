@@ -26,6 +26,9 @@ const podsJSON = `{"items":[
 type scriptedKubectl struct {
 	outputs []string
 	calls   [][]string
+	// namespaceCalls counts CurrentNamespace, which shells out to
+	// `kubectl config view` and so is worth not doing twice per command.
+	namespaceCalls int
 }
 
 func (k *scriptedKubectl) Run(args []string) (string, error) {
@@ -37,13 +40,16 @@ func (k *scriptedKubectl) Run(args []string) (string, error) {
 }
 func (k *scriptedKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
 func (k *scriptedKubectl) Probe([]string) int                         { return 0 }
-func (k *scriptedKubectl) CurrentNamespace() string                   { return "prod" }
-func (k *scriptedKubectl) CurrentContext() string                     { return "test" }
+func (k *scriptedKubectl) CurrentNamespace() string {
+	k.namespaceCalls++
+	return "prod"
+}
+func (k *scriptedKubectl) CurrentContext() string { return "test" }
 
 func TestTopAppendsUsagePercentages(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
 	states := &fakeState{}
-	output, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
+	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
 		Execute("", nil, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -61,7 +67,7 @@ func TestTopAppendsUsagePercentages(t *testing.T) {
 // a percentage against a partial denominator reads as headroom that isn't there.
 func TestTopMarksPartialLimitsUndefined(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
-	output, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", nil, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -85,7 +91,7 @@ func TestTopMarksPartialLimitsUndefined(t *testing.T) {
 // --no-limits skips the extra kubectl call entirely.
 func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
-	output, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", nil, true)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -101,7 +107,7 @@ func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
 // --containers is a different table shape, so percentages don't apply.
 func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
-	output, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", []string{"--containers"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -115,7 +121,7 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
 	states := &fakeState{}
-	output, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
+	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
 		Execute("", []string{"-A"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -133,7 +139,7 @@ func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
 func TestTopSavesPodsQuery(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
 	states := &fakeState{}
-	if _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
 		Execute("", nil, false); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -179,5 +185,41 @@ func TestPercentCellKeepsSubCorePrecision(t *testing.T) {
 	limit := resource.MustParse("2")
 	if got := percentCell("40m", &limit); got != "2%" {
 		t.Errorf("percentCell(40m, 2) = %q, want 2%%", got)
+	}
+}
+
+// Execute returns the namespace it listed from so the caller does not resolve
+// it a second time; each resolution is a `kubectl config view` subprocess.
+func TestTopReturnsTheNamespaceItUsed(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	_, namespace, err := TopCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute("", nil, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "prod" {
+		t.Errorf("namespace = %q, want prod", namespace)
+	}
+	if kubectl.namespaceCalls != 1 {
+		t.Errorf("CurrentNamespace called %d times, want 1", kubectl.namespaceCalls)
+	}
+}
+
+// An explicit -n needs no lookup at all, and is what the caption must show.
+func TestTopPrefersAnExplicitNamespace(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	_, namespace, err := TopCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute("", []string{"-n", "staging"}, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "staging" {
+		t.Errorf("namespace = %q, want staging", namespace)
+	}
+	if kubectl.namespaceCalls != 0 {
+		t.Errorf("CurrentNamespace called %d times with an explicit -n, want 0",
+			kubectl.namespaceCalls)
 	}
 }

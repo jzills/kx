@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/jzills/kx/internal/theme"
 )
 
 // ErrAborted is returned when the user declines a confirmation prompt. It
@@ -37,7 +39,7 @@ func (r *Renderer) prompts(in io.Reader) *bufio.Reader {
 }
 
 func (r *Renderer) confirmFrom(in io.Reader, message string) error {
-	fmt.Fprint(r.out, r.emphasizePaths(message)+" "+r.style("muted", "[y/n] (n):")+" ")
+	fmt.Fprint(r.out, r.emphasizePaths(message)+" "+r.style(theme.Muted, "[y/n] (n):")+" ")
 
 	answer, err := r.prompts(in).ReadString('\n')
 	if err != nil && answer == "" {

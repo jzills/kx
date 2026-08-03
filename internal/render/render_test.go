@@ -155,6 +155,44 @@ func TestUsagePctColor(t *testing.T) {
 	}
 }
 
+func TestStatusStyleClassifies(t *testing.T) {
+	cases := map[string]string{
+		"Running":           theme.StatusOK,
+		"CrashLoopBackOff":  theme.StatusBad,
+		"Pending":           theme.StatusWarn,
+		"ContainerCreating": theme.StatusWarn,
+		"Init:0/2":          theme.StatusWarn,
+		"WhoKnows":          theme.StatusNeutral,
+	}
+	for status, want := range cases {
+		if got := StatusStyle(status); got != want {
+			t.Errorf("StatusStyle(%q) = %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestUsageStyleThresholds(t *testing.T) {
+	cases := []struct {
+		pct      int
+		resource string
+		want     string
+	}{
+		{74, "memory", ""},
+		{75, "memory", theme.StatusWarn},
+		{89, "memory", theme.StatusWarn},
+		{90, "memory", theme.StatusBad},
+		{89, "cpu", ""},
+		{90, "cpu", theme.StatusWarn},
+		// CPU never reaches critical: throttling degrades, it doesn't crash.
+		{100, "cpu", theme.StatusWarn},
+	}
+	for _, c := range cases {
+		if got := UsageStyle(c.pct, c.resource); got != c.want {
+			t.Errorf("UsageStyle(%d, %q) = %q, want %q", c.pct, c.resource, got, c.want)
+		}
+	}
+}
+
 // A cell like "17 (3h ago)" must still align its count, which right-aligning
 // the whole cell would not do.
 func TestAlignRestartsPadsNumericPrefixOnly(t *testing.T) {

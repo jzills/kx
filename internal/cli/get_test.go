@@ -39,6 +39,9 @@ func (f *fakeKubectl) CurrentNamespace() string {
 
 type fakeState struct {
 	saved []state.State
+	// named records slot writes separately, so a test can tell the two
+	// destinations apart — which is the whole distinction `kx ns` turns on.
+	named []state.State
 	err   error
 }
 
@@ -50,6 +53,14 @@ func (f *fakeState) Save(s state.State) error {
 	return nil
 }
 
+func (f *fakeState) SaveNamed(s state.State) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.named = append(f.named, s)
+	return nil
+}
+
 func newGet(kubectl *fakeKubectl, states *fakeState) GetCommand {
 	return GetCommand{Kubectl: kubectl, State: states, Index: index.Service{}}
 }
@@ -58,7 +69,7 @@ func TestGetIndexesOutputAndSavesState(t *testing.T) {
 	kubectl := &fakeKubectl{output: podsOutput, namespace: "prod"}
 	states := &fakeState{}
 
-	output, err := newGet(kubectl, states).Execute("pods", "", nil)
+	output, _, err := newGet(kubectl, states).Execute("pods", "", nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -84,7 +95,7 @@ func TestGetIndexesOutputAndSavesState(t *testing.T) {
 
 func TestGetForwardsExtraArgsToKubectl(t *testing.T) {
 	kubectl := &fakeKubectl{output: podsOutput}
-	_, err := newGet(kubectl, &fakeState{}).Execute("pods", "", []string{"-l", "app=web"})
+	_, _, err := newGet(kubectl, &fakeState{}).Execute("pods", "", []string{"-l", "app=web"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -103,14 +114,16 @@ func TestGetForwardsExtraArgsToKubectl(t *testing.T) {
 // current one, or later commands resolve indexes against the wrong namespace.
 func TestGetRecordsExplicitNamespace(t *testing.T) {
 	for name, args := range map[string][]string{
-		"short flag": {"-n", "staging"},
-		"long flag":  {"--namespace", "staging"},
-		"equals":     {"--namespace=staging"},
+		"short flag":         {"-n", "staging"},
+		"long flag":          {"--namespace", "staging"},
+		"equals":             {"--namespace=staging"},
+		"short equals":       {"-n=staging"},
+		"attached shorthand": {"-nstaging"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			states := &fakeState{}
 			kubectl := &fakeKubectl{output: podsOutput, namespace: "default"}
-			if _, err := newGet(kubectl, states).Execute("pods", "", args); err != nil {
+			if _, _, err := newGet(kubectl, states).Execute("pods", "", args); err != nil {
 				t.Fatalf("Execute: %v", err)
 			}
 			if states.saved[0].Namespace != "staging" {
@@ -123,10 +136,12 @@ func TestGetRecordsExplicitNamespace(t *testing.T) {
 // Names aren't unique across namespaces, so -A results are never indexed —
 // dead X numbers would resolve to the wrong resource.
 func TestGetAllNamespacesIsNotIndexed(t *testing.T) {
-	for _, flag := range []string{"-A", "--all-namespaces"} {
+	for _, flag := range []string{
+		"-A", "--all-namespaces", "--all-namespaces=true", "-A=true",
+	} {
 		states := &fakeState{}
 		kubectl := &fakeKubectl{output: podsOutput}
-		output, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
+		output, _, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
@@ -139,10 +154,44 @@ func TestGetAllNamespacesIsNotIndexed(t *testing.T) {
 	}
 }
 
+// "=false" is a request for the ordinary single-namespace listing, so it must
+// index like any other. Reading it as "all namespaces" would silently drop the
+// indexes the user is about to use.
+func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
+	for _, flag := range []string{"--all-namespaces=false", "-A=false"} {
+		states := &fakeState{}
+		kubectl := &fakeKubectl{output: podsOutput}
+		output, _, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if output == podsOutput {
+			t.Errorf("%s output was not indexed:\n%s", flag, output)
+		}
+		if len(states.saved) != 1 {
+			t.Errorf("%s saved %d states, want 1", flag, len(states.saved))
+		}
+	}
+}
+
+// kubectl takes the last value when a flag is repeated; the recorded namespace
+// has to agree with the one the listing actually came from.
+func TestGetRecordsTheLastNamespaceWhenRepeated(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: podsOutput, namespace: "default"}
+	args := []string{"-n", "first", "-n", "second"}
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", args); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if states.saved[0].Namespace != "second" {
+		t.Errorf("saved namespace = %q, want second", states.saved[0].Namespace)
+	}
+}
+
 func TestGetFiltersByMatchTerm(t *testing.T) {
 	states := &fakeState{}
 	kubectl := &fakeKubectl{output: podsOutput}
-	output, err := newGet(kubectl, states).Execute("pods", "nginx", nil)
+	output, _, err := newGet(kubectl, states).Execute("pods", "nginx", nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -159,7 +208,7 @@ func TestGetFiltersByMatchTerm(t *testing.T) {
 func TestGetSavesQueryForRefresh(t *testing.T) {
 	states := &fakeState{}
 	kubectl := &fakeKubectl{output: podsOutput}
-	if _, err := newGet(kubectl, states).Execute("pods", "nginx", []string{"-n", "prod"}); err != nil {
+	if _, _, err := newGet(kubectl, states).Execute("pods", "nginx", []string{"-n", "prod"}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -180,7 +229,7 @@ func TestGetSavesQueryForRefresh(t *testing.T) {
 
 func TestGetWithoutMatchLeavesQueryMatchNil(t *testing.T) {
 	states := &fakeState{}
-	if _, err := newGet(&fakeKubectl{output: podsOutput}, states).Execute("pods", "", nil); err != nil {
+	if _, _, err := newGet(&fakeKubectl{output: podsOutput}, states).Execute("pods", "", nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if states.saved[0].Query.Match != nil {
@@ -191,7 +240,7 @@ func TestGetWithoutMatchLeavesQueryMatchNil(t *testing.T) {
 // Empty listings must not push a state entry, or `kx back` fills with nothing.
 func TestGetEmptyOutputSavesNothing(t *testing.T) {
 	states := &fakeState{}
-	if _, err := newGet(&fakeKubectl{output: ""}, states).Execute("pods", "", nil); err != nil {
+	if _, _, err := newGet(&fakeKubectl{output: ""}, states).Execute("pods", "", nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 0 {
@@ -201,7 +250,7 @@ func TestGetEmptyOutputSavesNothing(t *testing.T) {
 
 func TestGetPropagatesKubectlError(t *testing.T) {
 	kubectl := &fakeKubectl{err: errors.New("error: the server doesn't have a resource type \"widgets\"")}
-	_, err := newGet(kubectl, &fakeState{}).Execute("widgets", "", nil)
+	_, _, err := newGet(kubectl, &fakeState{}).Execute("widgets", "", nil)
 	if err == nil {
 		t.Fatal("Execute succeeded despite a kubectl failure")
 	}
@@ -213,7 +262,7 @@ func TestGetPropagatesKubectlError(t *testing.T) {
 func TestGetUnknownResourceKindPassesThrough(t *testing.T) {
 	states := &fakeState{}
 	output := "NAME      AGE\nwidget1   5d"
-	if _, err := newGet(&fakeKubectl{output: output}, states).Execute("widgets.example.com", "", nil); err != nil {
+	if _, _, err := newGet(&fakeKubectl{output: output}, states).Execute("widgets.example.com", "", nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if kind, _ := states.saved[0].Resources.Kind("widget1"); kind != kinds.Kind("widgets.example.com") {
@@ -224,3 +273,35 @@ func TestGetUnknownResourceKindPassesThrough(t *testing.T) {
 // indexService returns the real index service, used where a test exercises the
 // full listing path rather than substituting one.
 func indexService() Indexer { return index.Service{} }
+
+// An empty listing saves no state, so a caller reading the namespace back out
+// of saved state captioned it with the previous entry's. Switching to an empty
+// namespace and running `kx get pods` reported the namespace you had left.
+func TestGetReturnsTheNamespaceEvenWhenNothingMatched(t *testing.T) {
+	kubectl := &fakeKubectl{output: "", namespace: "empty-ns"}
+	states := &fakeState{}
+
+	_, namespace, err := newGet(kubectl, states).Execute("pods", "", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "empty-ns" {
+		t.Errorf("namespace = %q, want empty-ns", namespace)
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("an empty listing saved state: %+v", states.saved)
+	}
+}
+
+// An explicit -n is the namespace the listing came from, saved or not.
+func TestGetReturnsTheExplicitNamespace(t *testing.T) {
+	kubectl := &fakeKubectl{output: "", namespace: "current"}
+	_, namespace, err := newGet(kubectl, &fakeState{}).
+		Execute("pods", "", []string{"-n", "staging"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "staging" {
+		t.Errorf("namespace = %q, want staging", namespace)
+	}
+}

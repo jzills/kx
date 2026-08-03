@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/web"
 )
 
 func decode(t *testing.T, document string) map[string]json.RawMessage {
@@ -158,3 +159,248 @@ func TestImagesNoun(t *testing.T) {
 }
 
 var _ scanner.Service = (*fakeScanner)(nil)
+
+// `kx scan web` is a mistyped index, not a scanner flag. Sweeping the whole
+// namespace instead would act on something other than what was typed, and
+// outside --full the stray argument is dropped without a word.
+//
+// The guard returns before any cluster or scanner call, which is what makes it
+// testable without either.
+func TestScanRejectsANonNumericIndex(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"web"})
+	if err == nil {
+		t.Fatal("a non-numeric index was accepted")
+	}
+	if !strings.Contains(err.Error(), "'web' is not a valid int") {
+		t.Errorf("err = %v, want it to name the bad argument", err)
+	}
+}
+
+// The selector, the banner label and the empty-result message all describe the
+// same scope and have to agree; they live on one type for that reason.
+func TestScanScopeDescribesOneNamespace(t *testing.T) {
+	scope := scanScope{Namespace: "prod"}
+	if got := strings.Join(scope.selector(), " "); got != "-n prod" {
+		t.Errorf("selector = %q, want %q", got, "-n prod")
+	}
+	if got := scope.label(); got != "prod" {
+		t.Errorf("label = %q, want the namespace", got)
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "'prod'") {
+		t.Errorf("emptyMessage = %q, want it to name the namespace", got)
+	}
+}
+
+func TestScanScopeDescribesAllNamespaces(t *testing.T) {
+	scope := scanScope{All: true}
+	if got := strings.Join(scope.selector(), " "); got != "--all-namespaces" {
+		t.Errorf("selector = %q, want %q", got, "--all-namespaces")
+	}
+	// The literal string kx get -A already prints for the same scope.
+	if got := scope.label(); got != "all namespaces" {
+		t.Errorf("label = %q, want %q", got, "all namespaces")
+	}
+	if got := scope.emptyMessage(); !strings.Contains(got, "any namespace") {
+		t.Errorf("emptyMessage = %q, want it to cover every namespace", got)
+	}
+}
+
+// The regression test for the actual bug: `kx scan -n prod` used to sweep the
+// current namespace and report it as though it were prod.
+func TestCollectSweepsTheNamespaceItIsGiven(t *testing.T) {
+	kubectl := &fakeKubectl{
+		namespace: "kube-system",
+		output:    `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	images, err := command.Collect(scanScope{Namespace: "prod"}, "scout")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if strings.Join(images, ",") != "api:v1" {
+		t.Errorf("images = %v, want [api:v1]", images)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "-n prod") {
+		t.Errorf("argv = %q, want it to sweep 'prod'", argv)
+	}
+	if strings.Contains(argv, "kube-system") {
+		t.Errorf("argv = %q, swept the current namespace instead", argv)
+	}
+}
+
+func TestCollectAllNamespacesUsesTheClusterWideSelector(t *testing.T) {
+	kubectl := &fakeKubectl{
+		output: `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+	}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	if _, err := command.Collect(scanScope{All: true}, "scout"); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	argv := strings.Join(kubectl.args, " ")
+	if !strings.Contains(argv, "--all-namespaces") {
+		t.Errorf("argv = %q, want the cluster-wide selector", argv)
+	}
+	if strings.Contains(argv, "-n ") {
+		t.Errorf("argv = %q, want no single-namespace selector", argv)
+	}
+}
+
+// An empty sweep names the scope it searched, so the message is actionable.
+func TestCollectReportsAnEmptyScope(t *testing.T) {
+	kubectl := &fakeKubectl{output: `{"items":[]}`}
+	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
+
+	_, err := command.Collect(scanScope{All: true}, "scout")
+	if err == nil {
+		t.Fatal("an empty sweep succeeded")
+	}
+	if !strings.Contains(err.Error(), "any namespace") {
+		t.Errorf("err = %v, want it to name the scope", err)
+	}
+}
+
+// An index resolves a name from one namespace's listing; scanning that name
+// somewhere else finds a different resource or nothing at all.
+func TestScanRejectsANamespaceFlagAlongsideAnIndex(t *testing.T) {
+	for _, argv := range [][]string{
+		{"1", "-n", "prod"},
+		{"1", "--namespace=prod"},
+		{"1", "-A"},
+		{"1", "--all-namespaces"},
+	} {
+		quietRender(t)
+		cmd := newScanCommand(Services{})
+		err := cmd.RunE(cmd, argv)
+		if err == nil {
+			t.Fatalf("kx scan %v was accepted", argv)
+		}
+		if !strings.Contains(err.Error(), "cannot be combined with an index") {
+			t.Errorf("kx scan %v: err = %v", argv, err)
+		}
+	}
+}
+
+// `-n ""` is still a namespace flag for the purpose of the guards, which is the
+// distinction hasFlag exists to preserve.
+func TestScanRejectsAnEmptyNamespaceFlagAlongsideAnIndex(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "-n", ""})
+	if err == nil {
+		t.Fatal("kx scan 1 -n \"\" was accepted")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined with an index") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestScanRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(Services{})
+	err := cmd.RunE(cmd, []string{"-n", "prod", "-A"})
+	if err == nil {
+		t.Fatal("-n and -A were accepted together")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// scanPage is the only place a ScanPage's fields are set, so a direct test
+// pins each one to its source without needing a live cluster or a served
+// page — swapping Scope for something else, or dropping a row, fails this
+// directly rather than only showing up once a page is rendered.
+func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
+	rows := []scanner.ImageScan{
+		{Image: "api:v1", Counts: map[string]int{"critical": 1}},
+	}
+	page := scanPage("prod", rows, web.Meta{Title: "t"})
+
+	if page.Scope != "prod" {
+		t.Errorf("Scope = %q, want prod", page.Scope)
+	}
+	if len(page.Images) != 1 || page.Images[0].Image != "api:v1" {
+		t.Errorf("Images = %+v, want the one api:v1 row", page.Images)
+	}
+	if page.Images[0].Counts["critical"] != 1 {
+		t.Errorf("Counts = %+v, want the critical count carried through — it "+
+			"feeds the page's severity bars", page.Images[0].Counts)
+	}
+	if page.Meta.Title != "t" {
+		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
+	}
+}
+
+// A namespace sweep's page must carry the same "Mixed · " cross-kind label
+// the terminal's ScopeBanner prints; an indexed scan's pageScope is built
+// separately (in the index branch, string(kind)+"/"+name+" · "+namespace) and
+// never calls this, which is what keeps it unlabelled.
+func TestSweepPageScopeAddsTheMixedLabel(t *testing.T) {
+	if got := sweepPageScope("prod"); got != "Mixed · prod" {
+		t.Errorf("sweepPageScope(%q) = %q, want %q", "prod", got, "Mixed · prod")
+	}
+}
+
+func TestScanRegistersHTMLFlags(t *testing.T) {
+	cmd := newScanCommand(Services{})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// --port is hand-parsed like every other scan flag, so a bad value has to
+// fail the same deliberate way a bad index does rather than crash on Atoi's
+// error or silently fall back to 0 (which would mean "pick a free port").
+func TestScanRejectsANonIntegerPort(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"--port", "abc"})
+	if err == nil {
+		t.Fatal("a non-integer --port was accepted")
+	}
+	if !strings.Contains(err.Error(), "'--port'") || !strings.Contains(err.Error(), "'abc' is not a valid int") {
+		t.Errorf("err = %v, want it to name the bad --port value", err)
+	}
+}
+
+// --full streams Scout's own output to the terminal; serving a page instead is
+// incoherent, so the combination is rejected rather than silently picking one.
+func TestScanRejectsFullWithHTML(t *testing.T) {
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"1", "--full", "--html"})
+	if err == nil {
+		t.Fatal("--full with --html was accepted")
+	}
+	if !strings.Contains(err.Error(), "--full") || !strings.Contains(err.Error(), "--html") {
+		t.Errorf("error %q names neither flag", err)
+	}
+}
+
+// --no-open is extracted before --port, so a typo'd --no-open literal in
+// RunE would leave the token "--no-open" in argv for the following
+// extractString(rest, "--port", "") call to swallow as --port's own value,
+// rather than --port failing on a missing one. Calling extractBool/
+// extractString directly (as this file used to) would agree with whatever
+// literal the test itself passes and could never see a typo in RunE; only
+// real argv through cli.Execute proves the wiring (see argv_test.go's note
+// on why argument handling is exercised this way).
+func TestScanConsumesNoOpenBeforePort(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"scan", "--port", "--no-open"})
+	if err == nil {
+		t.Fatal("kx scan --port --no-open was accepted")
+	}
+	want := "flag needs an argument: --port"
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q — a typo'd --no-open would let --port "+
+			"swallow it as a value and report it as an invalid int instead",
+			err.Error(), want)
+	}
+}

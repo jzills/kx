@@ -58,8 +58,11 @@ func TestHandParsedFlagsAppearInHelp(t *testing.T) {
 	want := map[string][]string{
 		"get":    {"--match", "--decode", "--key", "--yes"},
 		"secret": {"--match", "--decode", "--key", "--yes"},
-		"scan":   {"--engine", "--full"},
-		"top":    {"--match", "--no-limits"},
+		"scan": {
+			"--engine", "--full", "--namespace", "--all-namespaces",
+			"--html", "--port", "--no-open",
+		},
+		"top": {"--match", "--no-limits"},
 	}
 	byName := map[string]*cobra.Command{}
 	for _, cmd := range NewRoot(argvServices(t), "test").Commands() {

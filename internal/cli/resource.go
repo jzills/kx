@@ -34,9 +34,10 @@ func (c DescribeCommand) Execute(index int, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		// kubectl already printed its own message; the only thing left to
-		// decide is whether this was a stale index worth refreshing.
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		// kubectl already printed its own message; what is left is deciding
+		// whether this was a stale index worth refreshing, and forwarding the
+		// exit code either way.
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -58,7 +59,7 @@ func (c EditCommand) Execute(index int, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -192,7 +193,7 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 		return err
 	}
 	if code != 0 {
-		return ensureExists(c.Kubectl, kind, name, namespace)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
@@ -225,7 +226,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			return ensureExists(c.Kubectl, kind, name, namespace)
+			return forwardExit(c.Kubectl, kind, name, namespace, code)
 		}
 		return nil
 
@@ -237,8 +238,16 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		args := append([]string{
 			"logs", "-l", selector, "--prefix=true", "-n", namespace,
 		}, extraArgs...)
-		_, err = c.Kubectl.RunInteractive(args, false)
-		return err
+		code, err := c.Kubectl.RunInteractive(args, false)
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			// No per-resource staleness check: the selector may legitimately
+			// match nothing, and the workload itself was just read to build it.
+			return SilentError{Code: code}
+		}
+		return nil
 
 	default:
 		return fmt.Errorf("Logs are not supported for '%s'.", kind)
@@ -321,7 +330,13 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 			if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
 				return err
 			}
-			return fmt.Errorf("Command failed in container (exit %d).", code)
+			// The message has to be kx's own — kubectl's stderr is suppressed
+			// above — but the code belongs to the command that ran, so that
+			// `kx exec 1 -- test -f /x` is usable from a shell.
+			return ExitError{
+				Code:    code,
+				Message: fmt.Sprintf("Command failed in container (exit %d).", code),
+			}
 		}
 		return nil
 	}
@@ -346,54 +361,76 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	)
 }
 
-// ContextKind is the pseudo-kind used for kubeconfig contexts. Not a
-// Kubernetes kind, but stored in state so the context command can tell a
-// context index from a resource index.
-const ContextKind kinds.Kind = "Context"
-
 // ContextsCommand lists kubeconfig contexts and indexes them.
+//
+// The listing goes to the context slot and nowhere else. A context is a
+// kubeconfig entry rather than a server resource — there is no
+// `kubectl describe context` — so nothing that reads the history stack can do
+// anything with one, and pushing it there only evicts work the stack is for.
 type ContextsCommand struct {
 	Kubectl kubectl.Service
-	State   StateWriter
+	State   NamedStateWriter
 	Index   Indexer
 }
 
-func (c ContextsCommand) Execute() (string, error) {
+// Execute lists the contexts and returns the indexed table along with the active
+// context, which captions it.
+//
+// The context is returned rather than left for the caller to fetch, the way
+// GetCommand.Execute returns its namespace: the listing is saved with it
+// already, and `kubectl config current-context` is a subprocess worth spawning
+// once. Reading it back out of state is not an option either — the listing goes
+// to the slot, not the history the caller can Load().
+func (c ContextsCommand) Execute() (table, context string, err error) {
 	output, err := c.Kubectl.Run([]string{"config", "get-contexts"})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	current := c.Kubectl.CurrentContext()
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
-		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, ContextKind),
-			Namespace: c.Kubectl.CurrentContext(),
+		if err := c.State.SaveNamed(state.State{
+			Resources: state.NewResources(names, kinds.Context),
+			Namespace: current,
 		}); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, current, nil
+}
+
+// NamedResolver resolves an index against a kind's own slot rather than against
+// the history cursor.
+type NamedResolver interface {
+	FieldsNamed(index int, kind kinds.Kind) (name, namespace string, err error)
 }
 
 // SwitchCommand activates an indexed namespace or context.
 //
-// Both are the same shape: resolve an index, refuse it if it names the wrong
-// kind, then hand the name to kubectl config. The kind check is not optional —
-// `kubectl config set-context --namespace` accepts any string, so a stale index
-// pointing at a Pod would silently make that pod's name the active namespace.
+// The index is resolved against the slot for the kind the command names, not
+// against the current history entry. `kx ns 2` has already said which kind it
+// means, so an intervening `kx get pods` should not turn that 2 into a pod —
+// which is what made the sequence `kx ns` / `kx get pod` / `kx ns 2` fail (#156).
+//
+// Reading the slot is also what keeps a stale index from making a pod's name the
+// active namespace: `kubectl config set-context --namespace` accepts any string
+// and validates nothing against the server, and only namespace listings ever
+// reach the namespace slot. There is deliberately no fallback to the current
+// entry when the slot is empty — that fallback is the defect.
+//
+// Nothing here checks the namespace exists either. Setting one is a local
+// kubeconfig edit that kubectl does not validate — pointing at a namespace
+// before creating it is a normal thing to do — and kx pre-empts nothing
+// elsewhere: every staleness check in the tool reacts to a failure rather than
+// running ahead of one.
 type SwitchCommand struct {
 	Kubectl kubectl.Service
-	State   IndexResolver
-	// Lister supplies the `kx back` hint when the kind check fails.
-	Lister kinds.PreviousLister
+	State   NamedResolver
 }
 
 func (c SwitchCommand) namespace(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+	name, _, err := c.State.FieldsNamed(index, kinds.Namespace)
 	if err != nil {
-		return "", err
-	}
-	if err := kinds.EnsureKind(index, name, kind, kinds.Namespace, c.Lister); err != nil {
 		return "", err
 	}
 	_, err = c.Kubectl.Run([]string{"config", "set-context", "--current", "--namespace=" + name})
@@ -401,13 +438,12 @@ func (c SwitchCommand) namespace(index int) (string, error) {
 }
 
 func (c SwitchCommand) context(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+	name, _, err := c.State.FieldsNamed(index, kinds.Context)
 	if err != nil {
 		return "", err
 	}
-	if err := kinds.EnsureKind(index, name, kind, ContextKind, c.Lister); err != nil {
-		return "", err
-	}
+	// use-context rejects a name that isn't there with a message of its own,
+	// which is the whole of the validation either switch needs.
 	_, err = c.Kubectl.Run([]string{"config", "use-context", name})
 	return name, err
 }

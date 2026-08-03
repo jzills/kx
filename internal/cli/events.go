@@ -103,15 +103,11 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
 
-			output, err := TopCommand{
+			output, namespace, err := TopCommand{
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 			}.Execute(match, rest, noLimits)
 			if err != nil {
 				return err
-			}
-			namespace := extractNamespace(rest)
-			if namespace == "" {
-				namespace = services.Kubectl.CurrentNamespace()
 			}
 			render.IndexedTable(output, "pods", namespace, "")
 			return nil

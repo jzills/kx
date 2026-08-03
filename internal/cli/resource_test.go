@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -42,6 +43,9 @@ type recordingKubectl struct {
 	exitCode    int
 	probeCode   int
 	quietStderr bool
+	// contextReads counts CurrentContext calls, each of which is a kubectl
+	// subprocess in the real service.
+	contextReads int
 }
 
 func (k *recordingKubectl) Run(args []string) (string, error) {
@@ -61,7 +65,11 @@ func (k *recordingKubectl) Probe(args []string) int {
 }
 
 func (k *recordingKubectl) CurrentNamespace() string { return "prod" }
-func (k *recordingKubectl) CurrentContext() string   { return "test" }
+
+func (k *recordingKubectl) CurrentContext() string {
+	k.contextReads++
+	return "test"
+}
 
 func joinArgs(args []string) string { return strings.Join(args, " ") }
 
@@ -105,12 +113,91 @@ func TestDescribeSucceedingDoesNotProbe(t *testing.T) {
 	}
 }
 
-// A resource that still exists means the failure was something else, and must
-// not be reported as stale state.
-func TestDescribeFailureOnLiveResourceIsNotStale(t *testing.T) {
-	kubectl := &recordingKubectl{exitCode: 1, probeCode: 0}
-	if err := (DescribeCommand{Kubectl: kubectl, State: pod("nginx")}).Execute(1, nil); err != nil {
-		t.Errorf("err = %v, want nil for a live resource", err)
+// A resource that still exists means the failure was something else: not stale
+// state, but still a failure. kubectl has already printed why, so the exit code
+// is forwarded without a second message.
+//
+// Returning nil here is what made `kx describe 1 --bogus-flag` print kubectl's
+// error and then exit 0, so a shell could not tell it had failed.
+func TestDescribeFailureOnLiveResourceForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %#v, want SilentError", err)
+	}
+	if silent.Code != 3 {
+		t.Errorf("exit code = %d, want kubectl's 3", silent.Code)
+	}
+	// Not stale, so the refresh path must leave it alone.
+	if isStale(err) {
+		t.Error("a live resource's failure was classified as stale")
+	}
+}
+
+// The same failure against a resource that has gone is stale state, and keeps
+// routing into the refresh instead.
+func TestDescribeFailureOnVanishedResourceStaysStale(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+	if !isStale(err) {
+		t.Error("StaleResourceError is not classified as stale")
+	}
+}
+
+func TestEditAndPortForwardForwardTheExitCode(t *testing.T) {
+	t.Run("edit", func(t *testing.T) {
+		kubectl := &recordingKubectl{exitCode: 5, probeCode: 0}
+		err := EditCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+		var silent SilentError
+		if !errors.As(err, &silent) || silent.Code != 5 {
+			t.Errorf("err = %#v, want SilentError{5}", err)
+		}
+	})
+	t.Run("port-forward", func(t *testing.T) {
+		kubectl := &recordingKubectl{exitCode: 2, probeCode: 0}
+		err := PortForwardCommand{Kubectl: kubectl, State: pod("nginx")}.
+			Execute(1, "8080:80", nil)
+		var silent SilentError
+		if !errors.As(err, &silent) || silent.Code != 2 {
+			t.Errorf("err = %#v, want SilentError{2}", err)
+		}
+	})
+}
+
+func TestLogsForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 4, probeCode: 0}
+	err := LogsCommand{Kubectl: kubectl, State: pod("nginx"), Status: noStatus}.
+		Execute(1, nil)
+	var silent SilentError
+	if !errors.As(err, &silent) || silent.Code != 4 {
+		t.Errorf("err = %#v, want SilentError{4}", err)
+	}
+}
+
+// kubectl's stderr is suppressed for `kx exec -- cmd`, so kx has to report the
+// failure itself — but the container's exit code is what a script needs back,
+// not a flat 1.
+func TestExecForwardsTheContainerExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 42, probeCode: 0}
+	err := ExecCommand{Kubectl: kubectl, State: pod("nginx"), Shells: []string{"sh"}}.
+		Execute(1, []string{"false"}, nil)
+
+	var exit ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("err = %#v, want ExitError", err)
+	}
+	if exit.Code != 42 {
+		t.Errorf("exit code = %d, want the container's 42", exit.Code)
+	}
+	if !strings.Contains(exit.Message, "exit 42") {
+		t.Errorf("message = %q, want it to name the code", exit.Message)
 	}
 }
 
@@ -408,24 +495,73 @@ func TestExecFailsWhenNoShellFound(t *testing.T) {
 	}
 }
 
-// kubectl config set-context accepts any string, so a stale index pointing at a
-// Pod would otherwise make that pod's name the active namespace.
-func TestNamespaceSwitchRejectsWrongKind(t *testing.T) {
+// slots answers FieldsNamed from per-kind slots, the way the state service
+// does: the index counts against that kind's own listing, and a kind with no
+// listing has nothing to resolve against.
+type slots map[kinds.Kind][]string
+
+func (s slots) FieldsNamed(index int, kind kinds.Kind) (string, string, error) {
+	names, ok := s[kind]
+	if !ok {
+		return "", "", fmt.Errorf(
+			"No %s listing yet — run 'kx %s' to list them.", kind, strings.ToLower(string(kind)))
+	}
+	if index < 1 || index > len(names) {
+		return "", "", fmt.Errorf(
+			"Index %d is out of range — the last %s listing had %d.", index, kind, len(names))
+	}
+	return names[index-1], "prod", nil
+}
+
+func namespaceSlot(names ...string) slots {
+	return slots{kinds.Namespace: names}
+}
+
+// The sequence from #156. Whatever is in history — here a pods listing — the
+// index counts against the namespace slot, because `kx ns 2` already said which
+// kind it means.
+func TestNamespaceSwitchReadsTheSlotNotTheCurrentListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := SwitchCommand{Kubectl: kubectl, State: pod("nginx")}.namespace(1)
+	state := slots{
+		kinds.Namespace: {"default", "staging"},
+		kinds.Pod:       {"nginx", "redis"},
+	}
+
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(2)
+	if err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if name != "staging" {
+		t.Errorf("name = %q, want staging — index 2 resolved against the wrong listing", name)
+	}
+	want := "config set-context --current --namespace=staging"
+	if got := joinArgs(kubectl.runs[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+// An unpopulated slot must not fall back to the current listing: that fallback
+// is what let a pod's name become the active namespace, and kubectl config
+// set-context validates nothing that would catch it.
+func TestNamespaceSwitchWithoutANamespaceListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	state := slots{kinds.Pod: {"nginx"}}
+
+	_, err := SwitchCommand{Kubectl: kubectl, State: state}.namespace(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a namespace, want an error")
+		t.Fatal("switched with no namespace listing, want an error")
+	}
+	if !strings.Contains(err.Error(), "No Namespace listing") {
+		t.Errorf("err = %v, want it to report an empty slot", err)
 	}
 	if len(kubectl.runs) != 0 {
-		t.Error("kubectl config was called for a wrong-kind index")
+		t.Error("kubectl config was called with no namespace listing")
 	}
 }
 
 func TestNamespaceSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("staging", kinds.Namespace),
-	}.namespace(1)
+	name, err := SwitchCommand{Kubectl: kubectl, State: namespaceSlot("staging")}.namespace(1)
 	if err != nil {
 		t.Fatalf("namespace: %v", err)
 	}
@@ -438,18 +574,33 @@ func TestNamespaceSwitch(t *testing.T) {
 	}
 }
 
-func TestContextSwitchRejectsResourceIndex(t *testing.T) {
-	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: pod("nginx")}.context(1)
+// Setting a namespace is a local kubeconfig edit that kubectl does not validate
+// — pointing at one before creating it is a normal thing to do — and every
+// staleness check in kx reacts to a failure rather than pre-empting one. So the
+// switch spends no round trip checking the namespace exists.
+func TestNamespaceSwitchDoesNotProbeTheCluster(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	if _, err := (SwitchCommand{Kubectl: kubectl, State: namespaceSlot("staging")}).
+		namespace(1); err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if len(kubectl.probes) != 0 {
+		t.Errorf("namespace switch probed the cluster: %v", kubectl.probes)
+	}
+}
+
+func TestContextSwitchWithoutAContextListing(t *testing.T) {
+	state := slots{kinds.Pod: {"nginx"}}
+	_, err := SwitchCommand{Kubectl: &recordingKubectl{}, State: state}.context(1)
 	if err == nil {
-		t.Fatal("switched to a Pod as a context, want an error")
+		t.Fatal("switched to a context with no context listing, want an error")
 	}
 }
 
 func TestContextSwitch(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	name, err := SwitchCommand{
-		Kubectl: kubectl, State: workload("docker-desktop", ContextKind),
-	}.context(1)
+	state := slots{kinds.Context: {"docker-desktop"}}
+	name, err := SwitchCommand{Kubectl: kubectl, State: state}.context(1)
 	if err != nil {
 		t.Fatalf("context: %v", err)
 	}
@@ -458,6 +609,11 @@ func TestContextSwitch(t *testing.T) {
 	}
 	if want := "config use-context docker-desktop"; joinArgs(kubectl.runs[0]) != want {
 		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+	// use-context rejects an unknown name itself, so kx spends no round trip
+	// checking what kubectl is about to check.
+	if len(kubectl.probes) != 0 {
+		t.Errorf("context switch probed the cluster: %v", kubectl.probes)
 	}
 }
 
@@ -468,14 +624,48 @@ func TestContextsSavesWithContextKind(t *testing.T) {
 		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
 	}
 	states := &fakeState{}
-	if _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+	if _, _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
 		Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(states.saved) != 1 {
-		t.Fatalf("saved %d entries, want 1", len(states.saved))
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
 	}
-	if kind, _ := states.saved[0].Resources.Kind("docker-desktop"); kind != ContextKind {
-		t.Errorf("kind = %q, want %q", kind, ContextKind)
+	if kind, _ := states.named[0].Resources.Kind("docker-desktop"); kind != kinds.Context {
+		t.Errorf("kind = %q, want %q", kind, kinds.Context)
+	}
+}
+
+// A context is a kubeconfig entry, not a server resource — there is no
+// `kubectl describe context` — so nothing downstream can consume one from the
+// history stack, and putting it there only evicts work.
+func TestContextsDoesNotTouchHistory(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	states := &fakeState{}
+	if _, _, err := (ContextsCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("pushed %d entries onto history, want 0", len(states.saved))
+	}
+}
+
+// The listing is saved with the active context already, so Execute hands it
+// back for the caption rather than making the caller fetch it.
+func TestContextsReturnsTheActiveContext(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	_, current, err := ContextsCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if current != "test" {
+		t.Errorf("context = %q, want the active context", current)
 	}
 }

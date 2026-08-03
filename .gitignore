@@ -4,6 +4,10 @@ docs/
 build/
 dist/
 
+# Written by `go test -coverprofile`, which is what CI runs and what you run
+# locally to see where you stand against the floor in pr.yml.
+coverage.out
+
 # Leftovers from the Python implementation. Nothing in the repo creates these
 # any more; they are ignored so a stale local venv can't be committed.
 .venv/

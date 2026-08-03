@@ -82,7 +82,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx get <resource> [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [<index>...] [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx secret [<index>...] [--decode] [--key/-k str] [--match/-m str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [--match/-m str] [--no-limits] [kubectl flags...]` | List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits. |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
@@ -99,12 +99,12 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| `kx scan [<index>] [--engine str] [--full] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or the whole namespace when no index is given; prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
+| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
-| `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage the whole namespace when no index is given; alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
-| `kx state [<position>] [--all/-a]` | Show current state, jump to a history position, or list all entries with --all. |
+| `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx drop <position>` | Remove a history entry by position (shown in kx state --all). |
 | `kx back` | Navigate to the previous kx get result. |
 | `kx forward` | Navigate to the next kx get result. |
@@ -158,9 +158,30 @@ or the full per-image CVE report with `--full`. Requires
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
 
+### View reports in a browser
+
+`kx diag --html` and `kx scan --html` render the same analysis as a page and
+open it in your browser as well as printing to the terminal; Ctrl-C stops the
+server. It binds `127.0.0.1` only, and nothing is written to disk — the report
+lives in memory for as long as the command runs.
+
+The page is drawn in your active theme, so `kx theme dracula` restyles it too.
+Sweep rows expand into that resource's full report, and image rows expand
+into the CVEs behind their severity counts — detail the terminal has no room
+for. None of it costs an extra API or scanner call: both were already
+gathered to build the table you'd see without `--html`.
+
+`--port` serves on a specific port instead of picking a free one, and
+`--no-open` skips launching a browser — the URL still prints, so you can
+open it yourself.
+
 ## State
 
-`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands always resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
+`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
+
+Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. `kx state --all` summarizes those slots under the history table, and `kx state --targets` expands them to the indexed listings the switch commands read, so you can pick a number without re-listing.
+
+To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual. It refreshes the slot as well, so the two spellings never disagree about what index 2 means. A narrowed listing counts, though: after `kx get ns -l team=platform`, `kx ns <index>` indexes into those namespaces rather than all of them. Run `kx ns` to list them all again.
 
 ## Configuration
 
@@ -187,17 +208,31 @@ Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized
 
 ## Development
 
+Go, at the version pinned by the `go` directive in `go.mod`. Nothing else is
+required to build or run.
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+go build ./...
 ```
 
 Run the CLI directly:
 
 ```bash
-python -m kx.main --help
+go run ./cmd/kx --help
+go run ./cmd/kx get pods
 ```
+
+Checks:
+
+```bash
+gofmt -l ./cmd ./internal ./tools   # must print nothing
+go vet ./...
+go test -race ./...
+```
+
+`pre-commit run --all-files` runs gofmt and go vet, and regenerates the command
+table above from the command tree — it fails if the table has drifted from the
+commands it documents. Tests are not in the hook; run them yourself.
 
 The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)
 tapes — see [`demo/README.md`](demo/README.md) for seeding the demo namespace

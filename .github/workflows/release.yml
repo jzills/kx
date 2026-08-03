@@ -144,6 +144,17 @@ jobs:
       contents: write
       actions: write
     steps:
+      # Before download-artifact: checkout cleans the workspace, which would
+      # take assets/ with it. Needed for .krew.yaml, which the validation
+      # below renders.
+      - uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Download binary archives
         uses: actions/download-artifact@v8
         with:
@@ -161,6 +172,43 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "v${{ needs.build-and-publish.outputs.version }}" \
             --generate-notes
+
+      # krew-index runs exactly this validator on the PR the dispatch below
+      # opens, and it is stricter than anything we can check before publishing:
+      # it installs every platform for real and inspects what lands. v0.1.0
+      # passed our own pre-release checks and was then rejected upstream for
+      # shipping no license file, where it sat as a stuck external PR nobody
+      # was watching.
+      #
+      # This still runs after the release is published — the validator needs
+      # downloadable assets with real sha256s, so it cannot run earlier. What
+      # it buys is finding out in our own pipeline within a minute rather than
+      # from a PR on someone else's repository.
+      - name: Validate the manifest krew-index will receive
+        env:
+          KREW_VERSION: v0.4.5
+        run: |
+          set -euo pipefail
+          tag="v${{ needs.build-and-publish.outputs.version }}"
+
+          # The bot's own renderer, so the manifest under test is the one it
+          # will submit rather than our approximation of it.
+          docker run --rm -v "$PWD:/home/app" \
+            "ghcr.io/rajatjindal/krew-release-bot:v0.0.50" \
+            krew-release-bot template --tag "$tag" --template-file .krew.yaml > idx.yaml
+          cat idx.yaml
+
+          # validate-krew-manifest drives `kubectl krew install`, so krew has to
+          # be on PATH. Same setup krew-index's own CI uses.
+          pushd "$(mktemp -d)"
+          curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/download/${KREW_VERSION}/krew.yaml"
+          curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/download/${KREW_VERSION}/krew-linux_amd64.tar.gz"
+          tar zxf krew-linux_amd64.tar.gz
+          ./krew-linux_amd64 install --manifest=krew.yaml --archive=krew-linux_amd64.tar.gz
+          popd
+          export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
+
+          go run "sigs.k8s.io/krew/cmd/validate-krew-manifest@${KREW_VERSION}" -manifest idx.yaml
 
       # Dispatch the Krew workflow at the new tag so krew-release-bot derives the
       # version from GITHUB_REF and opens a PR to kubernetes-sigs/krew-index

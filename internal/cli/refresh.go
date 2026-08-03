@@ -56,6 +56,23 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 	return nil
 }
 
+// forwardExit turns a non-zero kubectl exit into the error kx should return.
+//
+// A vanished resource becomes StaleResourceError, so the caller refreshes.
+// Anything else forwards kubectl's own exit code: kubectl has already printed
+// its message, so there is nothing to add, but exiting 0 would tell a script
+// the command succeeded. Returning nil here — which is what ensureExists does
+// on its own when the resource is still there — is why `kx describe 1
+// --bogus-flag` printed kubectl's error and then exited 0.
+func forwardExit(
+	kubectl kubectl.Service, kind kinds.Kind, name, namespace string, code int,
+) error {
+	if err := ensureExists(kubectl, kind, name, namespace); err != nil {
+		return err
+	}
+	return SilentError{Code: code}
+}
+
 // isStale reports whether an error means the current state entry no longer
 // describes the cluster.
 func isStale(err error) bool {
@@ -99,17 +116,13 @@ func recoverState(services Services) recoverOutcome {
 	}
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-	table, err := get.Execute(query.Resource, match, query.Args)
-	if err != nil {
-		return replayFailed
-	}
-	updated, err := services.State.Load()
+	table, namespace, err := get.Execute(query.Resource, match, query.Args)
 	if err != nil {
 		return replayFailed
 	}
 
 	render.Raw("State was stale — refreshed, pick a new index:")
-	render.IndexedTable(table, query.Resource, updated.Namespace, "")
+	render.IndexedTable(table, query.Resource, namespace, "")
 	return refreshed
 }
 

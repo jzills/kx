@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"strings"
-
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
@@ -19,6 +17,24 @@ type StateWriter interface {
 	Save(state.State) error
 }
 
+// NamedStateWriter writes a listing to its per-kind slot instead of the history
+// stack.
+type NamedStateWriter interface {
+	SaveNamed(state.State) error
+}
+
+// slotOnly routes a listing into its per-kind slot, leaving the history stack
+// untouched.
+//
+// `kx ns` runs through GetCommand like any other listing, but must not push an
+// entry: switching namespaces is the most frequent thing kx does, and stacking
+// every listing evicted the work the stack exists for. Swapping the writer
+// rather than teaching GetCommand about kinds keeps that decision at the one
+// call site that makes it.
+type slotOnly struct{ writer NamedStateWriter }
+
+func (s slotOnly) Save(entry state.State) error { return s.writer.SaveNamed(entry) }
+
 // GetCommand lists resources and saves the listing so later commands can
 // resolve indexes against it.
 type GetCommand struct {
@@ -30,33 +46,39 @@ type GetCommand struct {
 // extractNamespace finds an explicit namespace in the pass-through flags, so
 // the saved state records the namespace the listing actually came from rather
 // than the context's current one.
+// The spellings themselves are extractString's business rather than this
+// function's. A second matcher living here drifted from that one: `-nprod` and
+// `-n=prod` went unrecognised, so the state recorded the current namespace
+// while kubectl listed the one that was asked for, and every index afterwards
+// resolved against the wrong namespace.
+//
+// The flag stays in extraArgs for kubectl, so the stripped remainder is
+// discarded; extractString builds a new slice and never mutates its input. So
+// is the error, which fires only when the flag ends the argv with no value —
+// kubectl rejects that before any listing reaches the state.
 func extractNamespace(extraArgs []string) string {
-	for i, arg := range extraArgs {
-		if (arg == "-n" || arg == "--namespace") && i+1 < len(extraArgs) {
-			return extraArgs[i+1]
-		}
-		if strings.HasPrefix(arg, "--namespace=") {
-			return strings.SplitN(arg, "=", 2)[1]
-		}
-	}
-	return ""
+	namespace, _, _ := extractString(extraArgs, "--namespace", "-n")
+	return namespace
 }
 
 func allNamespaces(extraArgs []string) bool {
-	for _, arg := range extraArgs {
-		if arg == "-A" || arg == "--all-namespaces" {
-			return true
-		}
-	}
-	return false
+	present, _ := extractBool(extraArgs, "--all-namespaces", "-A")
+	return present
 }
 
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
-// the text to display.
-func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (string, error) {
+// the text to display and the namespace the listing came from.
+//
+// The namespace is returned rather than left for the caller to read back out of
+// saved state: an empty listing saves nothing, so a caller doing that would
+// caption it with whatever the previous entry's namespace was. Switching to an
+// empty namespace and running `kx get pods` reported the namespace you left.
+func (c GetCommand) Execute(
+	resource, filterTerm string, extraArgs []string,
+) (table, namespace string, err error) {
 	output, err := c.Kubectl.Run(append([]string{"get", resource}, extraArgs...))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if filterTerm != "" {
 		output = c.Index.Filter(output, filterTerm)
@@ -64,16 +86,17 @@ func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (st
 	if allNamespaces(extraArgs) {
 		// Names aren't unique across namespaces, so `-A` results are never
 		// indexed — returning unindexed output keeps dead X numbers off the
-		// screen.
-		return output, nil
+		// screen. The caller labels the scope; there is no single namespace.
+		return output, "", nil
+	}
+
+	namespace = extractNamespace(extraArgs)
+	if namespace == "" {
+		namespace = c.Kubectl.CurrentNamespace()
 	}
 
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
-		namespace := extractNamespace(extraArgs)
-		if namespace == "" {
-			namespace = c.Kubectl.CurrentNamespace()
-		}
 		var match *string
 		if filterTerm != "" {
 			match = &filterTerm
@@ -91,8 +114,8 @@ func (c GetCommand) Execute(resource, filterTerm string, extraArgs []string) (st
 			},
 		}
 		if err := c.State.Save(entry); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return indexed, nil
+	return indexed, namespace, nil
 }
