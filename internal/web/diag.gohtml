@@ -1,0 +1,156 @@
+{{define "report"}}
+<div class="block">
+  <p class="label">Summary</p>
+  <div class="findings">
+    {{if .Findings}}
+      {{range .Findings}}
+      <div class="finding-row">
+        <span class="icon {{severityClass .Severity}}">{{severityIcon .Severity}}</span>
+        <span>{{.Summary}}</span>
+      </div>
+      {{end}}
+    {{else}}
+      <p class="dim">No issues detected</p>
+    {{end}}
+  </div>
+</div>
+
+{{if .Pods}}
+<div class="block">
+  <p class="label">Pods</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>POD</th><th>PHASE</th><th>READY</th><th class="num">RESTARTS</th>
+        <th>CONTAINER</th><th>STATE</th><th>REASON</th><th>CPU</th><th>MEM</th>
+      </tr></thead>
+      <tbody>
+      {{range $pod := .Pods}}
+        {{if $pod.Containers}}
+          {{range $i, $c := $pod.Containers}}
+          <tr>
+            <td>{{if eq $i 0}}{{$pod.Name}}{{end}}</td>
+            <td class="{{statusClass $pod.Phase}}">{{if eq $i 0}}{{$pod.Phase}}{{end}}</td>
+            <td>{{if eq $i 0}}{{ready $pod}}{{end}}</td>
+            <td class="num">{{$c.RestartCount}}</td>
+            <td>{{$c.Name}}</td>
+            <td class="{{statusClass $c.State}}">{{$c.State}}</td>
+            <td class="{{statusClass (reason $c)}}">{{reason $c}}</td>
+            {{template "meter" cpuUsage $c}}
+            {{template "meter" memoryUsage $c}}
+          </tr>
+          {{end}}
+        {{else}}
+          <tr>
+            <td>{{$pod.Name}}</td>
+            <td class="{{statusClass $pod.Phase}}">{{$pod.Phase}}</td>
+            <td>{{ready $pod}}</td>
+            <td class="num"></td><td></td><td></td><td></td>
+            <td class="dim">—</td><td class="dim">—</td>
+          </tr>
+        {{end}}
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+{{$logs := false}}
+{{range .Pods}}{{range .Containers}}{{if .LogLines}}{{$logs = true}}{{end}}{{end}}{{end}}
+{{if $logs}}
+<div class="block">
+  <p class="label">Logs</p>
+  {{range $pod := .Pods}}
+    {{range $c := $pod.Containers}}
+      {{if $c.LogLines}}
+      <div>
+        <p class="subhead">Pod/{{$pod.Name}} · container {{$c.Name}}{{if not $c.LogFiltered}} · recent output{{end}}</p>
+        <pre class="logblock">{{range $c.LogLines}}{{.}}
+{{end}}</pre>
+      </div>
+      {{end}}
+    {{end}}
+  {{end}}
+</div>
+{{end}}
+
+<div class="block">
+  <p class="label">Warning events</p>
+  {{if .WarningEvents}}
+    <div>
+    {{range .WarningEvents}}
+      <div class="event">
+        <p class="event-head">{{.Kind}}/{{.Name}} · <span class="{{statusClass .Reason}}">{{.Reason}}</span> ×{{.Count}}{{with age .LastTimestamp}} · {{.}}{{end}}</p>
+        <p class="event-msg">{{.Message}}</p>
+      </div>
+    {{end}}
+    </div>
+  {{else}}
+    <p class="dim">No warning events</p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "meter"}}
+{{if .Known}}
+<td><div class="meter"><span class="meter-track"><span class="meter-fill {{.Class}}" style="width:{{.Pct}}%"></span></span><span class="meter-value">{{.Pct}}%</span></div></td>
+{{else}}
+<td class="dim">—</td>
+{{end}}
+{{end}}
+
+{{define "body"}}
+{{if .Single}}
+  {{$r := index .Reports 0}}
+  <div class="banner">
+    <span>{{$r.Kind}}/{{$r.Name}}</span>
+    <span class="sep">·</span>
+    <span class="ns">{{$r.Namespace}}</span>
+    <span class="sep">·</span>
+    <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
+  </div>
+  {{template "report" $r}}
+{{else}}
+  <div class="block">
+    {{if eq .Checked 0}}
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+    {{else if .Reports}}
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+      <div class="table-wrap">
+        <div class="sweep-head{{if .AllNamespaces}} ns-grid{{end}}">
+          {{if .AllNamespaces}}
+            <div class="kind">KIND</div><div>NAMESPACE</div>
+          {{else}}
+            <div class="index">X</div><div class="kind">KIND</div>
+          {{end}}
+          <div>NAME</div><div>VERDICT</div><div class="finding">TOP FINDING</div><div></div>
+        </div>
+        {{range $i, $r := .Reports}}
+        <details class="row {{severityClass $r.Verdict}}{{if $.AllNamespaces}} ns-grid{{end}}">
+          <summary>
+            {{if $.AllNamespaces}}
+              <span class="kind">{{$r.Kind}}</span><span class="dim">{{$r.Namespace}}</span>
+            {{else}}
+              <span class="index">{{add $i 1}}</span><span class="kind">{{$r.Kind}}</span>
+            {{end}}
+            <span>{{$r.Name}}</span>
+            <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
+            <span class="finding">{{with $r.Findings}}{{(index . 0).Summary}}{{end}}</span>
+            <span class="marker">›</span>
+          </summary>
+          <div class="drawer">{{template "report" $r}}</div>
+        </details>
+        {{end}}
+      </div>
+      <footer>
+        {{.Healthy}} healthy {{if eq .Healthy 1}}resource{{else}}resources{{end}} not shown
+        {{- if .AllNamespaces}} · indexes not saved for all-namespace listings{{else}} · kx diag &lt;index&gt; for the same detail in your terminal{{end}}
+        {{- range .Dropped}}<br>{{.}} shares a name with an indexed resource and was omitted{{end}}
+      </footer>
+    {{else}}
+      <p class="caption">Mixed · {{.Scope}} · <span class="status-ok">{{.Checked}} checked · all healthy</span></p>
+    {{end}}
+  </div>
+{{end}}
+{{end}}

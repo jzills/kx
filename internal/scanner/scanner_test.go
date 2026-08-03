@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,11 +24,208 @@ const sarif = `{
   }]
 }`
 
-func TestParseCounts(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(sarif)
+// realSarif is derived from `docker scout cves --format sarif nginx:1.21`
+// (Scout 1.22.0, which emits 408 rules and 410 results): the curl,
+// nghttp2/nginx and golang.org/x/crypto rules and their results are real,
+// trimmed to one rule per case that matters — a rule with one package, a
+// rule covering two packages whose results disagree about being fixed, and a
+// Go module purl. The rest are synthetic, added to exercise cases the trimmed
+// real document doesn't happen to contain: CVE-9999-0000 is an out-of-range
+// rule index; a third result against the nghttp2/nginx rule names a package
+// ("libssl1.1") the rule never declared and omits "Fixed version" entirely,
+// so the rule's fixed_version has nothing valid to leak onto; and a fourth
+// rule ("zlib1g") gets a result whose message has no purl at all. Their
+// message-label layout is invented, not observed; only the four real results
+// should be read as a fact about Scout's output.
+func realSarif(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "scout.sarif.json"))
 	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
+		t.Fatalf("reading fixture returned %v", err)
 	}
+	return string(raw)
+}
+
+func TestParseFindingsReadsEveryResult(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	// One finding per result, including the one whose rule index is bogus.
+	if len(findings) != 7 {
+		t.Fatalf("got %d findings, want 7", len(findings))
+	}
+
+	first := findings[0]
+	if first.ID != "CVE-2021-22945" {
+		t.Errorf("ID = %q", first.ID)
+	}
+	if first.Severity != "CRITICAL" {
+		t.Errorf("Severity = %q", first.Severity)
+	}
+	if first.Package != "curl" {
+		t.Errorf("Package = %q, want curl", first.Package)
+	}
+	// The purl version is percent-encoded; %2B is a plus.
+	if first.Installed != "7.74.0-1.3+deb11u1" {
+		t.Errorf("Installed = %q", first.Installed)
+	}
+	if first.FixedIn != "7.74.0-1.3+deb11u2" {
+		t.Errorf("FixedIn = %q", first.FixedIn)
+	}
+	if first.URL != "https://scout.docker.com/v/CVE-2021-22945" {
+		t.Errorf("URL = %q", first.URL)
+	}
+}
+
+// A rule covering two packages emits two results whose fixed versions differ.
+// Reading the fix from the rule would claim a fix for a package that has none.
+//
+// Both packages must actually turn up before their FixedIn is asserted on: a
+// mutant that deletes the message-parsing block entirely reads Package from
+// the rule's first purl for every result referencing it, so both results
+// here would report Package "nghttp2" and neither would report "nginx" — an
+// unchecked zero-value Finding{} for "nginx" has FixedIn == "", which passes
+// the empty-FixedIn assertion below for the wrong reason. found catches that.
+func TestParseFindingsTakesFixedVersionPerResult(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var nghttp2, nginx Finding
+	var foundNghttp2, foundNginx bool
+	for _, f := range findings {
+		switch f.Package {
+		case "nghttp2":
+			nghttp2, foundNghttp2 = f, true
+		case "nginx":
+			nginx, foundNginx = f, true
+		}
+	}
+	if !foundNghttp2 {
+		t.Fatal("no finding has Package \"nghttp2\" — the message-derived package split did not happen")
+	}
+	if !foundNginx {
+		t.Fatal("no finding has Package \"nginx\" — the message-derived package split did not happen")
+	}
+	if nghttp2.FixedIn != "1.43.0-1+deb11u1" {
+		t.Errorf("nghttp2 FixedIn = %q", nghttp2.FixedIn)
+	}
+	// "not fixed" is prose, not a version. It must not reach the page as one.
+	if nginx.FixedIn != "" {
+		t.Errorf("nginx FixedIn = %q, want empty for an unfixed package", nginx.FixedIn)
+	}
+}
+
+// A message can name a package without saying whether it's fixed — Scout
+// omits the "Fixed version" line rather than always printing one. The
+// libssl1.1 result here references the nghttp2/nginx rule (CVE-2023-44487)
+// but names a package that rule never declared, so its rule.fixed_version
+// (nghttp2's fix) belongs to neither nghttp2 nor nginx nor libssl1.1 for this
+// result. If the rule's value survived because the message didn't repeat it,
+// libssl1.1 would print nghttp2's fix — a fix it has no connection to at
+// all, which is the sharpest version of the harm this task exists to
+// prevent: once the message names a package, the rule's fields must be
+// abandoned wholesale, not kept for whichever field the message left blank.
+func TestParseFindingsMessagePurlWithoutFixedVersionYieldsEmptyFixedIn(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "libssl1.1" {
+			found = true
+			if f.Installed != "1.1.1n-0+deb11u4" {
+				t.Errorf("Installed = %q", f.Installed)
+			}
+			if f.FixedIn != "" {
+				t.Errorf("FixedIn = %q, want empty: the message named the package but had no "+
+					"Fixed version line, so the rule's fixed_version (nghttp2's fix) must not "+
+					"leak through", f.FixedIn)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no finding has Package \"libssl1.1\" — the message-derived package split did not happen")
+	}
+}
+
+// A message with no purl at all — no "Package" line Scout could print — falls
+// back to the rule for every field, not just the ones a partial message left
+// unset. This is the fallback path itself, distinct from the tests above
+// that exercise a message overriding it.
+func TestParseFindingsMessageWithoutPurlFallsBackToRule(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "zlib1g" {
+			found = true
+			if f.Installed != "1.2.11.dfsg-2+deb11u1" {
+				t.Errorf("Installed = %q", f.Installed)
+			}
+			if f.FixedIn != "1.2.11.dfsg-2+deb11u2" {
+				t.Errorf("FixedIn = %q", f.FixedIn)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no finding has Package \"zlib1g\" — the rule fallback did not run")
+	}
+}
+
+// A Go module keeps its path; collapsing it to the last segment would turn
+// golang.org/x/crypto into "crypto".
+func TestParseFindingsKeepsModulePaths(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "golang.org/x/crypto" {
+			found = true
+			if f.Installed != "v0.28.0" {
+				t.Errorf("Installed = %q", f.Installed)
+			}
+		}
+	}
+	if !found {
+		t.Error("the Go module's full path was not preserved")
+	}
+}
+
+// The counts the terminal table prints must not change.
+func TestCountBySeverityMatchesTheOldTally(t *testing.T) {
+	findings, err := Scout{}.ParseFindings(realSarif(t))
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	counts := CountBySeverity(findings)
+	want := map[string]int{
+		"CRITICAL": 1, "HIGH": 1, "MEDIUM": 1, "LOW": 3, "UNSPECIFIED": 1,
+	}
+	for severity, expected := range want {
+		if counts[severity] != expected {
+			t.Errorf("%s = %d, want %d", severity, counts[severity], expected)
+		}
+	}
+}
+
+func mustParseFindings(t *testing.T, document string) []Finding {
+	t.Helper()
+	findings, err := Scout{}.ParseFindings(document)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	return findings
+}
+
+func TestParseCounts(t *testing.T) {
+	counts := CountBySeverity(mustParseFindings(t, sarif))
 	want := map[string]int{"CRITICAL": 2, "HIGH": 1, "MEDIUM": 1, "LOW": 0, "UNSPECIFIED": 1}
 	for severity, expected := range want {
 		if counts[severity] != expected {
@@ -37,10 +236,7 @@ func TestParseCounts(t *testing.T) {
 
 // Every bucket is present even at zero, so the table always has a full row.
 func TestParseCountsAlwaysHasEveryBucket(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(`{"runs":[]}`)
-	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
-	}
+	counts := CountBySeverity(mustParseFindings(t, `{"runs":[]}`))
 	for _, severity := range Severities {
 		if _, ok := counts[severity]; !ok {
 			t.Errorf("bucket %q is missing", severity)
@@ -57,10 +253,7 @@ func TestParseCountsHandlesBadRuleIndexes(t *testing.T) {
 		`{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleIndex":-1}]}]}`,
 	}
 	for _, document := range cases {
-		counts, err := Scout{}.ParseCounts(document)
-		if err != nil {
-			t.Fatalf("ParseCounts: %v", err)
-		}
+		counts := CountBySeverity(mustParseFindings(t, document))
 		if counts["UNSPECIFIED"] != 1 {
 			t.Errorf("UNSPECIFIED = %d, want 1 for %s", counts["UNSPECIFIED"], document)
 		}
@@ -70,12 +263,9 @@ func TestParseCountsHandlesBadRuleIndexes(t *testing.T) {
 // An unrecognized severity label falls into UNSPECIFIED rather than creating a
 // bucket the table has no column for.
 func TestParseCountsUnknownSeverity(t *testing.T) {
-	counts, err := Scout{}.ParseCounts(
-		`{"runs":[{"tool":{"driver":{"rules":[{"properties":{"cvssV3_severity":"SEVERE"}}]}},` +
-			`"results":[{"ruleIndex":0}]}]}`)
-	if err != nil {
-		t.Fatalf("ParseCounts: %v", err)
-	}
+	counts := CountBySeverity(mustParseFindings(t,
+		`{"runs":[{"tool":{"driver":{"rules":[{"properties":{"cvssV3_severity":"SEVERE"}}]}},`+
+			`"results":[{"ruleIndex":0}]}]}`))
 	if counts["UNSPECIFIED"] != 1 {
 		t.Errorf("UNSPECIFIED = %d, want 1", counts["UNSPECIFIED"])
 	}
@@ -85,8 +275,8 @@ func TestParseCountsUnknownSeverity(t *testing.T) {
 }
 
 func TestParseCountsRejectsGarbage(t *testing.T) {
-	if _, err := (Scout{}).ParseCounts("not json"); err == nil {
-		t.Error("ParseCounts accepted non-JSON")
+	if _, err := (Scout{}).ParseFindings("not json"); err == nil {
+		t.Error("ParseFindings accepted non-JSON")
 	}
 }
 

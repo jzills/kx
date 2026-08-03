@@ -1,5 +1,6 @@
-// Package scanner runs a container image vulnerability scanner and rolls its
-// output up into severity counts.
+// Package scanner runs a container image vulnerability scanner and parses its
+// output into per-vulnerability findings, which are then rolled up into
+// severity counts.
 //
 // This is the one place kx shells out to something other than kubectl, so the
 // scanner is behind an Engine interface: adding a second one is a matter of
@@ -10,8 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -22,11 +25,14 @@ var Severities = []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNSPECIFIED"}
 
 // ImageScan is the rolled-up result for one image. Counts is nil when the scan
 // itself failed — an unpullable image, an auth problem, unparseable output —
-// and Error carries a short reason for the table's status cell.
+// and Error carries a short reason for the table's status cell. Findings is
+// the detail behind Counts — one entry per SARIF result — for anything that
+// needs more than the tally.
 type ImageScan struct {
-	Image  string
-	Counts map[string]int
-	Error  string
+	Image    string
+	Counts   map[string]int
+	Findings []Finding
+	Error    string
 }
 
 // Service runs scanner commands.
@@ -116,8 +122,8 @@ type Engine interface {
 	PassthroughArgv(image string, extra []string) []string
 	// SummaryArgv asks for machine-readable output.
 	SummaryArgv(image string) []string
-	// ParseCounts rolls that output up into severity counts.
-	ParseCounts(stdout string) (map[string]int, error)
+	// ParseFindings reads that output into one Finding per result.
+	ParseFindings(stdout string) ([]Finding, error)
 }
 
 const scoutDocsURL = "https://docs.docker.com/scout/"
@@ -145,53 +151,199 @@ func (Scout) SummaryArgv(image string) []string {
 	return []string{"docker", "scout", "cves", "--format", "sarif", image}
 }
 
-// ParseCounts reads SARIF, mapping each result to its rule's severity. A result
-// whose rule index is missing or out of range counts as UNSPECIFIED rather than
-// being dropped, so the totals always account for every finding.
-func (Scout) ParseCounts(stdout string) (map[string]int, error) {
-	var document struct {
-		Runs []struct {
-			Tool struct {
-				Driver struct {
-					Rules []struct {
-						Properties struct {
-							Severity string `json:"cvssV3_severity"`
-						} `json:"properties"`
-					} `json:"rules"`
-				} `json:"driver"`
-			} `json:"tool"`
-			Results []struct {
-				RuleIndex *int `json:"ruleIndex"`
-			} `json:"results"`
-		} `json:"runs"`
+// Finding is one vulnerability in one package. Fields Scout does not supply
+// stay empty and their columns are dropped rather than invented.
+type Finding struct {
+	ID        string
+	Severity  string
+	Package   string
+	Installed string
+	FixedIn   string
+	URL       string
+}
+
+// CountBySeverity tallies findings into the canonical buckets.
+//
+// The counts the summary table prints are derived from the findings rather
+// than parsed separately, so the table and the HTML CVE list cannot disagree
+// about which bucket anything landed in.
+//
+// A Severity outside the canonical list counts as UNSPECIFIED rather than
+// being dropped: ParseFindings never produces one today, but this is exported
+// beside a multi-engine Engine interface, and a future engine's own severity
+// vocabulary should lose a label to the catch-all, not out of the total.
+func CountBySeverity(findings []Finding) map[string]int {
+	known := make(map[string]bool, len(Severities))
+	counts := make(map[string]int, len(Severities))
+	for _, severity := range Severities {
+		known[severity] = true
+		counts[severity] = 0
 	}
+	for _, finding := range findings {
+		severity := finding.Severity
+		if !known[severity] {
+			severity = "UNSPECIFIED"
+		}
+		counts[severity]++
+	}
+	return counts
+}
+
+// sarifDocument is the slice of SARIF Scout populates.
+type sarifDocument struct {
+	Runs []struct {
+		Tool struct {
+			Driver struct {
+				Rules []struct {
+					ID         string `json:"id"`
+					HelpURI    string `json:"helpUri"`
+					Properties struct {
+						Severity     string   `json:"cvssV3_severity"`
+						FixedVersion string   `json:"fixed_version"`
+						Purls        []string `json:"purls"`
+					} `json:"properties"`
+				} `json:"rules"`
+			} `json:"driver"`
+		} `json:"tool"`
+		Results []struct {
+			RuleID    string `json:"ruleId"`
+			RuleIndex *int   `json:"ruleIndex"`
+			Message   struct {
+				Text string `json:"text"`
+			} `json:"message"`
+		} `json:"results"`
+	} `json:"runs"`
+}
+
+// ParseFindings reads SARIF into one Finding per result.
+//
+// Per result, not per rule: a rule covering two packages emits two results,
+// and one finding per rule would lose one of them — and with it the count,
+// since the severity tallies have always been over results.
+//
+// Package and fixed version are read from the result's own message, which is
+// the only per-result source for them. A rule's fixed_version describes just
+// one of its packages: CVE-2023-44487 is fixed for nghttp2 and unfixed for
+// nginx, and the rule carries only the former. The rule's values remain as
+// fallbacks for a message that does not parse.
+func (Scout) ParseFindings(stdout string) ([]Finding, error) {
+	var document sarifDocument
 	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
 		return nil, err
 	}
 
 	known := map[string]bool{}
-	counts := map[string]int{}
 	for _, severity := range Severities {
-		counts[severity] = 0
 		known[severity] = true
 	}
 
+	var findings []Finding
 	for _, run := range document.Runs {
 		rules := run.Tool.Driver.Rules
 		for _, result := range run.Results {
-			severity := "UNSPECIFIED"
+			finding := Finding{ID: result.RuleID, Severity: "UNSPECIFIED"}
+
 			if result.RuleIndex != nil && *result.RuleIndex >= 0 && *result.RuleIndex < len(rules) {
-				if value := rules[*result.RuleIndex].Properties.Severity; value != "" {
-					severity = strings.ToUpper(value)
+				rule := rules[*result.RuleIndex]
+				if value := strings.ToUpper(rule.Properties.Severity); known[value] {
+					finding.Severity = value
+				}
+				finding.URL = rule.HelpURI
+				if finding.ID == "" {
+					finding.ID = rule.ID
+				}
+				finding.FixedIn = fixedVersion(rule.Properties.FixedVersion)
+				if len(rule.Properties.Purls) > 0 {
+					finding.Package, finding.Installed = parsePurl(rule.Properties.Purls[0])
 				}
 			}
-			if !known[severity] {
-				severity = "UNSPECIFIED"
+
+			// The message is per-result and therefore authoritative. Once it
+			// yields a purl, the rule's values are abandoned wholesale rather
+			// than field by field: a rule's fixed_version describes only one
+			// of its packages, so keeping it beside a package the message
+			// named is exactly how a fix gets promised for a package that has
+			// none.
+			if purl := purlPattern.FindString(result.Message.Text); purl != "" {
+				finding.Package, finding.Installed = parsePurl(purl)
+				finding.FixedIn = ""
+				if fixed, ok := messageField(result.Message.Text, "Fixed version"); ok {
+					finding.FixedIn = fixedVersion(fixed)
+				}
 			}
-			counts[severity]++
+
+			findings = append(findings, finding)
 		}
 	}
-	return counts, nil
+	return findings, nil
+}
+
+// purlPattern matches the package URL embedded in a result's message.
+//
+// Matched rather than parsed off its label, so a change to Scout's column
+// padding or wording cannot break it.
+var purlPattern = regexp.MustCompile(`pkg:\S+`)
+
+// messageField reads one "Label :value" line out of a result's message. The
+// value is everything after the first colon, so a Debian epoch version like
+// "1:2.3-4" survives intact.
+func messageField(text, label string) (string, bool) {
+	for _, line := range strings.Split(text, "\n") {
+		name, value, found := strings.Cut(line, ":")
+		if found && strings.TrimSpace(name) == label {
+			return strings.TrimSpace(value), true
+		}
+	}
+	return "", false
+}
+
+// fixedVersion normalises Scout's "not fixed", which is prose rather than a
+// version and must not be printed as one.
+func fixedVersion(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "not fixed") {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// osPackageTypes are the purl types whose namespace is a distribution rather
+// than part of the package's identity.
+var osPackageTypes = map[string]bool{"deb": true, "rpm": true, "apk": true}
+
+// parsePurl reads a package URL into a display name and the installed version.
+//
+// "pkg:deb/debian/curl@7.74.0-1.3%2Bdeb11u1?os_distro=bullseye" is curl at
+// 7.74.0-1.3+deb11u1: the distro namespace is noise. A Go module keeps its
+// whole path, because "golang.org/x/crypto" collapsed to "crypto" names
+// nothing.
+func parsePurl(purl string) (name, version string) {
+	body := strings.TrimPrefix(purl, "pkg:")
+	if cut := strings.IndexAny(body, "?#"); cut >= 0 {
+		body = body[:cut]
+	}
+	if at := strings.LastIndex(body, "@"); at >= 0 {
+		version = decodePurl(body[at+1:])
+		body = body[:at]
+	}
+
+	segments := strings.Split(body, "/")
+	if len(segments) < 2 {
+		return decodePurl(body), version
+	}
+	if osPackageTypes[segments[0]] {
+		return decodePurl(segments[len(segments)-1]), version
+	}
+	return decodePurl(strings.Join(segments[1:], "/")), version
+}
+
+// decodePurl undoes the percent-encoding purls carry; a Debian version's "+"
+// arrives as %2B.
+func decodePurl(value string) string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
 }
 
 var engines = map[string]Engine{"scout": Scout{}}

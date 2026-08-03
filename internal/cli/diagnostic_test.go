@@ -2,12 +2,22 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/web"
 )
 
 // fakeGatherer replays a scripted sweep and records the namespace it was asked
@@ -170,5 +180,217 @@ func TestDiagRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
 		t.Fatal("-n and -A were accepted together")
 	} else if !strings.Contains(err.Error(), "cannot be combined") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestDiagnosticRegistersHTMLFlags(t *testing.T) {
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", []string{"diag"})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// sweepPage and resourcePage are the only places a DiagPage's fields are set,
+// so a table test over them pins each field to its source without needing a
+// live cluster or a served page — dropping AllNamespaces, transposing
+// Checked/Healthy, or hard-coding Single wrong all fail one of these directly.
+
+func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
+	result := render.TriageResult{
+		Namespace:     "prod",
+		AllNamespaces: true,
+		Checked:       12,
+		Healthy:       9,
+		Reports:       []diagnostics.Report{{Name: "web", Kind: kinds.Deployment}},
+		Dropped:       []string{"Service/web"},
+	}
+	page := sweepPage(result, web.Meta{Title: "t"})
+
+	if page.Single {
+		t.Error("Single = true, want false for a sweep")
+	}
+	if !page.AllNamespaces {
+		t.Error("AllNamespaces not carried from the result — an -A sweep would print index numbers that resolve to nothing")
+	}
+	if page.Checked != 12 {
+		t.Errorf("Checked = %d, want 12 (result.Checked)", page.Checked)
+	}
+	if page.Healthy != 9 {
+		t.Errorf("Healthy = %d, want 9 (result.Healthy) — Checked/Healthy look transposed", page.Healthy)
+	}
+	if len(page.Reports) != 1 || page.Reports[0].Name != "web" {
+		t.Errorf("Reports = %+v, want the one web report", page.Reports)
+	}
+	if len(page.Dropped) != 1 || page.Dropped[0] != "Service/web" {
+		t.Errorf("Dropped = %v, want [Service/web]", page.Dropped)
+	}
+	if page.Meta.Title != "t" {
+		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
+	}
+}
+
+// A scoped (non -A) sweep must not be mistaken for a cluster-wide one: its
+// Scope is its own namespace, not the "all namespaces" label.
+func TestSweepPageScopedNamespaceKeepsItsOwnName(t *testing.T) {
+	result := render.TriageResult{Namespace: "prod", Checked: 1}
+	page := sweepPage(result, web.Meta{})
+	if page.AllNamespaces {
+		t.Error("AllNamespaces = true for a scoped sweep")
+	}
+	if page.Scope != "prod" {
+		t.Errorf("Scope = %q, want prod", page.Scope)
+	}
+}
+
+func TestResourcePageIsSingleWithExactlyOneReport(t *testing.T) {
+	report := diagnostics.Report{Name: "web", Kind: kinds.Deployment, Namespace: "prod"}
+	page := resourcePage(report, web.Meta{Title: "t"})
+
+	if !page.Single {
+		t.Error("Single = false, want true — a single-resource page must render inline, not as a collapsed sweep row")
+	}
+	if len(page.Reports) != 1 || page.Reports[0].Name != "web" {
+		t.Errorf("Reports = %+v, want exactly the one report", page.Reports)
+	}
+	if page.Scope != "prod" {
+		t.Errorf("Scope = %q, want the report's own namespace", page.Scope)
+	}
+	if page.Meta.Title != "t" {
+		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
+	}
+}
+
+// diagnosticHTMLServices builds a Services that can drive newDiagnosticCommand's
+// RunE all the way through a real (fake-clientset) Gather/Sweep, rather than
+// stopping at the early guards the way Services{} does elsewhere in this file.
+// The fixtures below are deliberately minimal: their only job is to let
+// Sweep/Gather return without error so RunE reaches the html branch.
+func diagnosticHTMLServices(t *testing.T, objects ...runtime.Object) Services {
+	t.Helper()
+	return Services{
+		State:  &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config: config.Default(),
+		Kubernetes: func() (kubernetes.Interface, error) {
+			return fake.NewSimpleClientset(objects...), nil
+		},
+	}
+}
+
+// stoppedContext is already Done, standing in for the moment a user presses
+// Ctrl-C: web.Serve binds its listener, announces the URL, sees ctx.Done()
+// immediately in its select, and shuts back down — the same clean-stop path,
+// just without a wall-clock wait. context.WithCancel's cancellation reaches an
+// already-cancelled parent synchronously (propagateCancel checks p.err before
+// returning), so this is deterministic rather than a race against a goroutine.
+func stoppedContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}
+
+// Moving the "if !htmlOpts.Enabled { return nil }" gate above render.Triage
+// would make --html silently swallow the terminal table the command always
+// printed — exactly the "adds, never replaces" regression the commit message
+// is about. Only driving RunE for real pins the *order* of those two
+// statements; asserting on the extracted TriageResult/Report cannot see it.
+func TestDiagSweepWithHTMLStillPrintsTheTerminalTriage(t *testing.T) {
+	sink := captureRender(t)
+	cmd := newDiagnosticCommand(diagnosticHTMLServices(t), "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"namespace", "empty"}, {"html", "true"}, {"no-open", "true"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "checked") {
+		t.Errorf("terminal output = %q, want the triage caption to still print with --html set", sink.String())
+	}
+}
+
+// Same regression, single-resource branch: render.Diagnostic must still fire
+// before the html gate, even though the Report is about to be re-rendered as
+// a page a moment later.
+func TestDiagSingleWithHTMLStillPrintsTheTerminalReport(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+	})
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{{Name: "web", Kind: kinds.Deployment}}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{{"html", "true"}, {"no-open", "true"}} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	if err := cmd.RunE(cmd, []string{"1"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Deployment/web") {
+		t.Errorf("terminal output = %q, want the diagnostic report to still print with --html set", sink.String())
+	}
+}
+
+// The two tests above set --html=true, and moving the gate above the render
+// call is invisible from there: when Enabled is true the gate never returns
+// early either way, so the render call runs regardless of which side of the
+// gate it sits on. The mutation only shows up on the far more common path —
+// --html left off — where the moved gate now returns before the render call
+// ever runs. These two pin that path instead.
+func TestDiagSweepWithoutHTMLStillPrintsTheTerminalTriage(t *testing.T) {
+	sink := captureRender(t)
+	cmd := newDiagnosticCommand(diagnosticHTMLServices(t), "diagnostic", []string{"diag"})
+	cmd.SetContext(context.Background())
+	if err := cmd.Flags().Set("namespace", "empty"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "checked") {
+		t.Errorf("terminal output = %q, want the triage caption to print with --html left off", sink.String())
+	}
+	if strings.Contains(sink.String(), "serving at") {
+		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
+	}
+}
+
+func TestDiagSingleWithoutHTMLStillPrintsTheTerminalReport(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+	})
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{{Name: "web", Kind: kinds.Deployment}}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.RunE(cmd, []string{"1"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Deployment/web") {
+		t.Errorf("terminal output = %q, want the diagnostic report to print with --html left off", sink.String())
+	}
+	if strings.Contains(sink.String(), "serving at") {
+		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
 	}
 }

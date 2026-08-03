@@ -1,0 +1,64 @@
+{{define "body"}}
+<div class="block">
+  <p class="caption">{{.Scope}} · {{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}</p>
+
+  <div class="table-wrap">
+    <div class="sweep-head scan-grid">
+      <div>IMAGE</div><div>SEVERITY</div>
+      <div class="num">CRIT</div><div class="num">HIGH</div>
+      <div class="num">MED</div><div class="num">LOW</div><div class="num">UNSPEC</div><div></div>
+    </div>
+
+    {{range .Images}}
+    <details class="row{{if .Error}} status-warn{{else if gt (count .Counts "CRITICAL") 0}} status-bad{{end}}">
+      <summary class="scan-grid">
+        <span>{{.Image}}</span>
+        {{if .Error}}
+          <span class="status-warn">scan failed</span>
+          <span class="num dim">—</span><span class="num dim">—</span>
+          <span class="num dim">—</span><span class="num dim">—</span><span class="num dim">—</span>
+        {{else}}
+          <span class="stack">{{range severityBar .Counts}}<i class="{{.Class}}" style="width:{{.Pct}}%"></i>{{end}}</span>
+          <span class="num {{if gt (count .Counts "CRITICAL") 0}}status-bad{{else}}dim{{end}}">{{count .Counts "CRITICAL"}}</span>
+          <span class="num {{if gt (count .Counts "HIGH") 0}}status-bad{{else}}dim{{end}}">{{count .Counts "HIGH"}}</span>
+          <span class="num {{if gt (count .Counts "MEDIUM") 0}}status-warn{{else}}dim{{end}}">{{count .Counts "MEDIUM"}}</span>
+          <span class="num dim">{{count .Counts "LOW"}}</span>
+          <span class="num dim">{{count .Counts "UNSPECIFIED"}}</span>
+        {{end}}
+        <span class="marker">›</span>
+      </summary>
+      <div class="drawer">
+        {{if .Error}}
+          <p class="event-msg status-warn">{{.Error}}</p>
+        {{else if .Findings}}
+          <div class="block">
+            <p class="label">Vulnerabilities</p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>CVE</th><th>SEVERITY</th><th>PACKAGE</th>
+                  <th>INSTALLED</th><th>FIXED IN</th>
+                </tr></thead>
+                <tbody>
+                {{range .Findings}}
+                <tr>
+                  <td>{{if .URL}}<a href="{{.URL}}" rel="noreferrer noopener">{{.ID}}</a>{{else}}{{.ID}}{{end}}</td>
+                  <td class="{{if or (eq .Severity "CRITICAL") (eq .Severity "HIGH")}}status-bad{{else if eq .Severity "MEDIUM"}}status-warn{{else}}dim{{end}}">{{.Severity}}</td>
+                  <td>{{.Package}}</td>
+                  <td>{{.Installed}}</td>
+                  {{if .FixedIn}}<td class="status-ok">{{.FixedIn}}</td>{{else}}<td class="dim">—</td>{{end}}
+                </tr>
+                {{end}}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {{else}}
+          <p class="dim">No vulnerabilities found</p>
+        {{end}}
+      </div>
+    </details>
+    {{end}}
+  </div>
+</div>
+{{end}}

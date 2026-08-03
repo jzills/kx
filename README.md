@@ -99,9 +99,9 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--namespace/-n str] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
+| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--namespace/-n str]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
@@ -157,6 +157,23 @@ or the full per-image CVE report with `--full`. Requires
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
+
+### View reports in a browser
+
+`kx diag --html` and `kx scan --html` render the same analysis as a page and
+open it in your browser as well as printing to the terminal; Ctrl-C stops the
+server. It binds `127.0.0.1` only, and nothing is written to disk — the report
+lives in memory for as long as the command runs.
+
+The page is drawn in your active theme, so `kx theme dracula` restyles it too.
+Sweep rows expand into that resource's full report, and image rows expand
+into the CVEs behind their severity counts — detail the terminal has no room
+for. None of it costs an extra API or scanner call: both were already
+gathered to build the table you'd see without `--html`.
+
+`--port` serves on a specific port instead of picking a free one, and
+`--no-open` skips launching a browser — the URL still prints, so you can
+open it yourself.
 
 ## State
 

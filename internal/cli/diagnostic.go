@@ -10,6 +10,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -127,6 +128,38 @@ func (c TriageCommand) Execute(
 	}, nil
 }
 
+// sweepPage builds the HTML page for a namespace sweep from the same
+// TriageResult the terminal table renders, so the two shapes cannot drift
+// apart: Scope and AllNamespaces are derived from the result rather than
+// re-threaded through the caller's own namespace/allNamespaces variables.
+func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
+	scope := result.Namespace
+	if result.AllNamespaces {
+		scope = "all namespaces"
+	}
+	return web.DiagPage{
+		Meta:          meta,
+		Scope:         scope,
+		AllNamespaces: result.AllNamespaces,
+		Checked:       result.Checked,
+		Healthy:       result.Healthy,
+		Reports:       result.Reports,
+		Dropped:       result.Dropped,
+	}
+}
+
+// resourcePage builds the HTML page for one indexed resource: a sweep of one,
+// always Single so the template renders it inline rather than behind a
+// <details>.
+func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
+	return web.DiagPage{
+		Meta:    meta,
+		Scope:   report.Namespace,
+		Single:  true,
+		Reports: []diagnostics.Report{report},
+	}
+}
+
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     use + " [index]",
@@ -141,6 +174,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
+			html, _ := cmd.Flags().GetBool("html")
+			port, _ := cmd.Flags().GetInt("port")
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
@@ -186,7 +223,23 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					return err
 				}
 				render.Triage(result)
-				return nil
+				if !htmlOpts.Enabled {
+					return nil
+				}
+				scope := namespace
+				if allNamespaces {
+					scope = "all namespaces"
+				}
+				meta, err := pageMeta(services.Config.Theme, "kx diag · "+scope,
+					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderDiag(sweepPage(result, meta))
+				if err != nil {
+					return err
+				}
+				return servePage(ctx, page, htmlOpts)
 			}
 
 			index, err := parseIndex("index", args[0])
@@ -202,12 +255,31 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return err
 			}
 			render.Diagnostic(report)
-			return nil
+			if !htmlOpts.Enabled {
+				return nil
+			}
+			meta, err := pageMeta(services.Config.Theme,
+				"kx diag · "+string(report.Kind)+"/"+report.Name,
+				invocation(use, args[0], portFlag(port)))
+			if err != nil {
+				return err
+			}
+			page, err := web.RenderDiag(resourcePage(report, meta))
+			if err != nil {
+				return err
+			}
+			return servePage(ctx, page, htmlOpts)
 		},
 	}
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace; results are not indexed")
+	cmd.Flags().Bool("html", false,
+		"Render the report as HTML and serve it in a browser")
+	cmd.Flags().Int("port", 0,
+		"Port to serve the HTML report on; 0 picks a free one")
+	cmd.Flags().Bool("no-open", false,
+		"Serve the HTML report without opening a browser")
 	return cmd
 }

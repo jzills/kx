@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/web"
 )
 
 func decode(t *testing.T, document string) map[string]json.RawMessage {
@@ -307,5 +308,99 @@ func TestScanRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot be combined") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// scanPage is the only place a ScanPage's fields are set, so a direct test
+// pins each one to its source without needing a live cluster or a served
+// page — swapping Scope for something else, or dropping a row, fails this
+// directly rather than only showing up once a page is rendered.
+func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
+	rows := []scanner.ImageScan{
+		{Image: "api:v1", Counts: map[string]int{"critical": 1}},
+	}
+	page := scanPage("prod", rows, web.Meta{Title: "t"})
+
+	if page.Scope != "prod" {
+		t.Errorf("Scope = %q, want prod", page.Scope)
+	}
+	if len(page.Images) != 1 || page.Images[0].Image != "api:v1" {
+		t.Errorf("Images = %+v, want the one api:v1 row", page.Images)
+	}
+	if page.Images[0].Counts["critical"] != 1 {
+		t.Errorf("Counts = %+v, want the critical count carried through — it "+
+			"feeds the page's severity bars", page.Images[0].Counts)
+	}
+	if page.Meta.Title != "t" {
+		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)
+	}
+}
+
+// A namespace sweep's page must carry the same "Mixed · " cross-kind label
+// the terminal's ScopeBanner prints; an indexed scan's pageScope is built
+// separately (in the index branch, string(kind)+"/"+name+" · "+namespace) and
+// never calls this, which is what keeps it unlabelled.
+func TestSweepPageScopeAddsTheMixedLabel(t *testing.T) {
+	if got := sweepPageScope("prod"); got != "Mixed · prod" {
+		t.Errorf("sweepPageScope(%q) = %q, want %q", "prod", got, "Mixed · prod")
+	}
+}
+
+func TestScanRegistersHTMLFlags(t *testing.T) {
+	cmd := newScanCommand(Services{})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// --port is hand-parsed like every other scan flag, so a bad value has to
+// fail the same deliberate way a bad index does rather than crash on Atoi's
+// error or silently fall back to 0 (which would mean "pick a free port").
+func TestScanRejectsANonIntegerPort(t *testing.T) {
+	quietRender(t)
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"--port", "abc"})
+	if err == nil {
+		t.Fatal("a non-integer --port was accepted")
+	}
+	if !strings.Contains(err.Error(), "'--port'") || !strings.Contains(err.Error(), "'abc' is not a valid int") {
+		t.Errorf("err = %v, want it to name the bad --port value", err)
+	}
+}
+
+// --full streams Scout's own output to the terminal; serving a page instead is
+// incoherent, so the combination is rejected rather than silently picking one.
+func TestScanRejectsFullWithHTML(t *testing.T) {
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"1", "--full", "--html"})
+	if err == nil {
+		t.Fatal("--full with --html was accepted")
+	}
+	if !strings.Contains(err.Error(), "--full") || !strings.Contains(err.Error(), "--html") {
+		t.Errorf("error %q names neither flag", err)
+	}
+}
+
+// --no-open is extracted before --port, so a typo'd --no-open literal in
+// RunE would leave the token "--no-open" in argv for the following
+// extractString(rest, "--port", "") call to swallow as --port's own value,
+// rather than --port failing on a missing one. Calling extractBool/
+// extractString directly (as this file used to) would agree with whatever
+// literal the test itself passes and could never see a typo in RunE; only
+// real argv through cli.Execute proves the wiring (see argv_test.go's note
+// on why argument handling is exercised this way).
+func TestScanConsumesNoOpenBeforePort(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"scan", "--port", "--no-open"})
+	if err == nil {
+		t.Fatal("kx scan --port --no-open was accepted")
+	}
+	want := "flag needs an argument: --port"
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q — a typo'd --no-open would let --port "+
+			"swallow it as a value and report it as an invalid int instead",
+			err.Error(), want)
 	}
 }

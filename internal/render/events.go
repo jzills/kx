@@ -13,6 +13,11 @@ func FormatAge(timestamp time.Time) string {
 	return formatAgeAt(time.Now(), timestamp)
 }
 
+// FormatAgeAt formats an age relative to an explicit "now", so a caller that
+// must render deterministically — the HTML renderer, whose output is compared
+// byte-for-byte — can pin the reference time instead of reading the clock.
+func FormatAgeAt(now, timestamp time.Time) string { return formatAgeAt(now, timestamp) }
+
 // formatAgeAt takes the reference time so the formatting is testable without
 // freezing the clock.
 func formatAgeAt(now, timestamp time.Time) string {

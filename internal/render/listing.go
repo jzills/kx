@@ -41,6 +41,11 @@ func statusColor(status string) string {
 	}
 }
 
+// StatusStyle classifies a phase, state or reason string onto a semantic style
+// name. Exported so the HTML renderer classifies identically — a second copy
+// of this mapping is exactly the drift the web package exists to avoid.
+func StatusStyle(status string) string { return statusColor(status) }
+
 // kx top's usage-percentage thresholds. These mirror the diagnostic thresholds
 // (_MEMORY_WARN_THRESHOLD 0.75, _MEMORY_CRITICAL_THRESHOLD 0.90,
 // _CPU_WARN_THRESHOLD 0.90) re-expressed as plain percentages: a red 94% in
@@ -52,15 +57,13 @@ const (
 	cpuWarnPct     = 90 // CPU never reaches critical: throttling, not a crash.
 )
 
-// usagePctColor styles a "NN%" cell, returning "" to leave it unstyled.
-func usagePctColor(cell, resource string) string {
-	if !strings.HasSuffix(cell, "%") {
-		return ""
-	}
-	pct, err := strconv.Atoi(strings.TrimSuffix(cell, "%"))
-	if err != nil {
-		return ""
-	}
+// UsageStyle classifies a usage percentage for "memory" or "cpu", returning ""
+// when the percentage warrants no styling.
+//
+// Exported for the same reason as StatusStyle, and more urgently: these
+// thresholds are already kept in sync by hand with the diagnostic ones, so a
+// third copy would be one copy too many.
+func UsageStyle(pct int, resource string) string {
 	if resource == "memory" {
 		switch {
 		case pct >= memCriticalPct:
@@ -74,6 +77,18 @@ func usagePctColor(cell, resource string) string {
 		return theme.StatusWarn
 	}
 	return ""
+}
+
+// usagePctColor styles a "NN%" cell, returning "" to leave it unstyled.
+func usagePctColor(cell, resource string) string {
+	if !strings.HasSuffix(cell, "%") {
+		return ""
+	}
+	pct, err := strconv.Atoi(strings.TrimSuffix(cell, "%"))
+	if err != nil {
+		return ""
+	}
+	return UsageStyle(pct, resource)
 }
 
 // Columns whose values read as magnitudes, so they align on the right edge.
