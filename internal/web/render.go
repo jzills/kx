@@ -10,7 +10,7 @@ import (
 	"github.com/jzills/kx/internal/render"
 )
 
-//go:embed layout.gohtml diag.gohtml scan.gohtml
+//go:embed layout.gohtml diag.gohtml scan.gohtml tree.gohtml
 var templateFS embed.FS
 
 // stylesheet is compiled in, not read at runtime — the binary ships alone.
@@ -35,6 +35,8 @@ var (
 			ParseFS(templateFS, "layout.gohtml", "diag.gohtml"))
 	scanTemplate = template.Must(template.New("scan").Funcs(funcs).
 			ParseFS(templateFS, "layout.gohtml", "scan.gohtml"))
+	treeTemplate = template.Must(template.New("tree").Funcs(funcs).
+			ParseFS(templateFS, "layout.gohtml", "tree.gohtml"))
 )
 
 // RenderDiag renders a diagnostic page.
@@ -82,6 +84,21 @@ func RenderScan(page ScanPage) ([]byte, error) {
 	})
 	var out bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&out, "layout", page); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// RenderTree renders an ownership-graph page.
+//
+// Unlike RenderDiag/RenderScan, this needs no clone-and-rebind: a tree page
+// carries no timestamps, so there is no "age" for it to bind per call, and
+// executing the pristine package-level template directly is safe — it is
+// never mutated after init, and html/template.Execute is safe to call
+// concurrently once parsing is done.
+func RenderTree(page TreePage) ([]byte, error) {
+	var out bytes.Buffer
+	if err := treeTemplate.ExecuteTemplate(&out, "layout", page); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

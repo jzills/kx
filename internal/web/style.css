@@ -283,6 +283,47 @@ footer {
   padding-top: 1rem;
 }
 
+.tree, .tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-children {
+  padding-left: 1.1rem;
+  margin-left: 0.35rem;
+  border-left: 1px solid var(--border);
+}
+
+.tree li { margin: 0.15rem 0; font-family: var(--mono); font-size: var(--step-0); }
+
+.tree details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.tree details > summary::-webkit-details-marker { display: none; }
+
+.tree details > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 0.9em;
+  color: var(--muted);
+  transition: transform 0.1s;
+}
+
+.tree details[open] > summary::before { transform: rotate(90deg); }
+
+.tree-index { color: var(--muted); margin-right: 0.4em; }
+
+.tree-label.style-header { color: var(--accent); font-weight: 600; }
+.tree-label.style-accent { color: var(--accent); }
+.tree-label.style-muted  { color: var(--muted); }
+.tree-label.style-body   { color: var(--body); }
+
 @media (max-width: 720px) {
   /* .ns-grid's desktop rule above is a compound selector with higher
      specificity than the plain rule here, and @media adds no specificity of
