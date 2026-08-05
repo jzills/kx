@@ -119,14 +119,12 @@ func TestTriageAllNamespacesKeepsNamesakesFromDifferentNamespaces(t *testing.T) 
 	if len(result.Reports) != 2 {
 		t.Errorf("reported %d rows, want both namespaces' web", len(result.Reports))
 	}
-	if len(result.Dropped) != 0 {
-		t.Errorf("dropped %v, want nothing dropped when no state is saved", result.Dropped)
-	}
 }
 
-// Within one namespace the drop still applies: state is keyed by name alone, so
-// a Deployment and a Service both called web cannot both be indexed.
-func TestTriageScopedSweepStillDropsCrossKindNamesakes(t *testing.T) {
+// Resource kind is resolved positionally, not by re-searching state by name,
+// so a Deployment and a Service both called web within one namespace are both
+// indexed correctly rather than one being dropped.
+func TestTriageScopedSweepKeepsCrossKindNamesakes(t *testing.T) {
 	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
 		unhealthy(kinds.Deployment, "web", "prod"),
 		unhealthy(kinds.StatefulSet, "web", "prod"),
@@ -137,11 +135,21 @@ func TestTriageScopedSweepStillDropsCrossKindNamesakes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(result.Reports) != 1 {
-		t.Errorf("reported %d rows, want the collision dropped", len(result.Reports))
+	if len(result.Reports) != 2 {
+		t.Errorf("reported %d rows, want both the Deployment and the StatefulSet", len(result.Reports))
 	}
-	if len(result.Dropped) != 1 || !strings.Contains(result.Dropped[0], "web") {
-		t.Errorf("dropped = %v, want the StatefulSet named", result.Dropped)
+	if len(saved) != 1 {
+		t.Fatalf("saved %d states, want one", len(saved))
+	}
+	entries := saved[0].Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d entries, want both namesakes indexed", len(entries))
+	}
+	if entries[0].Name != "web" || entries[0].Kind != kinds.Deployment {
+		t.Errorf("entries[0] = %+v, want web/Deployment", entries[0])
+	}
+	if entries[1].Name != "web" || entries[1].Kind != kinds.StatefulSet {
+		t.Errorf("entries[1] = %+v, want web/StatefulSet", entries[1])
 	}
 }
 
@@ -204,7 +212,6 @@ func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
 		Checked:       12,
 		Healthy:       9,
 		Reports:       []diagnostics.Report{{Name: "web", Kind: kinds.Deployment}},
-		Dropped:       []string{"Service/web"},
 	}
 	page := sweepPage(result, web.Meta{Title: "t"})
 
@@ -222,9 +229,6 @@ func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
 	}
 	if len(page.Reports) != 1 || page.Reports[0].Name != "web" {
 		t.Errorf("Reports = %+v, want the one web report", page.Reports)
-	}
-	if len(page.Dropped) != 1 || page.Dropped[0] != "Service/web" {
-		t.Errorf("Dropped = %v, want [Service/web]", page.Dropped)
 	}
 	if page.Meta.Title != "t" {
 		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)

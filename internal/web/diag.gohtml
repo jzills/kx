@@ -146,7 +146,6 @@
       <footer>
         {{.Healthy}} healthy {{if eq .Healthy 1}}resource{{else}}resources{{end}} not shown
         {{- if .AllNamespaces}} · indexes not saved for all-namespace listings{{else}} · kx diag &lt;index&gt; for the same detail in your terminal{{end}}
-        {{- range .Dropped}}<br>{{.}} shares a name with an indexed resource and was omitted{{end}}
       </footer>
     {{else}}
       <p class="caption">Mixed · {{.Scope}} · <span class="status-ok">{{.Checked}} checked · all healthy</span></p>

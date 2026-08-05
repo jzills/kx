@@ -113,22 +113,6 @@ func TestTriageEmptyNamespace(t *testing.T) {
 	}
 }
 
-func TestTriageReportsDroppedNameCollisions(t *testing.T) {
-	out := capture(func(r *Renderer) {
-		r.Triage(TriageResult{
-			Namespace: "prod", Checked: 3, Healthy: 1,
-			Reports: []diagnostics.Report{{
-				Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
-				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
-			}},
-			Dropped: []string{"Service/api"},
-		})
-	})
-	if !strings.Contains(out, "Service/api shares a name") {
-		t.Errorf("dropped row not reported:\n%s", out)
-	}
-}
-
 // Every indexed listing labels its index column "X". The Python renderer left
 // the triage table's blank, alone among them; this is a deliberate divergence,
 // so it is pinned rather than left to drift back.

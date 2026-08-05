@@ -74,9 +74,10 @@ func TestResourceOrderIsStableAcrossLoads(t *testing.T) {
 	}
 }
 
-// The on-disk shape is a compatibility surface, not an implementation detail:
-// every installed kx reads whatever ~/.kx/state.json is already there, including
-// files written by older versions. Changing these keys silently breaks upgrades.
+// The on-disk shape is this build's compatibility surface: a version mismatch
+// resets the file (see TestVersionMismatchResetsFile) rather than trying to
+// stay compatible with every historical shape, so this test pins the current
+// version's shape rather than promising it never changes.
 func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 	service := newTestService(t, 10)
 	match := "web"
@@ -91,9 +92,13 @@ func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	var raw struct {
-		States []struct {
-			Resources map[string]string `json:"resources"`
-			Namespace string            `json:"namespace"`
+		Version int `json:"version"`
+		States  []struct {
+			Resources []struct {
+				Name string `json:"name"`
+				Kind string `json:"kind"`
+			} `json:"resources"`
+			Namespace string `json:"namespace"`
 			Query     *struct {
 				Resource string   `json:"resource"`
 				Args     []string `json:"args"`
@@ -105,8 +110,12 @@ func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("saved state is not the expected schema: %v\n%s", err, data)
 	}
-	if len(raw.States) != 1 || raw.States[0].Resources["nginx"] != "Pod" {
-		t.Errorf("resources = %v, want {nginx: Pod}", raw.States[0].Resources)
+	if raw.Version != currentSchemaVersion {
+		t.Errorf("version = %d, want %d", raw.Version, currentSchemaVersion)
+	}
+	if len(raw.States) != 1 || len(raw.States[0].Resources) != 1 ||
+		raw.States[0].Resources[0].Name != "nginx" || raw.States[0].Resources[0].Kind != "Pod" {
+		t.Errorf("resources = %v, want [{nginx Pod}]", raw.States[0].Resources)
 	}
 	if raw.Cursor != 0 {
 		t.Errorf("cursor = %d, want 0", raw.Cursor)
@@ -139,31 +148,105 @@ func TestLoadMissingFileReturnsErrNoState(t *testing.T) {
 	}
 }
 
-// A file written before history existed is a bare state object with no
-// "states" key.
-func TestLegacySingleStateFormatLoads(t *testing.T) {
+// A version mismatch — including the total absence of a version key, which is
+// every file written before versioning existed — resets state.json rather
+// than trying to keep reading an old or foreign shape. The next Load must see
+// an ordinary empty state, not another error.
+func TestVersionMismatchResetsFile(t *testing.T) {
+	service := newTestService(t, 10)
+	stale := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(stale), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := service.Load(); err != ErrSchemaChanged {
+		t.Fatalf("Load on a version-mismatched file = %v, want ErrSchemaChanged", err)
+	}
+
+	data, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile after reset: %v", err)
+	}
+	var raw struct {
+		Version int              `json:"version"`
+		States  []map[string]any `json:"states"`
+		Cursor  int              `json:"cursor"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("reset file is not valid JSON: %v\n%s", err, data)
+	}
+	if raw.Version != currentSchemaVersion {
+		t.Errorf("reset version = %d, want %d", raw.Version, currentSchemaVersion)
+	}
+	if len(raw.States) != 0 {
+		t.Errorf("reset states = %v, want empty", raw.States)
+	}
+
+	if _, err := service.Load(); err != ErrNoState {
+		t.Errorf("Load after reset = %v, want ErrNoState", err)
+	}
+}
+
+// A file with no "version" key at all — the shape of every state.json written
+// before this change — is exactly as stale as a wrong-version one and gets the
+// same reset treatment, not a legacy read path.
+func TestMissingVersionKeyResetsFile(t *testing.T) {
+	service := newTestService(t, 10)
+	preVersioning := `{"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(preVersioning), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := service.Load(); err != ErrSchemaChanged {
+		t.Fatalf("Load on a pre-versioning file = %v, want ErrSchemaChanged", err)
+	}
+	if _, err := service.Load(); err != ErrNoState {
+		t.Errorf("Load after reset = %v, want ErrNoState", err)
+	}
+}
+
+// The pre-history single-entry shape (no "states" key at all) also predates
+// versioning, so it resets exactly like any other unversioned file rather
+// than being transparently loaded.
+func TestLegacySingleStateFormatResetsFile(t *testing.T) {
 	service := newTestService(t, 10)
 	legacy := `{"resources": {"nginx": "Pod"}, "namespace": "prod"}`
 	if err := os.WriteFile(service.Path, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
+	if _, err := service.Load(); err != ErrSchemaChanged {
+		t.Fatalf("Load on a legacy file = %v, want ErrSchemaChanged", err)
+	}
+	if _, err := service.Load(); err != ErrNoState {
+		t.Errorf("Load after reset = %v, want ErrNoState", err)
+	}
+}
+
+// Save self-heals a version-mismatched file exactly as it does a corrupt one:
+// `kx get <resource>` rebuilds state without surfacing the reset to the user.
+func TestSaveHealsVersionMismatchedFile(t *testing.T) {
+	service := newTestService(t, 10)
+	stale := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(stale), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	save(t, service, State{Resources: pods("redis"), Namespace: "default"})
+
 	loaded, err := service.Load()
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Load after heal: %v", err)
 	}
-	if loaded.Namespace != "prod" || len(loaded.Names()) != 1 {
-		t.Errorf("legacy load = %+v", loaded)
-	}
-	if loaded.Query != nil {
-		t.Errorf("Query = %+v, want nil for a pre-query state file", loaded.Query)
+	if len(loaded.Names()) != 1 || loaded.Names()[0] != "redis" {
+		t.Errorf("healed state = %+v", loaded)
 	}
 }
 
 func TestCorruptFileReturnsActionableError(t *testing.T) {
 	for name, contents := range map[string]string{
 		"invalid json": "{not json",
-		"missing keys": `{"states": [{"namespace": "prod"}], "cursor": 0}`,
+		"missing keys": `{"version": 1, "states": [{"namespace": "prod"}], "cursor": 0}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			service := newTestService(t, 10)
@@ -412,6 +495,58 @@ func TestFieldsOutOfRange(t *testing.T) {
 
 	if _, _, _, err := service.Fields(9); err == nil {
 		t.Error("Fields(9) succeeded, want an out-of-range error")
+	}
+}
+
+// The regression this whole change exists for: two resources of different
+// kinds sharing a name must both be indexed and resolve to their own correct
+// kind, surviving a real on-disk round trip — not just the in-memory struct.
+func TestSameNameDifferentKindBothSurviveSaveAndLoad(t *testing.T) {
+	service := newTestService(t, 10)
+	entries := []Resource{
+		{Name: "waypoint", Kind: kinds.Deployment},
+		{Name: "waypoint", Kind: kinds.Service},
+	}
+	save(t, service, State{Resources: NewOrderedResources(entries), Namespace: "prod"})
+
+	// Load through a fresh Service pointed at the same path, so this exercises
+	// the wire format and not just the struct Save was handed.
+	reloaded := &Service{MaxHistory: 10, Path: service.Path}
+
+	name1, _, kind1, err := reloaded.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields(1): %v", err)
+	}
+	if name1 != "waypoint" || kind1 != kinds.Deployment {
+		t.Errorf("Fields(1) = %q/%q, want waypoint/Deployment", name1, kind1)
+	}
+
+	name2, _, kind2, err := reloaded.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields(2): %v", err)
+	}
+	if name2 != "waypoint" || kind2 != kinds.Service {
+		t.Errorf("Fields(2) = %q/%q, want waypoint/Service", name2, kind2)
+	}
+}
+
+func TestResourcesAtIsOneBasedAndBoundsChecked(t *testing.T) {
+	r := NewOrderedResources([]Resource{
+		{Name: "first", Kind: kinds.Pod},
+		{Name: "last", Kind: kinds.Service},
+	})
+
+	if _, ok := r.At(0); ok {
+		t.Error("At(0) = ok, want false — At is 1-based")
+	}
+	if _, ok := r.At(3); ok {
+		t.Error("At(3) = ok, want false — past the end")
+	}
+	if entry, ok := r.At(1); !ok || entry.Name != "first" {
+		t.Errorf("At(1) = %+v, %v; want first, true", entry, ok)
+	}
+	if entry, ok := r.At(2); !ok || entry.Name != "last" {
+		t.Errorf("At(2) = %+v, %v; want last, true", entry, ok)
 	}
 }
 
@@ -750,7 +885,7 @@ func TestFieldsNamedReturnsTheSlotNamespace(t *testing.T) {
 // loading and resolving exactly as it did.
 func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
 	service := newTestService(t, 10)
-	legacy := `{"states":[{"resources":{"nginx":"Pod"},"namespace":"prod","query":null}],"cursor":0}`
+	legacy := `{"version":1,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],"cursor":0}`
 	if err := os.WriteFile(service.Path, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -774,7 +909,7 @@ func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
 // refills the stack and not the slot.
 func TestSlotWithoutResourcesDropsAndKeepsTheHistory(t *testing.T) {
 	service := newTestService(t, 10)
-	raw := `{"states":[{"resources":{"nginx":"Pod"},"namespace":"prod","query":null}],` +
+	raw := `{"version":1,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
 		`"cursor":0,"named":{"Namespace":{"namespace":"prod"}}}`
 	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -805,8 +940,8 @@ func TestSlotWithoutResourcesDropsAndKeepsTheHistory(t *testing.T) {
 // names `kx get <resource>`, which is exactly what rebuilds it.
 func TestStackEntryWithoutResourcesIsStillFatal(t *testing.T) {
 	service := newTestService(t, 10)
-	raw := `{"states":[{"namespace":"prod","query":null}],"cursor":0,` +
-		`"named":{"Namespace":{"resources":{"prod":"Namespace"},"namespace":"prod"}}}`
+	raw := `{"version":1,"states":[{"namespace":"prod","query":null}],"cursor":0,` +
+		`"named":{"Namespace":{"resources":[{"name":"prod","kind":"Namespace"}],"namespace":"prod"}}}`
 	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

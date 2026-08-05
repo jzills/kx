@@ -3,7 +3,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,18 +17,22 @@ import (
 // Resource is one indexed row: the name kubectl reported and the kind it was
 // listed as.
 type Resource struct {
-	Name string
-	Kind kinds.Kind
+	Name string     `json:"name"`
+	Kind kinds.Kind `json:"kind"`
 }
 
 // Resources is an ordered name→kind mapping.
 //
 // Order is load-bearing: an index resolves to the nth entry, so this must
 // preserve the order names were listed in and the order they appear in the
-// JSON object on disk. That rules out a Go map, whose iteration order is
+// JSON array on disk. That rules out a Go map, whose iteration order is
 // randomized — a map here would resolve indexes to different resources on
-// different runs. The JSON representation is a plain object, so a state file
-// written by any version of kx keeps resolving indexes the same way.
+// different runs. It also rules out keying the on-disk JSON by name (an
+// earlier shape did this): a name is not unique across kinds, so two
+// resources of different kinds sharing a name could not both be represented.
+// A version mismatch on the on-disk shape is handled by the schema-version
+// check in loadHistory, not by this type trying to stay eternally
+// compatible with every historical shape.
 type Resources struct {
 	entries []Resource
 }
@@ -67,7 +70,11 @@ func (r Resources) Names() []string {
 	return names
 }
 
-// Kind returns the kind recorded for name.
+// Kind returns the kind recorded for the first entry named name. Ambiguous
+// when two entries share a name — returns whichever was inserted first.
+// Callers that already know the entry's position (having resolved it via
+// index.Resolve) should use At instead; this is for callers, such as tests,
+// that know the name is unique in the listing.
 func (r Resources) Kind(name string) (kinds.Kind, bool) {
 	for _, e := range r.entries {
 		if e.Name == name {
@@ -77,62 +84,27 @@ func (r Resources) Kind(name string) (kinds.Kind, bool) {
 	return "", false
 }
 
-// MarshalJSON writes a JSON object with keys in index order.
-func (r Resources) MarshalJSON() ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	for i, e := range r.entries {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		key, err := json.Marshal(e.Name)
-		if err != nil {
-			return nil, err
-		}
-		value, err := json.Marshal(string(e.Kind))
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(key)
-		buf.WriteByte(':')
-		buf.Write(value)
+// At returns the entry at a 1-based index, the same convention index.Resolve
+// uses, so a caller that has already resolved a name via index.Resolve can
+// look up its kind without a second, ambiguous, name-keyed search.
+func (r Resources) At(index int) (Resource, bool) {
+	i := index - 1
+	if i < 0 || i >= len(r.entries) {
+		return Resource{}, false
 	}
-	buf.WriteByte('}')
-	return buf.Bytes(), nil
+	return r.entries[i], true
 }
 
-// UnmarshalJSON reads a JSON object, preserving key order via the token
-// stream — encoding/json into a map would discard it.
-func (r *Resources) UnmarshalJSON(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delim, ok := token.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("resources: expected a JSON object")
-	}
+// MarshalJSON writes entries as a JSON array, in index order.
+func (r Resources) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.entries)
+}
 
-	r.entries = nil
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		name, ok := keyToken.(string)
-		if !ok {
-			return fmt.Errorf("resources: expected a string key")
-		}
-		var kind string
-		if err := decoder.Decode(&kind); err != nil {
-			return err
-		}
-		r.entries = append(r.entries, Resource{Name: name, Kind: kinds.Kind(kind)})
-	}
-	if _, err := decoder.Token(); err != nil {
-		return err
-	}
-	return nil
+// UnmarshalJSON reads a JSON array. Array order is part of the JSON spec, so
+// unlike the object shape this replaced, no custom decoding is needed to
+// preserve it.
+func (r *Resources) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &r.entries)
 }
 
 // Query is the `kx get` invocation that produced a state entry, kept so a
@@ -154,11 +126,18 @@ type State struct {
 // Names satisfies index.Resolver.
 func (s State) Names() []string { return s.Resources.Names() }
 
+// currentSchemaVersion is the on-disk shape's version. A plain, monotonically
+// increasing int — a version mismatch always means "reset", so there is no
+// partial-compatibility case for semver's major/minor/patch semantics to
+// express.
+const currentSchemaVersion = 1
+
 // History is the stack of listings with a cursor marking the current entry,
 // plus the per-kind slots that sit outside the stack.
 type History struct {
-	States []State `json:"states"`
-	Cursor int     `json:"cursor"`
+	Version int     `json:"version"`
+	States  []State `json:"states"`
+	Cursor  int     `json:"cursor"`
 	// Named holds the most recent listing of each slotted kind, keyed by kind.
 	// It is deliberately outside States: `kx ns` runs often enough that pushing
 	// every namespace listing onto the stack evicted the work the stack is for,
@@ -169,6 +148,17 @@ type History struct {
 
 // ErrNoState is returned when no state file exists yet.
 var ErrNoState = errors.New("No state found. Run `kx get <resource>` first.")
+
+// ErrSchemaChanged is returned when a state file's version doesn't match this
+// build's — including files with no version key at all, which is every file
+// written before versioning existed. The file has already been reset to a
+// fresh, empty, current-version History by the time this is returned: kx
+// state is ephemeral, and re-deriving it via `kx get` is cheaper and more
+// honest than migrating old files or asking the user to delete one by hand.
+var ErrSchemaChanged = errors.New(
+	"kx's saved state format has changed since this file was written. " +
+		"State has been reset (this does not affect your cluster) — run " +
+		"`kx get <resource>` to rebuild it.")
 
 // Service reads and writes the history stack at ~/.kx/state.json.
 type Service struct {
@@ -224,19 +214,22 @@ func (s *Service) loadHistory() (History, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return History{}, unreadable(err)
 	}
+
+	// A missing or mismatched version covers both a foreign/future schema and
+	// every file written before versioning existed (including the pre-history
+	// single-entry shape this branch used to special-case) — all of them are
+	// treated the same way: reset now, rather than try to keep reading an
+	// on-disk shape this build no longer promises to understand.
+	var version int
+	if raw, ok := probe["version"]; !ok || json.Unmarshal(raw, &version) != nil || version != currentSchemaVersion {
+		if err := s.saveHistory(History{States: []State{}, Cursor: 0}); err != nil {
+			return History{}, err
+		}
+		return History{}, ErrSchemaChanged
+	}
+
 	if _, ok := probe["states"]; !ok {
-		// Legacy single-entry file written before history existed.
-		var single State
-		if err := json.Unmarshal(data, &single); err != nil {
-			return History{}, unreadable(err)
-		}
-		if single.Resources.entries == nil {
-			return History{}, unreadable(errors.New("'resources'"))
-		}
-		if single.Namespace == "" {
-			single.Namespace = "default"
-		}
-		return History{States: []State{single}, Cursor: 0}, nil
+		return History{}, unreadable(errors.New("'states'"))
 	}
 
 	if _, ok := probe["cursor"]; !ok {
@@ -291,13 +284,11 @@ func (s *Service) loadHistory() (History, error) {
 		history.Named[kind] = state
 	}
 	if len(history.States) == 0 {
-		if len(history.Named) == 0 {
-			return History{}, unreadable(errors.New("no state entries"))
-		}
-		// Slots but no stack: `kx ns` on a fresh install writes a slot before
-		// any `kx get` has pushed an entry. The file is well-formed; it just
-		// has nothing for the stack readers yet, which Load reports as
-		// ErrNoState rather than as corruption.
+		// No stack entries: either a fresh reset file, or slots-only (`kx ns`
+		// on a fresh install writes a slot before any `kx get` has pushed an
+		// entry). Either way the file is well-formed; it just has nothing for
+		// the stack readers yet, which Load reports as ErrNoState rather than
+		// as corruption.
 		history.Cursor = 0
 		return history, nil
 	}
@@ -342,6 +333,7 @@ func (s *Service) saveHistory(history History) error {
 	if history.States == nil {
 		history.States = []State{}
 	}
+	history.Version = currentSchemaVersion
 	data, err := json.Marshal(history)
 	if err != nil {
 		return err
@@ -495,7 +487,9 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	if err != nil {
 		return "", "", "", err
 	}
-	kind, _ = current.Resources.Kind(name)
+	if entry, ok := current.Resources.At(idx); ok {
+		kind = entry.Kind
+	}
 	return name, current.Namespace, kind, nil
 }
 
@@ -567,7 +561,10 @@ func (s *Service) FieldsExpecting(
 			idx, describeCurrent(current), relist, plural, s.backHint(expected))
 	}
 
-	kind, _ := current.Resources.Kind(name)
+	var kind kinds.Kind
+	if entry, ok := current.Resources.At(idx); ok {
+		kind = entry.Kind
+	}
 	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
 		return "", "", err
 	}
