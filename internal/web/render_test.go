@@ -752,6 +752,32 @@ func TestAnchorsUseThePaletteAccent(t *testing.T) {
 	}
 }
 
+// The masthead's plain-text "kx" wordmark was replaced with an inline SVG
+// logomark so the report carries the same brand mark as kx --help's kxArt
+// banner. It must pick up the theme the same way the text wordmark did: via
+// the palette's accent custom property, not a fixed color, or a theme swap
+// would recolor everything else on the page except the logo.
+func TestWordmarkUsesThePaletteAccent(t *testing.T) {
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{{
+			Kind: kinds.Pod, Name: "quiet", Namespace: "diagnostics",
+			Verdict: diagnostics.OK,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), `<svg class="wordmark"`) {
+		t.Error("the masthead does not render the wordmark as an svg")
+	}
+	rule := cssRule(t, stylesheet, ".wordmark {")
+	if !strings.Contains(rule, "fill: var(--accent);") {
+		t.Error(".wordmark does not fill through the palette's accent custom " +
+			"property, so the masthead logo would not recolor with the theme")
+	}
+}
+
 func scanPage(t *testing.T) ScanPage {
 	t.Helper()
 	return ScanPage{

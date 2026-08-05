@@ -41,10 +41,13 @@ body {
 }
 
 .wordmark {
-  font-family: var(--mono);
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--accent);
+  /* Six lines of glyphs need more height than the single-line text wordmark
+     did to stay legible — at 1.5rem the individual box-drawing strokes blur
+     together. */
+  height: 2.75rem;
+  width: auto;
+  flex-shrink: 0;
+  fill: var(--accent);
 }
 
 .invocation { font-family: var(--mono); font-size: var(--step-0); color: var(--muted); }

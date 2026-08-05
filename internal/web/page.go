@@ -190,8 +190,12 @@ func sortedKeys(styles map[string]string) []string {
 
 // funcs are the derivations templates cannot express.
 var funcs = template.FuncMap{
-	"cssVars":       cssVars,
-	"stylesheet":    func() template.CSS { return template.CSS(stylesheet) },
+	"cssVars":    cssVars,
+	"stylesheet": func() template.CSS { return template.CSS(stylesheet) },
+	// wordmark is safe to mark pre-escaped for the same reason stylesheet is:
+	// it is a compiled-in asset, never page data, guarded by
+	// TestWordmarkUsesThePaletteAccent.
+	"wordmark":      func() template.HTML { return template.HTML(wordmarkSVG) },
 	"statusClass":   func(status string) string { return styleClass(render.StatusStyle(status)) },
 	"severityClass": severityClass,
 	"severityIcon":  severityIcon,
