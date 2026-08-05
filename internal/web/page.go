@@ -22,6 +22,7 @@ import (
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/tree"
 )
 
 // Meta is the provenance every page carries: what was run, when, and where it
@@ -60,6 +61,19 @@ type ScanPage struct {
 	Meta
 	Scope  string
 	Images []scanner.ImageScan
+}
+
+// TreePage is one ownership-graph rendering, for a single resource or a
+// whole namespace sweep — the same *tree.Node the terminal's render.Tree
+// draws, wrapped with page provenance.
+type TreePage struct {
+	Meta
+	// Scope is the muted caption line above the tree, e.g. "Namespace/prod"
+	// or "Deployment/web · prod" — the same text render.Banner/
+	// render.ScopeBanner already printed to the terminal just above
+	// render.Tree, so the two must not read differently.
+	Scope string
+	Root  *tree.Node
 }
 
 // Segment is one band of the stacked severity bar.

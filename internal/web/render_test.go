@@ -13,6 +13,7 @@ import (
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
+	"github.com/jzills/kx/internal/tree"
 )
 
 func testMeta(t *testing.T) Meta {
@@ -1062,5 +1063,165 @@ func TestRenderScanHealthyImageIsEmptyNotZero(t *testing.T) {
 		if strings.Contains(html, band) {
 			t.Errorf("a clean image rendered a %s severity band", band)
 		}
+	}
+}
+
+// ownershipTree builds a small three-level graph — a header-styled root with
+// one indexed, non-leaf child and one indexed leaf grandchild — so a single
+// fixture exercises the disclosure, header-style and index-prefix behaviour
+// together, the way a real `kx tree` walk would nest them.
+func ownershipTree() *tree.Node {
+	return &tree.Node{
+		Label: "Deployment/web", Style: theme.Header,
+		Children: []*tree.Node{{
+			Label: "rs/web-abc", Style: theme.Accent, Index: 1,
+			Children: []*tree.Node{
+				{Label: "pod/web-abc-1", Style: theme.Body, Index: 2},
+			},
+		}},
+	}
+}
+
+func TestRenderTreeLeafHasNoDetails(t *testing.T) {
+	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	labelAt := strings.Index(html, "pod/web-abc-1")
+	if labelAt < 0 {
+		t.Fatal("leaf node label is missing")
+	}
+	// The leaf's own <li> — the nearest "<li>" preceding its label — must not
+	// open a <details> of its own. Scoping to that one <li> (rather than
+	// counting opens/closes across the whole prefix) matters because the
+	// leaf sits nested inside two ancestor <details> that are still open at
+	// this point in the document.
+	own := html[strings.LastIndex(html[:labelAt], "<li>"):labelAt]
+	if strings.Contains(own, "<details") {
+		t.Error("a childless node rendered its own <details>, adding a pointless disclosure triangle to a leaf")
+	}
+}
+
+func TestRenderTreeNestsChildrenInDetails(t *testing.T) {
+	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "<details open>") {
+		t.Error("a node with children did not render an expanded <details>")
+	}
+	if !strings.Contains(html, `<ul class="tree-children">`) {
+		t.Error("children are not nested in a tree-children list")
+	}
+}
+
+// theme.Header carries no CSS custom property of its own — headers are
+// bold-accent, not their own colour (theme.WebStyles emits no --header var)
+// — so the template must route it through --accent rather than a nonexistent
+// var(--header).
+func TestRenderTreeHeaderStyleIsBoldAccent(t *testing.T) {
+	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	if !strings.Contains(string(out), `class="tree-label style-header"`) {
+		t.Error("the header-styled root did not get the style-header class")
+	}
+	rule := cssRule(t, stylesheet, ".tree-label.style-header {")
+	if !strings.Contains(rule, "var(--accent)") {
+		t.Error(".tree-label.style-header does not resolve through var(--accent)")
+	}
+	if strings.Contains(rule, "var(--header)") {
+		t.Error(".tree-label.style-header references a nonexistent var(--header)")
+	}
+}
+
+func TestRenderTreeIndexPrefix(t *testing.T) {
+	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, `<span class="tree-index">1</span>`) {
+		t.Error("an indexed node did not render its index prefix")
+	}
+	if !strings.Contains(html, `<span class="tree-index">2</span>`) {
+		t.Error("an indexed leaf did not render its index prefix")
+	}
+
+	unindexed := &tree.Node{
+		Label: "Deployment/web", Style: theme.Header,
+		Children: []*tree.Node{
+			{Label: "rs/web-abc", Style: theme.Accent,
+				Children: []*tree.Node{{Label: "pod/web-abc-1", Style: theme.Body}}},
+		},
+	}
+	out, err = RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: unindexed})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	// Checked via the quoted class attribute, not the bare "tree-index"
+	// substring: the embedded stylesheet's own ".tree-index { ... }" rule
+	// also contains that text, so a bare substring check can't tell an
+	// actual index span from the CSS rule that styles it.
+	if strings.Contains(string(out), `class="tree-index"`) {
+		t.Error("an unindexed tree rendered an index prefix")
+	}
+}
+
+// Resource names are cluster-controlled, same protection
+// TestRenderDiagEscapesClusterContent pins for diag.
+func TestRenderTreeEscapesClusterContent(t *testing.T) {
+	root := &tree.Node{Label: `<script>alert(1)</script>`, Style: theme.Header}
+	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: root})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	if strings.Contains(html, "<script>alert") {
+		t.Error("unescaped cluster content in output")
+	}
+	if !strings.Contains(html, "&lt;script&gt;") {
+		t.Error("script tag was not escaped")
+	}
+}
+
+// The palette reaches the page as custom properties, so kx theme changes the
+// browser output — parity with TestRenderDiagUsesTheActivePalette.
+func TestRenderTreeUsesTheActivePalette(t *testing.T) {
+	styles, err := theme.WebStyles("dracula")
+	if err != nil {
+		t.Fatalf("WebStyles returned %v", err)
+	}
+	meta := testMeta(t)
+	meta.Styles = styles
+
+	out, err := RenderTree(TreePage{Meta: meta, Scope: "prod", Root: ownershipTree()})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	if !strings.Contains(string(out), "--background:#282a36;") {
+		t.Error("dracula's background did not reach the page")
+	}
+}
+
+// Unlike RenderDiag/RenderScan, RenderTree binds no clock-derived state, so
+// two renders of the same page value must produce identical bytes with no
+// time-travel setup needed to prove it.
+func TestRenderTreeIsByteStable(t *testing.T) {
+	page := TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()}
+
+	first, err := RenderTree(page)
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	second, err := RenderTree(page)
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("two renders of the same page produced different bytes")
 	}
 }

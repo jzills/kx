@@ -2,12 +2,14 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jzills/kx/internal/graph"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/tree"
+	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -73,6 +75,29 @@ func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed 
 	})
 }
 
+// indexFlag renders --index for the invocation line when node indexes were
+// assigned, so the page's provenance line matches what was actually run.
+func indexFlag(indexed bool) string {
+	if indexed {
+		return "--index"
+	}
+	return ""
+}
+
+// scopeCaption joins non-empty parts with " · " for the page's muted caption
+// line, matching the text render.Banner/render.ScopeBanner already printed
+// to the terminal just above render.Tree, so the two must not read
+// differently.
+func scopeCaption(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " · ")
+}
+
 func newTreeCommand(services Services) *cobra.Command {
 	var indexed bool
 	cmd := &cobra.Command{
@@ -84,6 +109,11 @@ func newTreeCommand(services Services) *cobra.Command {
 		Example: "  kx tree\n  kx tree 1\n  kx tree 1 --index",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			html, _ := cmd.Flags().GetBool("html")
+			port, _ := cmd.Flags().GetInt("port")
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+
 			client, err := services.Kubernetes()
 			if err != nil {
 				return err
@@ -105,7 +135,21 @@ func newTreeCommand(services Services) *cobra.Command {
 					return err
 				}
 				render.Tree(node)
-				return nil
+				if !htmlOpts.Enabled {
+					return nil
+				}
+				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
+					invocation("tree", indexFlag(indexed), portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderTree(web.TreePage{
+					Meta: meta, Scope: scopeCaption("Namespace", namespace), Root: node,
+				})
+				if err != nil {
+					return err
+				}
+				return servePage(ctx, page, htmlOpts)
 			}
 
 			index, err := parseIndex("index", args[0])
@@ -116,9 +160,12 @@ func newTreeCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var scope string
 			if kind == kinds.Namespace {
+				scope = scopeCaption("Namespace", name)
 				render.ScopeBanner("Namespace", name, "")
 			} else {
+				scope = scopeCaption(string(kind)+"/"+name, namespace)
 				render.Banner(string(kind), name, namespace, "")
 			}
 			stop := render.Status("resolving ownership graph")
@@ -128,10 +175,31 @@ func newTreeCommand(services Services) *cobra.Command {
 				return err
 			}
 			render.Tree(node)
-			return nil
+			if !htmlOpts.Enabled {
+				return nil
+			}
+			// node.Label is already "Kind/Name" or "Namespace/name" (graph.go
+			// builds the root that way), so the page title reuses it rather
+			// than re-deriving kind/name separately.
+			meta, err := pageMeta(services.Config.Theme, "kx tree · "+node.Label,
+				invocation("tree", args[0], indexFlag(indexed), portFlag(port)))
+			if err != nil {
+				return err
+			}
+			page, err := web.RenderTree(web.TreePage{Meta: meta, Scope: scope, Root: node})
+			if err != nil {
+				return err
+			}
+			return servePage(ctx, page, htmlOpts)
 		},
 	}
 	cmd.Flags().BoolVarP(&indexed, "index", "i", false,
 		"Assign indexes to tree nodes and update state")
+	cmd.Flags().Bool("html", false,
+		"Render the tree as HTML and serve it in a browser")
+	cmd.Flags().Int("port", 0,
+		"Port to serve the HTML report on; 0 picks a free one")
+	cmd.Flags().Bool("no-open", false,
+		"Serve the HTML report without opening a browser")
 	return cmd
 }
