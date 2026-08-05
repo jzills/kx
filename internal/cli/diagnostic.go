@@ -50,10 +50,9 @@ type TriageCommand struct {
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
 // which the sweep spells as an empty namespace, the way client-go's listers do.
 //
-// A cluster-wide sweep saves no state and reports no dropped rows. Both exist
-// only to protect indexes, and indexes are what a cross-namespace listing
-// cannot have: state is keyed by name alone, and names repeat across
-// namespaces. kx get -A follows the same rule.
+// A cluster-wide sweep saves no state: there are no indexes for a
+// cross-namespace listing to protect, since names repeat across namespaces.
+// kx get -A follows the same rule.
 func (c TriageCommand) Execute(
 	ctx context.Context, namespace string, allNamespaces bool,
 ) (render.TriageResult, error) {
@@ -93,24 +92,12 @@ func (c TriageCommand) Execute(
 		}, nil
 	}
 
-	// State is keyed by name alone, so a rare cross-kind name collision keeps
-	// the earlier (more severe) row and drops the later one rather than letting
-	// an index resolve to the wrong resource.
-	seen := map[string]bool{}
 	var entries []state.Resource
-	var displayed []diagnostics.Report
-	var dropped []string
 	for _, report := range unhealthy {
-		if seen[report.Name] {
-			dropped = append(dropped, string(report.Kind)+"/"+report.Name)
-			continue
-		}
-		seen[report.Name] = true
 		entries = append(entries, state.Resource{Name: report.Name, Kind: report.Kind})
-		displayed = append(displayed, report)
 	}
 
-	if len(displayed) > 0 {
+	if len(unhealthy) > 0 {
 		if err := c.Save(state.State{
 			Resources: state.NewOrderedResources(entries),
 			Namespace: namespace,
@@ -122,9 +109,8 @@ func (c TriageCommand) Execute(
 	return render.TriageResult{
 		Namespace: namespace,
 		Checked:   len(reports),
-		Reports:   displayed,
+		Reports:   unhealthy,
 		Healthy:   len(reports) - len(unhealthy),
-		Dropped:   dropped,
 	}, nil
 }
 
@@ -144,7 +130,6 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Reports:       result.Reports,
-		Dropped:       result.Dropped,
 	}
 }
 

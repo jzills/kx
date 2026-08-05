@@ -53,7 +53,6 @@ type DiagPage struct {
 	// Reports are the unhealthy resources, most severe first — or exactly one
 	// resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
-	Dropped []string
 }
 
 // ScanPage is one image-scan sweep.

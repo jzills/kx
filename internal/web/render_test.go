@@ -350,21 +350,6 @@ func TestRenderDiagSweepAllHealthy(t *testing.T) {
 	}
 }
 
-// A name collision drops a row from the indexed listing; the page has to say
-// which, or the absence looks like a bug.
-func TestRenderDiagSweepReportsDroppedRows(t *testing.T) {
-	page := sweepPage(t)
-	page.Dropped = []string{"Service/api-gateway"}
-
-	out, err := RenderDiag(page)
-	if err != nil {
-		t.Fatalf("RenderDiag returned %v", err)
-	}
-	if !strings.Contains(string(out), "Service/api-gateway") {
-		t.Error("dropped row was not reported")
-	}
-}
-
 // The -A layout emits KIND and NAMESPACE where the indexed layout emits an
 // index and a kind, so it needs its own column widths. Without the modifier
 // class the kind renders into a slot sized for a two-digit index.
@@ -404,12 +389,11 @@ func TestRenderDiagAllNamespacesUsesItsOwnGrid(t *testing.T) {
 	}
 }
 
-// Kind, Namespace, Name, finding summaries and dropped-row names are all
-// cluster-controlled, and this task put them in new markup — the sweep
-// table, the <details><summary> row, and the footer. They must be escaped
-// exactly like the single-resource view's TestRenderDiagEscapesClusterContent
-// already requires. AllNamespaces is set because that is the branch that
-// prints Namespace at all.
+// Kind, Namespace, Name and finding summaries are all cluster-controlled, and
+// this task put them in new markup — the sweep table, the <details><summary>
+// row, and the footer. They must be escaped exactly like the single-resource
+// view's TestRenderDiagEscapesClusterContent already requires. AllNamespaces
+// is set because that is the branch that prints Namespace at all.
 func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 	page := sweepPage(t)
 	page.AllNamespaces = true
@@ -417,7 +401,6 @@ func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 	page.Reports[0].Namespace = `<b>ns</b>`
 	page.Reports[1].Name = `<script>alert(1)</script>`
 	page.Reports[1].Findings[0].Summary = `he said "boom" & <b>left</b>`
-	page.Dropped = []string{`<script>dropped</script>`}
 
 	out, err := RenderDiag(page)
 	if err != nil {
@@ -428,7 +411,6 @@ func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 	for _, forbidden := range []string{
 		"<script>kind",
 		"<script>alert",
-		"<script>dropped",
 		"<b>ns</b>",
 		"<b>left</b>",
 	} {

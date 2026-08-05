@@ -25,8 +25,6 @@ type TriageResult struct {
 	// Reports are the unhealthy resources only, most severe first.
 	Reports []diagnostics.Report
 	Healthy int
-	// Dropped names rows lost to a cross-kind name collision.
-	Dropped []string
 }
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
@@ -120,10 +118,6 @@ func (r *Renderer) Triage(result TriageResult) {
 		footer += " · kx diag <index> for detail"
 	}
 	r.line(r.style(theme.Muted, footer))
-	for _, name := range result.Dropped {
-		r.line(r.style(theme.Muted,
-			name+" shares a name with an indexed resource and was omitted"))
-	}
 }
 
 // What the NAME column can never have: two-space padding on both sides of all
