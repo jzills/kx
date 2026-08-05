@@ -9,6 +9,7 @@ package graph
 
 import (
 	"context"
+	"sort"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -444,6 +445,22 @@ func (b Builder) BuildNamespace(
 		renderNode(entry, root, childrenByOwner, c)
 	}
 	return root, c.resources, nil
+}
+
+// Namespaces lists every namespace's name, sorted so an -A tree sweep walks
+// them in a stable order rather than whatever order the API server happens
+// to return.
+func (b Builder) Namespaces(ctx context.Context) ([]string, error) {
+	list, err := b.Client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.Name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // renderNode adds an object under parent, then recurses into what it owns. A

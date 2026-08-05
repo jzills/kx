@@ -1207,6 +1207,55 @@ func TestRenderTreeUsesTheActivePalette(t *testing.T) {
 	}
 }
 
+// An -A sweep renders one root per namespace, each getting the same
+// disclosure treatment a single tree's top-level node does — no separate
+// markup shape is needed for the forest case.
+func TestRenderTreeAllNamespacesRendersEveryRoot(t *testing.T) {
+	roots := []*tree.Node{
+		{Label: "Namespace/default", Style: theme.Header,
+			Children: []*tree.Node{{Label: "Deployment/web", Style: theme.Header}}},
+		{Label: "Namespace/prod", Style: theme.Header,
+			Children: []*tree.Node{{Label: "Deployment/api", Style: theme.Header}}},
+	}
+	out, err := RenderTree(TreePage{
+		Meta: testMeta(t), Scope: "all namespaces",
+		AllNamespaces: true, Roots: roots,
+	})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	for _, want := range []string{"Namespace/default", "Deployment/web", "Namespace/prod", "Deployment/api"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("all-namespaces page is missing %q", want)
+		}
+	}
+	if !strings.Contains(html, "all namespaces") {
+		t.Error("scope caption missing")
+	}
+}
+
+// The AllNamespaces flag must actually gate which field the template reads:
+// a Root left over on a mis-set page must not silently render instead of the
+// intended empty Roots slice, and vice versa.
+func TestRenderTreeAllNamespacesIgnoresRoot(t *testing.T) {
+	out, err := RenderTree(TreePage{
+		Meta: testMeta(t), Scope: "all namespaces", AllNamespaces: true,
+		Root:  &tree.Node{Label: "Namespace/wrong-field", Style: theme.Header},
+		Roots: []*tree.Node{{Label: "Namespace/right-field", Style: theme.Header}},
+	})
+	if err != nil {
+		t.Fatalf("RenderTree returned %v", err)
+	}
+	html := string(out)
+	if strings.Contains(html, "wrong-field") {
+		t.Error("an AllNamespaces page rendered Root instead of Roots")
+	}
+	if !strings.Contains(html, "right-field") {
+		t.Error("an AllNamespaces page did not render Roots")
+	}
+}
+
 // Unlike RenderDiag/RenderScan, RenderTree binds no clock-derived state, so
 // two renders of the same page value must produce identical bytes with no
 // time-travel setup needed to prove it.

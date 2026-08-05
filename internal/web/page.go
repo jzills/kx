@@ -63,17 +63,22 @@ type ScanPage struct {
 	Images []scanner.ImageScan
 }
 
-// TreePage is one ownership-graph rendering, for a single resource or a
-// whole namespace sweep — the same *tree.Node the terminal's render.Tree
-// draws, wrapped with page provenance.
+// TreePage is one ownership-graph rendering, for a single resource, a whole
+// namespace sweep, or an -A sweep across every namespace — the same
+// *tree.Node(s) the terminal's render.Tree draws, wrapped with page
+// provenance.
 type TreePage struct {
 	Meta
-	// Scope is the muted caption line above the tree, e.g. "Namespace/prod"
-	// or "Deployment/web · prod" — the same text render.Banner/
-	// render.ScopeBanner already printed to the terminal just above
-	// render.Tree, so the two must not read differently.
+	// Scope is the muted caption line above the tree, e.g. "Namespace/prod",
+	// "Deployment/web · prod", or "all namespaces" — the same text
+	// render.Banner/render.ScopeBanner already printed to the terminal just
+	// above render.Tree, so the two must not read differently.
 	Scope string
-	Root  *tree.Node
+	// AllNamespaces sweeps render one root per namespace, in Roots, rather
+	// than the single Root every other shape uses.
+	AllNamespaces bool
+	Root          *tree.Node
+	Roots         []*tree.Node
 }
 
 // Segment is one band of the stacked severity bar.

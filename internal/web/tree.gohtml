@@ -21,7 +21,11 @@
 <div class="block">
   <p class="caption">{{.Scope}}</p>
   <ul class="tree tree-root">
-    {{template "node" .Root}}
+    {{if .AllNamespaces}}
+      {{range .Roots}}{{template "node" .}}{{end}}
+    {{else}}
+      {{template "node" .Root}}
+    {{end}}
   </ul>
 </div>
 {{end}}

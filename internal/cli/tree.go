@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jzills/kx/internal/graph"
@@ -56,6 +58,27 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 	return node, nil
 }
 
+// ExecuteAllNamespaces graphs the ownership forest for every namespace, one
+// root per namespace.
+//
+// Results are never indexed or saved, matching kx get -A and kx diag -A:
+// names repeat across namespaces, so there is nothing stable to index.
+func (c TreeCommand) ExecuteAllNamespaces(ctx context.Context) ([]*tree.Node, error) {
+	namespaces, err := c.Builder.Namespaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]*tree.Node, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		node, _, err := c.Builder.BuildNamespace(ctx, namespace, false)
+		if err != nil {
+			return nil, err
+		}
+		roots = append(roots, node)
+	}
+	return roots, nil
+}
+
 // save records the tree's nodes as a state entry.
 //
 // A tree entry carries no Query: it wasn't produced by `kx get`, so there is
@@ -102,17 +125,50 @@ func newTreeCommand(services Services) *cobra.Command {
 	var indexed bool
 	cmd := &cobra.Command{
 		Use:   "tree [index]",
-		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace.",
+		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); --index assigns indexes to tree nodes. A Namespace index graphs that namespace.",
 		Long: "Graphs ownership references from controllers down to containers.\n" +
-			"With no index, graphs every workload in the current namespace.\n" +
+			"With no index, graphs every workload in the current namespace, or in\n" +
+			"the namespace given by -n, or every namespace as a forest with -A.\n" +
 			"A Namespace index graphs that namespace.",
-		Example: "  kx tree\n  kx tree 1\n  kx tree 1 --index",
+		Example: "  kx tree\n  kx tree 1\n  kx tree 1 --index\n  kx tree -n prod\n  kx tree -A",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+
+			namespaceFlag, _ := cmd.Flags().GetString("namespace")
+			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
+
+			if cmd.Flags().Changed("namespace") && allNamespaces {
+				return errors.New(
+					"'--all-namespaces' and '--namespace' cannot be combined.")
+			}
+			// Names repeat across namespaces, so there is nothing stable for
+			// --index to number — the same reason kx get -A and kx diag -A
+			// never save indexable state either.
+			if allNamespaces && indexed {
+				return errors.New(
+					"'--all-namespaces' and '--index' cannot be combined — " +
+						"names repeat across namespaces, so there is nothing " +
+						"stable to index.")
+			}
+			// An index already carries the namespace it was listed from, so a
+			// scope flag next to one is a contradiction rather than a refinement.
+			scopeFlag := ""
+			if cmd.Flags().Changed("namespace") {
+				scopeFlag = "--namespace"
+			}
+			if allNamespaces {
+				scopeFlag = "--all-namespaces"
+			}
+			if len(args) > 0 && scopeFlag != "" {
+				return fmt.Errorf(
+					"'%s' cannot be combined with an index — an index already "+
+						"carries the namespace it was listed from. Drop the flag, "+
+						"or drop the index to sweep the namespace instead.", scopeFlag)
+			}
 
 			client, err := services.Kubernetes()
 			if err != nil {
@@ -126,7 +182,41 @@ func newTreeCommand(services Services) *cobra.Command {
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
-				namespace := services.Kubectl.CurrentNamespace()
+				if allNamespaces {
+					stop := render.Status("resolving ownership graphs")
+					roots, err := command.ExecuteAllNamespaces(ctx)
+					stop()
+					if err != nil {
+						return err
+					}
+					for i, root := range roots {
+						if i > 0 {
+							render.Blank()
+						}
+						render.Tree(root)
+					}
+					if !htmlOpts.Enabled {
+						return nil
+					}
+					meta, err := pageMeta(services.Config.Theme, "kx tree · all namespaces",
+						invocation("tree", scopeArgs("", true), portFlag(port)))
+					if err != nil {
+						return err
+					}
+					page, err := web.RenderTree(web.TreePage{
+						Meta: meta, Scope: "all namespaces",
+						AllNamespaces: true, Roots: roots,
+					})
+					if err != nil {
+						return err
+					}
+					return servePage(ctx, page, htmlOpts)
+				}
+
+				namespace := namespaceFlag
+				if namespace == "" {
+					namespace = services.Kubectl.CurrentNamespace()
+				}
 				render.ScopeBanner("Namespace", namespace, "")
 				stop := render.Status("resolving ownership graph")
 				node, err := command.ExecuteNamespace(ctx, namespace, indexed)
@@ -139,7 +229,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					return nil
 				}
 				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
-					invocation("tree", indexFlag(indexed), portFlag(port)))
+					invocation("tree", scopeArgs(namespace, false), indexFlag(indexed), portFlag(port)))
 				if err != nil {
 					return err
 				}
@@ -195,6 +285,10 @@ func newTreeCommand(services Services) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&indexed, "index", "i", false,
 		"Assign indexes to tree nodes and update state")
+	cmd.Flags().StringP("namespace", "n", "",
+		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false,
+		"Sweep every namespace, as a forest of per-namespace trees; results are not indexed")
 	cmd.Flags().Bool("html", false,
 		"Render the tree as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,

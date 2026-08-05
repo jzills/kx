@@ -263,3 +263,137 @@ func TestTreeIndexedOnNamespaceRowWithHTMLUsesNamespaceScope(t *testing.T) {
 		t.Errorf("terminal output = %q, want Namespace/prod graphed, not the listing namespace", sink.String())
 	}
 }
+
+// ExecuteAllNamespaces walks every namespace, one root per namespace, sorted
+// (Namespaces itself is pinned separately in internal/graph; this is the
+// integration between that ordering and the per-namespace BuildNamespace walk).
+func TestTreeExecuteAllNamespacesReturnsOneRootPerNamespace(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
+	)
+	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	roots, err := command.ExecuteAllNamespaces(context.Background())
+	if err != nil {
+		t.Fatalf("ExecuteAllNamespaces: %v", err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("roots = %d, want 2", len(roots))
+	}
+	// Sorted: "default" before "prod".
+	if roots[0].Label != "Namespace/default" {
+		t.Errorf("roots[0] = %q, want Namespace/default", roots[0].Label)
+	}
+	if roots[1].Label != "Namespace/prod" {
+		t.Errorf("roots[1] = %q, want Namespace/prod", roots[1].Label)
+	}
+}
+
+// -A never indexes, matching kx get -A and kx diag -A: names repeat across
+// namespaces, so there is nothing stable to index.
+func TestTreeExecuteAllNamespacesNeverIndexes(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
+	)
+	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	roots, err := command.ExecuteAllNamespaces(context.Background())
+	if err != nil {
+		t.Fatalf("ExecuteAllNamespaces: %v", err)
+	}
+	if len(roots) != 1 || len(roots[0].Children) != 1 {
+		t.Fatalf("roots = %+v, want exactly one namespace with one workload", roots)
+	}
+	if roots[0].Children[0].Index != 0 {
+		t.Errorf("workload index = %d, want 0 (unindexed)", roots[0].Children[0].Index)
+	}
+}
+
+func TestTreeRegistersNamespaceFlags(t *testing.T) {
+	cmd := newTreeCommand(Services{})
+	for _, name := range []string{"namespace", "all-namespaces"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+func TestTreeRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
+	cmd := newTreeCommand(Services{})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.Flags().Set("all-namespaces", "true"); err != nil {
+		t.Fatalf("set --all-namespaces: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("-n and -A were accepted together")
+	} else if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestTreeRejectsAllNamespacesWithIndex(t *testing.T) {
+	cmd := newTreeCommand(Services{})
+	if err := cmd.Flags().Set("all-namespaces", "true"); err != nil {
+		t.Fatalf("set --all-namespaces: %v", err)
+	}
+	if err := cmd.Flags().Set("index", "true"); err != nil {
+		t.Fatalf("set --index: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("-A and --index were accepted together")
+	} else if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestTreeRejectsScopeFlagWithIndexArgument(t *testing.T) {
+	for _, flag := range [][2]string{{"namespace", "prod"}, {"all-namespaces", "true"}} {
+		cmd := newTreeCommand(Services{})
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+		if err := cmd.RunE(cmd, []string{"1"}); err == nil {
+			t.Errorf("--%s was accepted alongside an index", flag[0])
+		} else if !strings.Contains(err.Error(), "cannot be combined with an index") {
+			t.Errorf("--%s err = %v", flag[0], err)
+		}
+	}
+}
+
+// Moving the "if !htmlOpts.Enabled { return nil }" gate above the -A render
+// loop would make --html silently swallow the terminal trees the command
+// always prints — the same "adds, never replaces" regression the other
+// branches are pinned against.
+func TestTreeAllNamespacesWithHTMLStillPrintsEveryTerminalTree(t *testing.T) {
+	sink := captureRender(t)
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "staging"}},
+	)
+	services := Services{
+		State:  &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config: config.Default(),
+		Kubernetes: func() (kubernetes.Interface, error) {
+			return client, nil
+		},
+	}
+	cmd := newTreeCommand(services)
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{{"all-namespaces", "true"}, {"html", "true"}, {"no-open", "true"}} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{"Namespace/prod", "Namespace/staging"} {
+		if !strings.Contains(sink.String(), want) {
+			t.Errorf("terminal output = %q, want %q to still print with --html set", sink.String(), want)
+		}
+	}
+}

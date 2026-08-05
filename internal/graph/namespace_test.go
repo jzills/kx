@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -177,5 +178,28 @@ func TestMostRecentJob(t *testing.T) {
 
 	if MostRecentJob("never-ran", []batchv1.Job{older}) != nil {
 		t.Error("MostRecentJob on an unrun CronJob returned a job")
+	}
+}
+
+// Namespaces sorts, so an -A tree sweep walks a stable order rather than
+// whatever order the fake (or real) API server happens to return objects in.
+func TestNamespacesListsSorted(t *testing.T) {
+	b := builder(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}},
+	)
+	names, err := b.Namespaces(context.Background())
+	if err != nil {
+		t.Fatalf("Namespaces: %v", err)
+	}
+	want := []string{"default", "kube-system", "prod"}
+	if len(names) != len(want) {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Errorf("names[%d] = %q, want %q", i, names[i], want[i])
+		}
 	}
 }
