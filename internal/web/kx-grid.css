@@ -214,8 +214,22 @@
   background: var(--surface);
 }
 
-.tabulator-row:hover {
-  background: var(--background);
+/* This is the one hover state that actually was broken (unlike the plain
+   background/text-colour rules above, which the comment before this block
+   still correctly says were fine): Tabulator auto-applies
+   ".tabulator-selectable" to any row with a click handler bound — which
+   the diag grid has, for row-expand — and its own
+   ".tabulator-row.tabulator-selectable:hover" rule (found in the vendored
+   stylesheet, wrapped in an @media (hover:hover) block) sets a flat light
+   grey, three selectors deep versus this file's plain ".tabulator-row:hover"
+   at two, so it always won regardless of source order. !important covers
+   every hover variant Tabulator might apply — selectable, selected, or
+   neither — so the row a user is pointing at always reads the same
+   regardless of which class ends up present. */
+.tabulator-row:hover,
+.tabulator-row.tabulator-selectable:hover,
+.tabulator-row.tabulator-selected:hover {
+  background: var(--background) !important;
 }
 
 .tabulator-row .tabulator-cell {
@@ -240,6 +254,16 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 600;
+}
+
+/* Same fix as the regular row hover above, same reason: the vendored
+   ".tabulator-row.tabulator-group:hover" rule sets a flat
+   rgba(0,0,0,.1) overlay at matching specificity, which would otherwise
+   layer semi-transparent black on top of this rule's own var(--background)
+   in whichever order the two happen to parse — !important makes the
+   themed colour authoritative instead of leaving that to chance. */
+.tabulator-row.tabulator-group:hover {
+  background: var(--background) !important;
 }
 
 /* Collapsed groups draw a right-pointing triangle (border-left carries the
