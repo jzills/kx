@@ -20,6 +20,24 @@
     return document.createTextNode(value === null || value === undefined ? "" : String(value));
   }
 
+  // uniqueValues builds a header-filter "list" values array from whatever
+  // a field actually contains in this sweep, sorted for a stable menu
+  // order — used for Kind, which (unlike Verdict) has no fixed, known set
+  // of values to hand-write.
+  function uniqueValues(rows, field) {
+    var seen = {};
+    var out = [];
+    rows.forEach(function (row) {
+      var v = row[field];
+      if (v && !seen[v]) {
+        seen[v] = true;
+        out.push(v);
+      }
+    });
+    out.sort();
+    return out;
+  }
+
   // Mirrors severityClass/severityIcon in page.go (diagnostics.Severity:
   // OK=0, Warning=1, Critical=2) so the grid's verdict badge reads the same
   // as the report it expands into. Kept here, not derived from the server,
@@ -62,7 +80,7 @@
     var select = document.createElement("select");
     var none = document.createElement("option");
     none.value = "";
-    none.textContent = "(none)";
+    none.textContent = "None";
     select.appendChild(none);
     options.forEach(function (opt) {
       var o = document.createElement("option");
@@ -126,7 +144,14 @@
     }
     columns.push({
       title: "Kind", field: "Kind", width: 150,
-      headerFilter: "list", headerFilterParams: { valuesLookup: true, clearable: true },
+      headerFilter: "list",
+      // multiselect: true makes Tabulator treat the filter value as an
+      // array and match rows against any of the selected values, natively
+      // — no custom headerFilterFunc needed. No synthetic "All" entry
+      // here: with nothing selected the filter is empty and every row
+      // shows, so "All" would be a checkbox that means the same thing as
+      // checking nothing, not a real option alongside the others.
+      headerFilterParams: { values: uniqueValues(data, "Kind"), multiselect: true, clearable: true },
     });
     if (allNamespaces) {
       columns.push({ title: "Namespace", field: "Namespace", width: 170, headerFilter: "input" });
@@ -139,8 +164,11 @@
         return aRow.getData().VerdictRank - bRow.getData().VerdictRank;
       },
       headerFilter: "list",
+      // Same multiselect reasoning as Kind above: no synthetic "All" entry,
+      // an empty selection already means every verdict shows.
       headerFilterParams: {
-        values: { "": "All", healthy: "Healthy", warnings: "Warning", critical: "Critical" },
+        values: { healthy: "Healthy", warnings: "Warning", critical: "Critical" },
+        multiselect: true,
         clearable: true,
       },
     });

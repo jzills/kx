@@ -124,10 +124,6 @@
    vendored source: padding, width, box-sizing, cursor, caretColor) — the
    same inline-style-beats-any-non-!important-rule mechanism that caused
    the tableholder height bug, so the same fix applies. */
-/* Same background token as .kx-grid-controls select below (var(--surface),
-   not var(--background)) deliberately — these are the same kind of control
-   and must read as one visual language, not two different shades of dark
-   depending on which one happens to sit inside .tabulator. */
 .tabulator .tabulator-header-filter input,
 .tabulator .tabulator-header-filter select {
   appearance: none !important;
@@ -146,21 +142,6 @@
 .tabulator .tabulator-header-filter select:focus-visible {
   outline: 2px solid var(--accent) !important;
   outline-offset: -1px;
-}
-
-/* <option>'s open dropdown list is rendered by the OS/browser as native
-   popup chrome, not part of the page's own box model — this is a real
-   platform boundary CSS can only partly reach, not another specificity gap
-   like the ones above. Modern Chromium and Firefox do respect
-   background-color/color set directly on <option>, though, which is the
-   documented, standard way to get as close as CSS allows; Safari's support
-   is more limited and may still show its own native list styling
-   regardless. Applied to both the header-filter <select> and the group-by
-   dropdown so the two stay visually identical. */
-.tabulator .tabulator-header-filter select option,
-.kx-grid-controls select option {
-  background: var(--surface) !important;
-  color: var(--body) !important;
 }
 
 /* Verified low-specificity in the vendored stylesheet (the real rule is
@@ -313,17 +294,48 @@
   color: var(--muted);
 }
 
+/* Label text ("Group by", "Search") gets the same treatment as
+   .tabulator-col-title's column headers (micro size, uppercase,
+   letter-spaced) — via CSS transform rather than hand-typed uppercase
+   strings in kx-grid.js, so the source text stays normal, readable copy
+   and the two can't drift out of sync the way a literal "GROUP BY" typed
+   in JS could. The <select>/<input> beside each label keeps the row's
+   normal step-0 size — this only styles the label itself. */
+.kx-grid-controls label {
+  font-size: var(--micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* Deliberately flat, not boxed like the header-filter inputs/selects: this
+   is the group-by control, styled to read as part of the column-header row
+   above it rather than as another filter field — same treatment as
+   .tabulator-col-title (micro size, uppercase, letter-spaced, muted),
+   applied directly to the select instead of only its label, and a hover
+   background matching .tabulator-col.tabulator-sortable:hover for the same
+   affordance headers already give. Width matches the header filter
+   selects' column width (Verdict is 140px) rather than shrink-wrapping to
+   its own text, so it doesn't read as a narrower, different kind of
+   control sitting right above ones that are wider. */
 .kx-grid-controls select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  color: var(--body);
+  background: transparent;
+  border: none;
+  color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--step-0);
+  font-size: var(--micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
   padding: 0.2rem 0.4rem;
+  width: 140px;
+}
+
+.kx-grid-controls select:hover {
+  background: var(--background);
 }
 
 .kx-bar {
