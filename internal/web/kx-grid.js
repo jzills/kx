@@ -20,6 +20,55 @@
     return document.createTextNode(value === null || value === undefined ? "" : String(value));
   }
 
+  // preserveScroll stops a redraw (a header filter changing, a group-by
+  // toggle, a tree search) from silently scrolling the page back to the top.
+  //
+  // Every Tabulator redraw clears its rendered rows before rebuilding them —
+  // this is Tabulator's own base render path (confirmed in the vendored
+  // source), not something renderVertical: "basic" opts out of. This grid's
+  // height is exactly its rendered content's height (kx-grid.css strips the
+  // fixed-height scroll viewport Tabulator would otherwise reserve, so the
+  // page scrolls instead of the grid). So mid-redraw, while rows are cleared
+  // and not yet rebuilt, the document is transiently shorter than it was —
+  // and if the page was scrolled past where that transient height ends, the
+  // browser clamps window.scrollY down to fit, exactly like scrolling past
+  // the end of a page that just got shorter. Once the rows are rebuilt the
+  // document regrows, but browsers do not restore a clamped scroll position
+  // just because there is room for it again, so the page is left sitting at
+  // the top. renderStarted/renderComplete bracket exactly that window, so
+  // saving the scroll position on one and restoring it on the other undoes
+  // the clamp before the user ever sees it settle at 0.
+  function preserveScroll(table) {
+    var savedY = null;
+    // How many more animation frames to keep re-asserting savedY for, once
+    // renderComplete fires. A filter that removes a whole group (e.g. the
+    // last row for an image, under groupBy) settles its layout — and gets
+    // reclamped by the browser — over several frames after renderComplete,
+    // not within the one frame a plain row-level filter does; a single
+    // corrective scrollTo the frame after renderComplete is enough for the
+    // common case but was empirically still too early for that one (traced
+    // by watching real scroll/scrollHeight events, not guessed).
+    var framesLeft = 0;
+
+    function reassert() {
+      if (framesLeft <= 0) return;
+      framesLeft--;
+      if (window.scrollY !== savedY) {
+        window.scrollTo(window.scrollX, savedY);
+      }
+      requestAnimationFrame(reassert);
+    }
+
+    table.on("renderStarted", function () {
+      savedY = window.scrollY;
+    });
+    table.on("renderComplete", function () {
+      if (savedY === null) return;
+      framesLeft = 15;
+      requestAnimationFrame(reassert);
+    });
+  }
+
   // uniqueValues builds a header-filter "list" values array from whatever
   // a field actually contains in this sweep, sorted for a stable menu
   // order — used for Kind, which (unlike Verdict) has no fixed, known set
@@ -296,6 +345,7 @@
       renderVertical: "basic",
     });
 
+    preserveScroll(table);
     table.on("dataFiltered", function () { syncFilterTooltips(mount); });
 
     var groupOptions = allNamespaces
@@ -367,7 +417,7 @@
     var data = kxData("kx-scan-images-data");
     if (!data) return;
 
-    new Tabulator(mount, {
+    var table = new Tabulator(mount, {
       data: data,
       layout: "fitColumns",
       columns: [
@@ -386,6 +436,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
+    preserveScroll(table);
   }
 
   // Scanner output is not trusted input — a compromised or malformed
@@ -485,6 +536,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
+    preserveScroll(table);
 
     addControls(mount, [
       groupSelect(table, [
@@ -579,6 +631,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
+    preserveScroll(table);
 
     addControls(mount, [
       searchInput(function (value) {
