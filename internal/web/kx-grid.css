@@ -6,31 +6,6 @@
 
 .grid-mount { margin: 0.25rem 0 0.75rem; }
 
-/* TEMPORARILY DISABLED for a diagnostic test (2026-08-06): checking whether
-   forcing every grid out of its own scroll region is what's behind the
-   scroll-jump-on-filter/sort reports. Tabulator decides internally, at
-   init, whether a table gets a fixed height with its own internal
-   scrollbar or grows to fit its content — a heuristic in the vendored JS
-   keyed off the mount element's clientHeight at that moment. These two
-   rules override that decision so no grid is ever its own scroll region,
-   since every page around them already scrolls; !important is required
-   because Tabulator applies its decision as inline styles via JS, and
-   inline styles beat any non-!important CSS rule regardless of selector
-   specificity. Re-enable (delete this comment, restore the two rule
-   blocks below) once the test is done either way.
-
-.tabulator,
-.tabulator-tableholder {
-  height: auto !important;
-  max-height: none !important;
-}
-
-.tabulator-tableholder {
-  overflow: visible !important;
-}
-
-*/
-
 .tabulator {
   background: var(--surface) !important;
   border: 1px solid var(--border);
