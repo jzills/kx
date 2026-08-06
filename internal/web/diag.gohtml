@@ -115,17 +115,14 @@
   <div class="block">
     {{if eq .Checked 0}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
-    {{else if .Reports}}
+    {{else}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
       <div class="grid-mount" data-kx-grid="diag" data-all-namespaces="{{.AllNamespaces}}"></div>
       <script type="application/json" id="kx-diag-data">{{diagRowsJSON .Reports}}</script>
       {{range $i, $r := .Reports}}<template id="diag-detail-{{$i}}">{{template "report" $r}}</template>{{end}}
       <footer>
-        {{.Healthy}} healthy {{if eq .Healthy 1}}resource{{else}}resources{{end}} not shown
-        {{- if .AllNamespaces}} · indexes not saved for all-namespace listings{{else}} · kx diag &lt;index&gt; for the same detail in your terminal{{end}}
+        {{if .AllNamespaces}}indexes not saved for all-namespace listings{{else}}kx diag &lt;index&gt; for the same detail in your terminal{{end}}
       </footer>
-    {{else}}
-      <p class="caption">Mixed · {{.Scope}} · <span class="status-ok">{{.Checked}} checked · all healthy</span></p>
     {{end}}
   </div>
 {{end}}

@@ -387,7 +387,7 @@ func sweepPage(t *testing.T) DiagPage {
 	}
 	return DiagPage{
 		Meta: testMeta(t), Scope: "diagnostics",
-		Checked: 14, Healthy: 12,
+		Checked: 14,
 		Reports: []diagnostics.Report{criticalReport(t), warning},
 	}
 }
@@ -401,7 +401,7 @@ func TestRenderDiagSweepIndexesRows(t *testing.T) {
 
 	for _, want := range []string{
 		"14 checked",
-		"12 healthy resources not shown",
+		"kx diag &lt;index&gt; for the same detail in your terminal",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("sweep page is missing %q", want)
@@ -467,17 +467,31 @@ func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
 	}
 }
 
-func TestRenderDiagSweepAllHealthy(t *testing.T) {
+// A sweep with only healthy resources still shows them as rows in the grid,
+// unlike the terminal's short "N checked · all healthy" line: the HTML report
+// is the full inventory, and its grid — not the server — is where healthy
+// rows get filtered away, if a viewer wants that.
+func TestRenderDiagSweepAllHealthyStillShowsRows(t *testing.T) {
 	page := sweepPage(t)
-	page.Reports = nil
-	page.Healthy = 14
+	page.Checked = 1
+	page.Reports = []diagnostics.Report{{
+		Kind: kinds.Pod, Name: "quiet", Namespace: "diagnostics", Verdict: diagnostics.OK,
+	}}
 
 	out, err := RenderDiag(page)
 	if err != nil {
 		t.Fatalf("RenderDiag returned %v", err)
 	}
-	if !strings.Contains(string(out), "all healthy") {
-		t.Error("an all-healthy sweep did not say so")
+	html := string(out)
+	if strings.Contains(html, "all healthy") {
+		t.Error("an all-healthy sweep collapsed to the one-line summary instead of rendering its grid")
+	}
+	if !strings.Contains(html, `class="grid-mount" data-kx-grid="diag"`) {
+		t.Error("an all-healthy sweep did not render its grid")
+	}
+	rows := decodeDiagRows(t, html)
+	if len(rows) != 1 || rows[0].Verdict != "healthy" {
+		t.Errorf("rows = %+v, want the one healthy resource shown", rows)
 	}
 }
 
@@ -545,7 +559,6 @@ func TestRenderDiagSweepZeroCheckedMakesNoHealthClaim(t *testing.T) {
 	page := sweepPage(t)
 	page.Reports = nil
 	page.Checked = 0
-	page.Healthy = 0
 
 	out, err := RenderDiag(page)
 	if err != nil {

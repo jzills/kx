@@ -51,9 +51,8 @@ type DiagPage struct {
 	AllNamespaces bool
 	Single        bool
 	Checked       int
-	Healthy       int
-	// Reports are the unhealthy resources, most severe first — or exactly one
-	// resource when Single is set, healthy or not.
+	// Reports are every swept resource, most severe first, healthy included —
+	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
 }
 
