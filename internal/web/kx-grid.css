@@ -39,43 +39,57 @@
 }
 
 .tabulator {
-  background: var(--surface);
+  background: var(--surface) !important;
   border: 1px solid var(--border);
   border-radius: 2px;
   font-family: var(--mono);
   font-size: var(--step-0);
 }
 
+/* !important on every property from here through .tabulator-col-sorter,
+   not just the ones proven broken so far: DevTools on the actual page
+   showed the real rule as ".tabulator .tabulator-header .tabulator-col"
+   (background:#fff), three chained classes deep — one more than
+   ".tabulator .tabulator-col" here, so it won regardless of source order.
+   Re-checking the full vendored stylesheet (not the truncated selectors an
+   earlier, cruder grep pass had led this file's overrides to assume) shows
+   this pattern repeats across nearly every header/column rule: real
+   selectors run 3-5 classes deep, sometimes with attribute selectors
+   ([aria-sort=...]) on top. Matching each one exactly means copying
+   Tabulator's internal selector chains verbatim, which is both what
+   already went wrong once and fragile against any future Tabulator version
+   changing that structure. !important ends the chase: it wins regardless
+   of how deep the real selector turns out to be. */
 .tabulator .tabulator-header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--muted) !important;
 }
 
 .tabulator .tabulator-col {
-  background: var(--surface);
-  border-right: none;
+  background: var(--surface) !important;
+  border-right: none !important;
 }
 
 .tabulator .tabulator-col-content {
-  padding: 0.55rem var(--pad-x);
+  padding: 0.55rem var(--pad-x) !important;
 }
 
 .tabulator .tabulator-col-title {
-  font-family: var(--mono);
-  font-size: var(--micro);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 600;
+  font-family: var(--mono) !important;
+  font-size: var(--micro) !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--muted) !important;
+  font-weight: 600 !important;
 }
 
 .tabulator .tabulator-col.tabulator-sortable:hover {
-  background: var(--background);
+  background: var(--background) !important;
 }
 
 .tabulator .tabulator-col-sorter {
-  color: var(--muted);
+  color: var(--muted) !important;
 }
 
 /* Sort-direction arrows are CSS border-triangles, not an icon font or SVG —
@@ -126,10 +140,17 @@
 
 .tabulator .tabulator-header-filter input:focus-visible,
 .tabulator .tabulator-header-filter select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent) !important;
   outline-offset: -1px;
 }
 
+/* Verified low-specificity in the vendored stylesheet (the real rule is
+   the bare ".tabulator-row,.tabulator-row.tabulator-row-even", matching or
+   below these), so no !important needed here — unlike the header/column
+   rules above, this one was never actually broken. Left as plain
+   declarations rather than !important'd defensively, so a future reader
+   can tell "checked and fine" apart from "forced because vendor CSS wins
+   otherwise" elsewhere in this file. */
 .tabulator-row {
   background: var(--surface);
   color: var(--body);
@@ -154,7 +175,10 @@
   cursor: pointer;
 }
 
-/* Group headers (scan's findings-by-image grouping). */
+/* Group headers (scan's findings-by-image grouping). Real rule is bare
+   ".tabulator-group" (background:#ccc), lower specificity than this, so
+   no !important needed — same "checked and fine" case as .tabulator-row
+   above. */
 .tabulator-row.tabulator-group {
   background: var(--background);
   border-bottom: 1px solid var(--border);
@@ -192,12 +216,12 @@
    (drawn via the ::after pseudo-element's background, not a border) for the
    same vendor-selector-fragility reason as the sort arrows above. */
 .tabulator-row .tabulator-cell .tabulator-data-tree-control {
-  border-color: var(--muted);
-  background: transparent;
+  border-color: var(--muted) !important;
+  background: transparent !important;
 }
 
 .tabulator-row .tabulator-cell .tabulator-data-tree-control:hover {
-  background: var(--background);
+  background: var(--background) !important;
 }
 
 .tabulator-row .tabulator-cell .tabulator-data-tree-control-expand,
@@ -216,37 +240,44 @@
 /* The empty-state message a grid shows via its "placeholder" option (the
    scan findings grid's "No vulnerabilities found") — Tabulator's own
    default is a 20px bold #ccc block, sized for a whole-page empty table
-   rather than a small note inside an otherwise-themed report. */
-.tabulator .tabulator-placeholder-contents {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: var(--step-0);
-  font-weight: 400;
+   rather than a small note inside an otherwise-themed report. Real
+   selector is ".tabulator .tabulator-tableholder .tabulator-placeholder
+   .tabulator-placeholder-contents" (four classes) plus a nested
+   "... .tabulator-placeholder span{color:#000}" — both deeper than
+   assumed here, so !important again. */
+.tabulator .tabulator-placeholder-contents,
+.tabulator .tabulator-placeholder-contents span {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+  font-weight: 400 !important;
 }
 
+/* Footer/pagination isn't currently used by any grid (no pagination
+   option is set), but themed defensively in case that changes later. */
 .tabulator .tabulator-footer {
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: var(--step-0);
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
 }
 
 .tabulator .tabulator-footer .tabulator-page {
-  background: var(--background);
-  border: 1px solid var(--border);
-  color: var(--body);
-  border-radius: 2px;
+  background: var(--background) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--body) !important;
+  border-radius: 2px !important;
 }
 
 .tabulator .tabulator-footer .tabulator-page.active {
-  background: var(--accent);
-  color: var(--background);
-  border-color: var(--accent);
+  background: var(--accent) !important;
+  color: var(--background) !important;
+  border-color: var(--accent) !important;
 }
 
 .tabulator .tabulator-footer .tabulator-page:disabled {
-  color: var(--muted);
+  color: var(--muted) !important;
 }
 
 /* kx-grid.js's own chrome: the stacked severity bar (mirrors .stack in
