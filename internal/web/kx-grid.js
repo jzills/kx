@@ -35,37 +35,26 @@
   // the end of a page that just got shorter. Once the rows are rebuilt the
   // document regrows, but browsers do not restore a clamped scroll position
   // just because there is room for it again, so the page is left sitting at
-  // the top. renderStarted/renderComplete bracket exactly that window, so
-  // saving the scroll position on one and restoring it on the other undoes
-  // the clamp before the user ever sees it settle at 0.
-  function preserveScroll(table) {
-    var savedY = null;
-    // How many more animation frames to keep re-asserting savedY for, once
-    // renderComplete fires. A filter that removes a whole group (e.g. the
-    // last row for an image, under groupBy) settles its layout — and gets
-    // reclamped by the browser — over several frames after renderComplete,
-    // not within the one frame a plain row-level filter does; a single
-    // corrective scrollTo the frame after renderComplete is enough for the
-    // common case but was empirically still too early for that one (traced
-    // by watching real scroll/scrollHeight events, not guessed).
-    var framesLeft = 0;
-
-    function reassert() {
-      if (framesLeft <= 0) return;
-      framesLeft--;
-      if (window.scrollY !== savedY) {
-        window.scrollTo(window.scrollX, savedY);
-      }
-      requestAnimationFrame(reassert);
-    }
-
+  // the top.
+  //
+  // An earlier version of this fixed the symptom after the fact — save
+  // scrollY on renderStarted, restore it a few animation frames after
+  // renderComplete — but that raced the browser's own async layout: how many
+  // frames "a few" needed to be varied by how much the redraw changed (a
+  // filter dropping a whole group settled later than a plain row filter),
+  // so it was unreliable for some redraws. This instead prevents the
+  // transient shrink outright: locking the mount's height to what it
+  // measured before the clear means the document never gets shorter than
+  // the current scroll position in the first place, so the browser has
+  // nothing to clamp. Releasing the lock on renderComplete lets it settle to
+  // its real new height — shorter, taller, or the same — same as any
+  // ordinary page whose content changes size.
+  function preserveScroll(mount, table) {
     table.on("renderStarted", function () {
-      savedY = window.scrollY;
+      mount.style.minHeight = mount.getBoundingClientRect().height + "px";
     });
     table.on("renderComplete", function () {
-      if (savedY === null) return;
-      framesLeft = 15;
-      requestAnimationFrame(reassert);
+      mount.style.minHeight = "";
     });
   }
 
@@ -345,7 +334,7 @@
       renderVertical: "basic",
     });
 
-    preserveScroll(table);
+    preserveScroll(mount, table);
     table.on("dataFiltered", function () { syncFilterTooltips(mount); });
 
     var groupOptions = allNamespaces
@@ -436,7 +425,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
-    preserveScroll(table);
+    preserveScroll(mount, table);
   }
 
   // Scanner output is not trusted input — a compromised or malformed
@@ -524,7 +513,12 @@
           title: "Fixable", field: "Fixable", width: 90, hozAlign: "center",
           formatter: function (cell) { return cell.getValue() ? "Yes" : "No"; },
           headerFilter: "list",
-          headerFilterParams: { values: { "": "All", true: "Fixable", false: "No fix" }, clearable: true },
+          // Same placeholder pattern as Severity above: no synthetic "All"
+          // entry — clearing the selection (clearable: true) already yields
+          // the "" headerValue headerFilterFunc treats as "show everything",
+          // so "All" is placeholder text, not a real option to pick.
+          headerFilterPlaceholder: "All",
+          headerFilterParams: { values: { true: "Fixable", false: "No fix" }, clearable: true },
           headerFilterFunc: function (headerValue, rowValue) {
             return headerValue === "" || String(rowValue) === headerValue;
           },
@@ -536,7 +530,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
-    preserveScroll(table);
+    preserveScroll(mount, table);
 
     addControls(mount, [
       groupSelect(table, [
@@ -631,7 +625,7 @@
       // scroll viewport, so it must not be used here.
       renderVertical: "basic",
     });
-    preserveScroll(table);
+    preserveScroll(mount, table);
 
     addControls(mount, [
       searchInput(function (value) {
