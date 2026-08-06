@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,83 @@ func quantity(t *testing.T, value string) *resource.Quantity {
 		t.Fatalf("ParseQuantity(%q) returned %v", value, err)
 	}
 	return &q
+}
+
+// jsonEscapedLT/jsonEscapedGT are json.Marshal's default HTML-escaped forms
+// of "<" and ">": the six-character literal escape sequence
+// backslash-u-0-0-3-c (and 3e), not the "&lt;"/"&gt;" entities the old
+// html/template-based rendering used. Built from rune(0x5c) rather than
+// typed as a literal backslash in a string, so there is no ambiguity about
+// whether the source holds that six-character escape text or an actual
+// "<"/">" rune — the two look identical in some renderings of this source
+// but must not be confused, since the whole point of the test using them is
+// to tell escaped output apart from unescaped output.
+var (
+	jsonEscapedLT = string(rune(0x5c)) + "u003c"
+	jsonEscapedGT = string(rune(0x5c)) + "u003e"
+)
+
+// extractJSONScript returns the raw text content of the
+// <script type="application/json" id="ID">...</script> block a grid
+// initializes from, so tests can decode the data a page hands to Tabulator
+// rather than pattern-matching on markup a client-side library now owns.
+func extractJSONScript(t *testing.T, html, id string) string {
+	t.Helper()
+	marker := `id="` + id + `"`
+	at := strings.Index(html, marker)
+	if at < 0 {
+		t.Fatalf("no <script> with id=%q found in output", id)
+	}
+	openTag := strings.Index(html[at:], ">")
+	if openTag < 0 {
+		t.Fatalf("script tag for id=%q was never closed", id)
+	}
+	start := at + openTag + 1
+	relEnd := strings.Index(html[start:], "</script>")
+	if relEnd < 0 {
+		t.Fatalf("no closing </script> found for id=%q", id)
+	}
+	return html[start : start+relEnd]
+}
+
+func decodeDiagRows(t *testing.T, html string) []DiagRow {
+	t.Helper()
+	var rows []DiagRow
+	raw := extractJSONScript(t, html, "kx-diag-data")
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("could not decode diag JSON payload: %v\nraw: %s", err, raw)
+	}
+	return rows
+}
+
+func decodeScanImageRows(t *testing.T, html string) []ScanImageRow {
+	t.Helper()
+	var rows []ScanImageRow
+	raw := extractJSONScript(t, html, "kx-scan-images-data")
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("could not decode scan image JSON payload: %v\nraw: %s", err, raw)
+	}
+	return rows
+}
+
+func decodeScanFindingRows(t *testing.T, html string) []ScanFindingRow {
+	t.Helper()
+	var rows []ScanFindingRow
+	raw := extractJSONScript(t, html, "kx-scan-findings-data")
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("could not decode scan findings JSON payload: %v\nraw: %s", err, raw)
+	}
+	return rows
+}
+
+func decodeTreeRows(t *testing.T, html string) []TreeRow {
+	t.Helper()
+	var rows []TreeRow
+	raw := extractJSONScript(t, html, "kx-tree-data")
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("could not decode tree JSON payload: %v\nraw: %s", err, raw)
+	}
+	return rows
 }
 
 func criticalReport(t *testing.T) diagnostics.Report {
@@ -99,6 +177,31 @@ func TestRenderDiagSingleResource(t *testing.T) {
 	}
 }
 
+// diag's single-resource view has exactly one resource — nothing to sort,
+// filter, or group. A regression that started emitting a grid mount here
+// would be silently pointless (an empty control surface over one row)
+// rather than caught, without this.
+func TestRenderDiagSingleHasNoGridMount(t *testing.T) {
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{criticalReport(t)},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+	// Checked via the id="..." attribute form and the full div opening tag,
+	// not bare "kx-diag-data"/"data-kx-grid=\"diag\"" substrings:
+	// kx-grid.js's own source (embedded on every page regardless of type)
+	// references those same strings as JS arguments/selectors
+	// (kxData("kx-diag-data"), querySelector('[data-kx-grid="diag"]')), so a
+	// bare substring check would pass unconditionally whether or not this
+	// page actually emitted the mount div or script tag.
+	if strings.Contains(html, `class="grid-mount" data-kx-grid="diag"`) || strings.Contains(html, `id="kx-diag-data"`) {
+		t.Error("a single-resource page emitted a diag grid mount/JSON payload")
+	}
+}
+
 // A container with no limit set must render an em dash. Rendering 0% would
 // claim it is using none of a limit it does not have.
 func TestRenderDiagShowsDashWhenNoLimit(t *testing.T) {
@@ -145,7 +248,9 @@ func TestUsageOfMatchesIntegerArithmetic(t *testing.T) {
 }
 
 // Log lines and event messages are cluster-controlled. Anything a pod can
-// print into its own logs must not become markup.
+// print into its own logs must not become markup. The single-resource view
+// still renders the report as literal server-side HTML (it has no grid), so
+// this stays an html/template escaping check.
 func TestRenderDiagEscapesClusterContent(t *testing.T) {
 	report := criticalReport(t)
 	report.Pods[0].Containers[0].LogLines = []string{`<script>alert("xss")</script>`}
@@ -297,24 +402,44 @@ func TestRenderDiagSweepIndexesRows(t *testing.T) {
 	for _, want := range []string{
 		"14 checked",
 		"12 healthy resources not shown",
-		`<span class="index">1</span>`,
-		`<span class="index">2</span>`,
-		"storage-pending",
-		"Volume is Pending",
-		// The drill-down is the same report block, so the detail is present.
-		"CrashLoopBackOff",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("sweep page is missing %q", want)
 		}
 	}
-	if !strings.Contains(html, "<details") {
-		t.Error("sweep rows are not expandable")
+	// The full div opening tag, not a bare data-kx-grid="diag" substring:
+	// kx-grid.js's own source (embedded on every page) contains that same
+	// text inside its querySelector call, so a bare substring check would
+	// pass even if this page never emitted the mount div itself.
+	if !strings.Contains(html, `class="grid-mount" data-kx-grid="diag"`) {
+		t.Error("sweep page is missing its diag grid mount")
+	}
+
+	rows := decodeDiagRows(t, html)
+	if len(rows) != 2 {
+		t.Fatalf("got %d diag rows, want 2", len(rows))
+	}
+	if rows[0].Index != 1 || rows[1].Index != 2 {
+		t.Errorf("rows are not 1-based indexed: got Index %d, %d", rows[0].Index, rows[1].Index)
+	}
+	if rows[1].Name != "storage-pending" || rows[1].TopFinding != "Volume is Pending" {
+		t.Errorf("row 1 does not carry the warning report's name/finding: %+v", rows[1])
+	}
+
+	// The drill-down is the same report block, cloned client-side from a
+	// <template> keyed by the row's 0-based position (see diagRowFormatter
+	// in kx-grid.js), so the detail is present in the document even though
+	// it is not part of the visible grid markup.
+	if !strings.Contains(html, `<template id="diag-detail-0">`) || !strings.Contains(html, "CrashLoopBackOff") {
+		t.Error("sweep rows are not paired with a detail <template>")
 	}
 }
 
-// A cluster-wide sweep saves no state, so there are no indexes to print. The
-// namespace takes the column instead, matching render.Triage.
+// A cluster-wide sweep saves no state, so kx-grid.js's column config drops
+// the index column and adds namespace instead (diagColumns in kx-grid.js) —
+// a client-side decision this test can't observe directly. What it pins is
+// the one thing the server controls: the mount's data-all-namespaces
+// attribute, which is what that column choice branches on.
 func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
 	page := sweepPage(t)
 	page.AllNamespaces = true
@@ -326,14 +451,19 @@ func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
 	}
 	html := string(out)
 
-	if strings.Contains(html, `<span class="index">1</span>`) {
-		t.Error("an all-namespaces sweep printed indexes")
-	}
-	if !strings.Contains(html, "NAMESPACE") {
-		t.Error("an all-namespaces sweep did not print a namespace column")
+	if !strings.Contains(html, `data-all-namespaces="true"`) {
+		t.Error("an all-namespaces sweep did not flag its grid mount")
 	}
 	if !strings.Contains(html, "all namespaces") {
 		t.Error("scope caption missing")
+	}
+
+	indexed, err := RenderDiag(sweepPage(t))
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if strings.Contains(string(indexed), `data-all-namespaces="true"`) {
+		t.Error("an indexed sweep wrongly flagged its grid mount as all-namespaces")
 	}
 }
 
@@ -351,50 +481,15 @@ func TestRenderDiagSweepAllHealthy(t *testing.T) {
 	}
 }
 
-// The -A layout emits KIND and NAMESPACE where the indexed layout emits an
-// index and a kind, so it needs its own column widths. Without the modifier
-// class the kind renders into a slot sized for a two-digit index.
-func TestRenderDiagAllNamespacesUsesItsOwnGrid(t *testing.T) {
-	page := sweepPage(t)
-	page.AllNamespaces = true
-
-	out, err := RenderDiag(page)
-	if err != nil {
-		t.Fatalf("RenderDiag returned %v", err)
-	}
-	html := string(out)
-	// Checked via the literal class attribute, not a bare "ns-grid"
-	// substring: the embedded stylesheet's own selector
-	// (".sweep-head.ns-grid") also contains that text, so a bare substring
-	// check can't tell a class actually applied to an element from the CSS
-	// rule that targets it. The header and a row are checked separately, via
-	// their full class attributes, so a fix that applies the modifier to
-	// only one of the two still fails here.
-	if !strings.Contains(html, `class="sweep-head ns-grid"`) {
-		t.Error("the -A header did not get its own grid")
-	}
-	if !strings.Contains(html, `class="row status-bad ns-grid"`) {
-		t.Error("the -A rows did not get their own grid")
-	}
-
-	// The indexed layout must NOT pick it up. Checking for the quoted
-	// occurrence (an HTML attribute value ending in ns-grid) rather than the
-	// bare word, again to avoid matching the stylesheet's own CSS selectors,
-	// which contain no quote characters.
-	indexed, err := RenderDiag(sweepPage(t))
-	if err != nil {
-		t.Fatalf("RenderDiag returned %v", err)
-	}
-	if strings.Contains(string(indexed), `ns-grid"`) {
-		t.Error("the indexed layout wrongly used the -A grid")
-	}
-}
-
-// Kind, Namespace, Name and finding summaries are all cluster-controlled, and
-// this task put them in new markup — the sweep table, the <details><summary>
-// row, and the footer. They must be escaped exactly like the single-resource
-// view's TestRenderDiagEscapesClusterContent already requires. AllNamespaces
-// is set because that is the branch that prints Namespace at all.
+// Kind, Namespace, Name and finding summaries are all cluster-controlled,
+// and now reach the page only through the JSON payload — the sweep's
+// visible rows are drawn client-side by kx-grid.js, not server-rendered
+// HTML text. json.Marshal's default HTML-escaping (< > & become <
+// > &) is what stops any of them from breaking out of the
+// <script type="application/json"> block; this pins that escaping, and that
+// the values still round-trip to their original form once decoded — a
+// template that stopped emitting a field would satisfy an absence check
+// just as well as one that correctly escaped it.
 func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 	page := sweepPage(t)
 	page.AllNamespaces = true
@@ -419,8 +514,23 @@ func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 			t.Errorf("unescaped cluster content in output: %q", forbidden)
 		}
 	}
-	if !strings.Contains(html, "&lt;script&gt;") {
-		t.Error("script tag was not escaped")
+	// json.Marshal's default HTML-escaping renders "<" as the six-byte
+	// literal escape sequence, backslash-u-0-0-3-c, not the HTML entity
+	// "&lt;" the old html/template-based rendering used. Checked against
+	// that literal sequence rather than a bare "<script>" substring: every
+	// page already contains real <script> tags for tabulatorJS/kxGridJS, so
+	// a check for the unescaped form would pass unconditionally regardless
+	// of whether this payload's escaping actually worked.
+	if !strings.Contains(html, jsonEscapedLT+"script"+jsonEscapedGT) {
+		t.Error("JSON payload did not HTML-escape a script tag")
+	}
+
+	rows := decodeDiagRows(t, html)
+	if rows[0].Kind != `<script>kind</script>` || rows[0].Namespace != `<b>ns</b>` {
+		t.Errorf("escaping mangled the decoded values instead of just neutralising them: %+v", rows[0])
+	}
+	if rows[1].Name != `<script>alert(1)</script>` {
+		t.Errorf("escaping mangled the decoded name: %+v", rows[1])
 	}
 }
 
@@ -450,41 +560,6 @@ func TestRenderDiagSweepZeroCheckedMakesNoHealthClaim(t *testing.T) {
 	}
 }
 
-// mediaQueryBlock returns the declaration text inside the first rule whose
-// prelude contains query, matched by counting braces rather than by a
-// regexp, so nested rules inside the block (there are two) don't end the
-// scan early. Scoping to the block matters: ".ns-grid" and ".scan-grid"
-// already appear elsewhere in the stylesheet's desktop rules, so a check
-// against the whole file would pass whether or not the mobile rule actually
-// mentions them.
-func mediaQueryBlock(t *testing.T, css, query string) string {
-	t.Helper()
-	start := strings.Index(css, query)
-	if start < 0 {
-		t.Fatalf("stylesheet does not contain %q", query)
-	}
-	relOpen := strings.IndexByte(css[start:], '{')
-	if relOpen < 0 {
-		t.Fatalf("no opening brace found after %q", query)
-	}
-	open := start + relOpen
-
-	depth := 0
-	for i := open; i < len(css); i++ {
-		switch css[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return css[open+1 : i]
-			}
-		}
-	}
-	t.Fatalf("no matching closing brace found for the %q block", query)
-	return ""
-}
-
 // stripCSSComments removes every /* ... */ span. CSS comments cannot nest,
 // so cutting at the first "/*"/"*/" pair repeatedly is exact; a comment with
 // no closing marker (shouldn't happen in valid CSS) discards the rest of the
@@ -508,50 +583,8 @@ func stripCSSComments(css string) string {
 	return out.String()
 }
 
-// gridCollapseSelectors returns the selector list of the mobile collapse
-// rule — the first rule inside @media (max-width: 720px), the one setting
-// grid-template-columns — with comments stripped first and the declaration
-// body (after the first "{") cut off, so a check against it can only be
-// satisfied by the selectors themselves.
-//
-// Both steps matter, and a prior round of this test skipped both: the rule
-// has its own explanatory comment describing why ".ns-grid" and
-// ".scan-grid" must be repeated here, and that comment contains those exact
-// two substrings. Scoping to the media-query block (mediaQueryBlock, above)
-// is not enough on its own — the comment sits inside that block too — so a
-// check against the raw block passed whether or not the selector list
-// itself named either modifier. The reviewer's targeted mutation (delete
-// just the selectors, keep the comment) is what exposed this; a whole-file
-// revert to pre-task HEAD had removed the comment along with everything
-// else, which is why it looked like conclusive mutation evidence at the
-// time and wasn't.
-func gridCollapseSelectors(t *testing.T, css string) string {
-	t.Helper()
-	block := stripCSSComments(mediaQueryBlock(t, css, "@media (max-width: 720px)"))
-	brace := strings.IndexByte(block, '{')
-	if brace < 0 {
-		t.Fatal("the mobile collapse rule has no declaration block")
-	}
-	return block[:brace]
-}
-
-// desktopCSS returns the stylesheet with every comment stripped and the
-// mobile collapse's whole @media block cut away, leaving only the rules that
-// apply at every viewport width. Comments are stripped from the FULL
-// stylesheet first — not just inside the media block — because the desktop
-// ".scan-grid" rule has its own explanatory comment (immediately above it in
-// style.css) that names ".scan-grid" and ".row.scan-grid > summary" in
-// prose; without stripping it, a check for those selectors could pass
-// against the comment alone with the rule itself deleted, the same class of
-// gap gridCollapseSelectors' own doc comment describes. @media (max-width:
-// 720px) is the last rule in style.css, so cutting the text at its start
-// leaves exactly the desktop-only rules before it; TestMobileCollapseCoversNsGrid
-// and TestMobileCollapseExcludesScanGrid already establish the media query's
-// own selector list separately, so there is no need to also exclude its
-// interior here beyond the cut.
 // cssRule returns the declaration block of the rule that begins with prefix,
-// comments stripped first so a mention inside prose cannot satisfy a caller —
-// the same trap desktopCSS strips comments to avoid.
+// comments stripped first so a mention inside prose cannot satisfy a caller.
 func cssRule(t *testing.T, css, prefix string) string {
 	t.Helper()
 	stripped := stripCSSComments(css)
@@ -566,167 +599,13 @@ func cssRule(t *testing.T, css, prefix string) string {
 	return stripped[at : at+end+1]
 }
 
-func desktopCSS(t *testing.T, css string) string {
-	t.Helper()
-	stripped := stripCSSComments(css)
-	at := strings.Index(stripped, "@media (max-width: 720px)")
-	if at < 0 {
-		t.Fatal("stylesheet does not contain the mobile collapse's @media rule")
-	}
-	return stripped[:at]
-}
-
-// Nothing else in this file pins that the DESKTOP ".scan-grid" rule still
-// exists: TestMobileCollapseExcludesScanGrid only looks inside the mobile
-// @media block, where .scan-grid is deliberately absent. Deleting the
-// desktop rule entirely would leave every test in this package green while
-// the scan page silently fell back to the diag sweep's six-column grid with
-// eight cells, at every viewport width, not just under 720px.
-func TestDesktopScanGridRuleExists(t *testing.T) {
-	desktop := desktopCSS(t, stylesheet)
-	if !strings.Contains(desktop, ".row > summary.scan-grid") ||
-		!strings.Contains(desktop, ".sweep-head.scan-grid") {
-		t.Error("the desktop .scan-grid rule (.row > summary.scan-grid, " +
-			".sweep-head.scan-grid) is missing outside the mobile media " +
-			"query — the scan page would silently fall back to diag's grid")
-	}
-}
-
-// Same gap, -A sweep side: TestMobileCollapseCoversNsGrid only pins that the
-// mobile rule's selector list repeats the ".ns-grid" modifier, not that the
-// desktop rule it is repeating alongside still exists at all.
-func TestDesktopNsGridRuleExists(t *testing.T) {
-	desktop := desktopCSS(t, stylesheet)
-	if !strings.Contains(desktop, ".row.ns-grid > summary") ||
-		!strings.Contains(desktop, ".sweep-head.ns-grid") {
-		t.Error("the desktop .ns-grid rule (.row.ns-grid > summary, " +
-			".sweep-head.ns-grid) is missing outside the mobile media query " +
-			"— the -A sweep would silently fall back to the indexed grid")
-	}
-}
-
-// .event-msg must declare no colour of its own. It shares its element with a
-// .status-* class on a failed scan (<p class="event-msg status-warn">), and
-// both are single-class selectors, so whichever is written later wins. When
-// .event-msg carried "color: var(--body)" it sat later in the sheet and the
-// error message rendered in body colour, silently dropping the warning colour
-// the markup asks for.
-func TestEventMsgDeclaresNoColour(t *testing.T) {
-	rule := cssRule(t, stylesheet, ".event-msg {")
-	if strings.Contains(rule, "color:") {
-		t.Errorf(".event-msg declares a colour (%q); it must inherit, or it "+
-			"outranks the .status-* class beside it on a failed scan row", rule)
-	}
-}
-
-// A failed scan's message must actually reach the page in the warning colour.
-// The rule above is the mechanism; this is the outcome.
-func TestRenderScanFailureMessageKeepsItsWarningClass(t *testing.T) {
-	out, err := RenderScan(scanPage(t))
-	if err != nil {
-		t.Fatalf("RenderScan returned %v", err)
-	}
-	if !strings.Contains(string(out), `<p class="event-msg status-warn">`) {
-		t.Error("the failed scan's message lost its status-warn class")
-	}
-}
-
-// Carried defect: .row.ns-grid > summary is a compound selector (two classes
-// plus a type), giving it higher specificity than the plain ".row >
-// summary, .sweep-head" rule inside @media (max-width: 720px) — and @media
-// contributes no specificity of its own. Unless the mobile rule repeats the
-// modifier at the same specificity, the desktop grid wins the cascade under
-// 720px and the -A sweep never collapses to the narrow layout.
-//
-// This checks the necessary condition — that the selector list inside the
-// media query actually names the modifier — which is what a fix of this
-// kind changes. It cannot check the sufficient one, that the mobile rule
-// then wins the cascade in an actual browser at an actual viewport width:
-// that is a rendering question no Go string comparison can answer, and
-// nothing in this package parses or computes CSS specificity outside this
-// test. Reasoning about the specificity arithmetic (above, and in the CSS
-// comment beside the rule) is what stands in for that.
-func TestMobileCollapseCoversNsGrid(t *testing.T) {
-	selectors := gridCollapseSelectors(t, stylesheet)
-	if !strings.Contains(selectors, ".ns-grid") {
-		t.Error("the mobile collapse rule's selector list does not mention " +
-			".ns-grid, so it loses the specificity contest against the " +
-			"desktop rule and never collapses under 720px")
-	}
-}
-
-// The scan page deliberately does not join the diag sweep's mobile
-// collapse — see the comment beside .scan-grid's desktop rule in style.css.
-// A scan row's columns (image, severity stack, five counts) have no pair as
-// droppable as the diag sweep's KIND/FINDING, so forcing them into the same
-// 3-column template would wrap the extra cells onto additional implicit
-// rows rather than collapsing sensibly; the scan page keeps its desktop
-// grid at every width and relies on .table-wrap's own horizontal scroll
-// instead, the same mechanism the CVE detail table inside each row's drawer
-// already depends on unconditionally.
-//
-// This pins that decision the same way TestMobileCollapseCoversNsGrid pins
-// the opposite one for .ns-grid: if a later change added ".scan-grid" back
-// into this selector list, the scan page would silently inherit the
-// diag-shaped collapse.
-func TestMobileCollapseExcludesScanGrid(t *testing.T) {
-	selectors := gridCollapseSelectors(t, stylesheet)
-	if strings.Contains(selectors, ".scan-grid") {
-		t.Error("the mobile collapse rule's selector list mentions " +
-			".scan-grid, which would force the scan page into the " +
-			"diag-shaped 3-column collapse instead of its own grid plus " +
-			"horizontal scroll")
-	}
-}
-
-// .row's own colour must be set (var(--body)), and declared textually AFTER
-// the .status-bad/.status-warn/.status-ok/.status-neutral rules it ties with
-// at equal specificity (0,1,0): a CSS specificity tie is broken by source
-// order, later wins. Without this, a severity class on a row (<details
-// class="row status-bad">, diag.gohtml/scan.gohtml) tints every descendant
-// that has no colour rule of its own — CVE package/installed cells, pod
-// logs, finding summaries — via inheritance from the <details> element
-// itself, contradicting those same descendants' own per-row classification
-// (e.g. a LOW-severity CVE rendering red inside a row with one CRITICAL
-// finding).
-//
-// This can only be checked textually, the same way TestMobileCollapseCoversNsGrid
-// pins a specificity contest no Go test here can render an actual cascade
-// for: reasoning about the arithmetic (also recorded in style.css's own
-// comments beside the similar .scan-grid/.ns-grid rules) stands in for it.
-func TestRowSetsItsOwnColorAfterSeverityClasses(t *testing.T) {
-	rowAt := strings.Index(stylesheet, ".row {")
-	if rowAt < 0 {
-		t.Fatal(".row rule not found in the stylesheet")
-	}
-	badAt := strings.Index(stylesheet, ".status-bad {")
-	if badAt < 0 {
-		t.Fatal(".status-bad rule not found in the stylesheet")
-	}
-	if rowAt < badAt {
-		t.Error(".row is declared before .status-bad in the stylesheet; at " +
-			"equal specificity the severity colour would win the cascade on " +
-			"the row itself and bleed into every uncoloured descendant")
-	}
-
-	end := strings.Index(stylesheet[rowAt:], "}")
-	if end < 0 {
-		t.Fatal(".row rule has no closing brace")
-	}
-	rowRule := stylesheet[rowAt : rowAt+end]
-	if !strings.Contains(rowRule, "color: var(--body)") {
-		t.Error(".row does not set its own color to var(--body), so a " +
-			"severity-classed row still tints every descendant with no " +
-			"colour rule of its own")
-	}
-}
-
 // style.css previously styled no anchors at all, so the CVE ID links
-// scan.gohtml renders (<a href="{{.URL}}">) fell back to the browser's
-// default link colour — roughly #0000EE, about 2:1 contrast against
-// github-dark's #0d1117 background and effectively invisible on nine of
-// kx's ten palettes. The CVE ID is the primary key of the table this
-// feature exists to show.
+// scan.gohtml renders fell back to the browser's default link colour —
+// roughly #0000EE, about 2:1 contrast against github-dark's #0d1117
+// background and effectively invisible on nine of kx's ten palettes. The
+// rule applies regardless of whether the anchor comes from server-rendered
+// HTML or (as with the scan findings grid today) a DOM node kx-grid.js
+// builds client-side — CSS selectors don't care which built the element.
 func TestAnchorsUseThePaletteAccent(t *testing.T) {
 	if !strings.Contains(stylesheet, "a { color: var(--accent); }") {
 		t.Error("anchors are not coloured through the palette's accent " +
@@ -814,79 +693,61 @@ func TestRenderScanListsImagesAndCVEs(t *testing.T) {
 	}
 	html := string(out)
 
-	for _, want := range []string{
-		"ghcr.io/jzills/api-gateway:1.8.3",
-		"CVE-2021-22945",
-		"curl",
-		// html/template's text escaper renders "+" as the numeric character
-		// reference "&#43;" in every HTML text context, not just this one —
-		// it is not conditioned on the value being page data versus a
-		// literal in the template. That is what a browser decodes back to
-		// "+", so this is the correctly escaped form of
-		// "7.74.0-1.3+deb11u2", the version this task's own fixture carries;
-		// a literal "+" byte in the output would mean escaping had been
-		// bypassed (e.g. with template.HTML), which the brief forbids.
-		"7.74.0-1.3&#43;deb11u2",
-		"https://scout.docker.com/v/CVE-2021-22945",
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("scan page is missing %q", want)
+	images := decodeScanImageRows(t, html)
+	if len(images) != 2 || images[0].Image != "ghcr.io/jzills/api-gateway:1.8.3" {
+		t.Fatalf("image grid payload missing the fixture's images: %+v", images)
+	}
+
+	findings := decodeScanFindingRows(t, html)
+	var got *ScanFindingRow
+	for i := range findings {
+		if findings[i].ID == "CVE-2021-22945" {
+			got = &findings[i]
 		}
+	}
+	if got == nil {
+		t.Fatal("findings payload is missing CVE-2021-22945")
+	}
+	if got.Package != "curl" || got.Installed != "7.74.0-1.3+deb11u1" || got.FixedIn != "7.74.0-1.3+deb11u2" {
+		t.Errorf("CVE-2021-22945 did not round-trip its package/installed/fixed fields: %+v", got)
+	}
+	if got.URL != "https://scout.docker.com/v/CVE-2021-22945" {
+		t.Errorf("CVE-2021-22945 lost its URL: %+v", got)
+	}
+	if !got.Fixable {
+		t.Error("a CVE with a FixedIn value must be Fixable")
 	}
 }
 
-// A package with no fix must show a dash, not an empty cell that reads as
-// missing data.
+// The dash itself is drawn client-side (fixedInFormatter in kx-grid.js,
+// verified manually per the package's testing strategy); what the server
+// controls, and what this pins, is that an unfixed CVE's FixedIn genuinely
+// comes through empty rather than some placeholder text the formatter would
+// have to special-case.
 func TestRenderScanShowsDashWhenUnfixed(t *testing.T) {
 	out, err := RenderScan(scanPage(t))
 	if err != nil {
 		t.Fatalf("RenderScan returned %v", err)
 	}
-	if !strings.Contains(string(out), `<td class="dim">—</td>`) {
-		t.Error("an unfixed CVE did not render a dash")
+	findings := decodeScanFindingRows(t, string(out))
+	for _, f := range findings {
+		if f.ID == "CVE-2023-44487" {
+			if f.FixedIn != "" || f.Fixable {
+				t.Errorf("an unfixed CVE reported FixedIn=%q Fixable=%v", f.FixedIn, f.Fixable)
+			}
+			return
+		}
 	}
+	t.Fatal("findings payload is missing CVE-2023-44487")
 }
 
-// rowContaining returns the <details>...</details> block enclosing the
-// first occurrence of marker, so an assertion can be scoped to one image's
-// row instead of the whole page.
-func rowContaining(t *testing.T, html, marker string) string {
-	t.Helper()
-	at := strings.Index(html, marker)
-	if at < 0 {
-		t.Fatalf("html does not contain %q", marker)
-	}
-	start := strings.LastIndex(html[:at], "<details")
-	if start < 0 {
-		t.Fatalf("no <details> found before %q", marker)
-	}
-	relEnd := strings.Index(html[at:], "</details>")
-	if relEnd < 0 {
-		t.Fatalf("no </details> found after %q", marker)
-	}
-	return html[start : at+relEnd+len("</details>")]
-}
-
-// A failed scan keeps its message and must not show zeroes, which would read
-// as a clean result.
-//
-// The zero-count check is load-bearing, not decorative: scanPage's failed
-// image (Error set, Counts left nil) would satisfy "the row is labelled" and
-// "the message is present" even if a regression made the template render
-// counts unconditionally instead of dashing them out on error — reading a
-// severity out of a nil Counts map returns Go's int zero value rather than
-// panicking, so the row would silently show "0" in every count column. The
-// check is anchored to the literal markup a zero count renders as
-// (`<span class="num dim">0</span>`), not a bare "0": the inlined stylesheet
-// is full of bare "0"s (padding, border widths, opacity), so that would
-// never be able to fail on this regression.
-//
-// The check is scoped to the failed row specifically (rowContaining), not
-// the whole page: scanPage's other image has legitimate zero counts of its
-// own (MEDIUM and UNSPECIFIED are both 0 for a real, successfully scanned
-// image), which correctly render the very same markup and would make a
-// whole-page check fail regardless of whether the failed row itself was
-// right.
+// A failed scan keeps its message and must not claim real counts for an
+// image that was never actually scanned — reading a severity out of a nil
+// Counts map returns Go's int zero value rather than panicking, so a
+// regression here would silently report a clean 0/0/0/0/0 image instead of
+// surfacing the failure. Dashing those zeros out in the UI is kx-grid.js's
+// job (countFormatter checks Error before trusting a count); this pins the
+// data it depends on.
 func TestRenderScanKeepsFailureMessages(t *testing.T) {
 	out, err := RenderScan(scanPage(t))
 	if err != nil {
@@ -894,15 +755,22 @@ func TestRenderScanKeepsFailureMessages(t *testing.T) {
 	}
 	html := string(out)
 	if !strings.Contains(html, "manifest unknown") {
-		t.Error("the failure message is missing")
+		t.Error("the failure message is missing from the JSON payload")
 	}
-	if !strings.Contains(html, "scan failed") {
-		t.Error("the failed row is not labelled")
+
+	images := decodeScanImageRows(t, html)
+	for _, img := range images {
+		if img.Image == "ghcr.io/jzills/ledger:0.4.0" {
+			if img.Error != "manifest unknown" {
+				t.Errorf("failed image lost its Error field: %+v", img)
+			}
+			if img.Critical != 0 || img.High != 0 || img.Medium != 0 || img.Low != 0 || img.Unspecified != 0 {
+				t.Errorf("a failed scan reported nonzero counts: %+v", img)
+			}
+			return
+		}
 	}
-	failedRow := rowContaining(t, html, "manifest unknown")
-	if strings.Contains(failedRow, `<span class="num dim">0</span>`) {
-		t.Error("a failed scan rendered a zero count instead of a dash")
-	}
+	t.Fatal("image payload is missing the failed image")
 }
 
 // Image names and scanner errors both come from outside kx.
@@ -915,20 +783,26 @@ func TestRenderScanEscapesImageNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderScan returned %v", err)
 	}
-	if strings.Contains(string(out), "<script>alert(1)") || strings.Contains(string(out), "<b>nope</b>") {
+	html := string(out)
+	if strings.Contains(html, "<script>alert(1)") || strings.Contains(html, "<b>nope</b>") {
 		t.Error("unescaped scanner content reached the page")
+	}
+
+	images := decodeScanImageRows(t, html)
+	if images[1].Image != `<script>alert(1)</script>` || images[1].Error != `<b>nope</b>` {
+		t.Errorf("escaping mangled the decoded image fields: %+v", images[1])
 	}
 }
 
-// TestRenderScanEscapesImageNames above mutates the image row that has Error
-// set, so the drawer renders the error message and the CVE table
-// (scan.gohtml's {{else if .Findings}} branch) is never reached — ID,
-// Package, Installed and URL have no escaping coverage anywhere else. URL in
-// particular flows into an href attribute, a URL context html/template
-// escapes with urlFilter rather than the plain text escaper the other three
-// fields go through, so it needs its own case: a dangerous scheme such as
-// "javascript:" is not encoded, it is replaced wholesale with the literal
-// "#ZgotmplZ".
+// ID/Package/Installed must never reach the page as literal HTML
+// metacharacters. URL is deliberately NOT checked for absence here: unlike
+// those three, a raw URL value is expected to survive intact in the inert
+// JSON blob — it only becomes dangerous once turned into a real href, which
+// now happens client-side (kx-grid.js's cveFormatter, guarded by
+// isSafeLink's http(s)-only allowlist, mirroring html/template's own
+// "#ZgotmplZ" neutralisation of dangerous URL schemes in the pre-grid
+// rendering). No Go test executes that JS; it's covered by code review and
+// the manual QA pass described in the plan, not here.
 func TestRenderScanEscapesFindingFields(t *testing.T) {
 	page := ScanPage{
 		Meta: testMeta(t), Scope: "diagnostics",
@@ -950,67 +824,31 @@ func TestRenderScanEscapesFindingFields(t *testing.T) {
 	}
 	html := string(out)
 
-	for _, forbidden := range []string{
-		"<script>alert",
-		"<b>package</b>",
-		"<i>installed</i>",
-		"javascript:alert",
-	} {
+	for _, forbidden := range []string{"<script>alert", "<b>package</b>", "<i>installed</i>"} {
 		if strings.Contains(html, forbidden) {
-			t.Errorf("unescaped or unneutralised cluster content reached the CVE table: %q", forbidden)
+			t.Errorf("unescaped cluster content reached the page: %q", forbidden)
 		}
 	}
 
-	// Positive assertions: each field must actually have rendered in its
-	// escaped form, not simply be absent — a template that stopped emitting
-	// a field would satisfy every check above just as well as one that
-	// correctly escaped it.
-	for _, want := range []string{
-		`&lt;script&gt;alert(&#34;id&#34;)&lt;/script&gt;`,
-		`&lt;b&gt;package&lt;/b&gt;`,
-		`&lt;i&gt;installed&lt;/i&gt;`,
-		`href="#ZgotmplZ"`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("the CVE table is missing %q", want)
-		}
+	findings := decodeScanFindingRows(t, html)
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
 	}
-}
-
-// style.css's ".row > summary.scan-grid, .sweep-head.scan-grid" rule only
-// matches because scan.gohtml puts the "scan-grid" class on <summary>
-// itself (paired with "row" only via the ">" combinator to its ancestor
-// <details>), not on <details> the way ".ns-grid" pairs with ".row"
-// (compare TestRenderDiagAllNamespacesUsesItsOwnGrid, which pins that
-// placement for ns-grid). Moving the class from <summary> to <details> —
-// the ns-grid shape — would silently stop the CSS selector from matching
-// anything, since ".row.scan-grid > summary" (an unstyled summary) is a
-// different selector than ".row > summary.scan-grid", and no other test in
-// this file checks where the class actually lives, only that the grid
-// renders content correctly.
-func TestRenderScanPutsGridClassOnHeaderAndSummary(t *testing.T) {
-	out, err := RenderScan(scanPage(t))
-	if err != nil {
-		t.Fatalf("RenderScan returned %v", err)
+	got := findings[0]
+	if got.ID != `<script>alert("id")</script>` || got.Package != `<b>package</b>` || got.Installed != `<i>installed</i>` {
+		t.Errorf("escaping mangled the decoded finding fields: %+v", got)
 	}
-	html := string(out)
-	if !strings.Contains(html, `<div class="sweep-head scan-grid">`) {
-		t.Error("the scan header did not get its own grid")
-	}
-	if !strings.Contains(html, `<summary class="scan-grid">`) {
-		t.Error("scan rows did not get their own grid on the <summary> element itself")
+	if got.URL != `javascript:alert(1)` {
+		t.Errorf("the raw URL did not round-trip: %+v", got)
 	}
 }
 
 // scanner.Severities has five buckets, not four: CountBySeverity folds any
 // finding ParseFindings could not map to a known severity into UNSPECIFIED,
 // deliberately, so it isn't dropped from the total (internal/scanner/scanner.go).
-// Before this fix, scan.gohtml only had CRIT/HIGH/MED/LOW columns — an image
-// whose findings were all UNSPECIFIED would show every visible count as
-// zero, reading as a clean scan while its drawer listed real CVEs
-// underneath. render.ScanSummary (internal/render/scan.go) has always had a
-// UNSPEC column for exactly this reason, and page.go's own package doc says
-// the page and terminal must not disagree about severity.
+// render.ScanSummary (internal/render/scan.go) has always had a UNSPEC
+// column for exactly this reason, and page.go's own package doc says the
+// page and terminal must not disagree about severity.
 func TestRenderScanShowsUnspecifiedCounts(t *testing.T) {
 	page := ScanPage{
 		Meta: testMeta(t), Scope: "diagnostics",
@@ -1029,20 +867,23 @@ func TestRenderScanShowsUnspecifiedCounts(t *testing.T) {
 		t.Fatalf("RenderScan returned %v", err)
 	}
 	html := string(out)
-	if !strings.Contains(html, `<span class="num dim">3</span>`) {
-		t.Error("an image with only UNSPECIFIED findings did not show its UNSPEC count")
+
+	images := decodeScanImageRows(t, html)
+	if images[0].Unspecified != 3 {
+		t.Errorf("an image with only UNSPECIFIED findings did not carry its count: %+v", images[0])
 	}
-	if !strings.Contains(html, "CVE-2024-00001") {
-		t.Error("an image with only UNSPECIFIED findings did not list its CVEs in the drawer")
+	findings := decodeScanFindingRows(t, html)
+	if len(findings) != 3 {
+		t.Fatalf("got %d findings, want 3", len(findings))
 	}
 }
 
-// An image scanned clean gets no severity bands (a zero total is a special
-// case in severityBar: without it, dividing by a zero total panics) and the
-// drawer says so in words rather than showing an empty table. If the
-// template stopped calling severityBar and instead always drew one full
-// band, or rendered the findings table unconditionally instead of branching
-// on {{if .Findings}}, this would catch it.
+// A clean image gets no severity bands (severityBar's zero-total special
+// case: dividing by a zero total would otherwise panic) and contributes no
+// rows to the findings grid at all. Its clean state is communicated by the
+// image grid's own zero counts; unlike the old per-image <details> drawer,
+// there is no separate per-image empty-state message in the findings grid
+// (a flat, cross-image view has no natural per-image slot for one).
 func TestRenderScanHealthyImageIsEmptyNotZero(t *testing.T) {
 	page := ScanPage{
 		Meta: testMeta(t), Scope: "diagnostics",
@@ -1056,20 +897,21 @@ func TestRenderScanHealthyImageIsEmptyNotZero(t *testing.T) {
 		t.Fatalf("RenderScan returned %v", err)
 	}
 	html := string(out)
-	if !strings.Contains(html, "No vulnerabilities found") {
-		t.Error("a clean image did not render the empty state")
+
+	images := decodeScanImageRows(t, html)
+	if len(images[0].Bar) != 0 {
+		t.Errorf("a clean image rendered severity bands: %+v", images[0].Bar)
 	}
-	for _, band := range []string{`<i class="crit"`, `<i class="high"`, `<i class="med"`, `<i class="low"`} {
-		if strings.Contains(html, band) {
-			t.Errorf("a clean image rendered a %s severity band", band)
-		}
+	findings := decodeScanFindingRows(t, html)
+	if len(findings) != 0 {
+		t.Errorf("a clean image contributed rows to the findings grid: %+v", findings)
 	}
 }
 
 // ownershipTree builds a small three-level graph — a header-styled root with
 // one indexed, non-leaf child and one indexed leaf grandchild — so a single
-// fixture exercises the disclosure, header-style and index-prefix behaviour
-// together, the way a real `kx tree` walk would nest them.
+// fixture exercises the nesting, header-style and index behaviour together,
+// the way a real `kx tree` walk would nest them.
 func ownershipTree() *tree.Node {
 	return &tree.Node{
 		Label: "Deployment/web", Style: theme.Header,
@@ -1082,53 +924,21 @@ func ownershipTree() *tree.Node {
 	}
 }
 
-func TestRenderTreeLeafHasNoDetails(t *testing.T) {
-	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
-	if err != nil {
-		t.Fatalf("RenderTree returned %v", err)
-	}
-	html := string(out)
-	labelAt := strings.Index(html, "pod/web-abc-1")
-	if labelAt < 0 {
-		t.Fatal("leaf node label is missing")
-	}
-	// The leaf's own <li> — the nearest "<li>" preceding its label — must not
-	// open a <details> of its own. Scoping to that one <li> (rather than
-	// counting opens/closes across the whole prefix) matters because the
-	// leaf sits nested inside two ancestor <details> that are still open at
-	// this point in the document.
-	own := html[strings.LastIndex(html[:labelAt], "<li>"):labelAt]
-	if strings.Contains(own, "<details") {
-		t.Error("a childless node rendered its own <details>, adding a pointless disclosure triangle to a leaf")
-	}
-}
-
-func TestRenderTreeNestsChildrenInDetails(t *testing.T) {
-	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
-	if err != nil {
-		t.Fatalf("RenderTree returned %v", err)
-	}
-	html := string(out)
-	if !strings.Contains(html, "<details open>") {
-		t.Error("a node with children did not render an expanded <details>")
-	}
-	if !strings.Contains(html, `<ul class="tree-children">`) {
-		t.Error("children are not nested in a tree-children list")
-	}
-}
-
 // theme.Header carries no CSS custom property of its own — headers are
 // bold-accent, not their own colour (theme.WebStyles emits no --header var)
-// — so the template must route it through --accent rather than a nonexistent
-// var(--header).
+// — so kx-grid.js's treeLabelFormatter must route it through --accent rather
+// than a nonexistent var(--header), the same constraint the old template
+// held.
 func TestRenderTreeHeaderStyleIsBoldAccent(t *testing.T) {
 	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
 	if err != nil {
 		t.Fatalf("RenderTree returned %v", err)
 	}
-	if !strings.Contains(string(out), `class="tree-label style-header"`) {
-		t.Error("the header-styled root did not get the style-header class")
+	roots := decodeTreeRows(t, string(out))
+	if roots[0].Style != theme.Header {
+		t.Errorf("the root's Style did not round-trip as %q: got %q", theme.Header, roots[0].Style)
 	}
+
 	rule := cssRule(t, stylesheet, ".tree-label.style-header {")
 	if !strings.Contains(rule, "var(--accent)") {
 		t.Error(".tree-label.style-header does not resolve through var(--accent)")
@@ -1143,12 +953,14 @@ func TestRenderTreeIndexPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTree returned %v", err)
 	}
-	html := string(out)
-	if !strings.Contains(html, `<span class="tree-index">1</span>`) {
-		t.Error("an indexed node did not render its index prefix")
+	roots := decodeTreeRows(t, string(out))
+	child := roots[0].Children[0]
+	if child.Index != 1 {
+		t.Errorf("an indexed node did not round-trip its index: got %d, want 1", child.Index)
 	}
-	if !strings.Contains(html, `<span class="tree-index">2</span>`) {
-		t.Error("an indexed leaf did not render its index prefix")
+	grandchild := child.Children[0]
+	if grandchild.Index != 2 {
+		t.Errorf("an indexed leaf did not round-trip its index: got %d, want 2", grandchild.Index)
 	}
 
 	unindexed := &tree.Node{
@@ -1162,17 +974,14 @@ func TestRenderTreeIndexPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTree returned %v", err)
 	}
-	// Checked via the quoted class attribute, not the bare "tree-index"
-	// substring: the embedded stylesheet's own ".tree-index { ... }" rule
-	// also contains that text, so a bare substring check can't tell an
-	// actual index span from the CSS rule that styles it.
-	if strings.Contains(string(out), `class="tree-index"`) {
-		t.Error("an unindexed tree rendered an index prefix")
+	roots = decodeTreeRows(t, string(out))
+	if roots[0].Children[0].Index != 0 {
+		t.Error("an unindexed tree rendered a nonzero index")
 	}
 }
 
 // Resource names are cluster-controlled, same protection
-// TestRenderDiagEscapesClusterContent pins for diag.
+// TestRenderDiagSweepEscapesClusterContent pins for diag's sweep grid.
 func TestRenderTreeEscapesClusterContent(t *testing.T) {
 	root := &tree.Node{Label: `<script>alert(1)</script>`, Style: theme.Header}
 	out, err := RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: root})
@@ -1183,8 +992,12 @@ func TestRenderTreeEscapesClusterContent(t *testing.T) {
 	if strings.Contains(html, "<script>alert") {
 		t.Error("unescaped cluster content in output")
 	}
-	if !strings.Contains(html, "&lt;script&gt;") {
-		t.Error("script tag was not escaped")
+	if !strings.Contains(html, jsonEscapedLT+"script"+jsonEscapedGT) {
+		t.Error("JSON payload did not HTML-escape a script tag")
+	}
+	roots := decodeTreeRows(t, html)
+	if roots[0].Label != `<script>alert(1)</script>` {
+		t.Errorf("escaping mangled the decoded label: %+v", roots[0])
 	}
 }
 
@@ -1207,9 +1020,9 @@ func TestRenderTreeUsesTheActivePalette(t *testing.T) {
 	}
 }
 
-// An -A sweep renders one root per namespace, each getting the same
-// disclosure treatment a single tree's top-level node does — no separate
-// markup shape is needed for the forest case.
+// An -A sweep renders one root per namespace in the JSON array Tabulator's
+// dataTree mode reads — no separate markup shape is needed for the forest
+// case.
 func TestRenderTreeAllNamespacesRendersEveryRoot(t *testing.T) {
 	roots := []*tree.Node{
 		{Label: "Namespace/default", Style: theme.Header,
@@ -1225,13 +1038,19 @@ func TestRenderTreeAllNamespacesRendersEveryRoot(t *testing.T) {
 		t.Fatalf("RenderTree returned %v", err)
 	}
 	html := string(out)
-	for _, want := range []string{"Namespace/default", "Deployment/web", "Namespace/prod", "Deployment/api"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("all-namespaces page is missing %q", want)
-		}
-	}
 	if !strings.Contains(html, "all namespaces") {
 		t.Error("scope caption missing")
+	}
+
+	decoded := decodeTreeRows(t, html)
+	if len(decoded) != 2 {
+		t.Fatalf("got %d roots, want 2", len(decoded))
+	}
+	if decoded[0].Label != "Namespace/default" || decoded[0].Children[0].Label != "Deployment/web" {
+		t.Errorf("first root did not round-trip: %+v", decoded[0])
+	}
+	if decoded[1].Label != "Namespace/prod" || decoded[1].Children[0].Label != "Deployment/api" {
+		t.Errorf("second root did not round-trip: %+v", decoded[1])
 	}
 }
 
@@ -1251,8 +1070,9 @@ func TestRenderTreeAllNamespacesIgnoresRoot(t *testing.T) {
 	if strings.Contains(html, "wrong-field") {
 		t.Error("an AllNamespaces page rendered Root instead of Roots")
 	}
-	if !strings.Contains(html, "right-field") {
-		t.Error("an AllNamespaces page did not render Roots")
+	decoded := decodeTreeRows(t, html)
+	if len(decoded) != 1 || decoded[0].Label != "Namespace/right-field" {
+		t.Errorf("an AllNamespaces page did not render Roots: %+v", decoded)
 	}
 }
 

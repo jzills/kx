@@ -28,6 +28,16 @@ var stylesheet string
 //go:embed wordmark.svg
 var wordmarkSVG string
 
+// kxGridCSS/kxGridJS are first-party, hand-written — unlike vendor.go's
+// Tabulator embeds, this is our code, kept beside style.css because it is
+// maintained the same way.
+//
+//go:embed kx-grid.css
+var kxGridCSS string
+
+//go:embed kx-grid.js
+var kxGridJS string
+
 // Two template sets rather than one: each body template defines "body", and a
 // single set cannot hold two definitions of the same name.
 var (

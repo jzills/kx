@@ -1,0 +1,202 @@
+/* kx-grid.css re-skins vendored Tabulator (tabulator.min.css, the "simple"
+   base) so a grid reads as part of the report rather than a bolted-on
+   widget. Every colour below is one of the custom properties cssVars()
+   already emits per-request — nothing here is a fixed hex, so this file
+   needs no reordering relative to cssVars in layout.gohtml. */
+
+.grid-mount { margin: 0.25rem 0 0.75rem; }
+
+.tabulator {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: var(--step-0);
+}
+
+.tabulator .tabulator-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.tabulator .tabulator-col {
+  background: var(--surface);
+  border-right: none;
+}
+
+.tabulator .tabulator-col-content {
+  padding: 0.55rem var(--pad-x);
+}
+
+.tabulator .tabulator-col-title {
+  font-family: var(--mono);
+  font-size: var(--micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tabulator .tabulator-col.tabulator-sortable:hover {
+  background: var(--background);
+}
+
+.tabulator .tabulator-col-sorter {
+  color: var(--muted);
+}
+
+.tabulator .tabulator-header-filter input,
+.tabulator .tabulator-header-filter select {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--body);
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  padding: 0.2rem 0.4rem;
+}
+
+.tabulator .tabulator-header-filter input:focus-visible,
+.tabulator .tabulator-header-filter select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.tabulator-row {
+  background: var(--surface);
+  color: var(--body);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabulator-row.tabulator-row-even {
+  background: var(--surface);
+}
+
+.tabulator-row:hover {
+  background: var(--background);
+}
+
+.tabulator-row .tabulator-cell {
+  padding: var(--pad-y) var(--pad-x);
+  border-right: none;
+}
+
+.tabulator-row.tabulator-selectable:hover {
+  cursor: pointer;
+}
+
+/* Group headers (scan's findings-by-image grouping). */
+.tabulator-row.tabulator-group {
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.tabulator-row.tabulator-group .tabulator-arrow {
+  border-top-color: var(--muted);
+}
+
+/* Tree rows (tree page's dataTree mode): indent guide plus expand arrow,
+   echoing .tree-children's left border in style.css so the tree grid reads
+   the same as the tree the terminal draws. */
+.tabulator-row .tabulator-data-tree-branch {
+  border-left: 1px solid var(--border);
+}
+
+.tabulator-row .tabulator-data-tree-control {
+  border-color: var(--muted);
+  background: transparent;
+}
+
+.tabulator-row .tabulator-data-tree-control:hover {
+  background: var(--background);
+}
+
+/* Status colours, applied via row/cell formatters using the same class
+   vocabulary the rest of the page uses (statusClass/severityClass). */
+.tabulator-row .status-ok { color: var(--status-ok); }
+.tabulator-row .status-warn { color: var(--status-warn); }
+.tabulator-row .status-bad { color: var(--status-bad); }
+.tabulator-row .status-neutral { color: var(--status-neutral); }
+
+.tabulator .tabulator-footer {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--step-0);
+}
+
+.tabulator .tabulator-footer .tabulator-page {
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--body);
+  border-radius: 2px;
+}
+
+.tabulator .tabulator-footer .tabulator-page.active {
+  background: var(--accent);
+  color: var(--background);
+  border-color: var(--accent);
+}
+
+.tabulator .tabulator-footer .tabulator-page:disabled {
+  color: var(--muted);
+}
+
+/* kx-grid.js's own chrome: the stacked severity bar (mirrors .stack in
+   style.css), the group-by control row, and the row-expansion panel diag
+   uses to clone a <template>'s report content into. */
+.kx-grid-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  color: var(--muted);
+}
+
+.kx-grid-controls select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--body);
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  padding: 0.2rem 0.4rem;
+}
+
+.kx-bar {
+  display: flex;
+  height: 5px;
+  width: 100%;
+  min-width: 6rem;
+  border-radius: 1px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.kx-bar i { display: block; height: 100%; }
+.kx-bar .crit, .kx-bar .high { background: var(--status-bad); }
+.kx-bar .high { opacity: 0.6; }
+.kx-bar .med { background: var(--status-warn); }
+.kx-bar .low { background: var(--muted); }
+
+.kx-detail {
+  padding: 1rem 1rem 1.5rem 1.5rem;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}

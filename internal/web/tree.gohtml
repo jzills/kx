@@ -1,31 +1,11 @@
-{{define "node"}}
-<li>
-  {{if .Children}}
-  <details open>
-    <summary>
-      {{if gt .Index 0}}<span class="tree-index">{{.Index}}</span>{{end}}
-      <span class="tree-label style-{{.Style}}">{{.Label}}</span>
-    </summary>
-    <ul class="tree-children">
-      {{range .Children}}{{template "node" .}}{{end}}
-    </ul>
-  </details>
-  {{else}}
-  {{if gt .Index 0}}<span class="tree-index">{{.Index}}</span>{{end}}
-  <span class="tree-label style-{{.Style}}">{{.Label}}</span>
-  {{end}}
-</li>
-{{end}}
-
 {{define "body"}}
 <div class="block">
   <p class="caption">{{.Scope}}</p>
-  <ul class="tree tree-root">
-    {{if .AllNamespaces}}
-      {{range .Roots}}{{template "node" .}}{{end}}
-    {{else}}
-      {{template "node" .Root}}
-    {{end}}
-  </ul>
+  <div class="grid-mount" data-kx-grid="tree"></div>
+  {{if .AllNamespaces}}
+    <script type="application/json" id="kx-tree-data">{{treeRootRowsJSON .Roots}}</script>
+  {{else}}
+    <script type="application/json" id="kx-tree-data">{{treeRowsJSON .Root}}</script>
+  {{end}}
 </div>
 {{end}}
