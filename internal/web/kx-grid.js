@@ -91,26 +91,82 @@
     return wrap;
   }
 
+  // Not a native <select>: a native select's open option list is genuine
+  // OS/browser chrome, which CSS can only reach as far as background-color/
+  // color on <option> — nowhere near Kind/Verdict's actual look, since
+  // those are Tabulator's own List editor (a custom-built .tabulator-
+  // edit-list popup, confirmed in the vendored source's
+  // _createListElement). Built as the same DOM shape instead — a
+  // .tabulator-popup-container wrapping a .tabulator-edit-list of
+  // .tabulator-edit-list-item rows — so it inherits every rule this
+  // stylesheet already has for that popup, with nothing new to keep in
+  // sync if that theming changes later.
   function groupSelect(table, options) {
+    var wrap = document.createElement("span");
+    wrap.className = "kx-group-select";
+
     var label = document.createElement("label");
     label.appendChild(document.createTextNode("Group by "));
-    var select = document.createElement("select");
-    var none = document.createElement("option");
-    none.value = "";
-    none.textContent = "None";
-    select.appendChild(none);
-    options.forEach(function (opt) {
-      var o = document.createElement("option");
-      o.value = opt.field;
-      o.textContent = opt.label;
-      if (opt.selected) o.selected = true;
-      select.appendChild(o);
-    });
-    select.addEventListener("change", function () {
-      table.setGroupBy(select.value || false);
-    });
-    label.appendChild(select);
-    return label;
+    wrap.appendChild(label);
+
+    var allOptions = [{ field: "", label: "None" }].concat(options);
+    var current = allOptions[0];
+    allOptions.forEach(function (opt) { if (opt.selected) current = opt; });
+
+    var trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "kx-group-trigger";
+    trigger.textContent = current.label;
+    label.appendChild(trigger);
+
+    var popup = null;
+
+    function close() {
+      if (!popup) return;
+      popup.remove();
+      popup = null;
+      document.removeEventListener("mousedown", onDocClick, true);
+    }
+
+    function onDocClick(e) {
+      if (popup && !popup.contains(e.target) && e.target !== trigger) close();
+    }
+
+    function choose(opt) {
+      current = opt;
+      trigger.textContent = opt.label;
+      table.setGroupBy(opt.field || false);
+      close();
+    }
+
+    function open() {
+      if (popup) { close(); return; }
+      popup = document.createElement("div");
+      popup.className = "tabulator-popup-container kx-group-popup";
+      var list = document.createElement("div");
+      list.className = "tabulator-edit-list";
+      allOptions.forEach(function (opt) {
+        var item = document.createElement("div");
+        item.className = "tabulator-edit-list-item" + (opt === current ? " active" : "");
+        item.textContent = opt.label;
+        item.addEventListener("mousedown", function (e) {
+          e.preventDefault(); // mousedown, not click: fires before onDocClick's capture-phase listener would even matter, so the choice registers in one event rather than racing the close-on-outside-click logic
+          choose(opt);
+        });
+        list.appendChild(item);
+      });
+      popup.appendChild(list);
+      wrap.appendChild(popup);
+      // Capture phase: this listener must see the click before it reaches
+      // whatever it landed on, since the trigger's own click (which comes
+      // after mousedown) would otherwise immediately reopen what this just
+      // closed.
+      document.addEventListener("mousedown", onDocClick, true);
+    }
+
+    trigger.addEventListener("click", open);
+
+    return wrap;
   }
 
   // ---- diag -----------------------------------------------------------

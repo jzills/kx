@@ -354,48 +354,67 @@
   font-weight: 600;
 }
 
+/* The group-by control's own positioning context: kx-group-popup below is
+   absolutely positioned against this, not the page, so it opens directly
+   under the trigger regardless of where this control sits in the row. */
+.kx-group-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* Deliberately flat, not boxed like the header-filter inputs/selects: this
    is the group-by control, styled to read as part of the column-header row
    above it rather than as another filter field — same treatment as
-   .tabulator-col-title (micro size, uppercase, letter-spaced, muted),
-   applied directly to the select instead of only its label, and a hover
+   .tabulator-col-title (micro size, letter-spaced, muted), applied
+   directly to the trigger instead of only its label, and a hover
    background matching .tabulator-col.tabulator-sortable:hover for the same
    affordance headers already give. Width matches the header filter
    selects' column width (Verdict is 165px) rather than shrink-wrapping to
    its own text, so it doesn't read as a narrower, different kind of
-   control sitting right above ones that are wider. */
-.kx-grid-controls select {
+   control sitting right above ones that are wider.
+
+   A <button>, not a <select>: kx-grid.js's groupSelect() now builds its
+   open list as a .tabulator-popup-container/.tabulator-edit-list, the
+   exact same DOM shape Tabulator's own List editor uses for Kind/Verdict,
+   so it inherits that theming instead of hitting a native <select>'s
+   dropdown — the OS/browser chrome CSS could only ever partly reach.
+   Resets <button>'s own native chrome (border, background, inherited
+   font) the same way appearance: none does for input/select elsewhere in
+   this file. */
+.kx-grid-controls .kx-group-trigger {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
   background: transparent;
   border: none;
   color: var(--muted);
+  font: inherit;
   font-family: var(--mono);
   font-size: var(--micro);
   letter-spacing: 0.12em;
   font-weight: 600;
   padding: 0.2rem 0.4rem;
   width: 165px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.kx-grid-controls select:hover {
+.kx-grid-controls .kx-group-trigger:hover {
   background: var(--background);
 }
 
-/* Unlike Kind/Verdict's header filters (Tabulator's own List editor, a
-   custom-built popup — see .tabulator-edit-list above), this is a genuine
-   native <select> built directly in kx-grid.js's groupSelect(), so its
-   open option list really is native OS/browser chrome. background-color/
-   color on <option> is the most CSS can reach here (checked and
-   documented earlier for the header filters, before it turned out those
-   weren't actually native) — real parity with .tabulator-edit-list's
-   hover/active states would mean replacing this <select> with a custom
-   popup built the same way Tabulator's is, which is a real feature, not a
-   style tweak. */
-.kx-grid-controls select option {
-  background: var(--surface);
-  color: var(--body);
+/* Positioned against .kx-group-select above, not the page — opens
+   directly under the trigger. z-index matches Tabulator's own popups
+   (.tabulator-popup-container's base rule sets the same 10000) so this
+   layers consistently with them rather than picking an arbitrary value. */
+.kx-group-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  z-index: 10000;
+  min-width: 165px;
 }
 
 .kx-bar {
