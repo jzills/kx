@@ -374,7 +374,6 @@
   font-family: var(--mono);
   font-size: var(--micro);
   letter-spacing: 0.12em;
-  text-transform: uppercase;
   font-weight: 600;
   padding: 0.2rem 0.4rem;
   width: 165px;
@@ -382,6 +381,21 @@
 
 .kx-grid-controls select:hover {
   background: var(--background);
+}
+
+/* Unlike Kind/Verdict's header filters (Tabulator's own List editor, a
+   custom-built popup — see .tabulator-edit-list above), this is a genuine
+   native <select> built directly in kx-grid.js's groupSelect(), so its
+   open option list really is native OS/browser chrome. background-color/
+   color on <option> is the most CSS can reach here (checked and
+   documented earlier for the header filters, before it turned out those
+   weren't actually native) — real parity with .tabulator-edit-list's
+   hover/active states would mean replacing this <select> with a custom
+   popup built the same way Tabulator's is, which is a real feature, not a
+   style tweak. */
+.kx-grid-controls select option {
+  background: var(--surface);
+  color: var(--body);
 }
 
 .kx-bar {
