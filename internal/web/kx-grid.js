@@ -149,6 +149,18 @@
       columns: columns,
       initialSort: [{ column: "Verdict", dir: "desc" }],
       rowFormatter: diagRowFormatter,
+      // Tabulator's default virtual-DOM renderer calculates every row's
+      // height once, up front, to absolutely position rows and size the
+      // scroll container — it has no way to know a row grew after
+      // diagRowFormatter appends a detail panel on click. row.reformat()
+      // only re-runs the formatter for that one row; it doesn't trigger the
+      // table-wide re-layout the virtual renderer would need to stop
+      // clipping the newly taller row at its stale height. "basic" mode
+      // renders every row as real DOM with natural height, which is what
+      // this grid needs since rows resize after the initial render — this
+      // grid is a namespace sweep (tens to low hundreds of rows), not the
+      // scale virtual scrolling exists for.
+      renderVertical: "basic",
     });
 
     var groupOptions = allNamespaces
@@ -291,6 +303,7 @@
       data: data,
       layout: "fitColumns",
       groupBy: "Image",
+      placeholder: "No vulnerabilities found",
       columns: [
         { title: "CVE", field: "ID", widthGrow: 1, headerFilter: "input", formatter: cveFormatter },
         { title: "Image", field: "Image", widthGrow: 2, headerFilter: "input" },

@@ -46,6 +46,28 @@
   color: var(--muted);
 }
 
+/* Sort-direction arrows are CSS border-triangles, not an icon font or SVG —
+   each state colours a different side and leaves the others "transparent"
+   to form the triangle, so this must only touch the side each state
+   actually colours (not a blanket border-color, which would fill in the
+   transparent sides and square the triangle off). !important is
+   deliberate: Tabulator's own rules for these are long compound selectors
+   with attribute selectors ([aria-sort=ascending]), specific enough that
+   matching them class-for-class would mean copying Tabulator's internal
+   selector chains verbatim — fragile against a future Tabulator version
+   changing that structure. A flat override is the more maintainable choice
+   for skinning a vendored library. */
+.tabulator-col-sorter .tabulator-arrow {
+  border-bottom-color: var(--muted) !important;
+}
+.tabulator-col.tabulator-sortable[aria-sort="ascending"] .tabulator-col-sorter .tabulator-arrow {
+  border-bottom-color: var(--accent) !important;
+}
+.tabulator-col.tabulator-sortable[aria-sort="descending"] .tabulator-col-sorter .tabulator-arrow {
+  border-top-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
 .tabulator .tabulator-header-filter input,
 .tabulator .tabulator-header-filter select {
   background: var(--background);
@@ -99,24 +121,44 @@
   font-weight: 600;
 }
 
+/* Collapsed groups draw a right-pointing triangle (border-left carries the
+   colour); expanded groups (.tabulator-group-visible) draw a down-pointing
+   one (border-top carries it) — two different sides, not interchangeable. */
 .tabulator-row.tabulator-group .tabulator-arrow {
-  border-top-color: var(--muted);
+  border-left-color: var(--muted) !important;
+}
+.tabulator-row.tabulator-group.tabulator-group-visible .tabulator-arrow {
+  border-top-color: var(--muted) !important;
 }
 
-/* Tree rows (tree page's dataTree mode): indent guide plus expand arrow,
-   echoing .tree-children's left border in style.css so the tree grid reads
-   the same as the tree the terminal draws. */
+/* Tree rows (tree page's dataTree mode): indent guide plus expand/collapse
+   control, echoing .tree-children's left border in style.css so the tree
+   grid reads the same as the tree the terminal draws. */
 .tabulator-row .tabulator-data-tree-branch {
   border-left: 1px solid var(--border);
 }
 
-.tabulator-row .tabulator-data-tree-control {
+/* Tabulator's real selector for this control is
+   ".tabulator-row .tabulator-cell .tabulator-data-tree-control" (three
+   classes) — one class more specific than a same-cascade-position override
+   without .tabulator-cell in the chain, so a shorter selector here loses
+   the specificity contest regardless of source order and silently never
+   applies. Matched exactly, plus !important on the actual +/- bar colour
+   (drawn via the ::after pseudo-element's background, not a border) for the
+   same vendor-selector-fragility reason as the sort arrows above. */
+.tabulator-row .tabulator-cell .tabulator-data-tree-control {
   border-color: var(--muted);
   background: transparent;
 }
 
-.tabulator-row .tabulator-data-tree-control:hover {
+.tabulator-row .tabulator-cell .tabulator-data-tree-control:hover {
   background: var(--background);
+}
+
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-expand,
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-expand::after,
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-collapse::after {
+  background: var(--muted) !important;
 }
 
 /* Status colours, applied via row/cell formatters using the same class
@@ -125,6 +167,17 @@
 .tabulator-row .status-warn { color: var(--status-warn); }
 .tabulator-row .status-bad { color: var(--status-bad); }
 .tabulator-row .status-neutral { color: var(--status-neutral); }
+
+/* The empty-state message a grid shows via its "placeholder" option (the
+   scan findings grid's "No vulnerabilities found") — Tabulator's own
+   default is a 20px bold #ccc block, sized for a whole-page empty table
+   rather than a small note inside an otherwise-themed report. */
+.tabulator .tabulator-placeholder-contents {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  font-weight: 400;
+}
 
 .tabulator .tabulator-footer {
   background: var(--surface);
