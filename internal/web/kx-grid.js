@@ -116,7 +116,10 @@
 
     var columns = [];
     if (!allNamespaces) {
-      columns.push({ title: "#", field: "Index", width: 56, hozAlign: "right", sorter: "number" });
+      // "X", not "#": every indexed listing in kx (internal/render/history.go,
+      // triage.go, listing.go) heads its index column "X" — this grid
+      // shouldn't invent a different convention for the same concept.
+      columns.push({ title: "X", field: "Index", width: 56, hozAlign: "right", sorter: "number" });
     }
     columns.push({
       title: "Kind", field: "Kind", width: 150,
@@ -407,7 +410,9 @@
       dataTreeElementColumn: "Label",
       columns: [
         {
-          title: "#", field: "Index", width: 64, hozAlign: "right",
+          // "X", matching every other indexed listing in kx — see the
+          // same note on the diag grid's Index column above.
+          title: "X", field: "Index", width: 64, hozAlign: "right",
           formatter: function (cell) { var v = cell.getValue(); return v > 0 ? String(v) : ""; },
         },
         { title: "Name", field: "Label", formatter: treeLabelFormatter, widthGrow: 3 },

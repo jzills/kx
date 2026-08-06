@@ -124,12 +124,16 @@
    vendored source: padding, width, box-sizing, cursor, caretColor) — the
    same inline-style-beats-any-non-!important-rule mechanism that caused
    the tableholder height bug, so the same fix applies. */
+/* Same background token as .kx-grid-controls select below (var(--surface),
+   not var(--background)) deliberately — these are the same kind of control
+   and must read as one visual language, not two different shades of dark
+   depending on which one happens to sit inside .tabulator. */
 .tabulator .tabulator-header-filter input,
 .tabulator .tabulator-header-filter select {
   appearance: none !important;
   -webkit-appearance: none !important;
   -moz-appearance: none !important;
-  background: var(--background) !important;
+  background: var(--surface) !important;
   border: 1px solid var(--border) !important;
   border-radius: 2px !important;
   color: var(--body) !important;
