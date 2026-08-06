@@ -148,6 +148,21 @@
   outline-offset: -1px;
 }
 
+/* <option>'s open dropdown list is rendered by the OS/browser as native
+   popup chrome, not part of the page's own box model — this is a real
+   platform boundary CSS can only partly reach, not another specificity gap
+   like the ones above. Modern Chromium and Firefox do respect
+   background-color/color set directly on <option>, though, which is the
+   documented, standard way to get as close as CSS allows; Safari's support
+   is more limited and may still show its own native list styling
+   regardless. Applied to both the header-filter <select> and the group-by
+   dropdown so the two stay visually identical. */
+.tabulator .tabulator-header-filter select option,
+.kx-grid-controls select option {
+  background: var(--surface) !important;
+  color: var(--body) !important;
+}
+
 /* Verified low-specificity in the vendored stylesheet (the real rule is
    the bare ".tabulator-row,.tabulator-row.tabulator-row-even", matching or
    below these), so no !important needed here — unlike the header/column
