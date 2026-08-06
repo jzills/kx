@@ -38,6 +38,23 @@
     return out;
   }
 
+  // A multiselect list filter's own display field is a genuine single-line
+  // <input> (confirmed in the vendored source — Tabulator's list editor
+  // always creates one, filter or not), which cannot wrap onto multiple
+  // lines the way a <textarea> could; that's an HTML constraint no CSS
+  // reaches, not a styling gap. This is the pragmatic middle ground: keep
+  // selections readable via a native tooltip once they overflow, rather
+  // than either leaving them silently cut off or rebuilding the whole
+  // filter as a custom widget. Tabulator has no per-column "filter
+  // changed" event in this build (checked: only the table-wide
+  // dataFiltered exists), so this re-syncs every header-filter input's
+  // title on every filter change rather than just the one that moved.
+  function syncFilterTooltips(mount) {
+    mount.querySelectorAll(".tabulator-header-filter input").forEach(function (input) {
+      input.title = input.value;
+    });
+  }
+
   // Mirrors severityClass/severityIcon in page.go (diagnostics.Severity:
   // OK=0, Warning=1, Critical=2) so the grid's verdict badge reads the same
   // as the report it expands into. Kept here, not derived from the server,
@@ -143,14 +160,24 @@
       columns.push({ title: "X", field: "Index", width: 72, hozAlign: "right", sorter: "number" });
     }
     columns.push({
-      title: "Kind", field: "Kind", width: 150,
+      title: "Kind", field: "Kind", width: 175,
       headerFilter: "list",
-      // multiselect: true makes Tabulator treat the filter value as an
-      // array and match rows against any of the selected values, natively
-      // — no custom headerFilterFunc needed. No synthetic "All" entry
-      // here: with nothing selected the filter is empty and every row
-      // shows, so "All" would be a checkbox that means the same thing as
-      // checking nothing, not a real option alongside the others.
+      // multiselect: true makes the filter value an array of the selected
+      // values, but does NOT change how that value gets matched against a
+      // row — Tabulator's default header-filter comparator (confirmed in
+      // the vendored source) does something exact-match-shaped with it,
+      // which against an array is never true for a single-valued field.
+      // That's what read as "AND" (more selections, never a match) and
+      // "everything empty after clearing" (a leftover non-empty array
+      // still failing every row). headerFilterFunc: "in" is Tabulator's
+      // own built-in comparator built for exactly this shape — array,
+      // OR-membership, empty array matches everything — found in the same
+      // filters map as "like"/"starts"/"regex".
+      headerFilterFunc: "in",
+      // No synthetic "All" entry: with nothing selected the filter array
+      // is empty, and "in" already treats that as "show everything," so
+      // "All" would be a checkbox meaning the same thing as checking
+      // nothing rather than a real, distinct option.
       headerFilterParams: { values: uniqueValues(data, "Kind"), multiselect: true, clearable: true },
     });
     if (allNamespaces) {
@@ -158,12 +185,14 @@
     }
     columns.push({ title: "Name", field: "Name", headerFilter: "input", widthGrow: 2 });
     columns.push({
-      title: "Verdict", field: "Verdict", width: 140,
+      title: "Verdict", field: "Verdict", width: 165,
       formatter: verdictFormatter,
       sorter: function (_a, _b, aRow, bRow) {
         return aRow.getData().VerdictRank - bRow.getData().VerdictRank;
       },
       headerFilter: "list",
+      // Same "in" comparator fix as Kind above, same reasoning.
+      headerFilterFunc: "in",
       // Same multiselect reasoning as Kind above: no synthetic "All" entry,
       // an empty selection already means every verdict shows.
       headerFilterParams: {
@@ -196,6 +225,8 @@
       // scale virtual scrolling exists for.
       renderVertical: "basic",
     });
+
+    table.on("dataFiltered", function () { syncFilterTooltips(mount); });
 
     var groupOptions = allNamespaces
       ? [{ field: "Namespace", label: "Namespace" }, { field: "Kind", label: "Kind" }, { field: "Verdict", label: "Verdict" }]

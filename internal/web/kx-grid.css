@@ -315,7 +315,7 @@
    applied directly to the select instead of only its label, and a hover
    background matching .tabulator-col.tabulator-sortable:hover for the same
    affordance headers already give. Width matches the header filter
-   selects' column width (Verdict is 140px) rather than shrink-wrapping to
+   selects' column width (Verdict is 165px) rather than shrink-wrapping to
    its own text, so it doesn't read as a narrower, different kind of
    control sitting right above ones that are wider. */
 .kx-grid-controls select {
@@ -331,7 +331,7 @@
   text-transform: uppercase;
   font-weight: 600;
   padding: 0.2rem 0.4rem;
-  width: 140px;
+  width: 165px;
 }
 
 .kx-grid-controls select:hover {
