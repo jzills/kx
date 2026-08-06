@@ -6,37 +6,30 @@
 
 .grid-mount { margin: 0.25rem 0 0.75rem; }
 
-/* Tabulator decides internally, at init, whether a table gets a fixed
-   height with its own internal scrollbar or grows to fit its content — a
-   heuristic in the vendored JS keyed off the mount element's clientHeight
-   at that moment, not anything a static CSS reorder can predict or that
-   reverse-engineering the minified bundle can fully pin down without a
-   browser to inspect it live. None of these grids should ever be their own
-   scroll region; every page around them already scrolls. Forcing the
-   outcome directly is more robust than chasing that branch: !important is
-   required because Tabulator applies its decision as inline styles via JS,
-   and inline styles beat any non-!important CSS rule regardless of
-   selector specificity. */
+/* TEMPORARILY DISABLED for a diagnostic test (2026-08-06): checking whether
+   forcing every grid out of its own scroll region is what's behind the
+   scroll-jump-on-filter/sort reports. Tabulator decides internally, at
+   init, whether a table gets a fixed height with its own internal
+   scrollbar or grows to fit its content — a heuristic in the vendored JS
+   keyed off the mount element's clientHeight at that moment. These two
+   rules override that decision so no grid is ever its own scroll region,
+   since every page around them already scrolls; !important is required
+   because Tabulator applies its decision as inline styles via JS, and
+   inline styles beat any non-!important CSS rule regardless of selector
+   specificity. Re-enable (delete this comment, restore the two rule
+   blocks below) once the test is done either way.
+
 .tabulator,
 .tabulator-tableholder {
   height: auto !important;
   max-height: none !important;
 }
 
-/* overflow-y: visible alone is not enough — per the CSS spec, when
-   overflow-x and overflow-y differ and one of them is "visible" while the
-   other isn't, the browser computes the visible one as "auto" instead (the
-   rule exists so a box can't scroll on one axis but not the other). Since
-   this box's overflow-x stays "auto" (the tableholder's own horizontal
-   column scroll, still wanted), overflow-y: visible on its own silently
-   computes back to auto and never stops the vertical clipping. layout:
-   "fitColumns" is set on every grid on this page, though, which shrinks
-   columns to fit rather than needing horizontal scroll in the first place —
-   so giving up the tableholder's own horizontal scroll here (both axes
-   visible) costs nothing these grids actually use. */
 .tabulator-tableholder {
   overflow: visible !important;
 }
+
+*/
 
 .tabulator {
   background: var(--surface) !important;
