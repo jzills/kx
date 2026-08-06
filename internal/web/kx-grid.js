@@ -308,6 +308,14 @@
       if (!document.getElementById("diag-detail-" + d.Row)) return;
       d._expanded = !d._expanded;
       row.reformat();
+      // row.reformat() alone re-runs diagRowFormatter for that one row but
+      // stops there — it doesn't recompute the table's own overall size, so
+      // an expanded detail panel taller than the table's previous content
+      // gets clipped inside a stale-height box with its own scrollbar
+      // instead of the table growing to show it (confirmed live: without
+      // this, .tabulator-tableholder kept an explicit inline height from
+      // before the click). table.redraw() triggers that recalculation.
+      table.redraw();
     });
   }
 
