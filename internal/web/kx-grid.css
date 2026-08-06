@@ -6,6 +6,27 @@
 
 .grid-mount { margin: 0.25rem 0 0.75rem; }
 
+/* Tabulator decides internally, at init, whether a table gets a fixed
+   height with its own internal scrollbar or grows to fit its content — a
+   heuristic in the vendored JS keyed off the mount element's clientHeight
+   at that moment, not anything a static CSS reorder can predict or that
+   reverse-engineering the minified bundle can fully pin down without a
+   browser to inspect it live. None of these grids should ever be their own
+   scroll region; every page around them already scrolls. Forcing the
+   outcome directly is more robust than chasing that branch: !important is
+   required because Tabulator applies its decision as inline styles via JS,
+   and inline styles beat any non-!important CSS rule regardless of
+   selector specificity. */
+.tabulator,
+.tabulator-tableholder {
+  height: auto !important;
+  max-height: none !important;
+}
+
+.tabulator-tableholder {
+  overflow-y: visible !important;
+}
+
 .tabulator {
   background: var(--surface);
   border: 1px solid var(--border);
