@@ -104,20 +104,24 @@
    <input>/<select> with native OS chrome by default (appearance: auto),
    and Tabulator's own CSS never touches that property — background/color
    alone can render invisibly against that native chrome depending on the
-   OS/browser theme, which is what a stark white filter box despite this
-   rule's background: var(--background) actually was. */
+   OS/browser theme. !important on every property here, not just
+   appearance, because Tabulator's filter-input editors set several
+   properties as inline styles at element-creation time (confirmed in the
+   vendored source: padding, width, box-sizing, cursor, caretColor) — the
+   same inline-style-beats-any-non-!important-rule mechanism that caused
+   the tableholder height bug, so the same fix applies. */
 .tabulator .tabulator-header-filter input,
 .tabulator .tabulator-header-filter select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  color: var(--body);
-  font-family: var(--mono);
-  font-size: var(--step-0);
-  padding: 0.2rem 0.4rem;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background: var(--background) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 2px !important;
+  color: var(--body) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+  padding: 0.2rem 0.4rem !important;
 }
 
 .tabulator .tabulator-header-filter input:focus-visible,
