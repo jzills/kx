@@ -23,8 +23,19 @@
   max-height: none !important;
 }
 
+/* overflow-y: visible alone is not enough — per the CSS spec, when
+   overflow-x and overflow-y differ and one of them is "visible" while the
+   other isn't, the browser computes the visible one as "auto" instead (the
+   rule exists so a box can't scroll on one axis but not the other). Since
+   this box's overflow-x stays "auto" (the tableholder's own horizontal
+   column scroll, still wanted), overflow-y: visible on its own silently
+   computes back to auto and never stops the vertical clipping. layout:
+   "fitColumns" is set on every grid on this page, though, which shrinks
+   columns to fit rather than needing horizontal scroll in the first place —
+   so giving up the tableholder's own horizontal scroll here (both axes
+   visible) costs nothing these grids actually use. */
 .tabulator-tableholder {
-  overflow-y: visible !important;
+  overflow: visible !important;
 }
 
 .tabulator {
@@ -89,8 +100,17 @@
   color: var(--accent) !important;
 }
 
+/* appearance: none is load-bearing, not cosmetic polish: browsers draw
+   <input>/<select> with native OS chrome by default (appearance: auto),
+   and Tabulator's own CSS never touches that property — background/color
+   alone can render invisibly against that native chrome depending on the
+   OS/browser theme, which is what a stark white filter box despite this
+   rule's background: var(--background) actually was. */
 .tabulator .tabulator-header-filter input,
 .tabulator .tabulator-header-filter select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: 2px;
@@ -240,6 +260,9 @@
 }
 
 .kx-grid-controls select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 2px;
