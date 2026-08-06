@@ -20,15 +20,25 @@ type TriageResult struct {
 	// so an X column here would print numbers that resolve to nothing.
 	AllNamespaces bool
 	// Checked is the number of resources swept, most of which are healthy and
-	// never appear as a row.
+	// never appear as a row unless Full is set.
 	Checked int
-	// Reports are the unhealthy resources only, most severe first.
+	// Reports are the terminal table's rows, most severe first: unhealthy
+	// resources only, or every swept resource when Full is set.
 	Reports []diagnostics.Report
+	// All is every swept resource, most severe first, regardless of Full — the
+	// HTML report shows the full inventory unconditionally, since its grid can
+	// filter healthy rows away client-side rather than needing them dropped
+	// before they ever reach the page.
+	All     []diagnostics.Report
 	Healthy int
+	// Full mirrors kx diag --full: Reports already includes healthy resources,
+	// so the footer must not also claim some were left out.
+	Full bool
 }
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
-// match the saved state, with healthy resources collapsed into the footer.
+// match the saved state, with healthy resources collapsed into the footer —
+// or one row per every swept resource, healthy included, when Full is set.
 //
 // The caption follows the same "{kind} · {namespace} · {count} {noun}" shape as
 // kx get and kx state, with "Mixed" as the kind since a sweep spans whatever
@@ -107,15 +117,17 @@ func (r *Renderer) Triage(result TriageResult) {
 	r.Table(columns, rows)
 
 	r.Blank()
-	label := "resources"
-	if result.Healthy == 1 {
-		label = "resource"
-	}
-	footer := strconv.Itoa(result.Healthy) + " healthy " + label + " not shown"
+	hint := "kx diag <index> for detail"
 	if result.AllNamespaces {
-		footer += " · " + AllNamespacesNote
-	} else {
-		footer += " · kx diag <index> for detail"
+		hint = AllNamespacesNote
+	}
+	footer := hint
+	if !result.Full {
+		label := "resources"
+		if result.Healthy == 1 {
+			label = "resource"
+		}
+		footer = strconv.Itoa(result.Healthy) + " healthy " + label + " not shown · " + hint
 	}
 	r.line(r.style(theme.Muted, footer))
 }

@@ -44,7 +44,7 @@ body {
   /* Six lines of glyphs need more height than the single-line text wordmark
      did to stay legible — at 1.5rem the individual box-drawing strokes blur
      together. */
-  height: 2.75rem;
+  height: 4rem;
   width: auto;
   flex-shrink: 0;
   fill: var(--accent);
@@ -79,8 +79,21 @@ body {
   background: var(--surface);
 }
 
+/* table-layout: fixed, not the default auto: this table (the diag report's
+   Pods table — the only <table> left anywhere in these pages) gets cloned
+   into a fresh <template> per row and appended into whichever diag row's
+   detail panel is expanded. With auto layout each clone sizes its own
+   columns from its own content independently, so two different resources'
+   Pods tables — different pod name lengths, different column counts of
+   actual content — end up with visibly different column widths, and a
+   table whose content is wide enough can overflow its box outright with
+   no visible way to reach the rest of it. Fixed layout makes the <th>
+   width percentages below authoritative for every clone regardless of
+   content, so column position matches across every expanded row and the
+   table can never grow past its container. */
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-family: var(--mono);
   font-size: var(--step-0);
@@ -96,9 +109,22 @@ thead th {
   padding: 0.55rem var(--pad-x);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-tbody td { padding: var(--pad-y) var(--pad-x); border-bottom: 1px solid var(--border); }
+/* overflow/text-overflow, not just on thead th: fixed layout only fixes
+   the column's width, not whether its content fits inside it — a long pod
+   or container name would otherwise wrap onto extra lines or spill past
+   its cell's border rather than staying to one line like the rest of the
+   table. */
+tbody td {
+  padding: var(--pad-y) var(--pad-x);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 tbody tr:last-child td { border-bottom: none; }
 
 a { color: var(--accent); }
@@ -173,107 +199,11 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .event { display: flex; flex-direction: column; gap: 0.15rem; }
 .event + .event { margin-top: 0.85rem; }
 .event-head { font-family: var(--mono); font-size: var(--step-0); color: var(--muted); margin: 0; }
-/* No colour of its own: it inherits body from .row (in a drawer) or from the
-   page, and declaring it here would outrank an equal-specificity .status-*
-   alongside it — which is how a failed scan's error message rendered in body
-   colour instead of the warning colour it asks for. */
+/* No colour of its own: it inherits body from .kx-detail or the page, and
+   declaring it here would outrank an equal-specificity .status-* alongside
+   it — which is how a failed scan's error message rendered in body colour
+   instead of the warning colour it asks for. */
 .event-msg { font-size: var(--step-0); margin: 0; }
-
-.row { color: var(--body); border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
-.row:last-of-type { border-bottom: none; }
-.row.status-bad { border-left-color: var(--status-bad); }
-.row.status-warn { border-left-color: var(--status-warn); }
-
-.row > summary {
-  display: grid;
-  gap: 0 var(--pad-x);
-  align-items: baseline;
-  padding: var(--pad-y) var(--pad-x);
-  font-family: var(--mono);
-  font-size: var(--step-0);
-  cursor: pointer;
-  list-style: none;
-  grid-template-columns: 2.25rem 11rem minmax(9rem, 1fr) 6.5rem minmax(12rem, 1.6fr) 1.25rem;
-}
-
-.row > summary::-webkit-details-marker { display: none; }
-.row > summary:hover { background: var(--surface); }
-.row > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-.sweep-head {
-  display: grid;
-  gap: 0 var(--pad-x);
-  padding: 0.55rem var(--pad-x);
-  border-bottom: 1px solid var(--border);
-  border-left: 3px solid transparent;
-  font-family: var(--mono);
-  font-size: var(--micro);
-  letter-spacing: 0.12em;
-  color: var(--muted);
-  font-weight: 600;
-  grid-template-columns: 2.25rem 11rem minmax(9rem, 1fr) 6.5rem minmax(12rem, 1.6fr) 1.25rem;
-}
-
-/* Plain ".scan-grid" alone is one class (0,1,0) — less specific than
-   ".row > summary" (0,1,1), which would otherwise keep the diag page's
-   six-column layout under the scan page's eight-column summary row. Pairing
-   it with the element it actually decorates gives it the specificity to
-   win, the same way .ns-grid below pairs with .row rather than standing
-   alone.
-
-   This class lives on the <summary> itself (scan.gohtml), not on its
-   parent the way ns-grid pairs with .row -- so the selector below is
-   ".row > summary.scan-grid", not ".row.scan-grid > summary". Moving the
-   class to <details> would silently stop this matching. */
-.row > summary.scan-grid,
-.sweep-head.scan-grid {
-  grid-template-columns: minmax(14rem, 1.6fr) 6rem 4rem 4rem 4rem 4rem 4rem 1.25rem;
-}
-
-/* The -A shape drops the index column and adds NAMESPACE, so its leading two
-   tracks are kind and namespace rather than index and kind. */
-.row.ns-grid > summary,
-.sweep-head.ns-grid {
-  grid-template-columns: 11rem 10rem minmax(9rem, 1fr) 6.5rem minmax(12rem, 1.6fr) 1.25rem;
-}
-
-.row .index, .sweep-head .index { text-align: right; color: var(--muted); }
-
-.row .finding {
-  font-family: var(--sans);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.marker { color: var(--muted); justify-self: end; }
-.row[open] .marker { transform: rotate(90deg); }
-
-.drawer {
-  padding: 1rem 1rem 1.5rem 1.5rem;
-  background: var(--background);
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.stack {
-  display: flex;
-  height: 5px;
-  width: 100%;
-  min-width: 6rem;
-  border-radius: 1px;
-  overflow: hidden;
-  background: var(--border);
-  align-self: center;
-}
-
-.stack i { display: block; height: 100%; }
-.stack .crit, .stack .high { background: var(--status-bad); }
-.stack .high { opacity: 0.6; }
-.stack .med { background: var(--status-warn); }
-.stack .low { background: var(--muted); }
 
 footer {
   font-family: var(--mono);
@@ -283,69 +213,10 @@ footer {
   padding-top: 1rem;
 }
 
-.tree, .tree-children {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.tree-children {
-  padding-left: 1.1rem;
-  margin-left: 0.35rem;
-  border-left: 1px solid var(--border);
-}
-
-.tree li { margin: 0.15rem 0; font-family: var(--mono); font-size: var(--step-0); }
-
-.tree details > summary {
-  cursor: pointer;
-  list-style: none;
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-}
-
-.tree details > summary::-webkit-details-marker { display: none; }
-
-.tree details > summary::before {
-  content: "▸";
-  display: inline-block;
-  width: 0.9em;
-  color: var(--muted);
-  transition: transform 0.1s;
-}
-
-.tree details[open] > summary::before { transform: rotate(90deg); }
-
-.tree-index { color: var(--muted); margin-right: 0.4em; }
-
+/* Still used: kx-grid.js's treeLabelFormatter sets these same classes on the
+   spans it builds for the tree grid's Name column, matching what the
+   terminal's render.Tree draws for the same node.Style values. */
 .tree-label.style-header { color: var(--accent); font-weight: 600; }
 .tree-label.style-accent { color: var(--accent); }
 .tree-label.style-muted  { color: var(--muted); }
 .tree-label.style-body   { color: var(--body); }
-
-@media (max-width: 720px) {
-  /* .ns-grid's desktop rule above is a compound selector with higher
-     specificity than the plain rule here, and @media adds no specificity of
-     its own — so without repeating the modifier in this selector list, the
-     -A sweep would keep its full desktop grid under 720px instead of
-     collapsing with everything else.
-
-     .scan-grid is deliberately NOT repeated here. This collapse works for
-     the diag sweep because KIND and FINDING (hidden below) are the two
-     columns it can afford to drop, leaving INDEX/NAMESPACE, NAME, VERDICT
-     and the marker. A scan row has no equivalent pair to drop: image,
-     severity stack, and five counts are all signal, and forcing them into
-     this same 3-column template wraps the extra cells onto additional
-     implicit rows rather than collapsing sensibly. Instead the scan page
-     keeps its desktop grid at every width and relies on .table-wrap's own
-     horizontal scroll — the same mechanism the CVE detail table inside
-     each row's drawer already depends on unconditionally, at every width,
-     elsewhere on this same page. */
-  .row > summary, .sweep-head,
-  .row.ns-grid > summary, .sweep-head.ns-grid {
-    grid-template-columns: 2rem 1fr 1.25rem;
-  }
-  .row > summary .kind, .row > summary .finding,
-  .sweep-head .kind, .sweep-head .finding { display: none; }
-}

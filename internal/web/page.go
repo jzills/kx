@@ -11,6 +11,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"sort"
@@ -50,9 +51,8 @@ type DiagPage struct {
 	AllNamespaces bool
 	Single        bool
 	Checked       int
-	Healthy       int
-	// Reports are the unhealthy resources, most severe first — or exactly one
-	// resource when Single is set, healthy or not.
+	// Reports are every swept resource, most severe first, healthy included —
+	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
 }
 
@@ -206,6 +206,160 @@ func sortedKeys(styles map[string]string) []string {
 	return names
 }
 
+// DiagRow is one sweep row for the diag grid — a thin, JSON-friendly view
+// over diagnostics.Report built by diagRows, the same conversion the sweep
+// body renders from, so the grid and the narrative report cannot disagree.
+//
+// Row is the 0-based index into DiagPage.Reports. It is stable regardless of
+// how the grid re-sorts, re-filters, or re-groups, and is how a row-click
+// finds its matching <template id="diag-detail-N"> for the expansion panel —
+// the full nested report is server-rendered once and cloned client-side
+// rather than reimplemented in JS from JSON.
+type DiagRow struct {
+	Row       int
+	Index     int // 1-based, matches the sweep's index column; unset in -A mode
+	Kind      string
+	Name      string
+	Namespace string
+	Verdict   string
+	// VerdictRank sorts by severity (OK < Warning < Critical); Verdict's text
+	// ("critical" < "healthy" < "warnings") does not sort that way.
+	VerdictRank int
+	TopFinding  string
+}
+
+func diagRows(reports []diagnostics.Report) []DiagRow {
+	rows := make([]DiagRow, len(reports))
+	for i, r := range reports {
+		row := DiagRow{
+			Row:         i,
+			Index:       i + 1,
+			Kind:        string(r.Kind),
+			Name:        r.Name,
+			Namespace:   r.Namespace,
+			Verdict:     r.Verdict.String(),
+			VerdictRank: int(r.Verdict),
+		}
+		if len(r.Findings) > 0 {
+			row.TopFinding = r.Findings[0].Summary
+		}
+		rows[i] = row
+	}
+	return rows
+}
+
+// ScanImageRow is one image-level row for the scan page's image grid, built
+// by scanImageRows over scanner.ImageScan. Bar reuses severityBar's own
+// bands rather than having the grid's JS re-derive them from Counts, so the
+// stacked bar can't drift from the one severityBar already draws elsewhere.
+type ScanImageRow struct {
+	Image                                    string
+	Error                                    string
+	Critical, High, Medium, Low, Unspecified int
+	Bar                                      []Segment
+}
+
+func scanImageRows(images []scanner.ImageScan) []ScanImageRow {
+	rows := make([]ScanImageRow, len(images))
+	for i, img := range images {
+		rows[i] = ScanImageRow{
+			Image:       img.Image,
+			Error:       img.Error,
+			Critical:    img.Counts["CRITICAL"],
+			High:        img.Counts["HIGH"],
+			Medium:      img.Counts["MEDIUM"],
+			Low:         img.Counts["LOW"],
+			Unspecified: img.Counts["UNSPECIFIED"],
+			Bar:         severityBar(img.Counts),
+		}
+	}
+	return rows
+}
+
+// ScanFindingRow is one CVE, flattened across every image so the findings
+// grid can search/group across the whole sweep rather than one image's
+// <details> at a time.
+type ScanFindingRow struct {
+	Image     string
+	ID        string
+	URL       string
+	Severity  string
+	Package   string
+	Installed string
+	FixedIn   string
+	Fixable   bool
+}
+
+func scanFindingRows(images []scanner.ImageScan) []ScanFindingRow {
+	var rows []ScanFindingRow
+	for _, img := range images {
+		for _, f := range img.Findings {
+			rows = append(rows, ScanFindingRow{
+				Image:     img.Image,
+				ID:        f.ID,
+				URL:       f.URL,
+				Severity:  f.Severity,
+				Package:   f.Package,
+				Installed: f.Installed,
+				FixedIn:   f.FixedIn,
+				Fixable:   f.FixedIn != "",
+			})
+		}
+	}
+	return rows
+}
+
+// TreeRow is a JSON-friendly view over *tree.Node for Tabulator's dataTree
+// mode. It is a deliberate copy rather than tree.Node itself: that package is
+// shared with the terminal renderer, and its Go-idiomatic Children field
+// shouldn't bend to Tabulator's own "_children" wire convention.
+type TreeRow struct {
+	Label    string
+	Style    string
+	Index    int
+	Children []TreeRow `json:"_children,omitempty"`
+}
+
+func treeRows(n *tree.Node) TreeRow {
+	if n == nil {
+		return TreeRow{}
+	}
+	row := TreeRow{Label: n.Label, Style: n.Style, Index: n.Index}
+	if len(n.Children) > 0 {
+		row.Children = make([]TreeRow, len(n.Children))
+		for i, c := range n.Children {
+			row.Children[i] = treeRows(c)
+		}
+	}
+	return row
+}
+
+func treeRootRows(roots []*tree.Node) []TreeRow {
+	rows := make([]TreeRow, len(roots))
+	for i, r := range roots {
+		rows[i] = treeRows(r)
+	}
+	return rows
+}
+
+// marshalJS renders a view type as a JSON literal safe to embed inside a
+// <script type="application/json"> block.
+//
+// json.Marshal's default HTML-escaping (< > & become < > &)
+// is what stops a CVE description or log line containing "</script>" from
+// breaking out of the block; template.JS marks the result pre-escaped so
+// html/template's own script-context escaping doesn't run a second pass over
+// already-valid JSON and corrupt it. The view types above never contain
+// channels, funcs, or cycles, so Marshal cannot fail here — a failure would
+// be a programming error, not a runtime condition to recover from.
+func marshalJS(v any) template.JS {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return template.JS(b)
+}
+
 // funcs are the derivations templates cannot express.
 var funcs = template.FuncMap{
 	"cssVars":    cssVars,
@@ -244,4 +398,19 @@ var funcs = template.FuncMap{
 	"severityBar": severityBar,
 	"severities":  func() []string { return scanner.Severities },
 	"count":       func(counts map[string]int, severity string) int { return counts[severity] },
+
+	// Vendored (see vendor.go) and first-party (see render.go) grid assets,
+	// inlined the same way stylesheet/wordmark are: pageHandler answers every
+	// request with one in-memory document, so there is nothing to reference
+	// by URL.
+	"tabulatorJS":  func() template.JS { return template.JS(tabulatorJS) },
+	"tabulatorCSS": func() template.CSS { return template.CSS(tabulatorCSS) },
+	"kxGridCSS":    func() template.CSS { return template.CSS(kxGridCSS) },
+	"kxGridJS":     func() template.JS { return template.JS(kxGridJS) },
+
+	"diagRowsJSON":        func(reports []diagnostics.Report) template.JS { return marshalJS(diagRows(reports)) },
+	"scanImageRowsJSON":   func(images []scanner.ImageScan) template.JS { return marshalJS(scanImageRows(images)) },
+	"scanFindingRowsJSON": func(images []scanner.ImageScan) template.JS { return marshalJS(scanFindingRows(images)) },
+	"treeRowsJSON":        func(root *tree.Node) template.JS { return marshalJS([]TreeRow{treeRows(root)}) },
+	"treeRootRowsJSON":    func(roots []*tree.Node) template.JS { return marshalJS(treeRootRows(roots)) },
 }

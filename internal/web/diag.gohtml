@@ -21,8 +21,8 @@
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>POD</th><th>PHASE</th><th>READY</th><th class="num">RESTARTS</th>
-        <th>CONTAINER</th><th>STATE</th><th>REASON</th><th>CPU</th><th>MEM</th>
+        <th style="width:20%">POD</th><th style="width:9%">PHASE</th><th style="width:7%">READY</th><th class="num" style="width:8%">RESTARTS</th>
+        <th style="width:14%">CONTAINER</th><th style="width:9%">STATE</th><th style="width:13%">REASON</th><th style="width:10%">CPU</th><th style="width:10%">MEM</th>
       </tr></thead>
       <tbody>
       {{range $pod := .Pods}}
@@ -115,40 +115,14 @@
   <div class="block">
     {{if eq .Checked 0}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
-    {{else if .Reports}}
-      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
-      <div class="table-wrap">
-        <div class="sweep-head{{if .AllNamespaces}} ns-grid{{end}}">
-          {{if .AllNamespaces}}
-            <div class="kind">KIND</div><div>NAMESPACE</div>
-          {{else}}
-            <div class="index">X</div><div class="kind">KIND</div>
-          {{end}}
-          <div>NAME</div><div>VERDICT</div><div class="finding">TOP FINDING</div><div></div>
-        </div>
-        {{range $i, $r := .Reports}}
-        <details class="row {{severityClass $r.Verdict}}{{if $.AllNamespaces}} ns-grid{{end}}">
-          <summary>
-            {{if $.AllNamespaces}}
-              <span class="kind">{{$r.Kind}}</span><span class="dim">{{$r.Namespace}}</span>
-            {{else}}
-              <span class="index">{{add $i 1}}</span><span class="kind">{{$r.Kind}}</span>
-            {{end}}
-            <span>{{$r.Name}}</span>
-            <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
-            <span class="finding">{{with $r.Findings}}{{(index . 0).Summary}}{{end}}</span>
-            <span class="marker">›</span>
-          </summary>
-          <div class="drawer">{{template "report" $r}}</div>
-        </details>
-        {{end}}
-      </div>
-      <footer>
-        {{.Healthy}} healthy {{if eq .Healthy 1}}resource{{else}}resources{{end}} not shown
-        {{- if .AllNamespaces}} · indexes not saved for all-namespace listings{{else}} · kx diag &lt;index&gt; for the same detail in your terminal{{end}}
-      </footer>
     {{else}}
-      <p class="caption">Mixed · {{.Scope}} · <span class="status-ok">{{.Checked}} checked · all healthy</span></p>
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+      <div class="grid-mount" data-kx-grid="diag" data-all-namespaces="{{.AllNamespaces}}"></div>
+      <script type="application/json" id="kx-diag-data">{{diagRowsJSON .Reports}}</script>
+      {{range $i, $r := .Reports}}<template id="diag-detail-{{$i}}">{{template "report" $r}}</template>{{end}}
+      <footer>
+        {{if .AllNamespaces}}indexes not saved for all-namespace listings{{else}}kx diag &lt;index&gt; for the same detail in your terminal{{end}}
+      </footer>
     {{end}}
   </div>
 {{end}}
