@@ -106,7 +106,10 @@
     wrap.className = "kx-group-select";
 
     var label = document.createElement("label");
-    label.appendChild(document.createTextNode("Group by "));
+    var labelText = document.createElement("span");
+    labelText.className = "kx-control-label";
+    labelText.textContent = "Group by";
+    label.appendChild(labelText);
     wrap.appendChild(label);
 
     var allOptions = [{ field: "", label: "None" }].concat(options);
@@ -504,9 +507,13 @@
 
   function searchInput(onInput) {
     var label = document.createElement("label");
-    label.appendChild(document.createTextNode("Search "));
+    var labelText = document.createElement("span");
+    labelText.className = "kx-control-label";
+    labelText.textContent = "Search";
+    label.appendChild(labelText);
     var input = document.createElement("input");
     input.type = "search";
+    input.className = "kx-search-input";
     input.placeholder = "filter by name…";
     input.addEventListener("input", function () { onInput(input.value); });
     label.appendChild(input);

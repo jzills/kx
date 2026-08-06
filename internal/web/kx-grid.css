@@ -340,18 +340,31 @@
   color: var(--muted);
 }
 
-/* Label text ("Group by", "Search") gets the same treatment as
-   .tabulator-col-title's column headers (micro size, uppercase,
-   letter-spaced) — via CSS transform rather than hand-typed uppercase
-   strings in kx-grid.js, so the source text stays normal, readable copy
-   and the two can't drift out of sync the way a literal "GROUP BY" typed
-   in JS could. The <select>/<input> beside each label keeps the row's
-   normal step-0 size — this only styles the label itself. */
+/* Label ("Group by", "Search") stacks above its control now, not beside
+   it — the same shape as a Tabulator column: .tabulator-col-title on top,
+   .tabulator-header-filter input below. Shared by both groupSelect() and
+   searchInput(), which both nest their control inside this <label>. */
 .kx-grid-controls label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+/* The label text itself, in its own span rather than styled on <label>
+   directly: <label> also contains the actual control (trigger button or
+   search input), and text-transform/letter-spacing inherit into children
+   by default — an earlier version of this rule lived on <label> and
+   silently forced the same uppercase onto whatever the group-by trigger
+   displayed and whatever a user typed into the search box, which is not
+   what either control's own value should look like. Same treatment as
+   .tabulator-col-title (micro size, uppercase, letter-spaced, muted). */
+.kx-control-label {
   font-size: var(--micro);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 600;
+  color: var(--muted);
 }
 
 /* The group-by control's own positioning context: kx-group-popup below is
@@ -360,48 +373,53 @@
 .kx-group-select {
   position: relative;
   display: inline-flex;
-  align-items: center;
 }
 
-/* Deliberately flat, not boxed like the header-filter inputs/selects: this
-   is the group-by control, styled to read as part of the column-header row
-   above it rather than as another filter field — same treatment as
-   .tabulator-col-title (micro size, letter-spaced, muted), applied
-   directly to the trigger instead of only its label, and a hover
-   background matching .tabulator-col.tabulator-sortable:hover for the same
-   affordance headers already give. Width matches the header filter
-   selects' column width (Verdict is 165px) rather than shrink-wrapping to
-   its own text, so it doesn't read as a narrower, different kind of
-   control sitting right above ones that are wider.
+/* The trigger and the search input now get the same box treatment as
+   Kind/Verdict's own header-filter inputs (background, border, body-
+   coloured text at step-0, not the label's micro/uppercase/muted look) —
+   this is the "selected value" text, styled the same as any other
+   filter's selected value, with the small-caps treatment living on
+   .kx-control-label above it instead.
 
-   A <button>, not a <select>: kx-grid.js's groupSelect() now builds its
-   open list as a .tabulator-popup-container/.tabulator-edit-list, the
-   exact same DOM shape Tabulator's own List editor uses for Kind/Verdict,
-   so it inherits that theming instead of hitting a native <select>'s
-   dropdown — the OS/browser chrome CSS could only ever partly reach.
-   Resets <button>'s own native chrome (border, background, inherited
-   font) the same way appearance: none does for input/select elsewhere in
-   this file. */
-.kx-grid-controls .kx-group-trigger {
+   kx-group-trigger is a <button>, not a <select>: kx-grid.js's
+   groupSelect() builds its open list as a .tabulator-popup-container/
+   .tabulator-edit-list, the exact same DOM shape Tabulator's own List
+   editor uses for Kind/Verdict, so it inherits that theming instead of
+   hitting a native <select>'s dropdown — OS/browser chrome CSS could only
+   ever partly reach. appearance: none resets both <button>'s and
+   <input>'s own native chrome the same way it does for the header-filter
+   inputs elsewhere in this file. Width matches the header filter inputs'
+   column width (Verdict is 165px) rather than shrink-wrapping to its own
+   text, so neither reads as a narrower, different kind of control sitting
+   right above ones that are wider. */
+.kx-grid-controls .kx-group-trigger,
+.kx-grid-controls .kx-search-input {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--body);
   font-family: var(--mono);
-  font-size: var(--micro);
-  letter-spacing: 0.12em;
-  font-weight: 600;
+  font-size: var(--step-0);
   padding: 0.2rem 0.4rem;
   width: 165px;
+}
+
+.kx-grid-controls .kx-group-trigger {
   text-align: left;
   cursor: pointer;
 }
 
 .kx-grid-controls .kx-group-trigger:hover {
   background: var(--background);
+}
+
+.kx-grid-controls .kx-search-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 /* Positioned against .kx-group-select above, not the page — opens
