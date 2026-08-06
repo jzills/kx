@@ -381,6 +381,10 @@
         { title: "Status", field: "Error", width: 120, formatter: imageStatusFormatter, headerSort: false },
       ],
       initialSort: [{ column: "Critical", dir: "desc" }],
+      // See the renderVertical note by .tabulator-tableholder in
+      // kx-grid.css: this page's CSS strips the virtual renderer's own
+      // scroll viewport, so it must not be used here.
+      renderVertical: "basic",
     });
   }
 
@@ -476,6 +480,10 @@
         },
       ],
       initialSort: [{ column: "Severity", dir: "asc" }],
+      // See the renderVertical note by .tabulator-tableholder in
+      // kx-grid.css: this page's CSS strips the virtual renderer's own
+      // scroll viewport, so it must not be used here.
+      renderVertical: "basic",
     });
 
     addControls(mount, [
@@ -566,6 +574,10 @@
         },
         { title: "Name", field: "Label", formatter: treeLabelFormatter, widthGrow: 3 },
       ],
+      // See the renderVertical note by .tabulator-tableholder in
+      // kx-grid.css: this page's CSS strips the virtual renderer's own
+      // scroll viewport, so it must not be used here.
+      renderVertical: "basic",
     });
 
     addControls(mount, [
