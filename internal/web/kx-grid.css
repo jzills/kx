@@ -144,6 +144,12 @@
   outline-offset: -1px;
 }
 
+.tabulator .tabulator-header-filter input::placeholder,
+.kx-grid-controls .kx-search-input::placeholder {
+  color: var(--muted) !important;
+  opacity: 1 !important;
+}
+
 /* The list filter's dropdown is NOT a native <select>/<option> popup — an
    earlier round wrongly assumed it was and treated its styling as a
    browser-native limit not worth fighting. Traced the actual source

@@ -236,13 +236,22 @@
       // No synthetic "All" entry: with nothing selected the filter array
       // is empty, and "in" already treats that as "show everything," so
       // "All" would be a checkbox meaning the same thing as checking
-      // nothing rather than a real, distinct option.
+      // nothing rather than a real, distinct option. headerFilterPlaceholder
+      // says the same thing passively, as placeholder text, rather than as
+      // a selectable item.
+      headerFilterPlaceholder: "All",
       headerFilterParams: { values: uniqueValues(data, "Kind"), multiselect: true, clearable: true },
     });
     if (allNamespaces) {
-      columns.push({ title: "Namespace", field: "Namespace", width: 170, headerFilter: "input" });
+      columns.push({
+        title: "Namespace", field: "Namespace", width: 170,
+        headerFilter: "input", headerFilterPlaceholder: "Type to filter…",
+      });
     }
-    columns.push({ title: "Name", field: "Name", headerFilter: "input", widthGrow: 2 });
+    columns.push({
+      title: "Name", field: "Name", headerFilter: "input", headerFilterPlaceholder: "Type to filter…",
+      widthGrow: 2,
+    });
     columns.push({
       title: "Verdict", field: "Verdict", width: 165,
       formatter: verdictFormatter,
@@ -254,6 +263,7 @@
       headerFilterFunc: "in",
       // Same multiselect reasoning as Kind above: no synthetic "All" entry,
       // an empty selection already means every verdict shows.
+      headerFilterPlaceholder: "All",
       headerFilterParams: {
         values: { healthy: "Healthy", warnings: "Warning", critical: "Critical" },
         multiselect: true,
@@ -261,7 +271,8 @@
       },
     });
     columns.push({
-      title: "Top finding", field: "TopFinding", widthGrow: 3, headerFilter: "input",
+      title: "Top finding", field: "TopFinding", widthGrow: 3,
+      headerFilter: "input", headerFilterPlaceholder: "Type to filter…",
       formatter: function (cell) { return textCell(cell.getValue()); },
     });
 
@@ -360,7 +371,7 @@
       data: data,
       layout: "fitColumns",
       columns: [
-        { title: "Image", field: "Image", widthGrow: 3, headerFilter: "input" },
+        { title: "Image", field: "Image", widthGrow: 3, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" },
         { title: "Severity", field: "Bar", formatter: severityBarFormatter, widthGrow: 2, headerSort: false },
         { title: "Crit", field: "Critical", width: 70, hozAlign: "right", sorter: "number", formatter: countFormatter("status-bad") },
         { title: "High", field: "High", width: 70, hozAlign: "right", sorter: "number", formatter: countFormatter("status-bad") },
@@ -429,8 +440,12 @@
       groupBy: "Image",
       placeholder: "No vulnerabilities found",
       columns: [
-        { title: "CVE", field: "ID", widthGrow: 1, headerFilter: "input", formatter: cveFormatter },
-        { title: "Image", field: "Image", widthGrow: 2, headerFilter: "input" },
+        {
+          title: "CVE", field: "ID", widthGrow: 1,
+          headerFilter: "input", headerFilterPlaceholder: "Type to filter…",
+          formatter: cveFormatter,
+        },
+        { title: "Image", field: "Image", widthGrow: 2, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" },
         {
           title: "Severity", field: "Severity", width: 120, formatter: severityFormatter,
           sorter: function (a, b) { return severityRank(a) - severityRank(b); },
@@ -440,7 +455,7 @@
             clearable: true,
           },
         },
-        { title: "Package", field: "Package", widthGrow: 2, headerFilter: "input" },
+        { title: "Package", field: "Package", widthGrow: 2, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" },
         { title: "Installed", field: "Installed", widthGrow: 1 },
         { title: "Fixed in", field: "FixedIn", widthGrow: 1, formatter: fixedInFormatter },
         {
