@@ -450,8 +450,15 @@
           title: "Severity", field: "Severity", width: 120, formatter: severityFormatter,
           sorter: function (a, b) { return severityRank(a) - severityRank(b); },
           headerFilter: "list",
+          // Same multiselect/"in"/placeholder pattern as diag's Kind and
+          // Verdict columns: an empty selection already shows everything, so
+          // there is no synthetic "All" entry, only placeholder text saying
+          // the same thing passively.
+          headerFilterFunc: "in",
+          headerFilterPlaceholder: "All",
           headerFilterParams: {
-            values: { "": "All", CRITICAL: "Critical", HIGH: "High", MEDIUM: "Medium", LOW: "Low", UNSPECIFIED: "Unspecified" },
+            values: { CRITICAL: "Critical", HIGH: "High", MEDIUM: "Medium", LOW: "Low", UNSPECIFIED: "Unspecified" },
+            multiselect: true,
             clearable: true,
           },
         },
