@@ -144,6 +144,52 @@
   outline-offset: -1px;
 }
 
+/* The list filter's dropdown is NOT a native <select>/<option> popup — an
+   earlier round wrongly assumed it was and treated its styling as a
+   browser-native limit not worth fighting. Traced the actual source
+   (_createListElement) and confirmed it's a plain, Tabulator-built <div
+   class="tabulator-edit-list"> full of its own <div class="tabulator-edit-
+   list-item"> rows, positioned in a ".tabulator-popup-container" wrapper —
+   ordinary DOM this stylesheet already themes everywhere else, not a
+   platform boundary. Both need covering: the container has its own
+   hardcoded white background independent of the list inside it. */
+.tabulator-popup-container {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.tabulator-edit-list {
+  background: var(--surface) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item {
+  color: var(--body) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item:hover {
+  background: var(--background) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item.active {
+  background: var(--accent) !important;
+  color: var(--background) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item.focused {
+  outline: 1px solid var(--accent) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-placeholder {
+  color: var(--muted) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-group {
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+}
+
 /* Verified low-specificity in the vendored stylesheet (the real rule is
    the bare ".tabulator-row,.tabulator-row.tabulator-row-even", matching or
    below these), so no !important needed here — unlike the header/column
