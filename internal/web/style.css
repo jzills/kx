@@ -79,8 +79,21 @@ body {
   background: var(--surface);
 }
 
+/* table-layout: fixed, not the default auto: this table (the diag report's
+   Pods table — the only <table> left anywhere in these pages) gets cloned
+   into a fresh <template> per row and appended into whichever diag row's
+   detail panel is expanded. With auto layout each clone sizes its own
+   columns from its own content independently, so two different resources'
+   Pods tables — different pod name lengths, different column counts of
+   actual content — end up with visibly different column widths, and a
+   table whose content is wide enough can overflow its box outright with
+   no visible way to reach the rest of it. Fixed layout makes the <th>
+   width percentages below authoritative for every clone regardless of
+   content, so column position matches across every expanded row and the
+   table can never grow past its container. */
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-family: var(--mono);
   font-size: var(--step-0);
@@ -96,9 +109,22 @@ thead th {
   padding: 0.55rem var(--pad-x);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-tbody td { padding: var(--pad-y) var(--pad-x); border-bottom: 1px solid var(--border); }
+/* overflow/text-overflow, not just on thead th: fixed layout only fixes
+   the column's width, not whether its content fits inside it — a long pod
+   or container name would otherwise wrap onto extra lines or spill past
+   its cell's border rather than staying to one line like the rest of the
+   table. */
+tbody td {
+  padding: var(--pad-y) var(--pad-x);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 tbody tr:last-child td { border-bottom: none; }
 
 a { color: var(--accent); }

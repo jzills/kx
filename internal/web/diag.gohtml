@@ -21,8 +21,8 @@
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>POD</th><th>PHASE</th><th>READY</th><th class="num">RESTARTS</th>
-        <th>CONTAINER</th><th>STATE</th><th>REASON</th><th>CPU</th><th>MEM</th>
+        <th style="width:20%">POD</th><th style="width:9%">PHASE</th><th style="width:7%">READY</th><th class="num" style="width:8%">RESTARTS</th>
+        <th style="width:14%">CONTAINER</th><th style="width:9%">STATE</th><th style="width:13%">REASON</th><th style="width:10%">CPU</th><th style="width:10%">MEM</th>
       </tr></thead>
       <tbody>
       {{range $pod := .Pods}}
