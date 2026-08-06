@@ -20,138 +20,6 @@
     return document.createTextNode(value === null || value === undefined ? "" : String(value));
   }
 
-  // preserveScroll stops a redraw (a header filter changing, a group-by
-  // toggle, a tree search) from moving the page under the user.
-  //
-  // Two distinct ways a redraw does this, both from the same root cause:
-  // this grid's height is exactly its rendered content's height (kx-grid.css
-  // strips the fixed-height scroll viewport Tabulator would otherwise
-  // reserve, so the page scrolls instead of the grid), and every redraw
-  // clears rendered rows before rebuilding them (Tabulator's own base render
-  // path, confirmed in the vendored source — not something renderVertical:
-  // "basic" opts out of).
-  //
-  //   1. Filtering to few/zero rows shrinks the document below the current
-  //      scroll position. The browser clamps window.scrollY to fit, same as
-  //      scrolling past the end of any page that just got shorter, and does
-  //      not restore the clamped position once the rows regrow.
-  //   2. Filtering out rows ABOVE whatever the user is currently looking at
-  //      (scrolled past the grid's own top, into its later rows or groups)
-  //      shrinks the document there instead. window.scrollY does not even
-  //      need to change for this one — the same numeric scrollY now simply
-  //      points at different content, because everything below the removed
-  //      rows shifted up to fill the gap. Native CSS scroll anchoring exists
-  //      for exactly this, but it anchors to a specific DOM node, and every
-  //      row node here gets destroyed and rebuilt on each redraw, breaking
-  //      that anchor.
-  //
-  // Both are fixed the same way: track whichever row is at the top of the
-  // viewport by its data (the same object reference across a redraw —
-  // Tabulator does not clone row data on a filter/group change, only on a
-  // genuine setData() with new objects), and once the redraw completes,
-  // measure where that same row ended up and scroll by the difference. This
-  // corrects for both cases at once, because it responds to the row's actual
-  // observed movement rather than assuming which of the two caused it.
-  //
-  // The mount's height is still locked from renderStarted to renderComplete
-  // — necessary because case 1's browser clamp fires as soon as the
-  // document gets too short to hold the *current* scroll position, which
-  // can happen mid-redraw before there is a rebuilt row left to anchor to.
-  // Locking the footprint up front means nothing can be clamped out from
-  // under the anchor calculation before it runs. If literally no rows
-  // survive the filter, there is no row left to anchor to at all — the lock
-  // is left in place rather than released, so a filter matching nothing
-  // does not collapse the grid (and move the page) out from under the user
-  // either; the empty-state placeholder just renders inside the reserved
-  // space instead.
-  function preserveScroll(mount, table) {
-    // A single "topmost visible row" anchor is not enough: if a filter
-    // removes rows unevenly (more above the viewport than below it, or vice
-    // versa — the normal case, not an edge case), that exact row can vanish
-    // while the redraw is still something the user should see hold still.
-    // Restoring window.scrollY as a fallback then does not work either,
-    // because it does not account for how much content actually vanished
-    // near the viewport specifically — it can still land dozens or hundreds
-    // of pixels off (measured directly: a surviving row drifted 271px this
-    // way in testing). Instead, every candidate anchor's row currently
-    // rendered is captured, closest-to-viewport-top first, and whichever
-    // one of them is still there after the redraw is used — the closest
-    // survivor is the best available stand-in for "the row the user was
-    // actually looking at."
-    var anchorCandidates = [];
-    // Remembers scrollY across a run of redraws that all match nothing —
-    // set the moment such a run begins, cleared once content comes back and
-    // the lock is released. No row-level anchor can help across that run:
-    // with zero active rows there is nothing to capture as a candidate, on
-    // every redraw in the run, not just the first. Without this, the
-    // redraw where content finally reappears would see zero candidates —
-    // indistinguishable from a page that was never scrolled into this grid
-    // at all — and release the lock without correcting anything.
-    var heldScrollY = null;
-
-    function candidatesByProximityToTop() {
-      var rows = table.getRows("active");
-      var candidates = [];
-      for (var i = 0; i < rows.length; i++) {
-        var el = rows[i].getElement();
-        if (!el) continue;
-        candidates.push({ data: rows[i].getData(), top: el.getBoundingClientRect().top });
-      }
-      candidates.sort(function (a, b) { return Math.abs(a.top) - Math.abs(b.top); });
-      return candidates;
-    }
-
-    table.on("renderStarted", function () {
-      mount.style.minHeight = mount.getBoundingClientRect().height + "px";
-      anchorCandidates = candidatesByProximityToTop();
-      if (heldScrollY === null) heldScrollY = window.scrollY;
-    });
-
-    table.on("renderComplete", function () {
-      var rows = table.getRows("active");
-      // Nothing survived the filter at all. Checked first, ahead of the
-      // candidate search below: once a redraw already collapses to zero
-      // rows, the *next* redraw's renderStarted has nothing to capture as a
-      // candidate either, so treating an empty candidate list the same as
-      // "nothing was ever in view" would release the lock on every
-      // subsequent keystroke while still matching nothing. Keeping the lock
-      // here instead means a filter matching nothing does not collapse the
-      // grid — and move the page — out from under the user; the empty-state
-      // placeholder renders inside the reserved space.
-      if (rows.length === 0) return;
-      var relocated = null;
-      var anchorTop = null;
-      for (var c = 0; c < anchorCandidates.length && !relocated; c++) {
-        for (var i = 0; i < rows.length; i++) {
-          if (rows[i].getData() === anchorCandidates[c].data) {
-            relocated = rows[i];
-            anchorTop = anchorCandidates[c].top;
-            break;
-          }
-        }
-      }
-      if (relocated) {
-        var delta = relocated.getElement().getBoundingClientRect().top - anchorTop;
-        if (delta !== 0) window.scrollBy(0, delta);
-      } else if (heldScrollY !== null && window.scrollY !== heldScrollY) {
-        // No candidate row survived at all — either nothing was in view to
-        // capture candidates from in the first place, every candidate got
-        // filtered out, or content is only just reappearing after a
-        // matched-nothing run. The lock has kept the document tall enough
-        // for heldScrollY to still be a valid position in every one of
-        // those cases where it can be; restoring it directly is a safe
-        // no-op otherwise. If the surviving content genuinely cannot
-        // support heldScrollY any more, releasing the lock right after
-        // lets the browser's own clamp reduce it correctly — the same
-        // "trust the native clamp once nothing else can help" a fully-empty
-        // result already relies on.
-        window.scrollTo(window.scrollX, heldScrollY);
-      }
-      mount.style.minHeight = "";
-      heldScrollY = null;
-    });
-  }
-
   // uniqueValues builds a header-filter "list" values array from whatever
   // a field actually contains in this sweep, sorted for a stable menu
   // order — used for Kind, which (unlike Verdict) has no fixed, known set
@@ -428,7 +296,6 @@
       renderVertical: "basic",
     });
 
-    preserveScroll(mount, table);
     table.on("dataFiltered", function () { syncFilterTooltips(mount); });
 
     var groupOptions = allNamespaces
@@ -500,7 +367,7 @@
     var data = kxData("kx-scan-images-data");
     if (!data) return;
 
-    var table = new Tabulator(mount, {
+    new Tabulator(mount, {
       data: data,
       layout: "fitColumns",
       columns: [
@@ -514,12 +381,7 @@
         { title: "Status", field: "Error", width: 120, formatter: imageStatusFormatter, headerSort: false },
       ],
       initialSort: [{ column: "Critical", dir: "desc" }],
-      // See the renderVertical note by .tabulator-tableholder in
-      // kx-grid.css: this page's CSS strips the virtual renderer's own
-      // scroll viewport, so it must not be used here.
-      renderVertical: "basic",
     });
-    preserveScroll(mount, table);
   }
 
   // Scanner output is not trusted input — a compromised or malformed
@@ -619,12 +481,7 @@
         },
       ],
       initialSort: [{ column: "Severity", dir: "asc" }],
-      // See the renderVertical note by .tabulator-tableholder in
-      // kx-grid.css: this page's CSS strips the virtual renderer's own
-      // scroll viewport, so it must not be used here.
-      renderVertical: "basic",
     });
-    preserveScroll(mount, table);
 
     addControls(mount, [
       groupSelect(table, [
@@ -714,12 +571,7 @@
         },
         { title: "Name", field: "Label", formatter: treeLabelFormatter, widthGrow: 3 },
       ],
-      // See the renderVertical note by .tabulator-tableholder in
-      // kx-grid.css: this page's CSS strips the virtual renderer's own
-      // scroll viewport, so it must not be used here.
-      renderVertical: "basic",
     });
-    preserveScroll(mount, table);
 
     addControls(mount, [
       searchInput(function (value) {
@@ -727,60 +579,6 @@
       }),
     ]);
   }
-
-  // The browser scrolls an off-screen input into view on its own, in two
-  // separate cases that have nothing to do with Tabulator and nothing
-  // preserveScroll's renderStarted/renderComplete hooks can see, since no
-  // redraw is involved in either: focusing it (confirmed: clicking a filter
-  // scrolled past the grid's own header jumps the page even before typing
-  // anything), and — separately — every keystroke it receives afterward, to
-  // keep the caret visible (confirmed by dispatching keystrokes with no
-  // Playwright element-targeting involved at all: the very first one still
-  // moved the page). A header filter sits at the top of a grid whose own
-  // rows can run hundreds of pixels below the current scroll position (see
-  // preserveScroll's own comment on why this page scrolls instead of the
-  // grid), so scrolling past it and then clicking or typing into it is not
-  // a rare edge case here.
-  //
-  // The click case has a real fix, not a guess: preventDefault() on
-  // mousedown stops the browser's own default focus (and the scroll that
-  // comes with it), and focus({preventScroll: true}) grants focus back
-  // without it — the standard technique for exactly this, and precise
-  // rather than reactive.
-  document.addEventListener("mousedown", function (e) {
-    var input = e.target.closest(".tabulator-header-filter input");
-    if (!input) return;
-    e.preventDefault();
-    input.focus({ preventScroll: true });
-  }, true);
-
-  // The keystroke case has no equivalent preventable event — it is the
-  // browser's own "keep the caret visible" behavior tied to the input's
-  // value changing, not a focus call this code makes. So this one really
-  // is reactive: a trusted scrollY is tracked continuously from ordinary
-  // scrolling, and any scroll landing shortly after a keydown on a header
-  // filter is reverted to that trusted value instead of adopted as the new
-  // one. 150ms is short enough that a real follow-up scroll (a human
-  // reacting and then moving a wheel) essentially never lands inside it,
-  // while comfortably covering the keystroke's own scroll, which resolves
-  // within a frame or two — confirmed by testing that a shorter window
-  // (50ms) still missed it under real per-keystroke round-trip timing.
-  var trustedScrollX = window.scrollX;
-  var trustedScrollY = window.scrollY;
-  var suppressUntil = 0;
-
-  document.addEventListener("keydown", function (e) {
-    if (e.target.closest(".tabulator-header-filter")) suppressUntil = Date.now() + 150;
-  }, true);
-
-  window.addEventListener("scroll", function () {
-    if (Date.now() < suppressUntil) {
-      window.scrollTo(trustedScrollX, trustedScrollY);
-      return;
-    }
-    trustedScrollX = window.scrollX;
-    trustedScrollY = window.scrollY;
-  });
 
   document.addEventListener("DOMContentLoaded", function () {
     if (typeof Tabulator === "undefined") return;

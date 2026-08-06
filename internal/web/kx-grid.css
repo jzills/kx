@@ -38,18 +38,6 @@
   overflow: visible !important;
 }
 
-/* Every grid in kx-grid.js sets renderVertical: "basic" for exactly this
-   reason: Tabulator's default virtual-DOM renderer positions rows by
-   measuring the tableholder's own scrollable viewport, and the two rules
-   above take that viewport away (no scroll, height matches content). On any
-   full re-render — a header filter changing, a group-by toggle, a
-   table.setData() call — virtual mode clears its rendered rows before
-   measuring and rebuilding, and with no fixed-height viewport to mask that
-   gap the table visibly collapses and snaps back, reading as a page-jump
-   stutter. "basic" mode renders real DOM with natural height and never
-   clears wholesale, so it has no such gap. Adding a new grid here without
-   the same option reintroduces the stutter. */
-
 .tabulator {
   background: var(--surface) !important;
   border: 1px solid var(--border);
