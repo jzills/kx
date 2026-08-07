@@ -15,7 +15,16 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
+      # The default GITHUB_TOKEN can't push the version-bump commit below:
+      # release/** is protected by the restrict-release ruleset, and that
+      # bypasses only a specific user, not the github-actions bot (Integration
+      # bypass actors require an org-owned repo, which this isn't). RELEASE_PAT
+      # is a fine-grained PAT for this repo (Contents: read and write) issued
+      # under that user's account, so the push authenticates as an actor the
+      # ruleset already trusts.
       - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Extract version from branch name
         id: version
@@ -24,7 +33,7 @@ jobs:
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -150,7 +159,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true

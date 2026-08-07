@@ -1,0 +1,460 @@
+/* kx-grid.css re-skins vendored Tabulator (tabulator.min.css, the "simple"
+   base) so a grid reads as part of the report rather than a bolted-on
+   widget. Every colour below is one of the custom properties cssVars()
+   already emits per-request — nothing here is a fixed hex, so this file
+   needs no reordering relative to cssVars in layout.gohtml. */
+
+.grid-mount { margin: 0.25rem 0 0.75rem; }
+
+.tabulator {
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: var(--step-0);
+}
+
+/* !important on every property from here through .tabulator-col-sorter,
+   not just the ones proven broken so far: DevTools on the actual page
+   showed the real rule as ".tabulator .tabulator-header .tabulator-col"
+   (background:#fff), three chained classes deep — one more than
+   ".tabulator .tabulator-col" here, so it won regardless of source order.
+   Re-checking the full vendored stylesheet (not the truncated selectors an
+   earlier, cruder grep pass had led this file's overrides to assume) shows
+   this pattern repeats across nearly every header/column rule: real
+   selectors run 3-5 classes deep, sometimes with attribute selectors
+   ([aria-sort=...]) on top. Matching each one exactly means copying
+   Tabulator's internal selector chains verbatim, which is both what
+   already went wrong once and fragile against any future Tabulator version
+   changing that structure. !important ends the chase: it wins regardless
+   of how deep the real selector turns out to be. */
+.tabulator .tabulator-header {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+}
+
+.tabulator .tabulator-col {
+  background: var(--surface) !important;
+  border-right: none !important;
+}
+
+.tabulator .tabulator-col-content {
+  padding: 0.55rem var(--pad-x) !important;
+}
+
+.tabulator .tabulator-col-title {
+  font-family: var(--mono) !important;
+  font-size: var(--micro) !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--muted) !important;
+  font-weight: 600 !important;
+}
+
+.tabulator .tabulator-col.tabulator-sortable:hover {
+  background: var(--background) !important;
+}
+
+.tabulator .tabulator-col-sorter {
+  color: var(--muted) !important;
+}
+
+/* Sort-direction arrows are CSS border-triangles, not an icon font or SVG —
+   each state colours a different side and leaves the others "transparent"
+   to form the triangle, so this must only touch the side each state
+   actually colours (not a blanket border-color, which would fill in the
+   transparent sides and square the triangle off). !important is
+   deliberate: Tabulator's own rules for these are long compound selectors
+   with attribute selectors ([aria-sort=ascending]), specific enough that
+   matching them class-for-class would mean copying Tabulator's internal
+   selector chains verbatim — fragile against a future Tabulator version
+   changing that structure. A flat override is the more maintainable choice
+   for skinning a vendored library. */
+.tabulator-col-sorter .tabulator-arrow {
+  border-bottom-color: var(--muted) !important;
+}
+.tabulator-col.tabulator-sortable[aria-sort="ascending"] .tabulator-col-sorter .tabulator-arrow {
+  border-bottom-color: var(--accent) !important;
+}
+.tabulator-col.tabulator-sortable[aria-sort="descending"] .tabulator-col-sorter .tabulator-arrow {
+  border-top-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+/* appearance: none is load-bearing, not cosmetic polish: browsers draw
+   <input>/<select> with native OS chrome by default (appearance: auto),
+   and Tabulator's own CSS never touches that property — background/color
+   alone can render invisibly against that native chrome depending on the
+   OS/browser theme. !important on every property here, not just
+   appearance, because Tabulator's filter-input editors set several
+   properties as inline styles at element-creation time (confirmed in the
+   vendored source: padding, width, box-sizing, cursor, caretColor) — the
+   same inline-style-beats-any-non-!important-rule mechanism that caused
+   the tableholder height bug, so the same fix applies. */
+.tabulator .tabulator-header-filter input,
+.tabulator .tabulator-header-filter select {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 2px !important;
+  color: var(--body) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+  padding: 0.2rem 0.4rem !important;
+}
+
+.tabulator .tabulator-header-filter input:focus-visible,
+.tabulator .tabulator-header-filter select:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: -1px;
+}
+
+.tabulator .tabulator-header-filter input::placeholder,
+.kx-grid-controls .kx-search-input::placeholder {
+  color: var(--muted) !important;
+  opacity: 1 !important;
+}
+
+/* The list filter's dropdown is NOT a native <select>/<option> popup — an
+   earlier round wrongly assumed it was and treated its styling as a
+   browser-native limit not worth fighting. Traced the actual source
+   (_createListElement) and confirmed it's a plain, Tabulator-built <div
+   class="tabulator-edit-list"> full of its own <div class="tabulator-edit-
+   list-item"> rows, positioned in a ".tabulator-popup-container" wrapper —
+   ordinary DOM this stylesheet already themes everywhere else, not a
+   platform boundary. Both need covering: the container has its own
+   hardcoded white background independent of the list inside it. */
+.tabulator-popup-container {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.tabulator-edit-list {
+  background: var(--surface) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item {
+  color: var(--body) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item:hover {
+  background: var(--background) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item.active {
+  background: var(--accent) !important;
+  color: var(--background) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item.focused {
+  outline: 1px solid var(--accent) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-placeholder {
+  color: var(--muted) !important;
+}
+
+.tabulator-edit-list .tabulator-edit-list-group {
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+}
+
+/* Verified low-specificity in the vendored stylesheet (the real rule is
+   the bare ".tabulator-row,.tabulator-row.tabulator-row-even", matching or
+   below these), so no !important needed here — unlike the header/column
+   rules above, this one was never actually broken. Left as plain
+   declarations rather than !important'd defensively, so a future reader
+   can tell "checked and fine" apart from "forced because vendor CSS wins
+   otherwise" elsewhere in this file. */
+.tabulator-row {
+  background: var(--surface);
+  color: var(--body);
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabulator-row.tabulator-row-even {
+  background: var(--surface);
+}
+
+/* This is the one hover state that actually was broken (unlike the plain
+   background/text-colour rules above, which the comment before this block
+   still correctly says were fine): Tabulator auto-applies
+   ".tabulator-selectable" to any row with a click handler bound — which
+   the diag grid has, for row-expand — and its own
+   ".tabulator-row.tabulator-selectable:hover" rule (found in the vendored
+   stylesheet, wrapped in an @media (hover:hover) block) sets a flat light
+   grey, three selectors deep versus this file's plain ".tabulator-row:hover"
+   at two, so it always won regardless of source order. !important covers
+   every hover variant Tabulator might apply — selectable, selected, or
+   neither — so the row a user is pointing at always reads the same
+   regardless of which class ends up present. */
+.tabulator-row:hover,
+.tabulator-row.tabulator-selectable:hover,
+.tabulator-row.tabulator-selected:hover {
+  background: var(--background) !important;
+}
+
+.tabulator-row .tabulator-cell {
+  padding: var(--pad-y) var(--pad-x);
+  border-right: none;
+}
+
+.tabulator-row.tabulator-selectable:hover {
+  cursor: pointer;
+}
+
+/* Group headers (scan's findings-by-image grouping). Real rule is bare
+   ".tabulator-group" (background:#ccc), lower specificity than this, so
+   no !important needed — same "checked and fine" case as .tabulator-row
+   above. */
+.tabulator-row.tabulator-group {
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* Same fix as the regular row hover above, same reason: the vendored
+   ".tabulator-row.tabulator-group:hover" rule sets a flat
+   rgba(0,0,0,.1) overlay at matching specificity, which would otherwise
+   layer semi-transparent black on top of this rule's own var(--background)
+   in whichever order the two happen to parse — !important makes the
+   themed colour authoritative instead of leaving that to chance. */
+.tabulator-row.tabulator-group:hover {
+  background: var(--background) !important;
+}
+
+/* Collapsed groups draw a right-pointing triangle (border-left carries the
+   colour); expanded groups (.tabulator-group-visible) draw a down-pointing
+   one (border-top carries it) — two different sides, not interchangeable. */
+.tabulator-row.tabulator-group .tabulator-arrow {
+  border-left-color: var(--muted) !important;
+}
+.tabulator-row.tabulator-group.tabulator-group-visible .tabulator-arrow {
+  border-top-color: var(--muted) !important;
+}
+
+/* Tree rows (tree page's dataTree mode): indent guide plus expand/collapse
+   control, echoing .tree-children's left border in style.css so the tree
+   grid reads the same as the tree the terminal draws. */
+.tabulator-row .tabulator-data-tree-branch {
+  border-left: 1px solid var(--border);
+}
+
+/* Tabulator's real selector for this control is
+   ".tabulator-row .tabulator-cell .tabulator-data-tree-control" (three
+   classes) — one class more specific than a same-cascade-position override
+   without .tabulator-cell in the chain, so a shorter selector here loses
+   the specificity contest regardless of source order and silently never
+   applies. Matched exactly, plus !important on the actual +/- bar colour
+   (drawn via the ::after pseudo-element's background, not a border) for the
+   same vendor-selector-fragility reason as the sort arrows above. */
+.tabulator-row .tabulator-cell .tabulator-data-tree-control {
+  border-color: var(--muted) !important;
+  background: transparent !important;
+}
+
+.tabulator-row .tabulator-cell .tabulator-data-tree-control:hover {
+  background: var(--background) !important;
+}
+
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-expand,
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-expand::after,
+.tabulator-row .tabulator-cell .tabulator-data-tree-control-collapse::after {
+  background: var(--muted) !important;
+}
+
+/* Status colours, applied via row/cell formatters using the same class
+   vocabulary the rest of the page uses (statusClass/severityClass). */
+.tabulator-row .status-ok { color: var(--status-ok); }
+.tabulator-row .status-warn { color: var(--status-warn); }
+.tabulator-row .status-bad { color: var(--status-bad); }
+.tabulator-row .status-neutral { color: var(--status-neutral); }
+
+/* The empty-state message a grid shows via its "placeholder" option (the
+   scan findings grid's "No vulnerabilities found") — Tabulator's own
+   default is a 20px bold #ccc block, sized for a whole-page empty table
+   rather than a small note inside an otherwise-themed report. Real
+   selector is ".tabulator .tabulator-tableholder .tabulator-placeholder
+   .tabulator-placeholder-contents" (four classes) plus a nested
+   "... .tabulator-placeholder span{color:#000}" — both deeper than
+   assumed here, so !important again. */
+.tabulator .tabulator-placeholder-contents,
+.tabulator .tabulator-placeholder-contents span {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+  font-weight: 400 !important;
+}
+
+/* Footer/pagination isn't currently used by any grid (no pagination
+   option is set), but themed defensively in case that changes later. */
+.tabulator .tabulator-footer {
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--step-0) !important;
+}
+
+.tabulator .tabulator-footer .tabulator-page {
+  background: var(--background) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--body) !important;
+  border-radius: 2px !important;
+}
+
+.tabulator .tabulator-footer .tabulator-page.active {
+  background: var(--accent) !important;
+  color: var(--background) !important;
+  border-color: var(--accent) !important;
+}
+
+.tabulator .tabulator-footer .tabulator-page:disabled {
+  color: var(--muted) !important;
+}
+
+/* kx-grid.js's own chrome: the stacked severity bar (mirrors .stack in
+   style.css), the group-by control row, and the row-expansion panel diag
+   uses to clone a <template>'s report content into. */
+.kx-grid-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  color: var(--muted);
+}
+
+/* Label ("Group by", "Search") stacks above its control now, not beside
+   it — the same shape as a Tabulator column: .tabulator-col-title on top,
+   .tabulator-header-filter input below. Shared by both groupSelect() and
+   searchInput(), which both nest their control inside this <label>. */
+.kx-grid-controls label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+/* The label text itself, in its own span rather than styled on <label>
+   directly: <label> also contains the actual control (trigger button or
+   search input), and text-transform/letter-spacing inherit into children
+   by default — an earlier version of this rule lived on <label> and
+   silently forced the same uppercase onto whatever the group-by trigger
+   displayed and whatever a user typed into the search box, which is not
+   what either control's own value should look like. Same treatment as
+   .tabulator-col-title (micro size, uppercase, letter-spaced, muted). */
+.kx-control-label {
+  font-size: var(--micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The group-by control's own positioning context: kx-group-popup below is
+   absolutely positioned against this, not the page, so it opens directly
+   under the trigger regardless of where this control sits in the row. */
+.kx-group-select {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The trigger and the search input now get the same box treatment as
+   Kind/Verdict's own header-filter inputs (background, border, body-
+   coloured text at step-0, not the label's micro/uppercase/muted look) —
+   this is the "selected value" text, styled the same as any other
+   filter's selected value, with the small-caps treatment living on
+   .kx-control-label above it instead.
+
+   kx-group-trigger is a <button>, not a <select>: kx-grid.js's
+   groupSelect() builds its open list as a .tabulator-popup-container/
+   .tabulator-edit-list, the exact same DOM shape Tabulator's own List
+   editor uses for Kind/Verdict, so it inherits that theming instead of
+   hitting a native <select>'s dropdown — OS/browser chrome CSS could only
+   ever partly reach. appearance: none resets both <button>'s and
+   <input>'s own native chrome the same way it does for the header-filter
+   inputs elsewhere in this file. Width matches the header filter inputs'
+   column width (Verdict is 165px) rather than shrink-wrapping to its own
+   text, so neither reads as a narrower, different kind of control sitting
+   right above ones that are wider. */
+.kx-grid-controls .kx-group-trigger,
+.kx-grid-controls .kx-search-input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--body);
+  font-family: var(--mono);
+  font-size: var(--step-0);
+  padding: 0.2rem 0.4rem;
+  width: 165px;
+}
+
+.kx-grid-controls .kx-group-trigger {
+  text-align: left;
+  cursor: pointer;
+}
+
+.kx-grid-controls .kx-group-trigger:hover {
+  background: var(--background);
+}
+
+.kx-grid-controls .kx-search-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Positioned against .kx-group-select above, not the page — opens
+   directly under the trigger. z-index matches Tabulator's own popups
+   (.tabulator-popup-container's base rule sets the same 10000) so this
+   layers consistently with them rather than picking an arbitrary value. */
+.kx-group-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  z-index: 10000;
+  min-width: 165px;
+}
+
+.kx-bar {
+  display: flex;
+  height: 5px;
+  width: 100%;
+  min-width: 6rem;
+  border-radius: 1px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.kx-bar i { display: block; height: 100%; }
+.kx-bar .crit, .kx-bar .high { background: var(--status-bad); }
+.kx-bar .high { opacity: 0.6; }
+.kx-bar .med { background: var(--status-warn); }
+.kx-bar .low { background: var(--muted); }
+
+.kx-detail {
+  padding: 1rem 1rem 1.5rem 1.5rem;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}

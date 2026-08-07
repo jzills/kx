@@ -24,6 +24,20 @@
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
 </div>
 
+## Contents
+
+- [Install](#install)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [Triage a namespace](#triage-a-namespace)
+  - [Read a Secret in plaintext](#read-a-secret-in-plaintext)
+  - [Scan images for vulnerabilities](#scan-images-for-vulnerabilities)
+  - [View reports in a browser](#view-reports-in-a-browser)
+- [State](#state)
+- [Configuration](#configuration)
+- [Themes](#themes)
+- [Development](#development)
+
 ## Install
 
 Requires `kubectl` on your PATH. Every install path below delivers the same
@@ -96,12 +110,12 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
-| `kx tree [<index>] [--index/-i]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given; --index assigns indexes to tree nodes. A Namespace index graphs that namespace. |
+| `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the Docker Scout CLI plugin (https://docs.docker.com/scout/). |
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
@@ -160,10 +174,10 @@ or the full per-image CVE report with `--full`. Requires
 
 ### View reports in a browser
 
-`kx diag --html` and `kx scan --html` render the same analysis as a page and
-open it in your browser as well as printing to the terminal; Ctrl-C stops the
-server. It binds `127.0.0.1` only, and nothing is written to disk — the report
-lives in memory for as long as the command runs.
+`kx diag --html`, `kx scan --html`, and `kx tree --html` render the same
+analysis as a page and open it in your browser as well as printing to the
+terminal; Ctrl-C stops the server. It binds `127.0.0.1` only, and nothing is
+written to disk — the report lives in memory for as long as the command runs.
 
 The page is drawn in your active theme, so `kx theme dracula` restyles it too.
 Sweep rows expand into that resource's full report, and image rows expand
@@ -174,6 +188,33 @@ gathered to build the table you'd see without `--html`.
 `--port` serves on a specific port instead of picking a free one, and
 `--no-open` skips launching a browser — the URL still prints, so you can
 open it yourself.
+
+#### `kx diag --html`
+
+A namespace sweep's severity-sorted findings, filterable and sortable by
+any column, with a group-by for larger sweeps.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
+</div>
+
+#### `kx scan --html`
+
+Per-image severity counts up top; the CVE table below groups by image and
+expands each row into its full detail.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
+</div>
+
+#### `kx tree --html`
+
+The ownership graph as a collapsible tree, indexed like every other kx
+listing.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
+</div>
 
 ## State
 

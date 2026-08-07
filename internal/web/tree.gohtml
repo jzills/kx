@@ -1,0 +1,11 @@
+{{define "body"}}
+<div class="block">
+  <p class="caption">{{.Scope}}</p>
+  <div class="grid-mount" data-kx-grid="tree"></div>
+  {{if .AllNamespaces}}
+    <script type="application/json" id="kx-tree-data">{{treeRootRowsJSON .Roots}}</script>
+  {{else}}
+    <script type="application/json" id="kx-tree-data">{{treeRowsJSON .Root}}</script>
+  {{end}}
+</div>
+{{end}}

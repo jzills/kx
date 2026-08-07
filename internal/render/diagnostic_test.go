@@ -106,26 +106,51 @@ func TestTriageAllHealthy(t *testing.T) {
 	}
 }
 
+// --full's Reports already includes healthy resources, so the footer must
+// not also claim some were left out — only the index/all-namespaces hint
+// survives.
+func TestTriageFullOmitsNotShownFooter(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			Namespace: "prod", Checked: 2, Healthy: 1, Full: true,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
+				{Kind: kinds.Pod, Name: "quiet", Verdict: diagnostics.OK},
+			},
+		})
+	})
+	if strings.Contains(out, "not shown") {
+		t.Errorf("--full footer still claims resources are not shown:\n%s", out)
+	}
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("--full footer dropped the index hint:\n%s", out)
+	}
+}
+
+// The all-namespaces footer swaps in AllNamespacesNote instead of the index
+// hint either way; --full must not also tack on a healthy count there.
+func TestTriageFullAllNamespacesKeepsAllNamespacesNote(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			AllNamespaces: true, Checked: 1, Full: true,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Pod, Name: "quiet", Namespace: "prod", Verdict: diagnostics.OK},
+			},
+		})
+	})
+	if strings.Contains(out, "not shown") {
+		t.Errorf("--full footer still claims resources are not shown:\n%s", out)
+	}
+	if !strings.Contains(out, AllNamespacesNote) {
+		t.Errorf("--full footer dropped the all-namespaces note:\n%s", out)
+	}
+}
+
 func TestTriageEmptyNamespace(t *testing.T) {
 	out := capture(func(r *Renderer) { r.Triage(TriageResult{Namespace: "prod"}) })
 	if !strings.Contains(out, "0 checked") {
 		t.Errorf("output = %q", out)
-	}
-}
-
-func TestTriageReportsDroppedNameCollisions(t *testing.T) {
-	out := capture(func(r *Renderer) {
-		r.Triage(TriageResult{
-			Namespace: "prod", Checked: 3, Healthy: 1,
-			Reports: []diagnostics.Report{{
-				Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
-				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
-			}},
-			Dropped: []string{"Service/api"},
-		})
-	})
-	if !strings.Contains(out, "Service/api shares a name") {
-		t.Errorf("dropped row not reported:\n%s", out)
 	}
 }
 

@@ -4,17 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
-<style>{{cssVars .Styles}}
+<style>
+{{tabulatorCSS}}
+{{kxGridCSS}}
+{{cssVars .Styles}}
 {{stylesheet}}</style>
 </head>
 <body>
 <div class="shell">
 <header class="masthead">
-  <div class="wordmark">kx</div>
+  {{wordmark}}
   <div class="invocation"><b>{{.Invocation}}</b> · captured {{.Captured.Format "2006-01-02 15:04:05 MST"}}</div>
 </header>
 {{template "body" .}}
 </div>
+<script>{{tabulatorJS}}</script>
+<script>{{kxGridJS}}</script>
 </body>
 </html>
 {{end}}
