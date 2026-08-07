@@ -195,7 +195,7 @@ A namespace sweep's severity-sorted findings, filterable and sortable by
 any column, with a group-by for larger sweeps.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
 </div>
 
 #### `kx scan --html`
@@ -204,7 +204,7 @@ Per-image severity counts up top; the CVE table below groups by image and
 expands each row into its full detail.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
 </div>
 
 #### `kx tree --html`
@@ -213,7 +213,7 @@ The ownership graph as a collapsible tree, indexed like every other kx
 listing.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
 </div>
 
 ## State
