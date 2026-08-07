@@ -549,7 +549,7 @@
     var input = document.createElement("input");
     input.type = "search";
     input.className = "kx-search-input";
-    input.placeholder = "filter by name…";
+    input.placeholder = "Type to filter…";
     input.addEventListener("input", function () { onInput(input.value); });
     label.appendChild(input);
     return label;

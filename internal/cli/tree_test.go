@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -116,11 +117,11 @@ func TestTreeOnNamespaceIndexGraphsThatNamespace(t *testing.T) {
 }
 
 func TestIndexFlag(t *testing.T) {
-	if got := indexFlag(true); got != "--index" {
-		t.Errorf("indexFlag(true) = %q, want --index", got)
+	if got := indexFlag(false); got != "--no-index" {
+		t.Errorf("indexFlag(false) = %q, want --no-index", got)
 	}
-	if got := indexFlag(false); got != "" {
-		t.Errorf("indexFlag(false) = %q, want empty", got)
+	if got := indexFlag(true); got != "" {
+		t.Errorf("indexFlag(true) = %q, want empty", got)
 	}
 }
 
@@ -232,6 +233,48 @@ func TestTreeWithoutHTMLPrintsNoServeAnnouncement(t *testing.T) {
 	}
 }
 
+// Indexing is on by default: a plain sweep with no flags should assign
+// indexes and save them, so a later command can resolve index 1.
+func TestTreeDefaultSweepIndexesAndSavesState(t *testing.T) {
+	captureRender(t)
+	services := treeHTMLServices(t, "prod", &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+	})
+	cmd := newTreeCommand(services)
+	cmd.SetContext(context.Background())
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	name, _, kind, err := services.State.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields(1) after default sweep: %v", err)
+	}
+	if name != "web" || kind != kinds.Deployment {
+		t.Errorf("Fields(1) = (%q, %s), want (web, Deployment)", name, kind)
+	}
+}
+
+// --no-index opts out of both index assignment and the state save.
+func TestTreeNoIndexSweepSkipsIndexingAndState(t *testing.T) {
+	captureRender(t)
+	services := treeHTMLServices(t, "prod", &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+	})
+	cmd := newTreeCommand(services)
+	cmd.SetContext(context.Background())
+	if err := cmd.Flags().Set("no-index", "true"); err != nil {
+		t.Fatalf("set --no-index: %v", err)
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if _, _, _, err := services.State.Fields(1); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Fields(1) after --no-index sweep: err = %v, want ErrNoState", err)
+	}
+}
+
 // A Namespace row is the one branch most likely to get name/namespace
 // backwards (see TestTreeOnNamespaceIndexGraphsThatNamespace's own comment):
 // the row was listed from one namespace but names another. This drives that
@@ -334,18 +377,20 @@ func TestTreeRejectsNamespaceAndAllNamespacesTogether(t *testing.T) {
 	}
 }
 
-func TestTreeRejectsAllNamespacesWithIndex(t *testing.T) {
-	cmd := newTreeCommand(Services{})
-	if err := cmd.Flags().Set("all-namespaces", "true"); err != nil {
-		t.Fatalf("set --all-namespaces: %v", err)
+// -A is never indexed regardless of flags, so --no-index alongside it is a
+// harmless no-op rather than a conflict — there's no more explicit --index
+// flag for -A to conflict with, unlike the old opt-in flag shape.
+func TestTreeAllNamespacesWithNoIndexIsAcceptedAsANoOp(t *testing.T) {
+	captureRender(t)
+	cmd := newTreeCommand(treeHTMLServices(t, "prod"))
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{{"all-namespaces", "true"}, {"no-index", "true"}} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
 	}
-	if err := cmd.Flags().Set("index", "true"); err != nil {
-		t.Fatalf("set --index: %v", err)
-	}
-	if err := cmd.RunE(cmd, nil); err == nil {
-		t.Fatal("-A and --index were accepted together")
-	} else if !strings.Contains(err.Error(), "cannot be combined") {
-		t.Errorf("err = %v", err)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("-A and --no-index should be accepted together: %v", err)
 	}
 }
 

@@ -98,11 +98,12 @@ func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed 
 	})
 }
 
-// indexFlag renders --index for the invocation line when node indexes were
-// assigned, so the page's provenance line matches what was actually run.
+// indexFlag renders --no-index for the invocation line when node indexes
+// were skipped, so the page's provenance line matches what was actually run.
+// Indexing is the default, so the common case renders nothing.
 func indexFlag(indexed bool) string {
-	if indexed {
-		return "--index"
+	if !indexed {
+		return "--no-index"
 	}
 	return ""
 }
@@ -122,17 +123,20 @@ func scopeCaption(parts ...string) string {
 }
 
 func newTreeCommand(services Services) *cobra.Command {
-	var indexed bool
 	cmd := &cobra.Command{
 		Use:   "tree [index]",
-		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); --index assigns indexes to tree nodes. A Namespace index graphs that namespace.",
+		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace.",
 		Long: "Graphs ownership references from controllers down to containers.\n" +
 			"With no index, graphs every workload in the current namespace, or in\n" +
 			"the namespace given by -n, or every namespace as a forest with -A.\n" +
-			"A Namespace index graphs that namespace.",
-		Example: "  kx tree\n  kx tree 1\n  kx tree 1 --index\n  kx tree -n prod\n  kx tree -A",
+			"A Namespace index graphs that namespace. Assigns indexes to tree\n" +
+			"nodes by default; --no-index skips that.",
+		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -n prod\n  kx tree -A",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			noIndex, _ := cmd.Flags().GetBool("no-index")
+			indexed := !noIndex
+
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
@@ -144,15 +148,6 @@ func newTreeCommand(services Services) *cobra.Command {
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
-			}
-			// Names repeat across namespaces, so there is nothing stable for
-			// --index to number — the same reason kx get -A and kx diag -A
-			// never save indexable state either.
-			if allNamespaces && indexed {
-				return errors.New(
-					"'--all-namespaces' and '--index' cannot be combined — " +
-						"names repeat across namespaces, so there is nothing " +
-						"stable to index.")
 			}
 			// An index already carries the namespace it was listed from, so a
 			// scope flag next to one is a contradiction rather than a refinement.
@@ -283,8 +278,8 @@ func newTreeCommand(services Services) *cobra.Command {
 			return servePage(ctx, page, htmlOpts)
 		},
 	}
-	cmd.Flags().BoolVarP(&indexed, "index", "i", false,
-		"Assign indexes to tree nodes and update state")
+	cmd.Flags().Bool("no-index", false,
+		"Skip assigning indexes to tree nodes and don't update state")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
