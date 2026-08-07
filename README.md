@@ -24,6 +24,20 @@
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
 </div>
 
+## Contents
+
+- [Install](#install)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [Triage a namespace](#triage-a-namespace)
+  - [Read a Secret in plaintext](#read-a-secret-in-plaintext)
+  - [Scan images for vulnerabilities](#scan-images-for-vulnerabilities)
+  - [View reports in a browser](#view-reports-in-a-browser)
+- [State](#state)
+- [Configuration](#configuration)
+- [Themes](#themes)
+- [Development](#development)
+
 ## Install
 
 Requires `kubectl` on your PATH. Every install path below delivers the same
@@ -160,10 +174,10 @@ or the full per-image CVE report with `--full`. Requires
 
 ### View reports in a browser
 
-`kx diag --html` and `kx scan --html` render the same analysis as a page and
-open it in your browser as well as printing to the terminal; Ctrl-C stops the
-server. It binds `127.0.0.1` only, and nothing is written to disk — the report
-lives in memory for as long as the command runs.
+`kx diag --html`, `kx scan --html`, and `kx tree --html` render the same
+analysis as a page and open it in your browser as well as printing to the
+terminal; Ctrl-C stops the server. It binds `127.0.0.1` only, and nothing is
+written to disk — the report lives in memory for as long as the command runs.
 
 The page is drawn in your active theme, so `kx theme dracula` restyles it too.
 Sweep rows expand into that resource's full report, and image rows expand
@@ -174,6 +188,14 @@ gathered to build the table you'd see without `--html`.
 `--port` serves on a specific port instead of picking a free one, and
 `--no-open` skips launching a browser — the URL still prints, so you can
 open it yourself.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
+  <br><br>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
+  <br><br>
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
+</div>
 
 ## State
 

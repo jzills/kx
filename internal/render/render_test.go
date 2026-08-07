@@ -234,6 +234,26 @@ func TestThemeListPreviewsEachPaletteDistinctly(t *testing.T) {
 	}
 }
 
+// The theme-name column must preview in each row's own palette, not the
+// active renderer's — the same bug the swatch column already avoided.
+// Regression for: after `kx theme light`, every row's index/name text (styled
+// through the active theme's Body/Muted, calibrated for a white terminal
+// background) rendered illegibly dark on an ordinary dark terminal.
+//
+// The assertion ties light's exact Muted color to the literal name-cell text
+// "light" (rather than just checking the color appears anywhere in the
+// output), since the swatch column already previewed correctly before this
+// fix and would make a looser assertion pass for the wrong reason.
+func TestThemeListNameColumnPreviewsItsOwnPalette(t *testing.T) {
+	out := styledCapture(t, "dracula", func(r *Renderer) { r.ThemeList("dracula") })
+	// light's Muted (#57606a) as lipgloss actually renders it — confirmed via
+	// a throwaway render rather than hand-converted hex, since colorful's
+	// sRGB round-trip can shift the last channel by 1 (105, not 106).
+	if !strings.Contains(out, "38;2;87;96;105mlight") {
+		t.Errorf("theme-name cell for \"light\" did not use light's own Muted color:\n%s", out)
+	}
+}
+
 // A preview must not emit color into a pipe just because it builds its own
 // palette.
 func TestThemeListPlainWhenNotStyled(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/theme"
@@ -225,6 +226,15 @@ func (r *Renderer) KeyValueTable(header string, keys []string, values map[string
 // ThemeList renders the theme registry, previewing each palette in its own
 // colors rather than the active theme's, so the list shows what you'd be
 // switching to.
+//
+// Every cell renders pre-styled via Plain rather than Styled: a Styled cell's
+// semantic name resolves against the *active* renderer's style map
+// (Table -> r.style), which would color every row in the active theme's
+// colors regardless of which palette that row is meant to preview — exactly
+// wrong for a listing whose entire point is showing other palettes. A theme
+// calibrated for a light terminal background (e.g. "light") rendered as the
+// active theme then paints every row's text in near-black, unreadable on the
+// typical dark terminal background this process can't detect or control.
 func (r *Renderer) ThemeList(active string) {
 	names := theme.Names()
 	r.Caption("Themes", "", itemLabel(len(names)))
@@ -232,20 +242,35 @@ func (r *Renderer) ThemeList(active string) {
 	columns := []Column{{Header: "X", Right: true}, {Header: ""}, {Header: "THEME"}, {Header: "PREVIEW"}}
 	rows := make([][]Cell, 0, len(names))
 	for position, name := range names {
-		rowStyle := theme.Muted
+		styles := r.paletteStyles(name)
+		styleName := theme.Muted
 		marker := ""
 		if name == active {
-			rowStyle = theme.Body
+			styleName = theme.Body
 			marker = "→"
 		}
 		rows = append(rows, []Cell{
-			Styled(strconv.Itoa(position+1), rowStyle),
-			Styled(marker, theme.Header),
-			Styled(name, rowStyle),
-			Plain(r.swatch(name)),
+			Plain(styles[styleName].Render(strconv.Itoa(position + 1))),
+			Plain(styles[theme.Header].Render(marker)),
+			Plain(styles[styleName].Render(name)),
+			Plain(r.swatch(styles)),
 		})
 	}
 	r.Table(columns, rows)
+}
+
+// paletteStyles builds the named theme's styles on the active renderer's
+// lipgloss renderer, so a row degrades with everything else: piping `kx
+// theme` must not emit color just because each row previews its own palette.
+// Falls back to the active renderer's own styles if name is somehow
+// unregistered (Names() is theme's own registry, so this should not happen),
+// rather than leaving the row fully unstyled.
+func (r *Renderer) paletteStyles(name string) map[string]lipgloss.Style {
+	specs, err := theme.Styles(name)
+	if err != nil {
+		return r.styles
+	}
+	return buildStyles(r.lip, specs)
 }
 
 // swatchParts are the sample words shown in a theme preview, paired with the
@@ -259,17 +284,9 @@ var swatchParts = []struct{ Sample, Style string }{
 	{"muted", theme.Muted},
 }
 
-// swatch renders a preview in the named theme's own styles.
-//
-// The styles are built on the active renderer's lipgloss renderer, so a preview
-// degrades with everything else: piping `kx theme` must not emit color just
-// because each row builds its own palette.
-func (r *Renderer) swatch(name string) string {
-	specs, err := theme.Styles(name)
-	if err != nil {
-		return ""
-	}
-	styles := buildStyles(r.lip, specs)
+// swatch renders a preview in the given theme's own styles (see
+// paletteStyles).
+func (r *Renderer) swatch(styles map[string]lipgloss.Style) string {
 	parts := make([]string, 0, len(swatchParts))
 	for _, part := range swatchParts {
 		parts = append(parts, styles[part.Style].Render(part.Sample))
