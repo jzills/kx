@@ -79,6 +79,16 @@ func runGet(services Services, resource string, args []string, options getOption
 		extra = append(names, extra...)
 	}
 
+	if isWatch(extra) {
+		// A watch stream never completes, so there is no finished table to index
+		// or save — Run() would otherwise block forever waiting for kubectl to
+		// exit, which it never does under --watch. Stream it straight through
+		// instead, the same way `logs -f` does.
+		render.Caption("watches can't be indexed — streaming kubectl output directly")
+		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
+		return err
+	}
+
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)

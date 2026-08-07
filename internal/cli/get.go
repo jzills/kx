@@ -66,6 +66,13 @@ func allNamespaces(extraArgs []string) bool {
 	return present
 }
 
+// isWatch reports whether the pass-through flags ask kubectl to stream rather
+// than return a completed listing.
+func isWatch(extraArgs []string) bool {
+	present, _ := extractBool(extraArgs, "--watch", "-w", "--watch-only")
+	return present
+}
+
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
 // the text to display and the namespace the listing came from.
 //
