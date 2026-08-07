@@ -190,11 +190,11 @@ gathered to build the table you'd see without `--html`.
 open it yourself.
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
   <br><br>
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
   <br><br>
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
 </div>
 
 ## State
