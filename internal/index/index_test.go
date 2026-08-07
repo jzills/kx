@@ -74,6 +74,77 @@ func TestParseOutputNoNameColumn(t *testing.T) {
 	}
 }
 
+func TestParseHeaderLocatesColumns(t *testing.T) {
+	shape, ok := ParseHeader("NAME             READY   STATUS    RESTARTS   AGE")
+	if !ok {
+		t.Fatal("ParseHeader returned ok=false for a valid header")
+	}
+	want := []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
+	if len(shape.Headers) != len(want) {
+		t.Fatalf("Headers = %v, want %v", shape.Headers, want)
+	}
+	for i, h := range want {
+		if shape.Headers[i] != h {
+			t.Errorf("Headers[%d] = %q, want %q", i, shape.Headers[i], h)
+		}
+	}
+	if shape.NameIdx != 0 {
+		t.Errorf("NameIdx = %d, want 0", shape.NameIdx)
+	}
+	if shape.EventIdx != -1 {
+		t.Errorf("EventIdx = %d, want -1 (no EVENT column)", shape.EventIdx)
+	}
+}
+
+func TestParseHeaderLocatesEventColumn(t *testing.T) {
+	shape, ok := ParseHeader("EVENT      NAME                 STATUS   AGE")
+	if !ok {
+		t.Fatal("ParseHeader returned ok=false")
+	}
+	if shape.EventIdx != 0 {
+		t.Errorf("EventIdx = %d, want 0", shape.EventIdx)
+	}
+	if shape.NameIdx != 1 {
+		t.Errorf("NameIdx = %d, want 1", shape.NameIdx)
+	}
+}
+
+func TestParseHeaderNoNameColumnReturnsFalse(t *testing.T) {
+	if _, ok := ParseHeader("FOO   BAR"); ok {
+		t.Error("ParseHeader returned ok=true for a header with no NAME column")
+	}
+}
+
+func TestTableShapeRowSlicesLikeParseTable(t *testing.T) {
+	shape, ok := ParseHeader("NAME             READY   STATUS    RESTARTS   AGE")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	got := shape.Row("nginx-abc-xyz    1/1     Running   0          5d")
+	want := []string{"nginx-abc-xyz", "1/1", "Running", "0", "5d"}
+	if len(got) != len(want) {
+		t.Fatalf("Row = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Row[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// A value wider than its header must not be sliced off — TableShape.Row
+// extends the last column to end-of-line, same as ParseTable.
+func TestTableShapeRowLastColumnNotTruncated(t *testing.T) {
+	shape, ok := ParseHeader("NAME   AGE")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	got := shape.Row("nginx  1000000000000000d")
+	if got[1] != "1000000000000000d" {
+		t.Errorf("Row[1] = %q, want the full unsliced value", got[1])
+	}
+}
+
 func TestAddPrependsIndexColumn(t *testing.T) {
 	output, names := Service{}.Add(podsOutput)
 	lines := strings.Split(output, "\n")

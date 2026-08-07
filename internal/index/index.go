@@ -64,16 +64,24 @@ func (s span) slice(row string) string {
 	return strings.TrimSpace(string(runes[s.start:end]))
 }
 
-// parseOutput splits kubectl table output into headers, rows and the position
-// of the NAME column. Returns a nil header slice when the output isn't a table
-// kx can index.
-func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
-	lines := strings.Split(output, "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return nil, nil, 0
-	}
+// TableShape is a parsed kubectl table header: column names, the spans used
+// to slice data rows, and the column indexes of NAME and EVENT (-1 if
+// absent — EVENT is only present when --output-watch-events was requested).
+type TableShape struct {
+	Headers  []string
+	NameIdx  int
+	EventIdx int
+	spans    []span
+}
 
-	header := lines[0]
+// ParseHeader locates each column's span from a kubectl header line, and the
+// NAME/EVENT column positions. Returns ok=false for a header with no NAME
+// column, the same "not indexable" signal parseOutput has always used.
+//
+// Exported so a caller streaming rows one at a time (kx get --watch) can
+// parse the header once and slice every following line against the same
+// spans a complete table would produce through ParseTable.
+func ParseHeader(header string) (TableShape, bool) {
 	// FindAllStringIndex reports byte offsets; the spans are kept in runes so
 	// they line up with rows that carry multi-byte values. Headers are ASCII in
 	// every table kubectl prints, so this conversion is a no-op in practice —
@@ -87,7 +95,7 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 		})
 	}
 	if len(spans) == 0 {
-		return nil, nil, 0
+		return TableShape{}, false
 	}
 	// kubectl doesn't pad a table's last column with trailing spaces, so its
 	// span (derived from the header word's own width) can be narrower than a
@@ -95,32 +103,64 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 	// wider values aren't sliced off.
 	spans[len(spans)-1].end = -1
 
-	for _, s := range spans {
-		headers = append(headers, s.slice(header))
+	headers := make([]string, len(spans))
+	for i, s := range spans {
+		headers[i] = s.slice(header)
 	}
 
-	nameIdx = -1
+	nameIdx := columnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return TableShape{}, false
+	}
+
+	return TableShape{
+		Headers:  headers,
+		NameIdx:  nameIdx,
+		EventIdx: columnIndex(headers, "EVENT"),
+		spans:    spans,
+	}, true
+}
+
+func columnIndex(headers []string, name string) int {
 	for i, h := range headers {
-		if h == "NAME" {
-			nameIdx = i
-			break
+		if h == name {
+			return i
 		}
 	}
-	if nameIdx < 0 {
+	return -1
+}
+
+// Row slices one data line against the shape's spans, the same way
+// parseOutput slices every row of a complete table.
+func (s TableShape) Row(line string) []string {
+	cols := make([]string, 0, len(s.spans))
+	for _, sp := range s.spans {
+		cols = append(cols, sp.slice(line))
+	}
+	return cols
+}
+
+// parseOutput splits kubectl table output into headers, rows and the position
+// of the NAME column. Returns a nil header slice when the output isn't a table
+// kx can index.
+func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
+	lines := strings.Split(output, "\n")
+	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
 		return nil, nil, 0
 	}
 
-	for _, row := range lines[1:] {
-		if strings.TrimSpace(row) == "" {
+	shape, ok := ParseHeader(lines[0])
+	if !ok {
+		return nil, nil, 0
+	}
+
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		cols := make([]string, 0, len(spans))
-		for _, s := range spans {
-			cols = append(cols, s.slice(row))
-		}
-		rows = append(rows, cols)
+		rows = append(rows, shape.Row(line))
 	}
-	return headers, rows, nameIdx
+	return shape.Headers, rows, shape.NameIdx
 }
 
 // cellWidth measures a cell the way kubectl's own table printer does — in
