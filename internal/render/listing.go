@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -166,6 +167,20 @@ func (r *Renderer) IndexedTable(text, resourceType, namespace, note string) {
 		return
 	}
 
+	columns, cells := styledColumnsAndCells(headers, rows)
+
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(rows)))
+	r.Table(columns, cells)
+	if note != "" {
+		r.Caption(note)
+	}
+}
+
+// styledColumnsAndCells applies status/usage-percentage styling and
+// restart-count alignment to a parsed table. Shared by IndexedTable and
+// RedrawTable so a live watch table looks identical to a snapshot listing —
+// a second copy of this classification would drift from it.
+func styledColumnsAndCells(headers []string, rows [][]string) ([]Column, [][]Cell) {
 	alignRestarts(rows, indexOf(headers, "RESTARTS"))
 
 	statusCol := indexOf(headers, "STATUS")
@@ -200,12 +215,38 @@ func (r *Renderer) IndexedTable(text, resourceType, namespace, note string) {
 		}
 		cells = append(cells, rendered)
 	}
+	return columns, cells
+}
 
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(rows)))
-	r.Table(columns, cells)
-	if note != "" {
-		r.Caption(note)
+// RedrawTable clears the previous frame (previousLines, if any) and reprints
+// a caption plus a themed table built from headers/rows the same way
+// IndexedTable renders a snapshot listing, returning the new line count for
+// the next call. A no-op off-terminal — nothing is written and 0 is
+// returned — the same way Status's spinner never runs off a terminal, so
+// piped output and tests never receive cursor codes.
+func (r *Renderer) RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
+	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), captionParts...)
+}
+
+// redrawTable is RedrawTable with the terminal check injected, the same seam
+// status() uses (internal/render/status.go:45) so this is testable without a
+// real terminal.
+func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines int, enabled bool, captionParts ...string) int {
+	if !enabled {
+		return 0
 	}
+	if previousLines > 0 {
+		fmt.Fprintf(r.out, "\x1b[%dA\x1b[J", previousLines)
+	}
+	columns, cells := styledColumnsAndCells(headers, rows)
+	r.Caption(captionParts...)
+	r.Table(columns, cells)
+	return 2 + len(cells) // caption line + header line + one per body row
+}
+
+// RedrawTable is the package-level wrapper, matching every other render entry point.
+func RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
+	return current.RedrawTable(headers, rows, previousLines, captionParts...)
 }
 
 // KeyValueTable renders a two-column listing, used for labels and annotations.
