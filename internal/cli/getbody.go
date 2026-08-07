@@ -80,10 +80,17 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	if isWatch(extra) {
-		// A watch stream never completes, so there is no finished table to index
-		// or save — Run() would otherwise block forever waiting for kubectl to
-		// exit, which it never does under --watch. Stream it straight through
-		// instead, the same way `logs -f` does.
+		// A watch stream never completes, so there is no finished table to
+		// index or save (Run() would otherwise block forever, since kubectl
+		// get --watch never exits on its own). For the default/wide,
+		// single-namespace table shape, kx tracks ADDED/MODIFIED/DELETED via
+		// --output-watch-events and redraws a live themed table in place.
+		// Anything else (-o json/yaml/name/custom-columns, -A) streams
+		// straight through instead, the same way `logs -f` does — re-theming
+		// non-tabular output doesn't make sense.
+		if wantsLiveTable(extra) {
+			return runWatch(services, resource, extra)
+		}
 		render.Caption("watches can't be indexed — streaming kubectl output directly")
 		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
 		return err

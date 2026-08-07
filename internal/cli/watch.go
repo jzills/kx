@@ -1,6 +1,14 @@
 package cli
 
-import "github.com/jzills/kx/internal/index"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
+)
 
 // watchRows tracks the current state of a live watch listing, keyed by NAME
 // (single-namespace only — a namespace-wide watch, -A, keeps the raw
@@ -77,4 +85,64 @@ func removeString(list []string, s string) []string {
 		}
 	}
 	return out
+}
+
+// watchThrottle caps how often a burst of watch events triggers a redraw —
+// well under human perception (~10/sec), so an initial ADDED burst for an
+// existing namespace doesn't flicker while updates still feel live.
+const watchThrottle = 100 * time.Millisecond
+
+// runWatch streams a live-redrawing table for `kx get <resource> --watch`.
+// Only reached for the default/wide, single-namespace table shape; runGet
+// routes non-tabular -o formats and -A to the raw RunInteractive passthrough
+// instead (see wantsLiveTable).
+func runWatch(services Services, resource string, extra []string) error {
+	namespace := extractNamespace(extra)
+	if namespace == "" {
+		namespace = services.Kubectl.CurrentNamespace()
+	}
+
+	args := append([]string{"get", resource}, extra...)
+	if present, _ := extractBool(extra, "--output-watch-events"); !present {
+		args = append(args, "--output-watch-events")
+	}
+
+	render.Caption("watches can't be indexed — showing a live view; press Ctrl-C to stop")
+
+	var shape index.TableShape
+	var displayHeaders []string
+	rows := newWatchRows()
+	lines := 0
+	lastDraw := time.Time{}
+
+	redraw := func(force bool) {
+		if !force && time.Since(lastDraw) < watchThrottle {
+			return
+		}
+		lastDraw = time.Now()
+		lines = render.RedrawTable(displayHeaders, rows.Snapshot(), lines,
+			kinds.PluralDisplay(resource), namespace, "watching")
+	}
+
+	err := services.Kubectl.Watch(args, func(line string) error {
+		if displayHeaders == nil {
+			parsed, ok := index.ParseHeader(line)
+			if !ok || parsed.EventIdx < 0 {
+				return fmt.Errorf("kx get --watch: unexpected kubectl output (no EVENT column)")
+			}
+			shape = parsed
+			displayHeaders = dropIndex(shape.Headers, shape.EventIdx)
+			return nil
+		}
+		if strings.TrimSpace(line) == "" {
+			return nil
+		}
+		rows.Apply(shape, shape.Row(line))
+		redraw(false)
+		return nil
+	})
+	if displayHeaders != nil {
+		redraw(true)
+	}
+	return err
 }

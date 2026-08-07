@@ -73,6 +73,19 @@ func isWatch(extraArgs []string) bool {
 	return present
 }
 
+// wantsLiveTable reports whether the pass-through flags request kubectl's
+// default or wide table shape, scoped to a single namespace — the shape
+// runWatch's live-redrawing table applies to. Non-tabular -o formats and -A
+// keep the raw-streaming passthrough instead (see watchRows' doc comment for
+// why -A is excluded).
+func wantsLiveTable(extraArgs []string) bool {
+	output, _, _ := extractString(extraArgs, "--output", "-o")
+	if output != "" && output != "wide" {
+		return false
+	}
+	return !allNamespaces(extraArgs)
+}
+
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
 // the text to display and the namespace the listing came from.
 //
