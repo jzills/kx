@@ -40,6 +40,7 @@ func (k *scriptedKubectl) Run(args []string) (string, error) {
 }
 func (k *scriptedKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
 func (k *scriptedKubectl) Probe([]string) int                         { return 0 }
+func (k *scriptedKubectl) Watch([]string, func(string) error) error   { return nil }
 func (k *scriptedKubectl) CurrentNamespace() string {
 	k.namespaceCalls++
 	return "prod"

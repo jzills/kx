@@ -5,6 +5,7 @@
 package kubectl
 
 import (
+	"bufio"
 	"errors"
 	"os"
 	"os/exec"
@@ -22,6 +23,12 @@ type Service interface {
 	// RunInteractive streams stdio through to the terminal and returns the
 	// exit code.
 	RunInteractive(args []string, quietStderr bool) (int, error)
+	// Watch streams stdout line by line to onLine as kubectl produces it, for
+	// long-running commands (get --watch) where Run's full-buffer capture
+	// would block forever — kubectl get --watch never exits on its own.
+	// Stderr is captured and surfaced as the error on a non-zero exit,
+	// matching Run. An onLine error stops the stream early and is returned.
+	Watch(args []string, onLine func(line string) error) error
 	// Probe runs silently and returns only the exit code.
 	Probe(args []string) int
 	CurrentNamespace() string
@@ -86,6 +93,46 @@ func (e Exec) RunInteractive(args []string, quietStderr bool) (int, error) {
 		return 1, translate(err)
 	}
 	return 0, nil
+}
+
+// Watch streams stdout line by line, for commands that never exit on their
+// own (kubectl get --watch). Buffering the whole output the way Run does
+// would block forever, since there is no "process exits" moment to wait for.
+func (e Exec) Watch(args []string, onLine func(line string) error) error {
+	cmd := e.command(args)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return translate(err)
+	}
+	if err := cmd.Start(); err != nil {
+		return translate(err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var onLineErr error
+	for scanner.Scan() {
+		if err := onLine(scanner.Text()); err != nil {
+			onLineErr = err
+			break
+		}
+	}
+
+	waitErr := cmd.Wait()
+	if onLineErr != nil {
+		return onLineErr
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		return errors.New(strings.TrimSpace(stderr.String()))
+	}
+	if waitErr != nil {
+		return translate(waitErr)
+	}
+	return nil
 }
 
 // Probe runs silently and reports only the exit code, used for shell detection.
