@@ -223,37 +223,42 @@ func (r *Renderer) KeyValueTable(header string, keys []string, values map[string
 	r.Table(columns, rows)
 }
 
-// ThemeList renders the theme registry, previewing each palette in its own
-// colors rather than the active theme's, so the list shows what you'd be
-// switching to.
+// ThemeList renders the theme registry. Only the PREVIEW column's swatch
+// shows a row's own palette colors; the index, marker and theme-name columns
+// stay in the terminal's plain default text (bold for the active row), never
+// any palette's foreground.
 //
-// Every cell renders pre-styled via Plain rather than Styled: a Styled cell's
-// semantic name resolves against the *active* renderer's style map
-// (Table -> r.style), which would color every row in the active theme's
-// colors regardless of which palette that row is meant to preview — exactly
-// wrong for a listing whose entire point is showing other palettes. A theme
-// calibrated for a light terminal background (e.g. "light") rendered as the
-// active theme then paints every row's text in near-black, unreadable on the
-// typical dark terminal background this process can't detect or control.
+// A previous version colored those columns too — first with the active
+// renderer's Body/Muted (coloring every row in whatever theme was active,
+// e.g. every row painted near-black once "light" was active), then, once
+// that was fixed, with each row's *own* palette (still wrong: the "light"
+// row itself, marked active, then rendered in light's own Body — the same
+// near-black — the instant light was the active theme, i.e. exactly when a
+// user would see it). Both versions assumed some theme's foreground would
+// contrast with the terminal's real background. It can't: a terminal has no
+// background this process can read or set (Chrome.Background is HTML-only,
+// see theme.Chrome's doc comment), so no themed foreground is safe for text
+// that must always be readable. The swatch is exempt because looking wrong
+// on your terminal *is* the information it's showing — that's what makes it
+// a preview rather than navigation chrome.
 func (r *Renderer) ThemeList(active string) {
 	names := theme.Names()
 	r.Caption("Themes", "", itemLabel(len(names)))
 
+	bold := r.lip.NewStyle().Bold(true)
 	columns := []Column{{Header: "X", Right: true}, {Header: ""}, {Header: "THEME"}, {Header: "PREVIEW"}}
 	rows := make([][]Cell, 0, len(names))
 	for position, name := range names {
-		styles := r.paletteStyles(name)
-		styleName := theme.Muted
-		marker := ""
+		index, marker, label := strconv.Itoa(position+1), "", name
 		if name == active {
-			styleName = theme.Body
 			marker = "→"
+			index, marker, label = bold.Render(index), bold.Render(marker), bold.Render(label)
 		}
 		rows = append(rows, []Cell{
-			Plain(styles[styleName].Render(strconv.Itoa(position + 1))),
-			Plain(styles[theme.Header].Render(marker)),
-			Plain(styles[styleName].Render(name)),
-			Plain(r.swatch(styles)),
+			Plain(index),
+			Plain(marker),
+			Plain(label),
+			Plain(r.swatch(r.paletteStyles(name))),
 		})
 	}
 	r.Table(columns, rows)
