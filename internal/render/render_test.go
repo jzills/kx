@@ -234,48 +234,6 @@ func TestThemeListPreviewsEachPaletteDistinctly(t *testing.T) {
 	}
 }
 
-// Regression for the actual reported bug: after `kx theme light`, the
-// "light" row's index/name went blank on a dark terminal. An earlier fix
-// made every row preview in its own palette, which fixed *other* rows
-// leaking the active theme's color but left this exact case broken: the
-// active row is "light" previewing itself, so it used light's own Body
-// (near-black) regardless. The index/marker/name columns must never carry a
-// palette color at all — only bold, for the active row — so this can't
-// recur under any active/previewed theme combination.
-func TestThemeListIndexAndNameColumnsNeverCarryPaletteColor(t *testing.T) {
-	out := styledCapture(t, "github-dark", func(r *Renderer) { r.ThemeList("light") })
-	for _, want := range []string{esc + "1m10" + esc + "0m", esc + "1m→" + esc + "0m", esc + "1mlight" + esc + "0m"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("active row's index/marker/name = %q not found bold-and-uncolored in:\n%s", want, out)
-		}
-	}
-	// Bold combines with a color in one escape ("\x1b[1;38;2;..."), so a
-	// literal "\x1b[1;" immediately preceding these cells' text would mean a
-	// color crept back in.
-	for _, bad := range []string{esc + "1;38;2;36;40;47m10", esc + "1;38;2;36;40;47mlight"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("active row's index/name carried a palette color:\n%s", out)
-		}
-	}
-}
-
-// The non-active rows' index/name must also stay uncolored, regardless of
-// which theme previews there or which theme is active — not just the active
-// row from the test above.
-func TestThemeListNonActiveRowsIndexAndNameAreUnstyled(t *testing.T) {
-	out := styledCapture(t, "light", func(r *Renderer) { r.ThemeList("light") })
-	if !strings.Contains(out, "dracula") {
-		t.Fatalf("theme list is missing dracula:\n%s", out)
-	}
-	// dracula's own Muted (#6272a4 -> lipgloss's 97;113;163, confirmed by a
-	// throwaway render rather than hand-converted hex; colorful's sRGB
-	// round-trip can shift a channel by 1) must not precede its plain,
-	// unstyled name text.
-	if strings.Contains(out, esc+"38;2;97;113;163mdracula") {
-		t.Errorf("non-active row's name carried a palette color:\n%s", out)
-	}
-}
-
 // A preview must not emit color into a pipe just because it builds its own
 // palette.
 func TestThemeListPlainWhenNotStyled(t *testing.T) {

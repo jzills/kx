@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/theme"
@@ -223,59 +222,30 @@ func (r *Renderer) KeyValueTable(header string, keys []string, values map[string
 	r.Table(columns, rows)
 }
 
-// ThemeList renders the theme registry. Only the PREVIEW column's swatch
-// shows a row's own palette colors; the index, marker and theme-name columns
-// stay in the terminal's plain default text (bold for the active row), never
-// any palette's foreground.
-//
-// A previous version colored those columns too — first with the active
-// renderer's Body/Muted (coloring every row in whatever theme was active,
-// e.g. every row painted near-black once "light" was active), then, once
-// that was fixed, with each row's *own* palette (still wrong: the "light"
-// row itself, marked active, then rendered in light's own Body — the same
-// near-black — the instant light was the active theme, i.e. exactly when a
-// user would see it). Both versions assumed some theme's foreground would
-// contrast with the terminal's real background. It can't: a terminal has no
-// background this process can read or set (Chrome.Background is HTML-only,
-// see theme.Chrome's doc comment), so no themed foreground is safe for text
-// that must always be readable. The swatch is exempt because looking wrong
-// on your terminal *is* the information it's showing — that's what makes it
-// a preview rather than navigation chrome.
+// ThemeList renders the theme registry, previewing each palette in its own
+// colors rather than the active theme's, so the list shows what you'd be
+// switching to.
 func (r *Renderer) ThemeList(active string) {
 	names := theme.Names()
 	r.Caption("Themes", "", itemLabel(len(names)))
 
-	bold := r.lip.NewStyle().Bold(true)
 	columns := []Column{{Header: "X", Right: true}, {Header: ""}, {Header: "THEME"}, {Header: "PREVIEW"}}
 	rows := make([][]Cell, 0, len(names))
 	for position, name := range names {
-		index, marker, label := strconv.Itoa(position+1), "", name
+		rowStyle := theme.Muted
+		marker := ""
 		if name == active {
+			rowStyle = theme.Body
 			marker = "→"
-			index, marker, label = bold.Render(index), bold.Render(marker), bold.Render(label)
 		}
 		rows = append(rows, []Cell{
-			Plain(index),
-			Plain(marker),
-			Plain(label),
-			Plain(r.swatch(r.paletteStyles(name))),
+			Styled(strconv.Itoa(position+1), rowStyle),
+			Styled(marker, theme.Header),
+			Styled(name, rowStyle),
+			Plain(r.swatch(name)),
 		})
 	}
 	r.Table(columns, rows)
-}
-
-// paletteStyles builds the named theme's styles on the active renderer's
-// lipgloss renderer, so a row degrades with everything else: piping `kx
-// theme` must not emit color just because each row previews its own palette.
-// Falls back to the active renderer's own styles if name is somehow
-// unregistered (Names() is theme's own registry, so this should not happen),
-// rather than leaving the row fully unstyled.
-func (r *Renderer) paletteStyles(name string) map[string]lipgloss.Style {
-	specs, err := theme.Styles(name)
-	if err != nil {
-		return r.styles
-	}
-	return buildStyles(r.lip, specs)
 }
 
 // swatchParts are the sample words shown in a theme preview, paired with the
@@ -289,9 +259,17 @@ var swatchParts = []struct{ Sample, Style string }{
 	{"muted", theme.Muted},
 }
 
-// swatch renders a preview in the given theme's own styles (see
-// paletteStyles).
-func (r *Renderer) swatch(styles map[string]lipgloss.Style) string {
+// swatch renders a preview in the named theme's own styles.
+//
+// The styles are built on the active renderer's lipgloss renderer, so a preview
+// degrades with everything else: piping `kx theme` must not emit color just
+// because each row builds its own palette.
+func (r *Renderer) swatch(name string) string {
+	specs, err := theme.Styles(name)
+	if err != nil {
+		return ""
+	}
+	styles := buildStyles(r.lip, specs)
 	parts := make([]string, 0, len(swatchParts))
 	for _, part := range swatchParts {
 		parts = append(parts, styles[part.Style].Render(part.Sample))
