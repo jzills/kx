@@ -189,11 +189,30 @@ gathered to build the table you'd see without `--html`.
 `--no-open` skips launching a browser — the URL still prints, so you can
 open it yourself.
 
+#### `kx diag --html`
+
+A namespace sweep's severity-sorted findings, filterable and sortable by
+any column, with a group-by for larger sweeps.
+
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
-  <br><br>
+</div>
+
+#### `kx scan --html`
+
+Per-image severity counts up top; the CVE table below groups by image and
+expands each row into its full detail.
+
+<div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
-  <br><br>
+</div>
+
+#### `kx tree --html`
+
+The ownership graph as a collapsible tree, indexed like every other kx
+listing.
+
+<div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/theme-fixes-and-screenshots/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
 </div>
 
