@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/events"
@@ -106,9 +108,19 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
-			html, _ := cmd.Flags().GetBool("html")
-			port, _ := cmd.Flags().GetInt("port")
-			noOpen, _ := cmd.Flags().GetBool("no-open")
+			html, rest := extractBool(rest, "--html")
+			noOpen, rest := extractBool(rest, "--no-open")
+			portText, rest, err := extractString(rest, "--port", "")
+			if err != nil {
+				return err
+			}
+			port := 0
+			if portText != "" {
+				if port, err = strconv.Atoi(portText); err != nil {
+					return fmt.Errorf(
+						"Invalid value for '--port': '%s' is not a valid int.", portText)
+				}
+			}
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
 			// A leading non-flag token names the resource type, mirroring

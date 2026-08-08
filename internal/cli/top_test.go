@@ -257,17 +257,37 @@ func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	cmd.SetContext(stoppedContext())
-	for _, flag := range [][2]string{{"html", "true"}, {"no-open", "true"}} {
-		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
-			t.Fatalf("set --%s: %v", flag[0], err)
-		}
-	}
 	sink := captureRender(t)
-	if err := cmd.RunE(cmd, nil); err != nil {
+	// --html/--no-open must go through args, not cmd.Flags().Set: top uses
+	// DisableFlagParsing (like scan), so these are extracted by hand from
+	// the raw argv, not populated by cobra's own flag parsing. Setting the
+	// registered flag directly would pass even if the hand-extraction were
+	// broken (as it briefly was) since real invocations never populate the
+	// flag that way.
+	if err := cmd.RunE(cmd, []string{"--html", "--no-open"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "Pods") {
 		t.Errorf("terminal output = %q, want the table to still print with --html set", sink.String())
+	}
+}
+
+// The real bug this guards: --html/--port/--no-open must be stripped from
+// the args before they reach kubectl, the same way --match/--no-limits
+// already are. If extraction is skipped, kubectl sees "--html" itself.
+func TestTopHTMLFlagsAreStrippedBeforeReachingKubectl(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetContext(stoppedContext())
+	captureRender(t)
+	if err := cmd.RunE(cmd, []string{"--html", "--no-open", "--port", "0"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, call := range kube.calls {
+		args := joinArgs(call)
+		if strings.Contains(args, "--html") || strings.Contains(args, "--port") || strings.Contains(args, "--no-open") {
+			t.Errorf("kubectl called with %q, want no leftover --html/--port/--no-open", args)
+		}
 	}
 }
 
