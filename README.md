@@ -176,10 +176,11 @@ or the full per-image CVE report with `--full`. Requires
 
 ### View reports in a browser
 
-`kx diag --html`, `kx scan --html`, and `kx tree --html` render the same
-analysis as a page and open it in your browser as well as printing to the
-terminal; Ctrl-C stops the server. It binds `127.0.0.1` only, and nothing is
-written to disk — the report lives in memory for as long as the command runs.
+`kx diag --html`, `kx scan --html`, `kx tree --html`, and `kx top --html`
+render the same analysis as a page and open it in your browser as well as
+printing to the terminal; Ctrl-C stops the server. It binds `127.0.0.1`
+only, and nothing is written to disk — the report lives in memory for as
+long as the command runs.
 
 The page is drawn in your active theme, so `kx theme dracula` restyles it too.
 Sweep rows expand into that resource's full report, and image rows expand
