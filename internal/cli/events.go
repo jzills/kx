@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/spf13/cobra"
@@ -86,11 +88,12 @@ func newEventsCommand(services Services) *cobra.Command {
 
 func newTopCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "top [kubectl flags]",
-		Short: "List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits.",
-		Long: "Lists pod CPU and memory usage with kubectl top, assigns indexes,\n" +
-			"and adds CPU%/MEM% columns computed against each pod's limits.",
-		Example:            "  kx top\n  kx top -m web\n  kx top --no-limits",
+		Use:   "top [resource] [kubectl flags]",
+		Short: "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
+		Long: "Lists pod or node CPU and memory usage with kubectl top, assigns\n" +
+			"indexes, and shows CPU%/MEM% — computed against each pod's limits\n" +
+			"for pods, native to kubectl for nodes.",
+		Example:            "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -103,13 +106,33 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
 
-			output, namespace, err := TopCommand{
+			// A leading non-flag token names the resource type, mirroring
+			// how `kx get`/`kx <kind>` resolve kind shorthands. Anything
+			// that doesn't resolve to Node (including no token at all)
+			// falls through to the pods path unchanged, exactly as it
+			// worked before this resource argument existed.
+			nodes := false
+			if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") &&
+				kinds.Normalize(rest[0]) == kinds.Node {
+				nodes = true
+				rest = rest[1:]
+			}
+
+			command := TopCommand{
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
-			}.Execute(match, rest, noLimits)
+			}
+			resourceLabel := "pods"
+			var output, namespace string
+			if nodes {
+				resourceLabel = "nodes"
+				output, namespace, err = command.ExecuteNodes(rest)
+			} else {
+				output, namespace, err = command.Execute(match, rest, noLimits)
+			}
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, "pods", namespace, "")
+			render.IndexedTable(output, resourceLabel, namespace, "")
 			return nil
 		},
 	}

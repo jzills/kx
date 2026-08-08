@@ -1,13 +1,31 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
 )
+
+// topServices builds a Services that can drive newTopCommand's RunE all the
+// way through, with a real (temp-file-backed) state.Service — Services.State
+// is a concrete *state.Service, not an interface, so a fakeState substitute
+// (used by the TopCommand.Execute-level tests above) does not fit here.
+func topServices(t *testing.T, kubectl kubectl.Service) Services {
+	t.Helper()
+	return Services{
+		Kubectl: kubectl,
+		State:   &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Index:   indexService(),
+		Config:  config.Default(),
+	}
+}
 
 const topOutput = "NAME             CPU(cores)   MEMORY(bytes)\n" +
 	"web-1            5m           64Mi\n" +
@@ -154,6 +172,36 @@ func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	}
 	if len(kubectl.calls) != 0 {
 		t.Errorf("Run was called %d times, want 0", len(kubectl.calls))
+	}
+}
+
+// A bare `kx top` (or any non-"nodes" leading token, e.g. --match's value)
+// must be provably unchanged: it stays the pods path with no token
+// stripped from what reaches TopCommand.Execute.
+func TestTopCommandDefaultsToPods(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("output = %q, want the Pods caption", sink.String())
+	}
+}
+
+func TestTopCommandRoutesNodesToken(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{nodesOutput}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"nodes"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Nodes") {
+		t.Errorf("output = %q, want the Nodes caption", sink.String())
+	}
+	if joinArgs(kube.calls[0]) != "top nodes" {
+		t.Errorf("args = %q, want \"top nodes\" (no leftover \"nodes\" positional)", joinArgs(kube.calls[0]))
 	}
 }
 
