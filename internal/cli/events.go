@@ -2,10 +2,15 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -86,11 +91,12 @@ func newEventsCommand(services Services) *cobra.Command {
 
 func newTopCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "top [kubectl flags]",
-		Short: "List CPU/memory usage for pods in the current namespace and assign index numbers, like kx get; shows usage as a percent of each pod's resource limits unless --no-limits.",
-		Long: "Lists pod CPU and memory usage with kubectl top, assigns indexes,\n" +
-			"and adds CPU%/MEM% columns computed against each pod's limits.",
-		Example:            "  kx top\n  kx top -m web\n  kx top --no-limits",
+		Use:   "top [resource] [kubectl flags]",
+		Short: "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
+		Long: "Lists pod or node CPU and memory usage with kubectl top, assigns\n" +
+			"indexes, and shows CPU%/MEM% — computed against each pod's limits\n" +
+			"for pods, native to kubectl for nodes.",
+		Example:            "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -102,21 +108,76 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
-
-			output, namespace, err := TopCommand{
-				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
-			}.Execute(match, rest, noLimits)
+			html, rest := extractBool(rest, "--html")
+			noOpen, rest := extractBool(rest, "--no-open")
+			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, "pods", namespace, "")
-			return nil
+			port := 0
+			if portText != "" {
+				if port, err = strconv.Atoi(portText); err != nil {
+					return fmt.Errorf(
+						"Invalid value for '--port': '%s' is not a valid int.", portText)
+				}
+			}
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+
+			// A leading non-flag token names the resource type, mirroring
+			// how `kx get`/`kx <kind>` resolve kind shorthands. Anything
+			// that doesn't resolve to Node (including no token at all)
+			// falls through to the pods path unchanged, exactly as it
+			// worked before this resource argument existed.
+			nodes := false
+			topArg := ""
+			if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") &&
+				kinds.Normalize(rest[0]) == kinds.Node {
+				nodes = true
+				topArg = "nodes"
+				rest = rest[1:]
+			}
+
+			command := TopCommand{
+				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
+			}
+			resourceLabel := "pods"
+			var output, namespace string
+			if nodes {
+				resourceLabel = "nodes"
+				output, namespace, err = command.ExecuteNodes(rest)
+			} else {
+				output, namespace, err = command.Execute(match, rest, noLimits)
+			}
+			if err != nil {
+				return err
+			}
+			render.IndexedTable(output, resourceLabel, namespace, "")
+			if !htmlOpts.Enabled {
+				return nil
+			}
+
+			label := kinds.PluralDisplay(resourceLabel)
+			meta, err := pageMeta(services.Config.Theme, "kx top · "+label,
+				invocation("top", topArg, portFlag(port)))
+			if err != nil {
+				return err
+			}
+			page, err := web.RenderTop(web.TopPage{
+				Meta: meta, Scope: scopeCaption(label, namespace), Rows: topPageRows(output),
+			})
+			if err != nil {
+				return err
+			}
+			return servePage(cmd.Context(), page, htmlOpts)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
 	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
+	cmd.Flags().Bool("html", false, "Render the listing as HTML and serve it in a browser")
+	cmd.Flags().Int("port", 0, "Port to serve --html on (random free port by default)")
+	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
