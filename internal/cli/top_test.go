@@ -5,11 +5,17 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/jzills/kx/internal/kinds"
 )
 
 const topOutput = "NAME             CPU(cores)   MEMORY(bytes)\n" +
 	"web-1            5m           64Mi\n" +
 	"web-2            250m         200Mi"
+
+const nodesOutput = "NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)\n" +
+	"node-a     196m         1%       1864Mi          24%\n" +
+	"node-b     500m         5%       3200Mi          40%"
 
 // Two containers, one with limits on both resources and one missing a memory
 // limit, so the summing and the "undefined" rule are both exercised.
@@ -94,6 +100,60 @@ func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	}
 	if len(kubectl.calls) != 0 {
 		t.Errorf("Run was called %d times, want 0 — the preflight should fail before any kubectl top/get call", len(kubectl.calls))
+	}
+}
+
+func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	states := &fakeState{}
+	output, namespace, err := TopCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.ExecuteNodes(nil)
+	if err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if namespace != "prod" {
+		t.Errorf("namespace = %q, want prod", namespace)
+	}
+	if !strings.Contains(output, "CPU%") || !strings.Contains(output, "MEM%") {
+		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
+	}
+	if strings.Contains(output, "CPU(%)") || strings.Contains(output, "MEMORY(%)") {
+		t.Errorf("output = %q, want kubectl's native (%%) headers gone", output)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d state entries, want 1", len(states.saved))
+	}
+	if kind, _ := states.saved[0].Resources.Kind("node-a"); kind != kinds.Node {
+		t.Errorf("kind = %q, want Node", kind)
+	}
+}
+
+// kubectl top nodes already reports percentages against node capacity
+// natively — unlike pods, ExecuteNodes must never fetch or compute limits.
+func TestExecuteNodesNeverFetchesLimits(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
+		ExecuteNodes(nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if len(kubectl.calls) != 1 {
+		t.Errorf("kubectl.Run called %d times, want 1 (top nodes only, no get pods -o json)", len(kubectl.calls))
+	}
+	if joinArgs(kubectl.calls[0]) != "top nodes" {
+		t.Errorf("args = %q, want \"top nodes\"", joinArgs(kubectl.calls[0]))
+	}
+}
+
+func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1}
+	_, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
+		ExecuteNodes(nil)
+	if err == nil || !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %v, want the friendly metrics-server message", err)
+	}
+	if len(kubectl.calls) != 0 {
+		t.Errorf("Run was called %d times, want 0", len(kubectl.calls))
 	}
 }
 

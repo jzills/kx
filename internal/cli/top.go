@@ -101,6 +101,75 @@ func (c TopCommand) Execute(
 	return indexed, namespace, nil
 }
 
+// ExecuteNodes lists node CPU/memory usage, indexed like kx get nodes.
+//
+// Unlike Execute (pods), there is no limits lookup: kubectl top nodes
+// already reports CPU(%)/MEMORY(%) against node capacity natively, so this
+// only has to relabel those columns to kx's own CPU%/MEM% naming (values
+// untouched) — see relabelPercentColumns — so the existing IndexedTable
+// coloring, which keys off those exact header names, applies for free.
+func (c TopCommand) ExecuteNodes(extraArgs []string) (table, namespace string, err error) {
+	if err := c.EnsureAvailable(); err != nil {
+		return "", "", err
+	}
+	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
+	if err != nil {
+		return "", "", err
+	}
+	output = relabelPercentColumns(output)
+
+	namespace = extractNamespace(extraArgs)
+	if namespace == "" {
+		namespace = c.Kubectl.CurrentNamespace()
+	}
+
+	indexed, names := c.Index.Add(output)
+	if len(names) > 0 {
+		if extraArgs == nil {
+			extraArgs = []string{}
+		}
+		if err := c.State.Save(state.State{
+			Resources: state.NewResources(names, kinds.Node),
+			Namespace: namespace,
+			// Recorded as a `get nodes` query, matching kx get nodes' own
+			// convention, so a stale entry refreshes into the same listing
+			// shape the indexes were assigned against.
+			Query: &state.Query{Resource: "nodes", Args: extraArgs},
+		}); err != nil {
+			return "", "", err
+		}
+	}
+	return indexed, namespace, nil
+}
+
+// relabelPercentColumns renames kubectl top nodes' native CPU(%)/MEMORY(%)
+// columns to kx's own CPU%/MEM% naming. Values are untouched — this is a
+// header rewrite only, so the existing render.UsageStyle-driven coloring in
+// IndexedTable (which looks up cells by the exact header names "CPU%"/
+// "MEM%") applies to nodes without any new coloring code.
+func relabelPercentColumns(output string) string {
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return output
+	}
+	cpuCol := indexOfHeader(headers, "CPU(%)")
+	memCol := indexOfHeader(headers, "MEMORY(%)")
+	if cpuCol < 0 && memCol < 0 {
+		return output
+	}
+	relabeled := append([]string{}, headers...)
+	if cpuCol >= 0 {
+		relabeled[cpuCol] = "CPU%"
+	}
+	if memCol >= 0 {
+		relabeled[memCol] = "MEM%"
+	}
+	table := make([][]string, 0, len(rows)+1)
+	table = append(table, relabeled)
+	table = append(table, rows...)
+	return index.Format(table)
+}
+
 // withUsagePercentages appends CPU%/MEM% columns computed against each pod's
 // limits.
 //
