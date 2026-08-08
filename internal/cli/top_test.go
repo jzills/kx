@@ -26,6 +26,11 @@ const podsJSON = `{"items":[
 type scriptedKubectl struct {
 	outputs []string
 	calls   [][]string
+	probes  [][]string
+	// probeCode is returned by every Probe call; zero value (0) means
+	// "available", so every existing test using scriptedKubectl without
+	// setting this keeps behaving exactly as it does today.
+	probeCode int
 	// namespaceCalls counts CurrentNamespace, which shells out to
 	// `kubectl config view` and so is worth not doing twice per command.
 	namespaceCalls int
@@ -39,13 +44,58 @@ func (k *scriptedKubectl) Run(args []string) (string, error) {
 	return "", nil
 }
 func (k *scriptedKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
-func (k *scriptedKubectl) Probe([]string) int                         { return 0 }
-func (k *scriptedKubectl) Watch([]string, func(string) error) error   { return nil }
+func (k *scriptedKubectl) Probe(args []string) int {
+	k.probes = append(k.probes, args)
+	return k.probeCode
+}
+func (k *scriptedKubectl) Watch([]string, func(string) error) error { return nil }
 func (k *scriptedKubectl) CurrentNamespace() string {
 	k.namespaceCalls++
 	return "prod"
 }
 func (k *scriptedKubectl) CurrentContext() string { return "test" }
+
+func TestTopEnsureAvailableProbesTheMetricsAPI(t *testing.T) {
+	kubectl := &scriptedKubectl{}
+	if err := (TopCommand{Kubectl: kubectl}).EnsureAvailable(); err != nil {
+		t.Fatalf("EnsureAvailable: %v", err)
+	}
+	want := "get --raw /apis/metrics.k8s.io/v1beta1"
+	if len(kubectl.probes) != 1 || joinArgs(kubectl.probes[0]) != want {
+		t.Errorf("probes = %v, want one call to %q", kubectl.probes, want)
+	}
+}
+
+func TestTopEnsureAvailableReturnsAFriendlyErrorWhenMissing(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1}
+	err := (TopCommand{Kubectl: kubectl}).EnsureAvailable()
+	if err == nil {
+		t.Fatal("EnsureAvailable returned nil with the metrics API unavailable")
+	}
+	if !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %q, want it to name metrics-server", err.Error())
+	}
+	if !strings.Contains(err.Error(), "https://github.com/kubernetes-sigs/metrics-server") {
+		t.Errorf("err = %q, want an install link", err.Error())
+	}
+}
+
+// The pods path already existed before this preflight; it must gain the
+// check without changing its Run-call sequence for the success path.
+func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1, outputs: []string{topOutput, podsJSON}}
+	_, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", nil, false)
+	if err == nil {
+		t.Fatal("Execute succeeded with the metrics API unavailable")
+	}
+	if !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %q, want the friendly message", err.Error())
+	}
+	if len(kubectl.calls) != 0 {
+		t.Errorf("Run was called %d times, want 0 — the preflight should fail before any kubectl top/get call", len(kubectl.calls))
+	}
+}
 
 func TestTopAppendsUsagePercentages(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}

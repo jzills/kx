@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -20,12 +21,30 @@ type TopCommand struct {
 	Index   Indexer
 }
 
+// EnsureAvailable checks that the cluster's metrics API is registered
+// before kx top tries to use it — kubectl top depends on the metrics-server
+// add-on, not just kubectl itself, and without this check a missing
+// metrics-server surfaces as kubectl's own raw, unhelpful error text.
+// Mirrors ScanCommand.EnsureAvailable's preflight-probe shape exactly
+// (internal/cli/scan.go): a cheap probe, a friendly message on failure.
+func (c TopCommand) EnsureAvailable() error {
+	if c.Kubectl.Probe([]string{"get", "--raw", "/apis/metrics.k8s.io/v1beta1"}) != 0 {
+		return errors.New("metrics-server is not available — kx top needs it " +
+			"installed in the cluster. Install it: " +
+			"https://github.com/kubernetes-sigs/metrics-server#installation")
+	}
+	return nil
+}
+
 // Execute returns the indexed table to display, and the namespace it was
 // listed from — resolving that costs a `kubectl config view` when no -n was
 // given, and the caller needs the same answer for the caption.
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table, namespace string, err error) {
+	if err := c.EnsureAvailable(); err != nil {
+		return "", "", err
+	}
 	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
 	if err != nil {
 		return "", "", err
