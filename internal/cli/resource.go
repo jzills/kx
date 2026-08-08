@@ -160,8 +160,14 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	}
 	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
 	if interactiveRolloutActions[action] {
-		_, err := c.Kubectl.RunInteractive(args, false)
-		return "", err
+		code, err := c.Kubectl.RunInteractive(args, false)
+		if err != nil {
+			return "", err
+		}
+		if code != 0 {
+			return "", forwardExit(c.Kubectl, kind, name, namespace, code)
+		}
+		return "", nil
 	}
 	return c.Kubectl.Run(args)
 }

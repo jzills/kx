@@ -321,6 +321,36 @@ func TestRolloutStatusStreams(t *testing.T) {
 	}
 }
 
+// A rollout status that fails must not be reported as a success: before this
+// fix, RolloutCommand discarded RunInteractive's exit code entirely.
+func TestRolloutStatusProbesOnFailure(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	_, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
+		Execute("status", 1)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if len(kubectl.probes) != 1 {
+		t.Errorf("probes = %d, want 1", len(kubectl.probes))
+	}
+}
+
+func TestRolloutStatusFailureOnLiveWorkloadForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
+	_, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
+		Execute("status", 1)
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %#v, want SilentError", err)
+	}
+	if silent.Code != 3 {
+		t.Errorf("code = %d, want 3", silent.Code)
+	}
+}
+
 func TestRolloutNonStatusIsCaptured(t *testing.T) {
 	kubectl := &recordingKubectl{output: "deployment.apps/api restarted\n"}
 	output, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
