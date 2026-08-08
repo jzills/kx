@@ -316,3 +316,19 @@ func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyRegistersHelpFlags(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	for _, name := range []string{"container", "no-preserve", "retries"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+func TestCopyRequiresTwoArguments(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	if err := cmd.Args(cmd, []string{"1:/etc/foo"}); err == nil {
+		t.Error("accepted a single argument, want src and dest required")
+	}
+}

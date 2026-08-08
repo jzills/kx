@@ -360,6 +360,35 @@ func newPortForwardCommand(services Services) *cobra.Command {
 	}
 }
 
+func newCopyCommand(services Services) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cp <src> <dest> [kubectl flags]",
+		Short: "Copy files to or from an indexed pod via kubectl cp.",
+		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
+			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
+		Args:               cobra.MinimumNArgs(2),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return fmt.Errorf("cp requires a source and a destination")
+			}
+			return CopyCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(rest[0], rest[1], rest[2:])
+		},
+	}
+	// Pure kubectl passthrough, parsed by hand — registered only so they
+	// appear in --help instead of vanishing.
+	cmd.Flags().StringP("container", "c", "", "Container name, if the pod has more than one")
+	cmd.Flags().Bool("no-preserve", false,
+		"Don't preserve the copied file/directory's ownership and permissions")
+	cmd.Flags().Int("retries", 0, "Number of retries on a copy failure (0 disables)")
+	return cmd
+}
+
 func newYamlCommand(services Services) *cobra.Command {
 	var show string
 	cmd := &cobra.Command{

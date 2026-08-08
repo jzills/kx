@@ -23,7 +23,7 @@ var helpSections = []struct {
 	{"Resources", []string{
 		"get", "secret", "top", "describe", "events", "logs", "labels", "annotations",
 		"label", "annotate", "yaml", "delete", "edit", "exec", "tree", "rollout",
-		"scale", "scan", "port-forward", "diagnostic", "namespace", "context",
+		"scale", "scan", "port-forward", "cp", "diagnostic", "namespace", "context",
 	}},
 	{"History", []string{"state", "drop", "back", "forward"}},
 	{"Configuration", []string{"theme"}},
