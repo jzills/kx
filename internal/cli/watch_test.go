@@ -16,6 +16,64 @@ func watchShape(t *testing.T) index.TableShape {
 	return shape
 }
 
+func watchAllNamespacesShape(t *testing.T) index.TableShape {
+	t.Helper()
+	shape, ok := index.ParseHeader("EVENT      NAMESPACE   NAME             STATUS")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	return shape
+}
+
+// Names collide across namespaces, so -A rows must be keyed by
+// NAMESPACE/NAME, not NAME alone — otherwise two unrelated pods with the
+// same name in different namespaces would clobber each other's row.
+func TestWatchRowsKeysByNamespaceAndNameForAllNamespaces(t *testing.T) {
+	shape := watchAllNamespacesShape(t)
+	rows := newWatchRows()
+	rows.Apply(shape, shape.Row("ADDED      prod        worker-0         Running"))
+	rows.Apply(shape, shape.Row("ADDED      staging     worker-0         Running"))
+
+	got := rows.Snapshot()
+	want := [][]string{{"prod", "worker-0", "Running"}, {"staging", "worker-0", "Running"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Snapshot = %v, want %v — same-named pods in different namespaces must not collide", got, want)
+	}
+}
+
+func TestWatchNamespaceAllNamespaces(t *testing.T) {
+	if got := watchNamespace([]string{"-A"}, &fakeKubectl{}); got != "all namespaces" {
+		t.Errorf("watchNamespace = %q, want %q", got, "all namespaces")
+	}
+}
+
+func TestWatchNamespaceExplicit(t *testing.T) {
+	if got := watchNamespace([]string{"-n", "staging"}, &fakeKubectl{}); got != "staging" {
+		t.Errorf("watchNamespace = %q, want %q", got, "staging")
+	}
+}
+
+func TestWatchNamespaceFallsBackToCurrentNamespace(t *testing.T) {
+	kube := &fakeKubectl{namespace: "prod"}
+	if got := watchNamespace(nil, kube); got != "prod" {
+		t.Errorf("watchNamespace = %q, want %q", got, "prod")
+	}
+}
+
+func TestWatchRowsDeletedOnlyRemovesMatchingNamespace(t *testing.T) {
+	shape := watchAllNamespacesShape(t)
+	rows := newWatchRows()
+	rows.Apply(shape, shape.Row("ADDED      prod        worker-0         Running"))
+	rows.Apply(shape, shape.Row("ADDED      staging     worker-0         Running"))
+	rows.Apply(shape, shape.Row("DELETED    prod        worker-0         Terminating"))
+
+	got := rows.Snapshot()
+	want := [][]string{{"staging", "worker-0", "Running"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Snapshot = %v, want %v — deleting prod/worker-0 must not remove staging/worker-0", got, want)
+	}
+}
+
 func TestWatchRowsAddedUpsertsInOrder(t *testing.T) {
 	shape := watchShape(t)
 	rows := newWatchRows()

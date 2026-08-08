@@ -65,13 +65,15 @@ func (s span) slice(row string) string {
 }
 
 // TableShape is a parsed kubectl table header: column names, the spans used
-// to slice data rows, and the column indexes of NAME and EVENT (-1 if
-// absent — EVENT is only present when --output-watch-events was requested).
+// to slice data rows, and the column indexes of NAME, EVENT and NAMESPACE
+// (-1 if absent — EVENT is only present when --output-watch-events was
+// requested, NAMESPACE only when -A/--all-namespaces was).
 type TableShape struct {
-	Headers  []string
-	NameIdx  int
-	EventIdx int
-	spans    []span
+	Headers      []string
+	NameIdx      int
+	EventIdx     int
+	NamespaceIdx int
+	spans        []span
 }
 
 // ParseHeader locates each column's span from a kubectl header line, and the
@@ -114,10 +116,11 @@ func ParseHeader(header string) (TableShape, bool) {
 	}
 
 	return TableShape{
-		Headers:  headers,
-		NameIdx:  nameIdx,
-		EventIdx: columnIndex(headers, "EVENT"),
-		spans:    spans,
+		Headers:      headers,
+		NameIdx:      nameIdx,
+		EventIdx:     columnIndex(headers, "EVENT"),
+		NamespaceIdx: columnIndex(headers, "NAMESPACE"),
+		spans:        spans,
 	}, true
 }
 

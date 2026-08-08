@@ -7,14 +7,14 @@ import (
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 )
 
-// watchRows tracks the current state of a live watch listing, keyed by NAME
-// (single-namespace only — a namespace-wide watch, -A, keeps the raw
-// streaming passthrough instead, since name alone isn't a safe row key
-// across namespaces). ADDED/MODIFIED upsert a row, DELETED removes it.
-// Order is insertion order: a MODIFIED row keeps its position; a name that
+// watchRows tracks the current state of a live watch listing, keyed by
+// rowKey (NAMESPACE/NAME when a NAMESPACE column is present — an -A watch —
+// or NAME alone otherwise). ADDED/MODIFIED upsert a row, DELETED removes it.
+// Order is insertion order: a MODIFIED row keeps its position; a key that
 // reappears after DELETED is appended at the end, same as a fresh ADDED.
 type watchRows struct {
 	order []string
@@ -25,31 +25,42 @@ func newWatchRows() *watchRows {
 	return &watchRows{rows: make(map[string][]string)}
 }
 
+// rowKey identifies a row uniquely. Names alone collide across namespaces —
+// two different namespaces can each have a pod called "worker-0" — so an -A
+// watch (NamespaceIdx present) keys on NAMESPACE/NAME instead of NAME alone.
+func rowKey(shape index.TableShape, row []string) string {
+	name := row[shape.NameIdx]
+	if shape.NamespaceIdx >= 0 && shape.NamespaceIdx < len(row) {
+		return row[shape.NamespaceIdx] + "/" + name
+	}
+	return name
+}
+
 // Apply updates the row set from one parsed line. row is the full slice
 // shape.Row returned, including the EVENT and NAME cells at shape's indexes.
 func (w *watchRows) Apply(shape index.TableShape, row []string) {
 	if shape.EventIdx < 0 || shape.EventIdx >= len(row) || shape.NameIdx >= len(row) {
 		return
 	}
-	event := row[shape.EventIdx]
-	name := row[shape.NameIdx]
-	if name == "" {
+	if row[shape.NameIdx] == "" {
 		return
 	}
+	event := row[shape.EventIdx]
+	key := rowKey(shape, row)
 	stored := dropIndex(row, shape.EventIdx)
 
 	if event == "DELETED" {
-		if _, ok := w.rows[name]; ok {
-			delete(w.rows, name)
-			w.order = removeString(w.order, name)
+		if _, ok := w.rows[key]; ok {
+			delete(w.rows, key)
+			w.order = removeString(w.order, key)
 		}
 		return
 	}
 
-	if _, ok := w.rows[name]; !ok {
-		w.order = append(w.order, name)
+	if _, ok := w.rows[key]; !ok {
+		w.order = append(w.order, key)
 	}
-	w.rows[name] = stored
+	w.rows[key] = stored
 }
 
 // Snapshot returns the current rows in display order, EVENT column already
@@ -57,8 +68,8 @@ func (w *watchRows) Apply(shape index.TableShape, row []string) {
 // rows in place, and that must never reach watchRows' stored state.
 func (w *watchRows) Snapshot() [][]string {
 	rows := make([][]string, 0, len(w.order))
-	for _, name := range w.order {
-		rows = append(rows, append([]string(nil), w.rows[name]...))
+	for _, key := range w.order {
+		rows = append(rows, append([]string(nil), w.rows[key]...))
 	}
 	return rows
 }
@@ -92,15 +103,28 @@ func removeString(list []string, s string) []string {
 // existing namespace doesn't flicker while updates still feel live.
 const watchThrottle = 100 * time.Millisecond
 
-// runWatch streams a live-redrawing table for `kx get <resource> --watch`.
-// Only reached for the default/wide, single-namespace table shape; runGet
-// routes non-tabular -o formats and -A to the raw RunInteractive passthrough
-// instead (see wantsLiveTable).
-func runWatch(services Services, resource string, extra []string) error {
-	namespace := extractNamespace(extra)
-	if namespace == "" {
-		namespace = services.Kubectl.CurrentNamespace()
+// watchNamespace resolves the caption namespace for a watch listing: "all
+// namespaces" for -A (rows there are keyed by NAMESPACE/NAME, not scoped to
+// one), the explicit -n/--namespace value if given, or the current
+// context's namespace otherwise.
+func watchNamespace(extra []string, kube kubectl.Service) string {
+	if allNamespaces(extra) {
+		return "all namespaces"
 	}
+	if namespace := extractNamespace(extra); namespace != "" {
+		return namespace
+	}
+	return kube.CurrentNamespace()
+}
+
+// runWatch streams a live-redrawing table for `kx get <resource> --watch`.
+// Only reached for the default/wide table shape; runGet routes non-tabular
+// -o formats to the raw RunInteractive passthrough instead (see
+// wantsLiveTable). -A watches are included — watchRows keys rows by
+// NAMESPACE/NAME in that case, so same-named pods in different namespaces
+// don't collide.
+func runWatch(services Services, resource string, extra []string) error {
+	namespace := watchNamespace(extra, services.Kubectl)
 
 	args := append([]string{"get", resource}, extra...)
 	if present, _ := extractBool(extra, "--output-watch-events"); !present {

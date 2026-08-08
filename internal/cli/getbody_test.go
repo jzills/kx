@@ -110,18 +110,31 @@ func TestGetWatchNonTabularOutputKeepsPassthrough(t *testing.T) {
 	}
 }
 
-// -A is unindexed and its rows aren't safely keyed by NAME alone (see
-// watchRows' doc comment), so it also keeps the passthrough.
-func TestGetWatchAllNamespacesKeepsPassthrough(t *testing.T) {
-	kube := &recordingKubectl{}
+// -A also uses the live table: watchRows keys rows by NAMESPACE/NAME in that
+// case (TestWatchRowsKeysByNamespaceAndNameForAllNamespaces is the
+// collision-safety proof), so it isn't unindexed-and-passthrough-only.
+func TestGetWatchAllNamespacesUsesLiveRedraw(t *testing.T) {
+	watchAllNamespacesHeader := "EVENT      NAMESPACE   NAME             READY   STATUS    RESTARTS   AGE"
+	watchAllNamespacesAdded := "ADDED      prod        nginx-abc-xyz    1/1     Running   0          5d"
+	kube := &fakeKubectl{
+		watchLines: []string{watchAllNamespacesHeader, watchAllNamespacesAdded},
+	}
 	services := switchServices(t, kube)
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
 
 	if err := runGet(services, "pods", []string{"--watch", "-A"}, getOptions{}); err != nil {
 		t.Fatalf("runGet: %v", err)
 	}
-	if len(kube.interactive) != 1 {
-		t.Fatalf("RunInteractive called %d times, want 1", len(kube.interactive))
+
+	want := []string{"get", "pods", "--watch", "-A", "--output-watch-events"}
+	if joinArgs(kube.watchArgs) != joinArgs(want) {
+		t.Errorf("watch args = %v, want %v", kube.watchArgs, want)
 	}
+	// The caption itself only renders through RedrawTable, which is a no-op
+	// off-terminal — TestWatchNamespaceAllNamespaces in watch_test.go is the
+	// direct proof that -A resolves to "all namespaces".
 }
 
 // An indexed argument still resolves to a name before the watch flag routes

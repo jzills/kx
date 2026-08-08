@@ -115,6 +115,26 @@ func TestParseHeaderNoNameColumnReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestParseHeaderLocatesNamespaceColumn(t *testing.T) {
+	shape, ok := ParseHeader("EVENT      NAMESPACE   NAME             STATUS")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	if shape.NamespaceIdx != 1 {
+		t.Errorf("NamespaceIdx = %d, want 1", shape.NamespaceIdx)
+	}
+}
+
+func TestParseHeaderNoNamespaceColumnReturnsNegativeOne(t *testing.T) {
+	shape, ok := ParseHeader("NAME             STATUS")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	if shape.NamespaceIdx != -1 {
+		t.Errorf("NamespaceIdx = %d, want -1", shape.NamespaceIdx)
+	}
+}
+
 func TestTableShapeRowSlicesLikeParseTable(t *testing.T) {
 	shape, ok := ParseHeader("NAME             READY   STATUS    RESTARTS   AGE")
 	if !ok {
