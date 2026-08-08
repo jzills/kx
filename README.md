@@ -87,6 +87,8 @@ pipx run --spec kx-cli kx get pods
 
 `kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are display-only — names aren't unique across namespaces.
 
+`--watch` redraws the table live as resources are added, changed, or removed, instead of printing a table that never finishes. It's display-only — a watch never completes, so there's nothing to index. Non-tabular output (`-o json`/`yaml`/etc.) streams kubectl's own watch output directly instead.
+
 Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs and other resource types still use `kx get <resource>`.
 
 Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `-h`/`--help` on any command shows usage, examples, and aliases.
