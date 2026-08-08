@@ -104,6 +104,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newScaleCommand(services),
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
+		newCopyCommand(services),
 		newYamlCommand(services),
 		newTreeCommand(services),
 		newScanCommand(services),

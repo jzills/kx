@@ -316,3 +316,47 @@ func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyRegistersHelpFlags(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	for _, name := range []string{"container", "no-preserve", "retries"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+func TestCopyRequiresTwoArguments(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	if err := cmd.RunE(cmd, []string{"1:/etc/foo"}); err == nil {
+		t.Error("accepted a single argument, want src and dest required")
+	}
+}
+
+// The real bug this guards: an Args validator requiring 2 arguments runs
+// against the unstripped argv on the full cobra dispatch path (cmd.RunE
+// alone never invokes Args, which is why that shortcut wouldn't have caught
+// this) — `kx cp --help` is a single argument, so a MinimumNArgs(2) gate
+// rejects it with an arity error before RunE ever sees it and gets a chance
+// to recognize --help via passthrough.
+func TestCopyHelpDoesNotTriggerAnArityError(t *testing.T) {
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newCopyCommand(Services{})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("Execute with --help = %v, want nil (help handled, not an arity error)", err)
+	}
+}
+
+// port-forward had the identical bug, caught and fixed alongside cp's own
+// (both took a MinimumNArgs(2) validator from the same pattern).
+func TestPortForwardHelpDoesNotTriggerAnArityError(t *testing.T) {
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newPortForwardCommand(Services{})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("Execute with --help = %v, want nil (help handled, not an arity error)", err)
+	}
+}

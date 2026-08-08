@@ -206,6 +206,123 @@ func TestExecForwardsTheContainerExitCode(t *testing.T) {
 	}
 }
 
+func TestCopyResolvesAnIndexedSource(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("1:/var/log/app.log", "./app.log", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := "cp prod/nginx:/var/log/app.log ./app.log"
+	if got := joinArgs(kubectl.interactive[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCopyResolvesAnIndexedDestination(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("./patch.conf", "1:/etc/app/patch.conf", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := "cp ./patch.conf prod/nginx:/etc/app/patch.conf"
+	if got := joinArgs(kubectl.interactive[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+// Neither side has to be indexed — a fully passthrough invocation (e.g. an
+// already-qualified ns/pod:path) is not kx's business to validate.
+func TestCopyPassesThroughArgsWithNoIndex(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("staging/other-pod:/etc/foo", "./foo", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := "cp staging/other-pod:/etc/foo ./foo"
+	if got := joinArgs(kubectl.interactive[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCopyForwardsExtraArgs(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("1:/etc/foo", "./foo", []string{"-c", "sidecar"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := "cp prod/nginx:/etc/foo ./foo -c sidecar"
+	if got := joinArgs(kubectl.interactive[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+func TestCopyRejectsAnIndexedNonPod(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
+		Execute("1:/etc/foo", "./foo", nil)
+	if err == nil {
+		t.Fatal("copied from a Deployment index, want an error")
+	}
+	if err.Error() != "cp is only supported for pods." {
+		t.Errorf("err = %q, want the pod-only message", err.Error())
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Error("kubectl was called for a rejected kind")
+	}
+}
+
+// A vanished indexed pod is stale state, exactly like exec/port-forward.
+func TestCopyFailureOnVanishedPodStaysStale(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("1:/etc/foo", "./foo", nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+}
+
+// A live pod's own failure (e.g. tar missing in the container) is not
+// stale state; kubectl already printed why, so the exit code is forwarded
+// without a second message — same contract as describe/edit/port-forward.
+func TestCopyFailureOnLivePodForwardsTheExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("1:/etc/foo", "./foo", nil)
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %#v, want SilentError", err)
+	}
+	if silent.Code != 3 {
+		t.Errorf("code = %d, want kubectl's 3", silent.Code)
+	}
+}
+
+// Neither side indexed: nothing to probe for staleness, so a failure is a
+// bare exit-code forward — same shape LogsCommand's aggregate branch uses.
+func TestCopyFailureWithNoIndexIsABareExitCode(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 5}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("staging/other-pod:/etc/foo", "./foo", nil)
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %#v, want SilentError", err)
+	}
+	if silent.Code != 5 {
+		t.Errorf("code = %d, want 5", silent.Code)
+	}
+	if len(kubectl.probes) != 0 {
+		t.Error("probed for staleness with nothing indexed to check")
+	}
+}
+
 func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
