@@ -8,6 +8,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
 
@@ -105,6 +106,10 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
+			html, _ := cmd.Flags().GetBool("html")
+			port, _ := cmd.Flags().GetInt("port")
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
 			// A leading non-flag token names the resource type, mirroring
 			// how `kx get`/`kx <kind>` resolve kind shorthands. Anything
@@ -112,9 +117,11 @@ func newTopCommand(services Services) *cobra.Command {
 			// falls through to the pods path unchanged, exactly as it
 			// worked before this resource argument existed.
 			nodes := false
+			topArg := ""
 			if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") &&
 				kinds.Normalize(rest[0]) == kinds.Node {
 				nodes = true
+				topArg = "nodes"
 				rest = rest[1:]
 			}
 
@@ -133,13 +140,32 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 			render.IndexedTable(output, resourceLabel, namespace, "")
-			return nil
+			if !htmlOpts.Enabled {
+				return nil
+			}
+
+			label := kinds.PluralDisplay(resourceLabel)
+			meta, err := pageMeta(services.Config.Theme, "kx top · "+label,
+				invocation("top", topArg, portFlag(port)))
+			if err != nil {
+				return err
+			}
+			page, err := web.RenderTop(web.TopPage{
+				Meta: meta, Scope: scopeCaption(label, namespace), Rows: topPageRows(output),
+			})
+			if err != nil {
+				return err
+			}
+			return servePage(cmd.Context(), page, htmlOpts)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
 	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
+	cmd.Flags().Bool("html", false, "Render the listing as HTML and serve it in a browser")
+	cmd.Flags().Int("port", 0, "Port to serve --html on (random free port by default)")
+	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")

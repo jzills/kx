@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/web"
 )
 
 // TopCommand lists pod resource usage, indexed like `kx get`, with usage
@@ -291,6 +293,61 @@ func percentCell(usage string, limit *resource.Quantity) string {
 		return "—"
 	}
 	return strconv.Itoa(int(used*100/total)) + "%"
+}
+
+// topPageRows re-parses the already-indexed (and, for nodes, relabeled)
+// table text into page rows for --html. There is no richer domain struct
+// behind a top listing the way diagnostics.Report/scanner.ImageScan back
+// diag/scan's pages — this table text already is the whole of the data —
+// so this builds web.TopRow directly rather than converting from some
+// intermediate type. Degrades gracefully when a column is absent (the -A
+// pods case has no X or CPU%/MEM% columns): that column's TopRow fields
+// stay at their zero value, which the template/grid render as blank/"—".
+func topPageRows(indexed string) []web.TopRow {
+	headers, rows, nameIdx := index.ParseTable(indexed)
+	if headers == nil {
+		return nil
+	}
+	indexIdx := indexOfHeader(headers, "X")
+	cpuIdx := indexOfHeader(headers, "CPU(cores)")
+	memIdx := indexOfHeader(headers, "MEMORY(bytes)")
+	cpuPctIdx := indexOfHeader(headers, "CPU%")
+	memPctIdx := indexOfHeader(headers, "MEM%")
+
+	pageRows := make([]web.TopRow, len(rows))
+	for i, row := range rows {
+		pageRow := web.TopRow{Name: row[nameIdx]}
+		if indexIdx >= 0 {
+			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
+				pageRow.Index = n
+			}
+		}
+		if cpuIdx >= 0 {
+			pageRow.CPU = row[cpuIdx]
+		}
+		if memIdx >= 0 {
+			pageRow.Memory = row[memIdx]
+		}
+		if cpuPctIdx >= 0 {
+			pageRow.CPUPct = usageCell(row[cpuPctIdx], "cpu")
+		}
+		if memPctIdx >= 0 {
+			pageRow.MemPct = usageCell(row[memPctIdx], "memory")
+		}
+		pageRows[i] = pageRow
+	}
+	return pageRows
+}
+
+// usageCell parses a "NN%" cell (or "—" for unknown) into a page-ready
+// Usage, reusing web.NewUsage's classification so there is one coloring
+// rule, not a second one duplicated here.
+func usageCell(cell, kind string) web.Usage {
+	pct, err := strconv.Atoi(strings.TrimSuffix(cell, "%"))
+	if err != nil {
+		return web.Usage{}
+	}
+	return web.NewUsage(pct, kind)
 }
 
 func indexOfHeader(headers []string, name string) int {

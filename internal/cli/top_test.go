@@ -205,6 +205,72 @@ func TestTopCommandRoutesNodesToken(t *testing.T) {
 	}
 }
 
+func TestTopPageRowsParsesIndexedTable(t *testing.T) {
+	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"  1    web-1    5m           12%     64Mi             80%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Index != 1 || row.Name != "web-1" || row.CPU != "5m" || row.Memory != "64Mi" {
+		t.Errorf("row = %+v, want Index 1, Name web-1, CPU 5m, Memory 64Mi", row)
+	}
+	if !row.CPUPct.Known || row.CPUPct.Pct != 12 {
+		t.Errorf("CPUPct = %+v, want Known with Pct 12", row.CPUPct)
+	}
+	if !row.MemPct.Known || row.MemPct.Pct != 80 {
+		t.Errorf("MemPct = %+v, want Known with Pct 80", row.MemPct)
+	}
+}
+
+// The -A pods table has no X or CPU%/MEM% columns (top.go's Execute skips
+// both for -A); topPageRows must degrade gracefully rather than panic or
+// misread columns, matching how IndexedTable itself already handles -A.
+func TestTopPageRowsHandlesTableWithNoIndexOrPercentColumns(t *testing.T) {
+	unindexed := "NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
+		"prod          web-1    5m           64Mi\n"
+	rows := topPageRows(unindexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].Index != 0 {
+		t.Errorf("Index = %d, want 0 (unindexed)", rows[0].Index)
+	}
+	if rows[0].CPUPct.Known || rows[0].MemPct.Known {
+		t.Errorf("CPUPct/MemPct = %+v/%+v, want both unknown", rows[0].CPUPct, rows[0].MemPct)
+	}
+}
+
+func TestTopRegistersHTMLFlags(t *testing.T) {
+	cmd := newTopCommand(Services{})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// Regression shape already pinned for diag/scan/tree: --html must add to
+// the terminal output, never replace it.
+func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{{"html", "true"}, {"no-open", "true"}} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("terminal output = %q, want the table to still print with --html set", sink.String())
+	}
+}
+
 func TestTopAppendsUsagePercentages(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
 	states := &fakeState{}
