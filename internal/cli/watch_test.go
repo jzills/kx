@@ -25,6 +25,32 @@ func watchAllNamespacesShape(t *testing.T) index.TableShape {
 	return shape
 }
 
+// Captured live: a MODIFIED row's STATUS ("Terminating", 11 chars) is wider
+// than the header assumed from an earlier ADDED row ("Running", 7 chars).
+// watchRows must upsert the correctly-parsed row, not a garbled one, and a
+// following DELETED must still remove it (proving the key it upserted under
+// is the plain resource name, unaffected by the width drift).
+func TestWatchRowsHandlesColumnWidthDriftAcrossEvents(t *testing.T) {
+	shape, ok := index.ParseHeader("EVENT      NAME                        READY   STATUS    RESTARTS   AGE")
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	rows := newWatchRows()
+	rows.Apply(shape, shape.Row("ADDED      waypoint-5d84f566ff-hb8rk   1/1     Running   0          106s"))
+	rows.Apply(shape, shape.Row("MODIFIED   waypoint-5d84f566ff-hb8rk   1/1     Terminating   0          107s"))
+
+	got := rows.Snapshot()
+	want := [][]string{{"waypoint-5d84f566ff-hb8rk", "1/1", "Terminating", "0", "107s"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Snapshot = %v, want %v", got, want)
+	}
+
+	rows.Apply(shape, shape.Row("DELETED    waypoint-5d84f566ff-hb8rk   1/1     Terminating   0          107s"))
+	if got := rows.Snapshot(); len(got) != 0 {
+		t.Errorf("Snapshot = %v, want empty after DELETED", got)
+	}
+}
+
 // Names collide across namespaces, so -A rows must be keyed by
 // NAMESPACE/NAME, not NAME alone — otherwise two unrelated pods with the
 // same name in different namespaces would clobber each other's row.

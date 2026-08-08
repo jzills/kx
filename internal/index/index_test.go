@@ -154,6 +154,52 @@ func TestTableShapeRowSlicesLikeParseTable(t *testing.T) {
 
 // A value wider than its header must not be sliced off — TableShape.Row
 // extends the last column to end-of-line, same as ParseTable.
+// Captured live from `kubectl get pods --watch --output-watch-events`: the
+// header was sized for "Running" (7 chars), but a later MODIFIED row's
+// STATUS value, "Terminating" (11 chars), is wider than the header assumed
+// — kubectl recomputes each watch row's own column widths independently, it
+// doesn't keep them pinned to the header the way a one-shot table does.
+// Slicing at the header's fixed byte offset used to cut STATUS short and
+// spill its tail into RESTARTS.
+const watchHeaderReal = "EVENT      NAME                        READY   STATUS    RESTARTS   AGE"
+const watchAddedRunningReal = "ADDED      waypoint-5d84f566ff-hb8rk   1/1     Running   0          106s"
+const watchModifiedTerminatingReal = "MODIFIED   waypoint-5d84f566ff-hb8rk   1/1     Terminating   0          107s"
+
+func TestTableShapeRowHandlesColumnWidthDriftAcrossWatchEvents(t *testing.T) {
+	shape, ok := ParseHeader(watchHeaderReal)
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+
+	got := shape.Row(watchModifiedTerminatingReal)
+	want := []string{"MODIFIED", "waypoint-5d84f566ff-hb8rk", "1/1", "Terminating", "0", "107s"}
+	if len(got) != len(want) {
+		t.Fatalf("Row = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Row[%d] = %q, want %q (full row: %#v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestTableShapeRowStillHandlesTheNarrowerRow(t *testing.T) {
+	shape, ok := ParseHeader(watchHeaderReal)
+	if !ok {
+		t.Fatal("ParseHeader: ok=false")
+	}
+	got := shape.Row(watchAddedRunningReal)
+	want := []string{"ADDED", "waypoint-5d84f566ff-hb8rk", "1/1", "Running", "0", "106s"}
+	if len(got) != len(want) {
+		t.Fatalf("Row = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Row[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestTableShapeRowLastColumnNotTruncated(t *testing.T) {
 	shape, ok := ParseHeader("NAME   AGE")
 	if !ok {
