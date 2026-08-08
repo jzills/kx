@@ -205,6 +205,24 @@ func TestTopCommandRoutesNodesToken(t *testing.T) {
 	}
 }
 
+// An explicit "pods" token must be stripped exactly like "nodes" is — not
+// left in extraArgs, where it would reach kubectl as a pod-name filter
+// (`kubectl top pods pods`, which 404s) instead of a resource type.
+func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"pods"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("output = %q, want the Pods caption", sink.String())
+	}
+	if joinArgs(kube.calls[0]) != "top pods" {
+		t.Errorf("args = %q, want \"top pods\" (no leftover \"pods\" positional)", joinArgs(kube.calls[0]))
+	}
+}
+
 func TestTopPageRowsParsesIndexedTable(t *testing.T) {
 	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
 		"  1    web-1    5m           12%     64Mi             80%   \n"

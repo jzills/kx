@@ -124,17 +124,24 @@ func newTopCommand(services Services) *cobra.Command {
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
 			// A leading non-flag token names the resource type, mirroring
-			// how `kx get`/`kx <kind>` resolve kind shorthands. Anything
-			// that doesn't resolve to Node (including no token at all)
-			// falls through to the pods path unchanged, exactly as it
-			// worked before this resource argument existed.
+			// how `kx get`/`kx <kind>` resolve kind shorthands. A
+			// recognized Pod or Node shorthand is consumed either way —
+			// `kx top pods` must strip "pods" the same way `kx top nodes`
+			// strips "nodes", or it leaks through to kubectl as a pod-name
+			// filter instead of a resource type. Anything else (including
+			// no token at all) falls through to the pods path completely
+			// unchanged, exactly as it worked before this argument existed.
 			nodes := false
 			topArg := ""
-			if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") &&
-				kinds.Normalize(rest[0]) == kinds.Node {
-				nodes = true
-				topArg = "nodes"
-				rest = rest[1:]
+			if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+				switch kinds.Normalize(rest[0]) {
+				case kinds.Node:
+					nodes = true
+					topArg = "nodes"
+					rest = rest[1:]
+				case kinds.Pod:
+					rest = rest[1:]
+				}
 			}
 
 			command := TopCommand{
