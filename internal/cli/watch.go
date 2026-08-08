@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -98,11 +97,6 @@ func removeString(list []string, s string) []string {
 	return out
 }
 
-// watchThrottle caps how often a burst of watch events triggers a redraw —
-// well under human perception (~10/sec), so an initial ADDED burst for an
-// existing namespace doesn't flicker while updates still feel live.
-const watchThrottle = 100 * time.Millisecond
-
 // watchNamespace resolves the caption namespace for a watch listing: "all
 // namespaces" for -A (rows there are keyed by NAMESPACE/NAME, not scoped to
 // one), the explicit -n/--namespace value if given, or the current
@@ -137,13 +131,13 @@ func runWatch(services Services, resource string, extra []string) error {
 	var displayHeaders []string
 	rows := newWatchRows()
 	lines := 0
-	lastDraw := time.Time{}
 
-	redraw := func(force bool) {
-		if !force && time.Since(lastDraw) < watchThrottle {
-			return
-		}
-		lastDraw = time.Now()
+	// Redraws on every event rather than throttling: Watch's callback is
+	// synchronous and there is no other trigger to catch up later, so a
+	// throttle that skips a redraw can leave the screen stuck on a stale
+	// frame indefinitely once the cluster goes quiet — exactly what "the
+	// initial ADDED burst only shows one row" turned out to be.
+	redraw := func() {
 		lines = render.RedrawTable(displayHeaders, rows.Snapshot(), lines,
 			kinds.PluralDisplay(resource), namespace, "watching")
 	}
@@ -162,11 +156,8 @@ func runWatch(services Services, resource string, extra []string) error {
 			return nil
 		}
 		rows.Apply(shape, shape.Row(line))
-		redraw(false)
+		redraw()
 		return nil
 	})
-	if displayHeaders != nil {
-		redraw(true)
-	}
 	return err
 }

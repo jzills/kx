@@ -218,6 +218,18 @@ func styledColumnsAndCells(headers []string, rows [][]string) ([]Column, [][]Cel
 	return columns, cells
 }
 
+// enableNameFlex marks the NAME column to shrink and ellipsize rather than
+// let a row wider than the terminal wrap onto a second physical line.
+// RedrawTable's \x1b[NA cursor-up math assumes exactly one physical line
+// per printed row; a wrapped row breaks that assumption, so the next
+// frame's clear lands short and leaves stale fragments of the previous
+// frame interleaved with the new one. No-op if there is no NAME column.
+func enableNameFlex(headers []string, columns []Column) {
+	if idx := indexOf(headers, "NAME"); idx >= 0 && idx < len(columns) {
+		columns[idx].Flex = true
+	}
+}
+
 // RedrawTable clears the previous frame (previousLines, if any) and reprints
 // a caption plus a themed table built from headers/rows the same way
 // IndexedTable renders a snapshot listing, returning the new line count for
@@ -239,6 +251,7 @@ func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines 
 		fmt.Fprintf(r.out, "\x1b[%dA\x1b[J", previousLines)
 	}
 	columns, cells := styledColumnsAndCells(headers, rows)
+	enableNameFlex(headers, columns)
 	r.Caption(captionParts...)
 	r.Table(columns, cells)
 	return 2 + len(cells) // caption line + header line + one per body row

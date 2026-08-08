@@ -56,3 +56,29 @@ func TestRedrawTableNoopOffTerminal(t *testing.T) {
 		t.Errorf("lines = %d, want 0", lines)
 	}
 }
+
+// RedrawTable's \x1b[NA cursor-up math assumes exactly one physical
+// terminal line per printed row. A row wider than the terminal wraps onto a
+// second physical line, and the next frame's cursor-up then lands short,
+// leaving stale fragments of the previous frame interleaved with the new
+// one — the NAME column must flex (shrink and ellipsize) instead of letting
+// that happen, the same mechanism fitFlexColumn already provides for any
+// other table.
+func TestRedrawTableFlexesNameColumn(t *testing.T) {
+	columns, _ := styledColumnsAndCells([]string{"NAME", "STATUS"}, [][]string{{"a", "Running"}})
+	enableNameFlex([]string{"NAME", "STATUS"}, columns)
+	if !columns[0].Flex {
+		t.Error("NAME column should be Flex")
+	}
+	if columns[1].Flex {
+		t.Error("STATUS column should not be Flex")
+	}
+}
+
+func TestRedrawTableFlexNoNameColumnIsNoop(t *testing.T) {
+	columns, _ := styledColumnsAndCells([]string{"FOO"}, [][]string{{"a"}})
+	enableNameFlex([]string{"FOO"}, columns) // must not panic
+	if columns[0].Flex {
+		t.Error("no NAME column present, nothing should be flexed")
+	}
+}
