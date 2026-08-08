@@ -337,10 +337,15 @@ func newRolloutCommand(services Services) *cobra.Command {
 
 func newPortForwardCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:                "port-forward <index> <port> [kubectl flags]",
-		Short:              "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
-		Example:            "  kx port-forward 1 8080:80",
-		Args:               cobra.MinimumNArgs(2),
+		Use:     "port-forward <index> <port> [kubectl flags]",
+		Short:   "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
+		Example: "  kx port-forward 1 8080:80",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, before passthrough can pull --help out of it —
+		// `kx port-forward --help` is a single argument, which used to fail
+		// a MinimumNArgs(2) gate before RunE ever saw it. The real "need an
+		// index and a port" check happens below, once passthrough has
+		// already resolved --help.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -366,7 +371,12 @@ func newCopyCommand(services Services) *cobra.Command {
 		Short: "Copy files to or from an indexed pod via kubectl cp.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
 			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
-		Args:               cobra.MinimumNArgs(2),
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, before passthrough can pull --help out of it —
+		// `kx cp --help` is a single argument, which would fail a
+		// MinimumNArgs(2) gate before RunE ever saw it. The real "need a
+		// source and a destination" check happens below, once passthrough
+		// has already resolved --help.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
