@@ -69,8 +69,8 @@ type ScanPage struct {
 // provenance.
 type TreePage struct {
 	Meta
-	// Scope is the muted caption line above the tree, e.g. "Namespace/prod",
-	// "Deployment/web · prod", or "all namespaces" — the same text
+	// Scope is the muted caption line above the tree, e.g. "Namespace · prod",
+	// "Deployment/web · prod", or "Namespace · all namespaces" — the same text
 	// render.Banner/render.ScopeBanner already printed to the terminal just
 	// above render.Tree, so the two must not read differently.
 	Scope string
