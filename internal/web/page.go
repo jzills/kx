@@ -81,6 +81,31 @@ type TreePage struct {
 	Roots         []*tree.Node
 }
 
+// TopPage is one kx top listing — pods (default) or nodes — rendered as a
+// page.
+//
+// Unlike DiagPage/ScanPage/TreePage, there is no richer domain struct
+// behind it (no diagnostics.Report/scanner.ImageScan equivalent): the
+// kubectl table text TopCommand already produces is the whole of the data,
+// so Rows is built directly from that text (see topPageRows in
+// internal/cli) rather than converted here from an intermediate type — the
+// way diagRows/scanImageRows/treeRows convert for the other three pages.
+type TopPage struct {
+	Meta
+	Scope string
+	Rows  []TopRow
+}
+
+// TopRow is one pod's or node's usage. Index is 0 for the -A pods listing,
+// which stays unindexed — the same "unset" convention DiagRow.Index uses
+// for -A mode.
+type TopRow struct {
+	Index          int
+	Name           string
+	CPU, Memory    string
+	CPUPct, MemPct Usage
+}
+
 // Segment is one band of the stacked severity bar.
 type Segment struct {
 	Class string
@@ -142,6 +167,14 @@ func usageOf(used, limit *resource.Quantity, kind string) Usage {
 		return Usage{}
 	}
 	pct := int(used.MilliValue() * 100 / limit.MilliValue())
+	return NewUsage(pct, kind)
+}
+
+// NewUsage builds a page-ready usage percentage from an already-known pct —
+// for callers (like kx top's row conversion, which parses percentages out
+// of kubectl's own table text) that have a percentage already, rather than
+// computing one from a quantity pair the way usageOf does.
+func NewUsage(pct int, kind string) Usage {
 	return Usage{Known: true, Pct: pct, Class: styleClass(render.UsageStyle(pct, kind))}
 }
 
@@ -413,4 +446,8 @@ var funcs = template.FuncMap{
 	"scanFindingRowsJSON": func(images []scanner.ImageScan) template.JS { return marshalJS(scanFindingRows(images)) },
 	"treeRowsJSON":        func(root *tree.Node) template.JS { return marshalJS([]TreeRow{treeRows(root)}) },
 	"treeRootRowsJSON":    func(roots []*tree.Node) template.JS { return marshalJS(treeRootRows(roots)) },
+	// Unlike the other *RowsJSON funcs, this is a plain marshal with no
+	// private converter behind it — TopRow already is the view type, built
+	// in internal/cli (see TopPage's doc comment above).
+	"topRowsJSON": func(rows []TopRow) template.JS { return marshalJS(rows) },
 }

@@ -1107,3 +1107,75 @@ func TestRenderTreeIsByteStable(t *testing.T) {
 		t.Error("two renders of the same page produced different bytes")
 	}
 }
+
+func decodeTopRows(t *testing.T, html string) []TopRow {
+	t.Helper()
+	var rows []TopRow
+	raw := extractJSONScript(t, html, "kx-top-data")
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("could not decode top JSON payload: %v\nraw: %s", err, raw)
+	}
+	return rows
+}
+
+func TestRenderTopRendersRowsAndScope(t *testing.T) {
+	page := TopPage{
+		Meta:  testMeta(t),
+		Scope: "Pods · prod",
+		Rows: []TopRow{
+			{Index: 1, Name: "web-1", CPU: "5m", Memory: "64Mi",
+				CPUPct: NewUsage(12, "cpu"), MemPct: NewUsage(80, "memory")},
+		},
+	}
+	out, err := RenderTop(page)
+	if err != nil {
+		t.Fatalf("RenderTop returned %v", err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "Pods · prod") {
+		t.Error("scope caption missing")
+	}
+	rows := decodeTopRows(t, html)
+	if len(rows) != 1 || rows[0].Name != "web-1" {
+		t.Fatalf("rows did not round-trip: %+v", rows)
+	}
+	if !rows[0].MemPct.Known || rows[0].MemPct.Pct != 80 {
+		t.Errorf("MemPct = %+v, want Known with Pct 80", rows[0].MemPct)
+	}
+	if rows[0].MemPct.Class == "" {
+		t.Errorf("MemPct.Class is empty, want a severity class for 80%%")
+	}
+}
+
+// Unlike RenderDiag/RenderScan, RenderTop binds no clock-derived state (no
+// "age" is used on a top page), so two renders of the same page value must
+// produce identical bytes with no time-travel setup needed to prove it —
+// the same guarantee TestRenderTreeIsByteStable pins for RenderTree.
+func TestRenderTopIsByteStable(t *testing.T) {
+	page := TopPage{
+		Meta: testMeta(t), Scope: "Nodes · default",
+		Rows: []TopRow{{Index: 1, Name: "node-a", CPU: "196m", Memory: "1864Mi",
+			CPUPct: NewUsage(1, "cpu"), MemPct: NewUsage(24, "memory")}},
+	}
+	first, err := RenderTop(page)
+	if err != nil {
+		t.Fatalf("RenderTop returned %v", err)
+	}
+	second, err := RenderTop(page)
+	if err != nil {
+		t.Fatalf("RenderTop returned %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("two renders of the same page produced different bytes")
+	}
+}
+
+func TestNewUsageIsAlwaysKnown(t *testing.T) {
+	// Sanity check that NewUsage always reports Known (it takes an
+	// already-computed percentage, unlike usageOf which can return an
+	// unknown Usage{} when the limit itself is missing).
+	u := NewUsage(50, "cpu")
+	if !u.Known || u.Pct != 50 {
+		t.Errorf("NewUsage(50, cpu) = %+v, want Known with Pct 50", u)
+	}
+}
