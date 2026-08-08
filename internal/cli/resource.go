@@ -256,7 +256,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("Logs are not supported for '%s'.", kind)
+		return fmt.Errorf("logs are not supported for '%s'.", kind)
 	}
 }
 

@@ -322,5 +322,9 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
 	cmd.Flags().BoolP("yes", "y", false,
 		"Skip the confirmation prompt for a namespace-wide --decode")
+	// Pure kubectl passthrough, parsed by hand like every other flag here —
+	// registered only so they appear in --help instead of vanishing.
+	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
 	return cmd
 }

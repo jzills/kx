@@ -454,12 +454,16 @@ func TestLogsForWorkloadWithoutSelectorFails(t *testing.T) {
 	}
 }
 
+// Message casing matches its four siblings ("scale/rollout/port-forward/scan
+// is not supported for '%s'.") rather than standing out as the one
+// capitalized "Logs are not supported...".
 func TestLogsRejectsUnsupportedKind(t *testing.T) {
 	err := LogsCommand{
 		Kubectl: &recordingKubectl{}, State: workload("cm", kinds.ConfigMap), Status: noStatus,
 	}.Execute(1, nil)
-	if err == nil {
-		t.Fatal("read logs from a ConfigMap, want an error")
+	want := "logs are not supported for 'ConfigMap'."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
 

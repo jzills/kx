@@ -224,3 +224,15 @@ func TestTopPrefersAnExplicitNamespace(t *testing.T) {
 			kubectl.namespaceCalls)
 	}
 }
+
+// -n/-A are pure kubectl passthrough, parsed by hand, but were never
+// registered so they vanished from --help despite being the most-used flags
+// on this command.
+func TestTopRegistersNamespaceFlags(t *testing.T) {
+	cmd := newTopCommand(Services{})
+	for _, name := range []string{"namespace", "all-namespaces"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
