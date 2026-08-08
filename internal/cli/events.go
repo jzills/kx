@@ -117,5 +117,9 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
+	// Pure kubectl passthrough, parsed by hand like every other flag here —
+	// registered only so they appear in --help instead of vanishing.
+	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
 	return cmd
 }
