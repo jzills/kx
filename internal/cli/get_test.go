@@ -21,6 +21,12 @@ type fakeKubectl struct {
 	err       error
 	args      []string
 	namespace string
+	// watchLines is fed to onLine, one call per entry, when Watch runs.
+	watchLines []string
+	// watchArgs records the args Watch was called with.
+	watchArgs []string
+	// watchErr is returned by Watch after watchLines is exhausted.
+	watchErr error
 }
 
 func (f *fakeKubectl) Run(args []string) (string, error) {
@@ -29,7 +35,17 @@ func (f *fakeKubectl) Run(args []string) (string, error) {
 }
 func (f *fakeKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
 func (f *fakeKubectl) Probe([]string) int                         { return 0 }
-func (f *fakeKubectl) CurrentContext() string                     { return "test-context" }
+
+func (f *fakeKubectl) Watch(args []string, onLine func(string) error) error {
+	f.watchArgs = args
+	for _, line := range f.watchLines {
+		if err := onLine(line); err != nil {
+			return err
+		}
+	}
+	return f.watchErr
+}
+func (f *fakeKubectl) CurrentContext() string { return "test-context" }
 func (f *fakeKubectl) CurrentNamespace() string {
 	if f.namespace != "" {
 		return f.namespace

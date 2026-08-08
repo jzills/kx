@@ -64,6 +64,11 @@ func (k *recordingKubectl) Probe(args []string) int {
 	return k.probeCode
 }
 
+func (k *recordingKubectl) Watch(args []string, onLine func(string) error) error {
+	k.runs = append(k.runs, args)
+	return k.err
+}
+
 func (k *recordingKubectl) CurrentNamespace() string { return "prod" }
 
 func (k *recordingKubectl) CurrentContext() string {

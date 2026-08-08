@@ -33,35 +33,86 @@ func Resolve(state Resolver, index int) (string, error) {
 	return names[index-1], nil
 }
 
-// span is a half-open column range in the header line, measured in runes.
-// end < 0 means end-of-line.
-type span struct {
-	start, end int
+// columnSepRE matches kubectl's real column separator: a run of two or more
+// spaces. A value's own internal spacing ("13 (5h59m ago)") is always
+// single, so splitting on 2+-space runs stays correct per row, unlike
+// slicing at fixed byte offsets derived once from the header: kubectl's
+// `--watch` printer recomputes each row's own column widths independently
+// rather than keeping them pinned to the header, so a later value wider
+// than anything the header saw (STATUS going from "Running" to
+// "Terminating") used to get sliced at the stale offset and spill into the
+// next column.
+var columnSepRE = regexp.MustCompile(`\s{2,}`)
+
+// TableShape is a parsed kubectl table header: column names and the column
+// indexes of NAME, EVENT and NAMESPACE (-1 if absent — EVENT is only
+// present when --output-watch-events was requested, NAMESPACE only when
+// -A/--all-namespaces was).
+type TableShape struct {
+	Headers      []string
+	NameIdx      int
+	EventIdx     int
+	NamespaceIdx int
 }
 
-var columnRE = regexp.MustCompile(`\S+\s*`)
+// ParseHeader splits a kubectl header line into column names, and locates
+// the NAME/EVENT/NAMESPACE columns. Returns ok=false for a header with no
+// NAME column, the same "not indexable" signal parseOutput has always used.
+//
+// Exported so a caller streaming rows one at a time (kx get --watch) can
+// parse the header once and split every following line the same way a
+// complete table would through ParseTable.
+func ParseHeader(header string) (TableShape, bool) {
+	headers := splitColumns(header, -1)
+	if len(headers) == 0 {
+		return TableShape{}, false
+	}
 
-// slice extracts a span from a row.
-//
-// Offsets are rune counts rather than byte counts, because that is the unit
-// kubectl lays its columns out in: its table printer pads with text/tabwriter,
-// which measures cells in runes. A row carrying a multi-byte value keeps its
-// columns at the same rune offsets as the header but at different byte
-// offsets, so byte slicing cuts every column after that value in the wrong
-// place.
-//
-// Rows shorter than the header yield "" past the end, the way Python's slicing
-// did; Go would panic.
-func (s span) slice(row string) string {
-	runes := []rune(row)
-	if s.start >= len(runes) {
-		return ""
+	nameIdx := columnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return TableShape{}, false
 	}
-	end := s.end
-	if end < 0 || end > len(runes) {
-		end = len(runes)
+
+	return TableShape{
+		Headers:      headers,
+		NameIdx:      nameIdx,
+		EventIdx:     columnIndex(headers, "EVENT"),
+		NamespaceIdx: columnIndex(headers, "NAMESPACE"),
+	}, true
+}
+
+func columnIndex(headers []string, name string) int {
+	for i, h := range headers {
+		if h == name {
+			return i
+		}
 	}
-	return strings.TrimSpace(string(runes[s.start:end]))
+	return -1
+}
+
+// splitColumns splits a table line (header or data row) on runs of 2+
+// spaces. n caps the number of pieces the way regexp.Split defines it: the
+// last piece is the unsplit remainder, so a value that legitimately
+// contains its own 2+-space run (unseen in practice, but this is the
+// fallback) still lands whole in the last column rather than being cut
+// further. n < 0 is uncapped, used for the header itself.
+func splitColumns(line string, n int) []string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return nil
+	}
+	return columnSepRE.Split(trimmed, n)
+}
+
+// Row splits one data line into exactly len(s.Headers) fields, padding with
+// "" for a line shorter than the header (Python's slicing did this; Go
+// indexing would panic without it).
+func (s TableShape) Row(line string) []string {
+	cols := splitColumns(line, len(s.Headers))
+	for len(cols) < len(s.Headers) {
+		cols = append(cols, "")
+	}
+	return cols
 }
 
 // parseOutput splits kubectl table output into headers, rows and the position
@@ -73,54 +124,18 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 		return nil, nil, 0
 	}
 
-	header := lines[0]
-	// FindAllStringIndex reports byte offsets; the spans are kept in runes so
-	// they line up with rows that carry multi-byte values. Headers are ASCII in
-	// every table kubectl prints, so this conversion is a no-op in practice —
-	// it is the rows that diverge.
-	matches := columnRE.FindAllStringIndex(header, -1)
-	spans := make([]span, 0, len(matches))
-	for _, m := range matches {
-		spans = append(spans, span{
-			start: utf8.RuneCountInString(header[:m[0]]),
-			end:   utf8.RuneCountInString(header[:m[1]]),
-		})
-	}
-	if len(spans) == 0 {
-		return nil, nil, 0
-	}
-	// kubectl doesn't pad a table's last column with trailing spaces, so its
-	// span (derived from the header word's own width) can be narrower than a
-	// data row's actual value in that column. Extend it to end-of-line so
-	// wider values aren't sliced off.
-	spans[len(spans)-1].end = -1
-
-	for _, s := range spans {
-		headers = append(headers, s.slice(header))
-	}
-
-	nameIdx = -1
-	for i, h := range headers {
-		if h == "NAME" {
-			nameIdx = i
-			break
-		}
-	}
-	if nameIdx < 0 {
+	shape, ok := ParseHeader(lines[0])
+	if !ok {
 		return nil, nil, 0
 	}
 
-	for _, row := range lines[1:] {
-		if strings.TrimSpace(row) == "" {
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		cols := make([]string, 0, len(spans))
-		for _, s := range spans {
-			cols = append(cols, s.slice(row))
-		}
-		rows = append(rows, cols)
+		rows = append(rows, shape.Row(line))
 	}
-	return headers, rows, nameIdx
+	return shape.Headers, rows, shape.NameIdx
 }
 
 // cellWidth measures a cell the way kubectl's own table printer does — in
