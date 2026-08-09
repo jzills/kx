@@ -166,8 +166,10 @@ namespace in one call, `-n` included — it confirms first unless you pass
 `kx scan <index>` scans the unique container images of an indexed workload
 (init containers and CronJob job templates included); bare `kx scan` sweeps
 every workload in the namespace. Results come back as a severity summary,
-or the full per-image CVE report with `--full`. Requires
-[Docker Scout](https://docs.docker.com/scout/).
+or the full per-image CVE report with `--full`. Requires the CLI for the
+selected engine — [Docker Scout](https://docs.docker.com/scout/) by
+default, or [Trivy](https://trivy.dev/) via `kx engine trivy` (see
+[Configuration](#configuration)).
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
