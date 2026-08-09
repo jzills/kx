@@ -100,8 +100,13 @@ type TopPage struct {
 // which stays unindexed — the same "unset" convention DiagRow.Index uses
 // for -A mode.
 type TopRow struct {
-	Index          int
-	Name           string
+	Index int
+	Name  string
+	// Namespace is empty in single-namespace mode (no NAMESPACE column to
+	// read it from) — the grid only shows this column when at least one
+	// row actually has one, matching the -A-only NAMESPACE column
+	// kubectl top pods -A's own terminal output already has.
+	Namespace      string
 	CPU, Memory    string
 	CPUPct, MemPct Usage
 }

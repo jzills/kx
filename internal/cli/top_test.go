@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -204,6 +205,26 @@ func TestTopCommandDefaultsToPods(t *testing.T) {
 	}
 }
 
+// Matches kx get -A's own caption override (getbody.go): with many
+// namespaces spanned, there is no single one to name in the caption.
+func TestTopCommandAllNamespacesCaptionSaysAllNamespaces(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"-A"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "all namespaces") {
+		t.Errorf("output = %q, want the \"all namespaces\" caption", sink.String())
+	}
+	if strings.Contains(sink.String(), "· prod ·") {
+		t.Errorf("output = %q, want no single namespace named in the caption", sink.String())
+	}
+	if !strings.Contains(sink.String(), render.AllNamespacesNote) {
+		t.Errorf("output = %q, want the all-namespaces note explaining no indexes", sink.String())
+	}
+}
+
 func TestTopCommandRoutesNodesToken(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{nodesOutput}}
 	cmd := newTopCommand(topServices(t, kube))
@@ -271,6 +292,37 @@ func TestTopPageRowsHandlesTableWithNoIndexOrPercentColumns(t *testing.T) {
 	}
 	if rows[0].CPUPct.Known || rows[0].MemPct.Known {
 		t.Errorf("CPUPct/MemPct = %+v/%+v, want both unknown", rows[0].CPUPct, rows[0].MemPct)
+	}
+}
+
+// The -A grid needs its own Namespace per row to disambiguate same-named
+// pods across namespaces — the same reason podLimits/withUsagePercentages
+// key by namespace/name instead of bare name.
+func TestTopPageRowsPopulatesNamespaceFromTheNamespaceColumn(t *testing.T) {
+	indexed := "NAMESPACE     NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"prod          web-1    5m           1%      64Mi             50%   \n" +
+		"staging       web-1    3m           0%      32Mi             12%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0].Namespace != "prod" || rows[1].Namespace != "staging" {
+		t.Errorf("namespaces = %q, %q, want prod, staging", rows[0].Namespace, rows[1].Namespace)
+	}
+}
+
+// The single-namespace case has no NAMESPACE column at all — Namespace
+// stays empty rather than defaulting to something misleading, and the grid
+// only shows the column when at least one row actually has one.
+func TestTopPageRowsLeavesNamespaceEmptyWithoutANamespaceColumn(t *testing.T) {
+	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"  1    web-1    5m           12%     64Mi             80%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].Namespace != "" {
+		t.Errorf("Namespace = %q, want empty (no NAMESPACE column in single-namespace mode)", rows[0].Namespace)
 	}
 }
 

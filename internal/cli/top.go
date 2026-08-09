@@ -330,6 +330,7 @@ func topPageRows(indexed string) []web.TopRow {
 		return nil
 	}
 	indexIdx := indexOfHeader(headers, "X")
+	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
 	cpuIdx := indexOfHeader(headers, "CPU(cores)")
 	memIdx := indexOfHeader(headers, "MEMORY(bytes)")
 	cpuPctIdx := indexOfHeader(headers, "CPU%")
@@ -342,6 +343,9 @@ func topPageRows(indexed string) []web.TopRow {
 			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
 				pageRow.Index = n
 			}
+		}
+		if namespaceIdx >= 0 {
+			pageRow.Namespace = row[namespaceIdx]
 		}
 		if cpuIdx >= 0 {
 			pageRow.CPU = row[cpuIdx]

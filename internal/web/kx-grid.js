@@ -609,21 +609,31 @@
     var data = kxData("kx-top-data");
     if (!data) return;
 
+    var columns = [
+      {
+        // "X", matching every other indexed listing in kx.
+        title: "X", field: "Index", width: 72, hozAlign: "right",
+        formatter: function (cell) { var v = cell.getValue(); return v > 0 ? String(v) : ""; },
+      },
+      { title: "Name", field: "Name", widthGrow: 3, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" },
+      { title: "CPU", field: "CPU", width: 100 },
+      { title: "CPU%", field: "CPUPct", width: 90, hozAlign: "right", formatter: usagePctFormatter("CPUPct") },
+      { title: "Memory", field: "Memory", width: 110 },
+      { title: "MEM%", field: "MemPct", width: 90, hozAlign: "right", formatter: usagePctFormatter("MemPct") },
+    ];
+    // Namespace only exists on a -A listing (single-namespace mode has no
+    // NAMESPACE column to populate it from, so every row's field is empty
+    // there) — the column only earns its place when it would actually say
+    // something.
+    var hasNamespace = data.some(function (row) { return !!row.Namespace; });
+    if (hasNamespace) {
+      columns.splice(1, 0, { title: "Namespace", field: "Namespace", width: 140, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" });
+    }
+
     new Tabulator(mount, {
       data: data,
       layout: "fitColumns",
-      columns: [
-        {
-          // "X", matching every other indexed listing in kx.
-          title: "X", field: "Index", width: 72, hozAlign: "right",
-          formatter: function (cell) { var v = cell.getValue(); return v > 0 ? String(v) : ""; },
-        },
-        { title: "Name", field: "Name", widthGrow: 3, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" },
-        { title: "CPU", field: "CPU", width: 100 },
-        { title: "CPU%", field: "CPUPct", width: 90, hozAlign: "right", formatter: usagePctFormatter("CPUPct") },
-        { title: "Memory", field: "Memory", width: 110 },
-        { title: "MEM%", field: "MemPct", width: 90, hozAlign: "right", formatter: usagePctFormatter("MemPct") },
-      ],
+      columns: columns,
     });
   }
 
