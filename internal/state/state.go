@@ -477,6 +477,14 @@ func (s *Service) Drop(position int) (History, error) {
 	return history, nil
 }
 
+// DropAll clears the entire on-disk state — the navigation stack and the
+// namespace/context slots together — resetting to what a fresh install has.
+// Unlike Drop, which refuses to remove the last remaining entry, DropAll has
+// no such guard: clearing everything is the point.
+func (s *Service) DropAll() error {
+	return s.saveHistory(History{})
+}
+
 // Fields resolves an index to the resource it names, plus its namespace and kind.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
 	current, err := s.Load()
