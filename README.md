@@ -238,6 +238,7 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
 | `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
+| `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`). |
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
 
