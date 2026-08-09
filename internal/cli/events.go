@@ -148,24 +148,34 @@ func newTopCommand(services Services) *cobra.Command {
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 			}
 			resourceLabel := "pods"
+			scopedAllNamespaces := false
+			note := ""
 			var output, namespace string
 			if nodes {
 				resourceLabel = "nodes"
 				output, namespace, err = command.ExecuteNodes(rest)
 			} else {
+				scopedAllNamespaces = allNamespaces(rest)
 				output, namespace, err = command.Execute(match, rest, noLimits)
+				if scopedAllNamespaces {
+					// Matches kx get -A's own caption override (getbody.go):
+					// many namespaces span the listing, so there is no
+					// single one to name.
+					namespace = "all namespaces"
+					note = render.AllNamespacesNote
+				}
 			}
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resourceLabel, namespace, "")
+			render.IndexedTable(output, resourceLabel, namespace, note)
 			if !htmlOpts.Enabled {
 				return nil
 			}
 
 			label := kinds.PluralDisplay(resourceLabel)
 			meta, err := pageMeta(services.Config.Theme, "kx top · "+label,
-				invocation("top", topArg, portFlag(port)))
+				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), portFlag(port)))
 			if err != nil {
 				return err
 			}
