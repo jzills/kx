@@ -69,9 +69,14 @@ func rootSections(root *cobra.Command) []render.HelpSection {
 }
 
 func commandHelp(cmd *cobra.Command) render.CommandHelp {
+	spec := ParseUse(cmd.Use)
+
 	doc := cmd.Long
 	if doc == "" {
 		doc = cmd.Short
+	}
+	if spec.Passthrough != "" {
+		doc += "\n\nUnrecognized flags are passed through to kubectl."
 	}
 
 	// Use carries the argument spec after the command name; the name itself is

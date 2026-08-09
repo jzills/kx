@@ -172,6 +172,32 @@ func TestHelpSectionCommandsAreAlphabetized(t *testing.T) {
 	}
 }
 
+// Any command whose Use string passes through flags (describe, logs, edit,
+// exec, port-forward, cp, get, secret, scan) gets the note for free from its
+// Use string, rather than a hand-written sentence that can drift out of sync
+// per command.
+func TestCommandHelpNotesKubectlPassthrough(t *testing.T) {
+	passthroughNote := "Unrecognized flags are passed through to kubectl."
+
+	withPassthrough := &cobra.Command{
+		Use:   "describe <index>... [kubectl flags]",
+		Short: "Show full kubectl describe output.",
+	}
+	if !strings.Contains(commandHelp(withPassthrough).Doc, passthroughNote) {
+		t.Errorf("commandHelp(%q).Doc = %q, want it to contain %q",
+			withPassthrough.Use, commandHelp(withPassthrough).Doc, passthroughNote)
+	}
+
+	withoutPassthrough := &cobra.Command{
+		Use:   "scale <index> <replicas>",
+		Short: "Scale an indexed workload.",
+	}
+	if strings.Contains(commandHelp(withoutPassthrough).Doc, passthroughNote) {
+		t.Errorf("commandHelp(%q).Doc = %q, want no passthrough note",
+			withoutPassthrough.Use, commandHelp(withoutPassthrough).Doc)
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
