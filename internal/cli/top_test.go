@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
@@ -35,12 +36,25 @@ const nodesOutput = "NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)\
 	"node-a     196m         1%       1864Mi          24%\n" +
 	"node-b     500m         5%       3200Mi          40%"
 
+// Two different namespaces, same pod name — the exact collision bare-name
+// keying can't handle, and the composite-key fix exists to cover.
+const topAllNamespacesOutput = "NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
+	"prod          web-1    5m           64Mi\n" +
+	"staging       web-1    3m           32Mi"
+
+const allNamespacesPodsJSON = `{"items":[
+  {"metadata":{"name":"web-1","namespace":"prod"},"spec":{"containers":[
+    {"resources":{"limits":{"cpu":"500m","memory":"128Mi"}}}]}},
+  {"metadata":{"name":"web-1","namespace":"staging"},"spec":{"containers":[
+    {"resources":{"limits":{"cpu":"500m","memory":"256Mi"}}}]}}
+]}`
+
 // Two containers, one with limits on both resources and one missing a memory
 // limit, so the summing and the "undefined" rule are both exercised.
 const podsJSON = `{"items":[
-  {"metadata":{"name":"web-1"},"spec":{"containers":[
+  {"metadata":{"name":"web-1","namespace":"prod"},"spec":{"containers":[
     {"resources":{"limits":{"cpu":"500m","memory":"128Mi"}}}]}},
-  {"metadata":{"name":"web-2"},"spec":{"containers":[
+  {"metadata":{"name":"web-2","namespace":"prod"},"spec":{"containers":[
     {"resources":{"limits":{"cpu":"500m","memory":"256Mi"}}},
     {"resources":{"limits":{"cpu":"500m"}}}]}}
 ]}`
@@ -381,19 +395,61 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 }
 
 // Names aren't unique across namespaces, so -A output is never indexed.
+// -A is still never indexed or saved to state — names aren't unique across
+// namespaces — even though it now computes percentages same as any other
+// top listing.
 func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
 	states := &fakeState{}
 	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
 		Execute("", []string{"-A"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if output != topOutput {
+	headers, _, _ := index.ParseTable(output)
+	if indexOfHeader(headers, "X") >= 0 {
 		t.Errorf("-A output was indexed:\n%s", output)
 	}
 	if len(states.saved) != 0 {
 		t.Errorf("-A saved state, want none")
+	}
+}
+
+func TestTopAllNamespacesGetsPercentagesKeyedByNamespace(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", []string{"-A"}, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// prod/web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
+	if !strings.Contains(output, "1%") || !strings.Contains(output, "50%") {
+		t.Errorf("output missing prod/web-1's percentages:\n%s", output)
+	}
+	// staging/web-1: 3m of 500m = 0%, 32Mi of 256Mi = 12%. Same pod name,
+	// different namespace, different limits — proves the lookup is keyed
+	// by namespace, not just name (bare-name keying would give both rows
+	// whichever limit was inserted into the map last).
+	if !strings.Contains(output, "12%") {
+		t.Errorf("output missing staging/web-1's own percentage (12%%), got same as prod's — composite key not applied:\n%s", output)
+	}
+	if joinArgs(kubectl.calls[1]) != "get pods -A -o json" {
+		t.Errorf("limits call = %q, want \"get pods -A -o json\"", joinArgs(kubectl.calls[1]))
+	}
+}
+
+func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput}}
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", []string{"-A"}, true)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if output != topAllNamespacesOutput {
+		t.Errorf("--no-limits -A output was modified:\n%s", output)
+	}
+	if len(kubectl.calls) != 1 {
+		t.Errorf("kubectl called %d times, want 1 (no limits lookup with --no-limits)", len(kubectl.calls))
 	}
 }
 

@@ -56,8 +56,9 @@ func (c TopCommand) Execute(
 	}
 
 	allNamespaces := allNamespaces(extraArgs)
-	// --containers is a different table shape entirely, and -A is unindexed
-	// anyway, so neither gets percentage columns.
+	// --containers is a different table shape entirely, so it never gets
+	// percentage columns — unlike -A, which does (see withUsagePercentages),
+	// even though it stays unindexed regardless.
 	hasContainers := false
 	for _, arg := range extraArgs {
 		if arg == "--containers" {
@@ -70,8 +71,8 @@ func (c TopCommand) Execute(
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
-	if !allNamespaces && !hasContainers && !noLimits {
-		output, err = c.withUsagePercentages(output, namespace)
+	if !hasContainers && !noLimits {
+		output, err = c.withUsagePercentages(output, namespace, allNamespaces)
 		if err != nil {
 			return "", "", err
 		}
@@ -172,20 +173,22 @@ func relabelPercentColumns(output string) string {
 	return index.Format(table)
 }
 
-// withUsagePercentages appends CPU%/MEM% columns computed against each pod's
-// limits.
-//
-// Only handles `kubectl top pods`' default per-pod shape; the caller filters
-// out the --containers and -A cases before this runs.
-func (c TopCommand) withUsagePercentages(output, namespace string) (string, error) {
+// withUsagePercentages appends CPU%/MEM% columns computed against each
+// pod's limits. When allNamespaces, rows are keyed by their own NAMESPACE
+// column (present in kubectl top pods -A's own output) rather than the
+// single namespace passed in — pod names collide across namespaces, so a
+// bare-name key would silently give two different pods' rows the same
+// limit.
+func (c TopCommand) withUsagePercentages(output, namespace string, allNamespaces bool) (string, error) {
 	headers, rows, nameIdx := index.ParseTable(output)
 	cpuCol := indexOfHeader(headers, "CPU(cores)")
 	memCol := indexOfHeader(headers, "MEMORY(bytes)")
 	if headers == nil || cpuCol < 0 || memCol < 0 {
 		return output, nil
 	}
+	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
 
-	limits, err := c.podLimits(namespace)
+	limits, err := c.podLimits(namespace, allNamespaces)
 	if err != nil {
 		return "", err
 	}
@@ -193,7 +196,11 @@ func (c TopCommand) withUsagePercentages(output, namespace string) (string, erro
 	table := make([][]string, 0, len(rows)+1)
 	table = append(table, append(append([]string{}, headers...), "CPU%", "MEM%"))
 	for _, row := range rows {
-		limit := limits[row[nameIdx]]
+		rowNamespace := namespace
+		if namespaceIdx >= 0 {
+			rowNamespace = row[namespaceIdx]
+		}
+		limit := limits[rowNamespace+"/"+row[nameIdx]]
 		table = append(table, append(append([]string{}, row...),
 			percentCell(row[cpuCol], limit.CPU),
 			percentCell(row[memCol], limit.Memory),
@@ -209,14 +216,26 @@ type podLimit struct {
 	Memory *resource.Quantity
 }
 
-// podLimits sums each resource's limit across a pod's containers, matching how
-// `kubectl top pods` aggregates usage to the pod level.
+// podLimits sums each resource's limit across a pod's containers, matching
+// how `kubectl top pods` aggregates usage to the pod level, for one
+// namespace or (allNamespaces) the whole cluster. Keyed by
+// "namespace/name" in both cases — pod names alone collide across
+// namespaces, so a single shared key shape (rather than a bare-name map
+// for the single-namespace case and a different one for -A) is what lets
+// withUsagePercentages use one lookup expression regardless of scope.
 //
 // A container missing a limit makes that resource undefined for the whole pod:
 // a percentage against a partial denominator would read as healthy headroom
 // when it is nothing of the sort.
-func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
-	raw, err := c.Kubectl.Run([]string{"get", "pods", "-n", namespace, "-o", "json"})
+func (c TopCommand) podLimits(namespace string, allNamespaces bool) (map[string]podLimit, error) {
+	args := []string{"get", "pods"}
+	if allNamespaces {
+		args = append(args, "-A")
+	} else {
+		args = append(args, "-n", namespace)
+	}
+	args = append(args, "-o", "json")
+	raw, err := c.Kubectl.Run(args)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +243,8 @@ func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 			Spec struct {
 				Containers []struct {
@@ -270,7 +290,7 @@ func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
 		if memDefined {
 			entry.Memory = memTotal
 		}
-		limits[item.Metadata.Name] = entry
+		limits[item.Metadata.Namespace+"/"+item.Metadata.Name] = entry
 	}
 	return limits, nil
 }
@@ -301,8 +321,9 @@ func percentCell(usage string, limit *resource.Quantity) string {
 // diag/scan's pages — this table text already is the whole of the data —
 // so this builds web.TopRow directly rather than converting from some
 // intermediate type. Degrades gracefully when a column is absent (the -A
-// pods case has no X or CPU%/MEM% columns): that column's TopRow fields
-// stay at their zero value, which the template/grid render as blank/"—".
+// pods case has no X column, since -A stays unindexed): that column's
+// TopRow fields stay at their zero value, which the template/grid render
+// as blank/"—".
 func topPageRows(indexed string) []web.TopRow {
 	headers, rows, nameIdx := index.ParseTable(indexed)
 	if headers == nil {
