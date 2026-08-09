@@ -121,9 +121,6 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
-| `kx back` | Navigate to the previous kx get result. |
-| `kx drop <position> [--all/-a]` | Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots. |
-| `kx forward` | Navigate to the next kx get result. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 <!-- commands-table-end -->
@@ -222,7 +219,7 @@ listing.
 
 ## State
 
-`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx back`/`kx forward` step through it, and `kx drop <position>` removes one.
+`kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx state back`/`kx state forward` step through it, and `kx state drop <position>` removes one (`kx state drop --all` clears everything, including the namespace/context slots below). The older `kx back`/`kx forward`/`kx drop` spellings still work too.
 
 Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. `kx state --all` summarizes those slots under the history table, and `kx state --targets` expands them to the indexed listings the switch commands read, so you can pick a number without re-listing.
 
