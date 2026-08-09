@@ -33,7 +33,7 @@
   - [Read a Secret in plaintext](#read-a-secret-in-plaintext)
   - [Scan images for vulnerabilities](#scan-images-for-vulnerabilities)
   - [View reports in a browser](#view-reports-in-a-browser)
-- [State](#state)
+- [History](#history)
 - [Configuration](#configuration)
 - [Themes](#themes)
 - [Development](#development)
@@ -217,7 +217,7 @@ listing.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
 </div>
 
-## State
+## History
 
 `kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx state back`/`kx state forward` step through it, and `kx state drop <position>` removes one (`kx state drop --all` clears everything, including the namespace/context slots below). The older `kx back`/`kx forward`/`kx drop` spellings still work too.
 
