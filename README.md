@@ -122,6 +122,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
+| `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 <!-- commands-table-end -->
 

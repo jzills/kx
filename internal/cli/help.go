@@ -28,7 +28,7 @@ var helpSections = []struct {
 		"secret", "top", "tree", "yaml",
 	}},
 	{"History", []string{"state"}},
-	{"Configuration", []string{"theme"}},
+	{"Configuration", []string{"engine", "theme"}},
 }
 
 // installHelp replaces cobra's help output with the themed help screens, for
