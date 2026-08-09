@@ -198,6 +198,27 @@ func TestCommandHelpNotesKubectlPassthrough(t *testing.T) {
 	}
 }
 
+// state gained subcommands in this change; its --help must list them so
+// they're not registered-but-undiscoverable.
+func TestStateHelpListsItsSubcommands(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	stateCmd, _, err := root.Find([]string{"state"})
+	if err != nil {
+		t.Fatalf("root.Find(state): %v", err)
+	}
+	help := commandHelp(stateCmd)
+	var names []string
+	for _, item := range help.Commands {
+		names = append(names, item.Name)
+	}
+	joined := strings.Join(names, " ")
+	for _, want := range []string{"back", "drop", "forward"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("kx state --help Commands = %q, missing %q", joined, want)
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
@@ -209,8 +230,11 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// cobra adds these itself; they aren't part of kx's surface.
-		if name == "help" || name == "completion" {
+		// cobra adds these itself; they aren't part of kx's surface. Hidden
+		// commands are the pre-restructure kx back/forward/drop spellings,
+		// deliberately absent from --help now that kx state back/forward/drop
+		// are canonical — see NewRoot.
+		if name == "help" || name == "completion" || cmd.Hidden {
 			continue
 		}
 		if !listed[name] {

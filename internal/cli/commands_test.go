@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -314,6 +315,71 @@ func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
 		if !strings.Contains(out.String(), tc.want) {
 			t.Errorf("kx state %s output = %q, want %q", tc.flag, out.String(), tc.want)
 		}
+	}
+}
+
+// kx state drop --all clears history and slots after confirming, since it's
+// destructive in a way a single-position drop isn't (that only costs a
+// re-list of one entry; --all also discards the namespace/context slots).
+func TestDropAllConfirmsBeforeClearing(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var prompted string
+	services.Confirm = func(m string) error { prompted = m; return nil }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --all: %v", err)
+	}
+	if prompted == "" {
+		t.Error("kx state drop --all did not prompt for confirmation")
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 0 {
+		t.Errorf("len(States) = %d, want 0 after drop --all", len(history.States))
+	}
+}
+
+// Declining the prompt must clear nothing.
+func TestDropAllAbortsWithoutConfirmation(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	services.Confirm = func(string) error { return errors.New("aborted") }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx state drop --all succeeded despite an aborted confirmation")
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — an aborted drop --all must not clear anything", len(history.States))
 	}
 }
 

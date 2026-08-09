@@ -664,12 +664,31 @@ func newNavigateCommand(services Services, use, short string, delta int) *cobra.
 }
 
 func newDropCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	var all bool
+	cmd := &cobra.Command{
 		Use:     "drop <position>",
-		Short:   "Remove a history entry by position (shown in kx state --all).",
-		Example: "  kx drop 2",
-		Args:    cobra.ExactArgs(1),
+		Short:   "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Example: "  kx state drop 2\n  kx state drop --all",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) > 0 {
+					return fmt.Errorf("drop --all takes no position argument")
+				}
+				if err := services.confirm()(
+					"Clear all kx history, including namespace and context slots?",
+				); err != nil {
+					return err
+				}
+				if err := services.State.DropAll(); err != nil {
+					return err
+				}
+				render.Success("Cleared all history.")
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("drop requires a position, or --all to clear everything")
+			}
 			position, err := parseIndex("position", args[0])
 			if err != nil {
 				return err
@@ -682,4 +701,6 @@ func newDropCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Clear all history and namespace/context slots")
+	return cmd
 }

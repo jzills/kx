@@ -89,11 +89,27 @@ func NewRoot(services Services, version string) *cobra.Command {
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
-	root.AddCommand(withoutRefresh(newStateCommand(services)))
-	root.AddCommand(withoutRefresh(newDropCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1)))
+
+	stateCmd := newStateCommand(services)
+	stateCmd.AddCommand(
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newDropCommand(services),
+	)
+	root.AddCommand(withoutRefresh(stateCmd))
+
+	// kx back/forward/drop predate kx state gaining subcommands. They stay
+	// registered and fully working — just hidden from --help and the README
+	// table — so existing scripts and muscle memory don't break.
+	for _, cmd := range []*cobra.Command{
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newDropCommand(services),
+	} {
+		cmd.Hidden = true
+		root.AddCommand(withoutRefresh(cmd))
+	}
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),

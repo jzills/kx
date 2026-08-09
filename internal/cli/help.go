@@ -2,6 +2,7 @@ package cli
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -26,7 +27,7 @@ var helpSections = []struct {
 		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
 		"secret", "top", "tree", "yaml",
 	}},
-	{"History", []string{"back", "drop", "forward", "state"}},
+	{"History", []string{"state"}},
 	{"Configuration", []string{"theme"}},
 }
 
@@ -88,6 +89,15 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		usage += " [OPTIONS]"
 	}
 
+	var subcommands []render.HelpItem
+	for _, child := range cmd.Commands() {
+		if child.Hidden || child.Name() == "help" {
+			continue
+		}
+		subcommands = append(subcommands, render.HelpItem{Name: child.Name(), Doc: child.Short})
+	}
+	sort.Slice(subcommands, func(i, j int) bool { return subcommands[i].Name < subcommands[j].Name })
+
 	var options []render.HelpItem
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 		if flag.Name == "help" || flag.Hidden {
@@ -111,6 +121,7 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		Path:     cmd.CommandPath(),
 		Doc:      doc,
 		Usage:    usage,
+		Commands: subcommands,
 		Args:     positionalArgs(cmd.Use),
 		Options:  options,
 		Aliases:  cmd.Aliases,

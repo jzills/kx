@@ -77,6 +77,7 @@ type CommandHelp struct {
 	Path     string
 	Doc      string
 	Usage    string
+	Commands []HelpItem
 	Args     []HelpItem
 	Options  []HelpItem
 	Aliases  []string
@@ -93,6 +94,15 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 	}
 	r.Blank()
 	r.line(r.style(theme.Muted, "Usage") + "  " + help.Usage)
+
+	if len(help.Commands) > 0 {
+		r.Blank()
+		r.line(r.style(theme.Header, "Commands"))
+		for _, item := range help.Commands {
+			r.line("  " + r.style(theme.Body, padName(item.Name, 14)) + "  " +
+				r.style(theme.Muted, shortHelp(item.Doc, shortHelpLimit)))
+		}
+	}
 
 	if len(help.Args) > 0 {
 		r.Blank()
