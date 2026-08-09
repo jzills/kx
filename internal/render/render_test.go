@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
 	"github.com/muesli/termenv"
 )
@@ -370,5 +371,25 @@ func TestTableWithoutFlexIsUnconstrained(t *testing.T) {
 	renderer.Table([]Column{{Header: "A"}}, [][]Cell{{Plain(strings.Repeat("y", 300))}})
 	if !strings.Contains(buf.String(), strings.Repeat("y", 300)) {
 		t.Error("a table with no flex column was truncated")
+	}
+}
+
+func TestEngineListMarksTheActiveEngine(t *testing.T) {
+	out := styledCapture(t, "github-dark", func(r *Renderer) { r.EngineList("trivy") })
+	for _, name := range scanner.Names() {
+		if !strings.Contains(out, name) {
+			t.Errorf("engine list is missing %q", name)
+		}
+	}
+	if !strings.Contains(out, "→") {
+		t.Errorf("active engine is not marked: %q", out)
+	}
+}
+
+func TestEngineListPlainWhenNotStyled(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, &buf, "github-dark", false).EngineList("scout")
+	if strings.Contains(buf.String(), esc) {
+		t.Errorf("engine list leaked color into unstyled output: %q", buf.String())
 	}
 }
