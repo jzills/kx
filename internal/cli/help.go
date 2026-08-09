@@ -21,11 +21,12 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"get", "secret", "top", "describe", "events", "logs", "labels", "annotations",
-		"label", "annotate", "yaml", "delete", "edit", "exec", "tree", "rollout",
-		"scale", "scan", "port-forward", "cp", "diagnostic", "namespace", "context",
+		"annotate", "annotations", "context", "cp", "delete", "describe",
+		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
+		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
+		"secret", "top", "tree", "yaml",
 	}},
-	{"History", []string{"state", "drop", "back", "forward"}},
+	{"History", []string{"back", "drop", "forward", "state"}},
 	{"Configuration", []string{"theme"}},
 }
 

@@ -159,6 +159,19 @@ func TestParseUseDetectsRepeatableArgsAndPassthrough(t *testing.T) {
 	}
 }
 
+// Command names inside a section are alphabetized so the listing is scannable
+// without memorizing an editorial order; section titles keep their own order.
+func TestHelpSectionCommandsAreAlphabetized(t *testing.T) {
+	for _, section := range helpSections {
+		for i := 1; i < len(section.Commands); i++ {
+			if section.Commands[i-1] > section.Commands[i] {
+				t.Errorf("section %q: %q comes before %q, not alphabetical",
+					section.Title, section.Commands[i-1], section.Commands[i])
+			}
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
