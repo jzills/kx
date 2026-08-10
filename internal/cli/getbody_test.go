@@ -157,6 +157,44 @@ func TestGetIndexRangeRelist(t *testing.T) {
 	}
 }
 
+// A kubectl flag value can legitimately contain ".." — JSONPath's recursive
+// descent, e.g. -o jsonpath={..metadata.name} — and must reach kubectl
+// untouched rather than being mistaken for a range token. Range/int
+// recognition is restricted to the leading run specifically so a value like
+// this, which never leads, is never inspected for it.
+func TestGetPassesThroughDoubleDotFlagValues(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", []string{"-o", "jsonpath={..metadata.name}"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	want := []string{"get", "pods", "-o", "jsonpath={..metadata.name}"}
+	if joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+}
+
+// Indexes only lead; one after a kubectl flag is no longer special-cased and
+// reaches kubectl as a literal positional the way any other non-index token
+// does — the flip side of TestGetPassesThroughDoubleDotFlagValues, and the
+// only way to stop scanning every argument for something index-shaped
+// without also mistaking a flag's own value for one.
+func TestGetIndexAfterFlagIsNotResolved(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", []string{"-n", "prod", "3"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	want := []string{"get", "pods", "-n", "prod", "3"}
+	if joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+}
+
 // An indexed argument still resolves to a name before the watch flag routes
 // to the live table, so `kx get pods 1 --watch` watches the right pod.
 func TestGetWatchResolvesIndexFirst(t *testing.T) {

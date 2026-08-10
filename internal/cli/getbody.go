@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -31,21 +30,20 @@ const allNamespacesNote = render.AllNamespacesNote
 // checked against the requested kind, and scoped to the namespace they were
 // listed in.
 func runGet(services Services, resource string, args []string, options getOptions) error {
+	// Indexes lead, kubectl's flags follow — the same split describe/logs use
+	// (splitLeadingIndexes), rather than scanning every argument for
+	// something index-shaped. A kubectl flag value can legitimately contain
+	// ".." (JSONPath's recursive descent, e.g. -o jsonpath={..metadata.name}),
+	// and a scan-anywhere loop that expanded it as a range broke that
+	// passthrough outright instead of erroring or ignoring it.
+	indexArgs, extra := splitLeadingIndexes(args)
 	var indexes []int
-	var extra []string
-	for _, arg := range args {
-		if index, err := strconv.Atoi(arg); err == nil {
-			indexes = append(indexes, index)
-			continue
+	if len(indexArgs) > 0 {
+		var err error
+		indexes, err = parseIndexes("indexes", indexArgs)
+		if err != nil {
+			return err
 		}
-		if expanded, ok, err := expandRange("indexes", arg); ok {
-			if err != nil {
-				return err
-			}
-			indexes = append(indexes, expanded...)
-			continue
-		}
-		extra = append(extra, arg)
 	}
 
 	// Contexts live in kubeconfig, not on the server, so kubectl rejects
