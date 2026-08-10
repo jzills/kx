@@ -447,7 +447,7 @@ func GetEngine(name string) (Engine, error) {
 			names = append(names, known)
 		}
 		sort.Strings(names)
-		return nil, fmt.Errorf("unknown engine '%s'. Available engines: %s.",
+		return nil, fmt.Errorf("Unknown engine '%s'. Available engines: %s.",
 			name, strings.Join(names, ", "))
 	}
 	return engine, nil

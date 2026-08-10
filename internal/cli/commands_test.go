@@ -435,7 +435,7 @@ func TestDropAllConfirmsBeforeClearing(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services)
+	cmd := newDropCommand(services, "kx state drop")
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kx state drop --all: %v", err)
@@ -467,7 +467,7 @@ func TestDropAllAbortsWithoutConfirmation(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services)
+	cmd := newDropCommand(services, "kx state drop")
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("kx state drop --all succeeded despite an aborted confirmation")

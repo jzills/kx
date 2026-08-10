@@ -96,7 +96,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	stateCmd.AddCommand(
 		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
 		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
-		newDropCommand(services),
+		newDropCommand(services, "kx state drop"),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
 
@@ -106,7 +106,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	for _, cmd := range []*cobra.Command{
 		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
 		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
-		newDropCommand(services),
+		newDropCommand(services, "kx drop"),
 	} {
 		cmd.Hidden = true
 		root.AddCommand(withoutRefresh(cmd))
