@@ -98,10 +98,35 @@ var pluralDisplay = map[Kind]string{
 	Context:                 "Contexts",
 }
 
+// ShorthandSource resolves a spelling kindMap does not recognize, such as a
+// CRD's shortName. Injected so this package stays free of a discovery/
+// client-go dependency — see internal/discovery.Source, the production
+// implementation. A nil source (the default) means no fallback: identical
+// to today's behavior.
+type ShorthandSource interface {
+	Resolve(spelling string) (kind Kind, plural string, ok bool)
+}
+
+var shorthandSource ShorthandSource
+
+// SetShorthandSource installs the fallback consulted when kindMap misses.
+// Called once, from root.go, before any command runs. Passing nil removes
+// any previously installed source.
+func SetShorthandSource(source ShorthandSource) {
+	shorthandSource = source
+}
+
 // IsKindSpelling reports whether token names a known resource type.
 func IsKindSpelling(token string) bool {
-	_, ok := kindMap[strings.ToLower(token)]
-	return ok
+	if _, ok := kindMap[strings.ToLower(token)]; ok {
+		return true
+	}
+	if shorthandSource != nil {
+		if _, _, ok := shorthandSource.Resolve(token); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Normalize maps a kubectl resource type onto its canonical kind, passing
@@ -109,6 +134,11 @@ func IsKindSpelling(token string) bool {
 func Normalize(resourceType string) Kind {
 	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
 		return kind
+	}
+	if shorthandSource != nil {
+		if kind, _, ok := shorthandSource.Resolve(resourceType); ok {
+			return kind
+		}
 	}
 	return Kind(resourceType)
 }
@@ -121,6 +151,11 @@ func PluralDisplay(resourceType string) string {
 			return plural
 		}
 		return string(kind) + "s"
+	}
+	if shorthandSource != nil {
+		if _, plural, ok := shorthandSource.Resolve(resourceType); ok && plural != "" {
+			return plural
+		}
 	}
 	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
 	// It is still named by its canonical kind in captions and errors.
