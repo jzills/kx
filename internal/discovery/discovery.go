@@ -17,6 +17,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/kinds"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,4 +99,49 @@ func buildLookup(lists []*metav1.APIResourceList, err error) (
 		}
 	}
 	return shorthands, plurals, true
+}
+
+// Source implements kinds.ShorthandSource by reading kubectl's on-disk
+// discovery cache. The lookup is built once per process, on first use — a
+// kx invocation that never types an unrecognized spelling pays no cost from
+// this package at all.
+type Source struct {
+	once       sync.Once
+	shorthands map[string]kinds.Kind
+	plurals    map[kinds.Kind]string
+}
+
+// NewSource returns a Source ready to install via kinds.SetShorthandSource.
+func NewSource() *Source {
+	return &Source{}
+}
+
+// Resolve implements kinds.ShorthandSource.
+func (s *Source) Resolve(spelling string) (kinds.Kind, string, bool) {
+	s.once.Do(s.load)
+	kind, ok := s.shorthands[strings.ToLower(spelling)]
+	if !ok {
+		return "", "", false
+	}
+	return kind, s.plurals[kind], true
+}
+
+// load populates the lookup tables. Any failure (no kubeconfig, no cache
+// directory, a hard discovery error) leaves both maps empty — Resolve then
+// simply never matches anything, identical to no source being installed.
+func (s *Source) load() {
+	s.shorthands = map[string]kinds.Kind{}
+	s.plurals = map[kinds.Kind]string{}
+
+	client, err := newDiscoveryClient()
+	if err != nil {
+		return
+	}
+	lists, discoveryErr := client.ServerPreferredResources()
+	shorthands, plurals, ok := buildLookup(lists, discoveryErr)
+	if !ok {
+		return
+	}
+	s.shorthands = shorthands
+	s.plurals = plurals
 }

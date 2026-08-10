@@ -28,7 +28,12 @@ func (t *recordingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 
 // writeFixtureResourceList writes a serverresources.json cache file in the
 // exact encoding CachedDiscoveryClient itself writes (runtime.Encode via
-// scheme.Codecs.LegacyCodec), so the real reader can decode it back.
+// scheme.Codecs.LegacyCodec), so the real reader can decode it back. It also
+// registers groupVersion in servergroups.json: CachedDiscoveryClient.
+// ServerPreferredResources (which Source.load calls) first reads the group
+// list to learn which group/versions exist at all — a serverresources.json
+// fixture that isn't also listed there is invisible to it, exactly as it
+// would be against a real, incompletely-cached cluster.
 func writeFixtureResourceList(t *testing.T, perHostCacheDir, groupVersion string, list *metav1.APIResourceList) {
 	t.Helper()
 	list.TypeMeta = metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}
@@ -37,6 +42,56 @@ func writeFixtureResourceList(t *testing.T, perHostCacheDir, groupVersion string
 		t.Fatalf("encode fixture: %v", err)
 	}
 	path := filepath.Join(perHostCacheDir, groupVersion, "serverresources.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registerFixtureGroupVersion(t, perHostCacheDir, groupVersion)
+}
+
+// registerFixtureGroupVersion adds groupVersion to servergroups.json,
+// merging with whatever is already recorded there. See
+// writeFixtureResourceList for why this file has to exist alongside the
+// per-group-version fixture.
+func registerFixtureGroupVersion(t *testing.T, perHostCacheDir, groupVersion string) {
+	t.Helper()
+	gv, err := schema.ParseGroupVersion(groupVersion)
+	if err != nil {
+		t.Fatalf("ParseGroupVersion(%q): %v", groupVersion, err)
+	}
+
+	path := filepath.Join(perHostCacheDir, "servergroups.json")
+	groups := &metav1.APIGroupList{TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"}}
+	if existing, err := os.ReadFile(path); err == nil {
+		if err := runtime.DecodeInto(scheme.Codecs.UniversalDecoder(), existing, groups); err != nil {
+			t.Fatalf("decode existing servergroups.json: %v", err)
+		}
+	}
+
+	version := metav1.GroupVersionForDiscovery{GroupVersion: groupVersion, Version: gv.Version}
+	found := false
+	for i := range groups.Groups {
+		if groups.Groups[i].Name == gv.Group {
+			groups.Groups[i].Versions = append(groups.Groups[i].Versions, version)
+			groups.Groups[i].PreferredVersion = version
+			found = true
+			break
+		}
+	}
+	if !found {
+		groups.Groups = append(groups.Groups, metav1.APIGroup{
+			Name:             gv.Group,
+			Versions:         []metav1.GroupVersionForDiscovery{version},
+			PreferredVersion: version,
+		})
+	}
+
+	encoded, err := runtime.Encode(scheme.Codecs.LegacyCodec(), groups)
+	if err != nil {
+		t.Fatalf("encode servergroups.json: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -209,5 +264,29 @@ func TestBuildLookupHardFailsOnAnyOtherError(t *testing.T) {
 	_, _, ok := buildLookup(nil, errNetworkDisabled)
 	if ok {
 		t.Error("buildLookup reported ok for a non-partial error")
+	}
+}
+
+// Source.Resolve against a real fixture cache directory — the only test in
+// this file that exercises every earlier task's piece together.
+func TestSourceResolvesFromAFixtureCache(t *testing.T) {
+	host := "https://127.0.0.1:6443"
+	perHostCacheDir := setupFixtureEnv(t, host)
+	writeFixtureResourceList(t, perHostCacheDir, "v1", &metav1.APIResourceList{
+		GroupVersion: "v1",
+		APIResources: []metav1.APIResource{
+			{Name: "pods", Kind: "Pod", ShortNames: []string{"po"}},
+		},
+	})
+
+	source := NewSource()
+	kind, plural, ok := source.Resolve("po")
+	if !ok || kind != kinds.Kind("Pod") || plural != "pods" {
+		t.Errorf("Resolve(po) = (%q, %q, %v), want (Pod, pods, true)", kind, plural, ok)
+	}
+
+	_, _, ok = source.Resolve("nonexistent-thing")
+	if ok {
+		t.Error("Resolve(nonexistent-thing) = true, want false")
 	}
 }
