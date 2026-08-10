@@ -19,6 +19,7 @@ var SupportedKinds = map[kinds.Kind]bool{
 	kinds.Service:               true,
 	kinds.PersistentVolumeClaim: true,
 	kinds.CronJob:               true,
+	kinds.Ingress:               true,
 }
 
 const restartWarnThreshold = 5
@@ -60,6 +61,9 @@ func BuildReport(data Data) Report {
 	}
 	if data.CronJob != nil {
 		findings = append(findings, cronJobFindings(*data.CronJob)...)
+	}
+	if data.Ingress != nil {
+		findings = append(findings, ingressFindings(*data.Ingress)...)
 	}
 	for _, pod := range data.Pods {
 		findings = append(findings, podFindings(pod)...)
@@ -180,6 +184,18 @@ func pvcFindings(pvc PVCHealth) []Finding {
 			"PersistentVolumeClaim lost: backing volume no longer available"}}
 	}
 	return nil
+}
+
+// ingressFindings reports one Critical finding per backend Service the
+// Ingress references but which does not exist. No loadBalancer/address
+// check — see IngressHealth's doc comment.
+func ingressFindings(ingress IngressHealth) []Finding {
+	findings := make([]Finding, 0, len(ingress.MissingBackends))
+	for _, name := range ingress.MissingBackends {
+		findings = append(findings, Finding{Critical, fmt.Sprintf(
+			"Ingress references missing Service '%s'", name)})
+	}
+	return findings
 }
 
 func podFindings(pod PodDiagnostic) []Finding {
