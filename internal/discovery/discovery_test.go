@@ -5,10 +5,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/kinds"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sdiscovery "k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
 )
 
@@ -137,5 +141,73 @@ func TestNewDiscoveryClientFailsInstantlyWhenCacheIsMissing(t *testing.T) {
 	}
 	if _, err := client.ServerResourcesForGroupVersion("v1"); err == nil {
 		t.Fatal("expected an error for a missing cache entry")
+	}
+}
+
+func TestBuildLookupMapsEveryShortNamePluralAndKindToTheSameKind(t *testing.T) {
+	lists := []*metav1.APIResourceList{{
+		APIResources: []metav1.APIResource{
+			{Name: "gateways", SingularName: "gateway", Kind: "Gateway", ShortNames: []string{"gw"}},
+		},
+	}}
+	shorthands, plurals, ok := buildLookup(lists, nil)
+	if !ok {
+		t.Fatal("buildLookup reported not ok for valid input")
+	}
+	for _, spelling := range []string{"gw", "gateway", "gateways", "Gateway"} {
+		if got := shorthands[strings.ToLower(spelling)]; got != kinds.Kind("Gateway") {
+			t.Errorf("shorthands[%q] = %q, want Gateway", spelling, got)
+		}
+	}
+	if plurals[kinds.Kind("Gateway")] != "gateways" {
+		t.Errorf("plurals[Gateway] = %q, want gateways", plurals[kinds.Kind("Gateway")])
+	}
+}
+
+// A subresource (e.g. "deployments/scale") has a "/" in its Name and must
+// not pollute the lookup — it is not a spelling anyone would type.
+func TestBuildLookupSkipsSubresources(t *testing.T) {
+	lists := []*metav1.APIResourceList{{
+		APIResources: []metav1.APIResource{
+			{Name: "deployments/scale", Kind: "Scale"},
+		},
+	}}
+	shorthands, _, ok := buildLookup(lists, nil)
+	if !ok {
+		t.Fatal("buildLookup reported not ok for valid input")
+	}
+	if _, found := shorthands["scale"]; found {
+		t.Error("a subresource's Kind leaked into the lookup")
+	}
+	if len(shorthands) != 0 {
+		t.Errorf("shorthands = %v, want empty", shorthands)
+	}
+}
+
+// A partial-group-discovery failure must not blind the lookup for the
+// groups that DID resolve — only some CRD group being uncached shouldn't
+// cost every already-cached built-in group its shorthands.
+func TestBuildLookupTreatsPartialGroupFailureAsUsable(t *testing.T) {
+	lists := []*metav1.APIResourceList{{
+		APIResources: []metav1.APIResource{
+			{Name: "pods", Kind: "Pod", ShortNames: []string{"po"}},
+		},
+	}}
+	partialErr := &k8sdiscovery.ErrGroupDiscoveryFailed{
+		Groups: map[schema.GroupVersion]error{{Group: "gateway.networking.k8s.io", Version: "v1"}: errNetworkDisabled},
+	}
+	shorthands, _, ok := buildLookup(lists, partialErr)
+	if !ok {
+		t.Fatal("buildLookup treated a partial-group-discovery failure as a hard failure")
+	}
+	if shorthands["po"] != kinds.Kind("Pod") {
+		t.Errorf("shorthands[po] = %q, want Pod even though another group failed", shorthands["po"])
+	}
+}
+
+func TestBuildLookupHardFailsOnAnyOtherError(t *testing.T) {
+	_, _, ok := buildLookup(nil, errNetworkDisabled)
+	if ok {
+		t.Error("buildLookup reported ok for a non-partial error")
 	}
 }

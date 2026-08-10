@@ -16,7 +16,10 @@ package discovery
 import (
 	"errors"
 	"net/http"
+	"strings"
 
+	"github.com/jzills/kx/internal/kinds"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	restclient "k8s.io/client-go/rest"
@@ -56,4 +59,43 @@ func newDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
 		return config
 	}
 	return flags.ToDiscoveryClient()
+}
+
+// buildLookup turns discovered API resources into the two lookup tables
+// Source.Resolve serves from. err is ServerPreferredResources' own return
+// value: a *discovery.ErrGroupDiscoveryFailed means some groups didn't
+// resolve (their cache entry was missing or stale, most likely) but others
+// did — that's still usable data, not a hard failure. Any other error is.
+func buildLookup(lists []*metav1.APIResourceList, err error) (
+	shorthands map[string]kinds.Kind, plurals map[kinds.Kind]string, ok bool,
+) {
+	if err != nil && !discovery.IsGroupDiscoveryFailedError(err) {
+		return nil, nil, false
+	}
+
+	shorthands = map[string]kinds.Kind{}
+	plurals = map[kinds.Kind]string{}
+	for _, list := range lists {
+		if list == nil {
+			continue
+		}
+		for _, resource := range list.APIResources {
+			// A subresource's Name contains "/" (e.g. "deployments/scale")
+			// and is never a spelling anyone types as a bare resource type.
+			if strings.Contains(resource.Name, "/") || resource.Kind == "" {
+				continue
+			}
+			kind := kinds.Kind(resource.Kind)
+			plurals[kind] = resource.Name
+			shorthands[strings.ToLower(resource.Name)] = kind
+			shorthands[strings.ToLower(resource.Kind)] = kind
+			if resource.SingularName != "" {
+				shorthands[strings.ToLower(resource.SingularName)] = kind
+			}
+			for _, short := range resource.ShortNames {
+				shorthands[strings.ToLower(short)] = kind
+			}
+		}
+	}
+	return shorthands, plurals, true
 }
