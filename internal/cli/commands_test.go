@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -17,7 +18,9 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// The leading run of numbers are indexes; everything after is kubectl's.
+// The leading run of numbers are indexes; everything after is kubectl's. A
+// range token counts as a single leading argument here — it's expanded later,
+// in parseIndexes.
 func TestSplitLeadingIndexes(t *testing.T) {
 	cases := []struct {
 		args        []string
@@ -29,6 +32,13 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		{[]string{"1", "2", "-o", "wide"}, 2, "-o wide"},
 		{[]string{"--flag", "1"}, 0, "--flag 1"},
 		{nil, 0, ""},
+		{[]string{"9..17", "-o", "wide"}, 1, "-o wide"},
+		{[]string{"9..17", "3", "--tail=5"}, 2, "--tail=5"},
+		// A malformed range still belongs to the leading run — it should reach
+		// parseIndexes for a proper "not a valid range" error, rather than
+		// falling through to the generic "not a valid int" message that
+		// applies when the leading run is empty.
+		{[]string{"5..", "-o", "wide"}, 1, "-o wide"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -64,6 +74,66 @@ func TestParseIndexNamesTheArgument(t *testing.T) {
 	want := "Invalid value for 'indexes': 'abc' is not a valid int."
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// A range token expands into every index it spans, inclusive of both ends,
+// walking in whichever direction the two ends imply.
+func TestParseIndexesExpandsRanges(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want []int
+	}{
+		{"ascending", []string{"9..12"}, []int{9, 10, 11, 12}},
+		{"descending", []string{"12..9"}, []int{12, 11, 10, 9}},
+		{"single value", []string{"5..5"}, []int{5}},
+		{"mixed with literal indexes", []string{"1", "3..5", "7"}, []int{1, 3, 4, 5, 7}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseIndexes("indexes", tc.args)
+			if err != nil {
+				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// A malformed range is reported the same way a bad single index is: named,
+// quoted, and rejected before reaching the cluster.
+func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{"9..", "Invalid value for 'indexes': '9..' is not a valid range."},
+		{"..17", "Invalid value for 'indexes': '..17' is not a valid range."},
+		{"9..abc", "Invalid value for 'indexes': '9..abc' is not a valid range."},
+		{"9...17", "Invalid value for 'indexes': '9...17' is not a valid range."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.arg, func(t *testing.T) {
+			_, err := parseIndexes("indexes", []string{tc.arg})
+			if err == nil {
+				t.Fatalf("parseIndexes(%q) accepted a malformed range", tc.arg)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A pathological range shouldn't build a giant slice before any index is even
+// resolved against the current listing.
+func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
+	_, err := parseIndexes("indexes", []string{"1..999999"})
+	if err == nil {
+		t.Fatal("parseIndexes accepted an oversized range")
 	}
 }
 
@@ -111,6 +181,9 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 		}
 		if err := cmd.Args(cmd, []string{"1", "2"}); err != nil {
 			t.Errorf("%s rejects two indexes: %v", name, err)
+		}
+		if err := cmd.Args(cmd, []string{"1", "3..5"}); err != nil {
+			t.Errorf("%s rejects a mixed index/range argument list: %v", name, err)
 		}
 		if !strings.Contains(cmd.Use, "...") {
 			t.Errorf("%s: Use = %q, want it to show a repeatable index", name, cmd.Use)

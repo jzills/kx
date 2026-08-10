@@ -300,7 +300,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		Long: "Lists Secrets exactly as kx get does. With --decode, prints an\n" +
 			"indexed Secret's data in plaintext, or every Secret in the namespace\n" +
 			"when no index is given.",
-		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt",
+		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3",
 		// Everything not a kx flag belongs to kubectl.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

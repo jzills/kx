@@ -137,6 +137,26 @@ func TestGetWatchAllNamespacesUsesLiveRedraw(t *testing.T) {
 	// direct proof that -A resolves to "all namespaces".
 }
 
+// A range argument resolves to every name it spans, the same as typing out
+// the equivalent literal indexes, so `kx get pods 1..2` relists both pods.
+func TestGetIndexRangeRelist(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	if err := runGet(services, "pods", []string{"1..2"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	want := []string{"get", "pods", "nginx-abc-xyz", "redis-def-uvw", "-n", "prod"}
+	if joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+}
+
 // An indexed argument still resolves to a name before the watch flag routes
 // to the live table, so `kx get pods 1 --watch` watches the right pod.
 func TestGetWatchResolvesIndexFirst(t *testing.T) {
