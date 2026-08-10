@@ -309,11 +309,15 @@ func newScanCommand(services Services) *cobra.Command {
 		Short: "Scan the unique container images of an indexed workload for vulnerabilities, " +
 			"or a whole namespace when no index is given (-n to pick one, -A for every " +
 			"namespace); prints a severity summary table " +
-			"by default, or the raw scanner output with --full. Requires the Docker Scout " +
-			"CLI plugin (https://docs.docker.com/scout/).",
+			"by default, or the raw scanner output with --full. Requires the CLI for the " +
+			"selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; " +
+			"or Trivy via --engine trivy, https://trivy.dev/ — see kx engine).",
 		Long: "Resolves the unique container images of a workload and scans each for\n" +
 			"vulnerabilities, printing a severity summary table.\n\n" +
-			"Requires the Docker Scout CLI plugin: https://docs.docker.com/scout/",
+			"Requires the CLI for the selected engine. Docker Scout is the default:\n" +
+			"https://docs.docker.com/scout/\n" +
+			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
+			"Run 'kx engine' to see or change the default.",
 		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -326,7 +330,7 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			if engine == "" {
-				engine = "scout"
+				engine = services.Config.Engine
 			}
 			full, rest := extractBool(rest, "--full")
 			html, rest := extractBool(rest, "--html")
@@ -484,7 +488,7 @@ func newScanCommand(services Services) *cobra.Command {
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
 	cmd.Flags().String("engine", "",
-		"Vulnerability scanner to use; 'scout' is currently the only supported value")
+		"Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default")
 	cmd.Flags().Bool("full", false,
 		"Stream the scanner's full output instead of the summary table")
 	cmd.Flags().StringP("namespace", "n", "",

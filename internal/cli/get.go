@@ -66,6 +66,24 @@ func allNamespaces(extraArgs []string) bool {
 	return present
 }
 
+// isWatch reports whether the pass-through flags ask kubectl to stream rather
+// than return a completed listing.
+func isWatch(extraArgs []string) bool {
+	present, _ := extractBool(extraArgs, "--watch", "-w", "--watch-only")
+	return present
+}
+
+// wantsLiveTable reports whether the pass-through flags request kubectl's
+// default or wide table shape — the shape runWatch's live-redrawing table
+// applies to. Non-tabular -o formats keep the raw-streaming passthrough
+// instead, since a themed table doesn't apply to non-tabular output. -A is
+// included: watchRows keys rows by NAMESPACE/NAME when a NAMESPACE column is
+// present, so same-named pods in different namespaces don't collide.
+func wantsLiveTable(extraArgs []string) bool {
+	output, _, _ := extractString(extraArgs, "--output", "-o")
+	return output == "" || output == "wide"
+}
+
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
 // the text to display and the namespace the listing came from.
 //

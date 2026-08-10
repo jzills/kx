@@ -278,6 +278,79 @@ func (Scout) ParseFindings(stdout string) ([]Finding, error) {
 	return findings, nil
 }
 
+const trivyDocsURL = "https://trivy.dev/"
+
+// Trivy is the Aqua Security Trivy engine.
+type Trivy struct{}
+
+func (Trivy) Name() string { return "trivy" }
+
+// PreflightArgv checks the trivy binary is installed and runnable.
+func (Trivy) PreflightArgv() []string { return []string{"trivy", "--version"} }
+
+func (Trivy) UnavailableMessage() string {
+	return "trivy is not available — kx scan needs the Trivy CLI. " +
+		"Install it: " + trivyDocsURL
+}
+
+func (Trivy) PassthroughArgv(image string, extra []string) []string {
+	return append([]string{"trivy", "image", image}, extra...)
+}
+
+func (Trivy) SummaryArgv(image string) []string {
+	return []string{"trivy", "image", "--format", "json", image}
+}
+
+// trivyDocument is the shape of Trivy's native `--format json` output.
+type trivyDocument struct {
+	Results []struct {
+		Vulnerabilities []struct {
+			VulnerabilityID  string `json:"VulnerabilityID"`
+			PkgName          string `json:"PkgName"`
+			InstalledVersion string `json:"InstalledVersion"`
+			FixedVersion     string `json:"FixedVersion"`
+			Severity         string `json:"Severity"`
+			PrimaryURL       string `json:"PrimaryURL"`
+		} `json:"Vulnerabilities"`
+	} `json:"Results"`
+}
+
+// ParseFindings reads Trivy's native JSON into one Finding per vulnerability.
+//
+// Unlike Scout's SARIF, Trivy's JSON already carries package, version and
+// severity as named fields per vulnerability, so there is no purl parsing or
+// per-result message scraping to do.
+func (Trivy) ParseFindings(stdout string) ([]Finding, error) {
+	var document trivyDocument
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		return nil, err
+	}
+
+	known := map[string]bool{}
+	for _, severity := range Severities {
+		known[severity] = true
+	}
+
+	var findings []Finding
+	for _, result := range document.Results {
+		for _, vulnerability := range result.Vulnerabilities {
+			severity := strings.ToUpper(vulnerability.Severity)
+			if !known[severity] {
+				severity = "UNSPECIFIED"
+			}
+			findings = append(findings, Finding{
+				ID:        vulnerability.VulnerabilityID,
+				Severity:  severity,
+				Package:   vulnerability.PkgName,
+				Installed: vulnerability.InstalledVersion,
+				FixedIn:   vulnerability.FixedVersion,
+				URL:       vulnerability.PrimaryURL,
+			})
+		}
+	}
+	return findings, nil
+}
+
 // purlPattern matches the package URL embedded in a result's message.
 //
 // Matched rather than parsed off its label, so a change to Scout's column
@@ -346,7 +419,24 @@ func decodePurl(value string) string {
 	return decoded
 }
 
-var engines = map[string]Engine{"scout": Scout{}}
+var engines = map[string]Engine{"scout": Scout{}, "trivy": Trivy{}}
+
+// engineOrder is `kx engine`'s display order — registration order, not
+// alphabetical, so Scout (the default) is always listed first.
+var engineOrder = []string{"scout", "trivy"}
+
+// Names returns the registered engine names in display order.
+func Names() []string {
+	names := make([]string, len(engineOrder))
+	copy(names, engineOrder)
+	return names
+}
+
+// Exists reports whether name is a registered engine.
+func Exists(name string) bool {
+	_, ok := engines[name]
+	return ok
+}
 
 // GetEngine resolves an engine by name.
 func GetEngine(name string) (Engine, error) {
@@ -357,7 +447,7 @@ func GetEngine(name string) (Engine, error) {
 			names = append(names, known)
 		}
 		sort.Strings(names)
-		return nil, fmt.Errorf("unknown engine '%s'. Available engines: %s.",
+		return nil, fmt.Errorf("Unknown engine '%s'. Available engines: %s.",
 			name, strings.Join(names, ", "))
 	}
 	return engine, nil

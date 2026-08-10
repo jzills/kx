@@ -239,6 +239,36 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		})
 	}
 
+	// Ingresses have no pods and no ownership — a structural check against
+	// the Services list already fetched above for the Service kind's own
+	// block. Namespace-qualified for the same reason usageKey/endpointsKey
+	// are: a cluster-wide sweep sees same-named Services across namespaces,
+	// and an Ingress's backend only ever resolves within its own.
+	type serviceKey struct{ namespace, name string }
+	knownServices := make(map[serviceKey]bool, len(services.Items))
+	for i := range services.Items {
+		knownServices[serviceKey{services.Items[i].Namespace, services.Items[i].Name}] = true
+	}
+	ingresses, err := s.Client.NetworkingV1().Ingresses(namespace).List(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ingresses.Items {
+		ingress := &ingresses.Items[i]
+		var missing []string
+		for _, backendName := range ingressBackendServiceNames(ingress) {
+			if !knownServices[serviceKey{ingress.Namespace, backendName}] {
+				missing = append(missing, backendName)
+			}
+		}
+		results = append(results, Data{
+			Kind: kinds.Ingress, Name: ingress.Name, Namespace: ingress.Namespace,
+			Ingress: &IngressHealth{MissingBackends: missing},
+			WarningEvents: s.warningEvents(
+				kinds.Ingress, ingress.Name, ingress.Namespace, nil, allEvents),
+		})
+	}
+
 	// Whatever is left: pods nothing swept claimed.
 	for i := range pods.Items {
 		pod := &pods.Items[i]

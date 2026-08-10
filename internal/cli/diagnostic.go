@@ -164,7 +164,7 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     use + " [index]",
-		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
+		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases: aliases,
 		Long: "Analyses health signals — replica counts, container states, resource\n" +
 			"usage and warning events — and reports findings by severity.\n" +

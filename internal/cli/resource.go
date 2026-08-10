@@ -160,8 +160,14 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	}
 	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
 	if interactiveRolloutActions[action] {
-		_, err := c.Kubectl.RunInteractive(args, false)
-		return "", err
+		code, err := c.Kubectl.RunInteractive(args, false)
+		if err != nil {
+			return "", err
+		}
+		if code != 0 {
+			return "", forwardExit(c.Kubectl, kind, name, namespace, code)
+		}
+		return "", nil
 	}
 	return c.Kubectl.Run(args)
 }
@@ -196,6 +202,73 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
+}
+
+// CopyCommand copies files to or from an indexed pod via kubectl cp.
+type CopyCommand struct {
+	Kubectl kubectl.Service
+	State   IndexResolver
+}
+
+// resolvedPod is what resolve found, if the argument named an indexed pod —
+// nil when it didn't, which is the common case for the local-path side of
+// a copy.
+type resolvedPod struct {
+	Name      string
+	Namespace string
+}
+
+func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
+	src, srcPod, err := c.resolve(src)
+	if err != nil {
+		return err
+	}
+	dest, destPod, err := c.resolve(dest)
+	if err != nil {
+		return err
+	}
+	args := append([]string{"cp", src, dest}, extraArgs...)
+	code, err := c.Kubectl.RunInteractive(args, false)
+	if err != nil {
+		return err
+	}
+	if code == 0 {
+		return nil
+	}
+	// cp copies between local and exactly one pod, never pod-to-pod, so at
+	// most one side ever resolves — whichever one did is what's worth
+	// checking for staleness.
+	pod := srcPod
+	if pod == nil {
+		pod = destPod
+	}
+	if pod == nil {
+		return SilentError{Code: code}
+	}
+	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code)
+}
+
+// resolve rewrites an "<index>:<path>" argument into kubectl cp's own
+// "<namespace>/<pod>:<path>" pod-reference syntax. Anything that doesn't
+// parse as "<int>:..." passes through completely unchanged — a local path,
+// or an already-qualified ns/pod:path for bypassing the index entirely.
+func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, err error) {
+	before, path, found := strings.Cut(arg, ":")
+	if !found {
+		return arg, nil, nil
+	}
+	index, err := strconv.Atoi(before)
+	if err != nil {
+		return arg, nil, nil
+	}
+	name, namespace, kind, err := c.State.Fields(index)
+	if err != nil {
+		return "", nil, err
+	}
+	if kind != kinds.Pod {
+		return "", nil, fmt.Errorf("cp is only supported for pods.")
+	}
+	return namespace + "/" + name + ":" + path, &resolvedPod{Name: name, Namespace: namespace}, nil
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read
@@ -250,7 +323,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("Logs are not supported for '%s'.", kind)
+		return fmt.Errorf("logs are not supported for '%s'.", kind)
 	}
 }
 

@@ -397,3 +397,25 @@ func TestFilterSeverityLinesSkipsBlanks(t *testing.T) {
 		t.Errorf("lines = %v, want the one non-blank line", lines)
 	}
 }
+
+func TestIngressFindings(t *testing.T) {
+	if findings := ingressFindings(IngressHealth{}); len(findings) != 0 {
+		t.Errorf("findings = %v, want none when every backend resolves", summaries(findings))
+	}
+
+	one := ingressFindings(IngressHealth{MissingBackends: []string{"api"}})
+	if got := severityOf(t, one, "api"); got != Critical {
+		t.Errorf("severity = %v, want Critical", got)
+	}
+	if !hasSummaryContaining(one, "Ingress references missing Service 'api'") {
+		t.Errorf("findings = %v, want the exact missing-backend message", summaries(one))
+	}
+
+	many := ingressFindings(IngressHealth{MissingBackends: []string{"api", "web"}})
+	if len(many) != 2 {
+		t.Fatalf("findings = %v, want one per missing backend", summaries(many))
+	}
+	if !hasSummaryContaining(many, "'api'") || !hasSummaryContaining(many, "'web'") {
+		t.Errorf("findings = %v, want both backends named", summaries(many))
+	}
+}

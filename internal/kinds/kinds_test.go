@@ -109,3 +109,92 @@ func TestEnsureKindOmitsBackWhenPreviousDoesNotList(t *testing.T) {
 		t.Errorf("error = %q, want no 'kx back' hint", err)
 	}
 }
+
+type fakeShorthandSource struct {
+	kind   Kind
+	plural string
+	ok     bool
+	calls  []string
+}
+
+func (f *fakeShorthandSource) Resolve(spelling string) (Kind, string, bool) {
+	f.calls = append(f.calls, spelling)
+	return f.kind, f.plural, f.ok
+}
+
+// A spelling already in kindMap must never reach the fallback — the static
+// path is unchanged, byte-for-byte, regardless of what source is installed.
+func TestNormalizeDoesNotConsultFallbackForKnownSpellings(t *testing.T) {
+	fake := &fakeShorthandSource{}
+	SetShorthandSource(fake)
+	defer SetShorthandSource(nil)
+
+	if got := Normalize("po"); got != Pod {
+		t.Errorf("Normalize(po) = %q, want Pod", got)
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("fallback was consulted for a known spelling: %v", fake.calls)
+	}
+}
+
+func TestNormalizeConsultsFallbackOnMiss(t *testing.T) {
+	fake := &fakeShorthandSource{kind: Kind("Gateway"), plural: "Gateways", ok: true}
+	SetShorthandSource(fake)
+	defer SetShorthandSource(nil)
+
+	if got := Normalize("gw"); got != Kind("Gateway") {
+		t.Errorf("Normalize(gw) = %q, want Gateway", got)
+	}
+	if len(fake.calls) != 1 || fake.calls[0] != "gw" {
+		t.Errorf("calls = %v, want [gw]", fake.calls)
+	}
+}
+
+func TestNormalizeFallsThroughWhenSourceMisses(t *testing.T) {
+	fake := &fakeShorthandSource{ok: false}
+	SetShorthandSource(fake)
+	defer SetShorthandSource(nil)
+
+	if got := Normalize("nonexistent"); got != Kind("nonexistent") {
+		t.Errorf("Normalize(nonexistent) = %q, want the raw string passed through", got)
+	}
+}
+
+func TestNormalizeWithNilSourceMatchesTodaysBehavior(t *testing.T) {
+	SetShorthandSource(nil)
+	if got := Normalize("gw"); got != Kind("gw") {
+		t.Errorf("Normalize(gw) = %q, want the raw string passed through with no source installed", got)
+	}
+}
+
+func TestIsKindSpellingConsultsFallback(t *testing.T) {
+	SetShorthandSource(&fakeShorthandSource{ok: true})
+	defer SetShorthandSource(nil)
+	if !IsKindSpelling("gw") {
+		t.Error("IsKindSpelling(gw) = false, want true when the fallback recognizes it")
+	}
+
+	SetShorthandSource(&fakeShorthandSource{ok: false})
+	if IsKindSpelling("nonexistent") {
+		t.Error("IsKindSpelling(nonexistent) = true, want false when nothing recognizes it")
+	}
+}
+
+func TestPluralDisplayUsesFallbackPlural(t *testing.T) {
+	SetShorthandSource(&fakeShorthandSource{kind: Kind("Gateway"), plural: "Gateways", ok: true})
+	defer SetShorthandSource(nil)
+	if got := PluralDisplay("gw"); got != "Gateways" {
+		t.Errorf("PluralDisplay(gw) = %q, want Gateways", got)
+	}
+}
+
+// A fallback that resolves the kind but reports no plural text falls back to
+// the resource type passed through unchanged, matching today's behavior for
+// any other unrecognized spelling.
+func TestPluralDisplayFallsThroughWithoutAPlural(t *testing.T) {
+	SetShorthandSource(&fakeShorthandSource{kind: Kind("Gateway"), plural: "", ok: true})
+	defer SetShorthandSource(nil)
+	if got := PluralDisplay("gw"); got != "gw" {
+		t.Errorf("PluralDisplay(gw) = %q, want the raw resource type", got)
+	}
+}

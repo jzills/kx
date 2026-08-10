@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -31,14 +30,20 @@ const allNamespacesNote = render.AllNamespacesNote
 // checked against the requested kind, and scoped to the namespace they were
 // listed in.
 func runGet(services Services, resource string, args []string, options getOptions) error {
+	// Indexes lead, kubectl's flags follow — the same split describe/logs use
+	// (splitLeadingIndexes), rather than scanning every argument for
+	// something index-shaped. A kubectl flag value can legitimately contain
+	// ".." (JSONPath's recursive descent, e.g. -o jsonpath={..metadata.name}),
+	// and a scan-anywhere loop that expanded it as a range broke that
+	// passthrough outright instead of erroring or ignoring it.
+	indexArgs, extra := splitLeadingIndexes(args)
 	var indexes []int
-	var extra []string
-	for _, arg := range args {
-		if index, err := strconv.Atoi(arg); err == nil {
-			indexes = append(indexes, index)
-			continue
+	if len(indexArgs) > 0 {
+		var err error
+		indexes, err = parseIndexes("indexes", indexArgs)
+		if err != nil {
+			return err
 		}
-		extra = append(extra, arg)
 	}
 
 	// Contexts live in kubeconfig, not on the server, so kubectl rejects
@@ -77,6 +82,23 @@ func runGet(services Services, resource string, args []string, options getOption
 			extra = append(extra, "-n", namespace)
 		}
 		extra = append(names, extra...)
+	}
+
+	if isWatch(extra) {
+		// A watch stream never completes, so there is no finished table to
+		// index or save (Run() would otherwise block forever, since kubectl
+		// get --watch never exits on its own). For the default/wide,
+		// single-namespace table shape, kx tracks ADDED/MODIFIED/DELETED via
+		// --output-watch-events and redraws a live themed table in place.
+		// Anything else (-o json/yaml/name/custom-columns, -A) streams
+		// straight through instead, the same way `logs -f` does — re-theming
+		// non-tabular output doesn't make sense.
+		if wantsLiveTable(extra) {
+			return runWatch(services, resource, extra)
+		}
+		render.Caption("watches can't be indexed — streaming kubectl output directly")
+		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
+		return err
 	}
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}

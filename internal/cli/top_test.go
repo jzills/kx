@@ -1,22 +1,61 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
+
+// topServices builds a Services that can drive newTopCommand's RunE all the
+// way through, with a real (temp-file-backed) state.Service — Services.State
+// is a concrete *state.Service, not an interface, so a fakeState substitute
+// (used by the TopCommand.Execute-level tests above) does not fit here.
+func topServices(t *testing.T, kubectl kubectl.Service) Services {
+	t.Helper()
+	return Services{
+		Kubectl: kubectl,
+		State:   &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Index:   indexService(),
+		Config:  config.Default(),
+	}
+}
 
 const topOutput = "NAME             CPU(cores)   MEMORY(bytes)\n" +
 	"web-1            5m           64Mi\n" +
 	"web-2            250m         200Mi"
 
+const nodesOutput = "NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)\n" +
+	"node-a     196m         1%       1864Mi          24%\n" +
+	"node-b     500m         5%       3200Mi          40%"
+
+// Two different namespaces, same pod name — the exact collision bare-name
+// keying can't handle, and the composite-key fix exists to cover.
+const topAllNamespacesOutput = "NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
+	"prod          web-1    5m           64Mi\n" +
+	"staging       web-1    3m           32Mi"
+
+const allNamespacesPodsJSON = `{"items":[
+  {"metadata":{"name":"web-1","namespace":"prod"},"spec":{"containers":[
+    {"resources":{"limits":{"cpu":"500m","memory":"128Mi"}}}]}},
+  {"metadata":{"name":"web-1","namespace":"staging"},"spec":{"containers":[
+    {"resources":{"limits":{"cpu":"500m","memory":"256Mi"}}}]}}
+]}`
+
 // Two containers, one with limits on both resources and one missing a memory
 // limit, so the summing and the "undefined" rule are both exercised.
 const podsJSON = `{"items":[
-  {"metadata":{"name":"web-1"},"spec":{"containers":[
+  {"metadata":{"name":"web-1","namespace":"prod"},"spec":{"containers":[
     {"resources":{"limits":{"cpu":"500m","memory":"128Mi"}}}]}},
-  {"metadata":{"name":"web-2"},"spec":{"containers":[
+  {"metadata":{"name":"web-2","namespace":"prod"},"spec":{"containers":[
     {"resources":{"limits":{"cpu":"500m","memory":"256Mi"}}},
     {"resources":{"limits":{"cpu":"500m"}}}]}}
 ]}`
@@ -26,6 +65,11 @@ const podsJSON = `{"items":[
 type scriptedKubectl struct {
 	outputs []string
 	calls   [][]string
+	probes  [][]string
+	// probeCode is returned by every Probe call; zero value (0) means
+	// "available", so every existing test using scriptedKubectl without
+	// setting this keeps behaving exactly as it does today.
+	probeCode int
 	// namespaceCalls counts CurrentNamespace, which shells out to
 	// `kubectl config view` and so is worth not doing twice per command.
 	namespaceCalls int
@@ -39,12 +83,323 @@ func (k *scriptedKubectl) Run(args []string) (string, error) {
 	return "", nil
 }
 func (k *scriptedKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
-func (k *scriptedKubectl) Probe([]string) int                         { return 0 }
+func (k *scriptedKubectl) Probe(args []string) int {
+	k.probes = append(k.probes, args)
+	return k.probeCode
+}
+func (k *scriptedKubectl) Watch([]string, func(string) error) error { return nil }
 func (k *scriptedKubectl) CurrentNamespace() string {
 	k.namespaceCalls++
 	return "prod"
 }
 func (k *scriptedKubectl) CurrentContext() string { return "test" }
+
+func TestTopEnsureAvailableProbesTheMetricsAPI(t *testing.T) {
+	kubectl := &scriptedKubectl{}
+	if err := (TopCommand{Kubectl: kubectl}).EnsureAvailable(); err != nil {
+		t.Fatalf("EnsureAvailable: %v", err)
+	}
+	want := "get --raw /apis/metrics.k8s.io/v1beta1"
+	if len(kubectl.probes) != 1 || joinArgs(kubectl.probes[0]) != want {
+		t.Errorf("probes = %v, want one call to %q", kubectl.probes, want)
+	}
+}
+
+func TestTopEnsureAvailableReturnsAFriendlyErrorWhenMissing(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1}
+	err := (TopCommand{Kubectl: kubectl}).EnsureAvailable()
+	if err == nil {
+		t.Fatal("EnsureAvailable returned nil with the metrics API unavailable")
+	}
+	if !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %q, want it to name metrics-server", err.Error())
+	}
+	if !strings.Contains(err.Error(), "https://github.com/kubernetes-sigs/metrics-server") {
+		t.Errorf("err = %q, want an install link", err.Error())
+	}
+}
+
+// The pods path already existed before this preflight; it must gain the
+// check without changing its Run-call sequence for the success path.
+func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1, outputs: []string{topOutput, podsJSON}}
+	_, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", nil, false)
+	if err == nil {
+		t.Fatal("Execute succeeded with the metrics API unavailable")
+	}
+	if !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %q, want the friendly message", err.Error())
+	}
+	if len(kubectl.calls) != 0 {
+		t.Errorf("Run was called %d times, want 0 — the preflight should fail before any kubectl top/get call", len(kubectl.calls))
+	}
+}
+
+func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	states := &fakeState{}
+	output, namespace, err := TopCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.ExecuteNodes("", nil)
+	if err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if namespace != "prod" {
+		t.Errorf("namespace = %q, want prod", namespace)
+	}
+	if !strings.Contains(output, "CPU%") || !strings.Contains(output, "MEM%") {
+		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
+	}
+	if strings.Contains(output, "CPU(%)") || strings.Contains(output, "MEMORY(%)") {
+		t.Errorf("output = %q, want kubectl's native (%%) headers gone", output)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d state entries, want 1", len(states.saved))
+	}
+	if kind, _ := states.saved[0].Resources.Kind("node-a"); kind != kinds.Node {
+		t.Errorf("kind = %q, want Node", kind)
+	}
+}
+
+// -m/--match is registered as a general `kx top` flag with no note that it's
+// pods-only, so it must actually filter the nodes path too — not silently
+// list everything while the user believes they narrowed it down.
+func TestExecuteNodesFiltersByMatchTerm(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	states := &fakeState{}
+	output, _, err := TopCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.ExecuteNodes("node-a", nil)
+	if err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if !strings.Contains(output, "node-a") {
+		t.Errorf("output = %q, want node-a", output)
+	}
+	if strings.Contains(output, "node-b") {
+		t.Errorf("output = %q, want node-b filtered out", output)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d state entries, want 1", len(states.saved))
+	}
+	if match := states.saved[0].Query.Match; match == nil || *match != "node-a" {
+		t.Errorf("saved match = %v, want \"node-a\" — a stale entry must refresh with the same filter", match)
+	}
+}
+
+// kubectl top nodes already reports percentages against node capacity
+// natively — unlike pods, ExecuteNodes must never fetch or compute limits.
+func TestExecuteNodesNeverFetchesLimits(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
+		ExecuteNodes("", nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if len(kubectl.calls) != 1 {
+		t.Errorf("kubectl.Run called %d times, want 1 (top nodes only, no get pods -o json)", len(kubectl.calls))
+	}
+	if joinArgs(kubectl.calls[0]) != "top nodes" {
+		t.Errorf("args = %q, want \"top nodes\"", joinArgs(kubectl.calls[0]))
+	}
+}
+
+func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
+	kubectl := &scriptedKubectl{probeCode: 1}
+	_, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
+		ExecuteNodes("", nil)
+	if err == nil || !strings.Contains(err.Error(), "metrics-server is not available") {
+		t.Errorf("err = %v, want the friendly metrics-server message", err)
+	}
+	if len(kubectl.calls) != 0 {
+		t.Errorf("Run was called %d times, want 0", len(kubectl.calls))
+	}
+}
+
+// A bare `kx top` (or any non-"nodes" leading token, e.g. --match's value)
+// must be provably unchanged: it stays the pods path with no token
+// stripped from what reaches TopCommand.Execute.
+func TestTopCommandDefaultsToPods(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("output = %q, want the Pods caption", sink.String())
+	}
+}
+
+// Matches kx get -A's own caption override (getbody.go): with many
+// namespaces spanned, there is no single one to name in the caption.
+func TestTopCommandAllNamespacesCaptionSaysAllNamespaces(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"-A"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "all namespaces") {
+		t.Errorf("output = %q, want the \"all namespaces\" caption", sink.String())
+	}
+	if strings.Contains(sink.String(), "· prod ·") {
+		t.Errorf("output = %q, want no single namespace named in the caption", sink.String())
+	}
+	if !strings.Contains(sink.String(), render.AllNamespacesNote) {
+		t.Errorf("output = %q, want the all-namespaces note explaining no indexes", sink.String())
+	}
+}
+
+func TestTopCommandRoutesNodesToken(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{nodesOutput}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"nodes"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Nodes") {
+		t.Errorf("output = %q, want the Nodes caption", sink.String())
+	}
+	if joinArgs(kube.calls[0]) != "top nodes" {
+		t.Errorf("args = %q, want \"top nodes\" (no leftover \"nodes\" positional)", joinArgs(kube.calls[0]))
+	}
+}
+
+// An explicit "pods" token must be stripped exactly like "nodes" is — not
+// left in extraArgs, where it would reach kubectl as a pod-name filter
+// (`kubectl top pods pods`, which 404s) instead of a resource type.
+func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	sink := captureRender(t)
+	if err := cmd.RunE(cmd, []string{"pods"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("output = %q, want the Pods caption", sink.String())
+	}
+	if joinArgs(kube.calls[0]) != "top pods" {
+		t.Errorf("args = %q, want \"top pods\" (no leftover \"pods\" positional)", joinArgs(kube.calls[0]))
+	}
+}
+
+func TestTopPageRowsParsesIndexedTable(t *testing.T) {
+	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"  1    web-1    5m           12%     64Mi             80%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Index != 1 || row.Name != "web-1" || row.CPU != "5m" || row.Memory != "64Mi" {
+		t.Errorf("row = %+v, want Index 1, Name web-1, CPU 5m, Memory 64Mi", row)
+	}
+	if !row.CPUPct.Known || row.CPUPct.Pct != 12 {
+		t.Errorf("CPUPct = %+v, want Known with Pct 12", row.CPUPct)
+	}
+	if !row.MemPct.Known || row.MemPct.Pct != 80 {
+		t.Errorf("MemPct = %+v, want Known with Pct 80", row.MemPct)
+	}
+}
+
+// The -A pods table has no X or CPU%/MEM% columns (top.go's Execute skips
+// both for -A); topPageRows must degrade gracefully rather than panic or
+// misread columns, matching how IndexedTable itself already handles -A.
+func TestTopPageRowsHandlesTableWithNoIndexOrPercentColumns(t *testing.T) {
+	unindexed := "NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
+		"prod          web-1    5m           64Mi\n"
+	rows := topPageRows(unindexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].Index != 0 {
+		t.Errorf("Index = %d, want 0 (unindexed)", rows[0].Index)
+	}
+	if rows[0].CPUPct.Known || rows[0].MemPct.Known {
+		t.Errorf("CPUPct/MemPct = %+v/%+v, want both unknown", rows[0].CPUPct, rows[0].MemPct)
+	}
+}
+
+// The -A grid needs its own Namespace per row to disambiguate same-named
+// pods across namespaces — the same reason podLimits/withUsagePercentages
+// key by namespace/name instead of bare name.
+func TestTopPageRowsPopulatesNamespaceFromTheNamespaceColumn(t *testing.T) {
+	indexed := "NAMESPACE     NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"prod          web-1    5m           1%      64Mi             50%   \n" +
+		"staging       web-1    3m           0%      32Mi             12%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0].Namespace != "prod" || rows[1].Namespace != "staging" {
+		t.Errorf("namespaces = %q, %q, want prod, staging", rows[0].Namespace, rows[1].Namespace)
+	}
+}
+
+// The single-namespace case has no NAMESPACE column at all — Namespace
+// stays empty rather than defaulting to something misleading, and the grid
+// only shows the column when at least one row actually has one.
+func TestTopPageRowsLeavesNamespaceEmptyWithoutANamespaceColumn(t *testing.T) {
+	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+		"  1    web-1    5m           12%     64Mi             80%   \n"
+	rows := topPageRows(indexed)
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].Namespace != "" {
+		t.Errorf("Namespace = %q, want empty (no NAMESPACE column in single-namespace mode)", rows[0].Namespace)
+	}
+}
+
+func TestTopRegistersHTMLFlags(t *testing.T) {
+	cmd := newTopCommand(Services{})
+	for _, name := range []string{"html", "port", "no-open"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+// Regression shape already pinned for diag/scan/tree: --html must add to
+// the terminal output, never replace it.
+func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetContext(stoppedContext())
+	sink := captureRender(t)
+	// --html/--no-open must go through args, not cmd.Flags().Set: top uses
+	// DisableFlagParsing (like scan), so these are extracted by hand from
+	// the raw argv, not populated by cobra's own flag parsing. Setting the
+	// registered flag directly would pass even if the hand-extraction were
+	// broken (as it briefly was) since real invocations never populate the
+	// flag that way.
+	if err := cmd.RunE(cmd, []string{"--html", "--no-open"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "Pods") {
+		t.Errorf("terminal output = %q, want the table to still print with --html set", sink.String())
+	}
+}
+
+// The real bug this guards: --html/--port/--no-open must be stripped from
+// the args before they reach kubectl, the same way --match/--no-limits
+// already are. If extraction is skipped, kubectl sees "--html" itself.
+func TestTopHTMLFlagsAreStrippedBeforeReachingKubectl(t *testing.T) {
+	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetContext(stoppedContext())
+	captureRender(t)
+	if err := cmd.RunE(cmd, []string{"--html", "--no-open", "--port", "0"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, call := range kube.calls {
+		args := joinArgs(call)
+		if strings.Contains(args, "--html") || strings.Contains(args, "--port") || strings.Contains(args, "--no-open") {
+			t.Errorf("kubectl called with %q, want no leftover --html/--port/--no-open", args)
+		}
+	}
+}
 
 func TestTopAppendsUsagePercentages(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
@@ -118,19 +473,61 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 }
 
 // Names aren't unique across namespaces, so -A output is never indexed.
+// -A is still never indexed or saved to state — names aren't unique across
+// namespaces — even though it now computes percentages same as any other
+// top listing.
 func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
 	states := &fakeState{}
 	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
 		Execute("", []string{"-A"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if output != topOutput {
+	headers, _, _ := index.ParseTable(output)
+	if indexOfHeader(headers, "X") >= 0 {
 		t.Errorf("-A output was indexed:\n%s", output)
 	}
 	if len(states.saved) != 0 {
 		t.Errorf("-A saved state, want none")
+	}
+}
+
+func TestTopAllNamespacesGetsPercentagesKeyedByNamespace(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", []string{"-A"}, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// prod/web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
+	if !strings.Contains(output, "1%") || !strings.Contains(output, "50%") {
+		t.Errorf("output missing prod/web-1's percentages:\n%s", output)
+	}
+	// staging/web-1: 3m of 500m = 0%, 32Mi of 256Mi = 12%. Same pod name,
+	// different namespace, different limits — proves the lookup is keyed
+	// by namespace, not just name (bare-name keying would give both rows
+	// whichever limit was inserted into the map last).
+	if !strings.Contains(output, "12%") {
+		t.Errorf("output missing staging/web-1's own percentage (12%%), got same as prod's — composite key not applied:\n%s", output)
+	}
+	if joinArgs(kubectl.calls[1]) != "get pods -A -o json" {
+		t.Errorf("limits call = %q, want \"get pods -A -o json\"", joinArgs(kubectl.calls[1]))
+	}
+}
+
+func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput}}
+	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
+		Execute("", []string{"-A"}, true)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if output != topAllNamespacesOutput {
+		t.Errorf("--no-limits -A output was modified:\n%s", output)
+	}
+	if len(kubectl.calls) != 1 {
+		t.Errorf("kubectl called %d times, want 1 (no limits lookup with --no-limits)", len(kubectl.calls))
 	}
 }
 
@@ -221,5 +618,17 @@ func TestTopPrefersAnExplicitNamespace(t *testing.T) {
 	if kubectl.namespaceCalls != 0 {
 		t.Errorf("CurrentNamespace called %d times with an explicit -n, want 0",
 			kubectl.namespaceCalls)
+	}
+}
+
+// -n/-A are pure kubectl passthrough, parsed by hand, but were never
+// registered so they vanished from --help despite being the most-used flags
+// on this command.
+func TestTopRegistersNamespaceFlags(t *testing.T) {
+	cmd := newTopCommand(Services{})
+	for _, name := range []string{"namespace", "all-namespaces"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
 	}
 }

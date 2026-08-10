@@ -184,6 +184,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					if err != nil {
 						return err
 					}
+					render.ScopeBanner("Namespace", "all namespaces", "")
 					for i, root := range roots {
 						if i > 0 {
 							render.Blank()
@@ -199,7 +200,7 @@ func newTreeCommand(services Services) *cobra.Command {
 						return err
 					}
 					page, err := web.RenderTree(web.TreePage{
-						Meta: meta, Scope: "all namespaces",
+						Meta: meta, Scope: scopeCaption("Namespace", "all namespaces"),
 						AllNamespaces: true, Roots: roots,
 					})
 					if err != nil {

@@ -300,7 +300,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		Long: "Lists Secrets exactly as kx get does. With --decode, prints an\n" +
 			"indexed Secret's data in plaintext, or every Secret in the namespace\n" +
 			"when no index is given.",
-		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt",
+		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3",
 		// Everything not a kx flag belongs to kubectl.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -322,5 +322,9 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
 	cmd.Flags().BoolP("yes", "y", false,
 		"Skip the confirmation prompt for a namespace-wide --decode")
+	// Pure kubectl passthrough, parsed by hand like every other flag here —
+	// registered only so they appear in --help instead of vanishing.
+	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
 	return cmd
 }

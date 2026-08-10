@@ -88,12 +88,29 @@ func NewRoot(services Services, version string) *cobra.Command {
 	installHelp(root, version)
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
+	root.AddCommand(withoutRefresh(newEngineCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
-	root.AddCommand(withoutRefresh(newStateCommand(services)))
-	root.AddCommand(withoutRefresh(newDropCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1)))
-	root.AddCommand(withoutRefresh(newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1)))
+
+	stateCmd := newStateCommand(services)
+	stateCmd.AddCommand(
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newDropCommand(services, "kx state drop"),
+	)
+	root.AddCommand(withoutRefresh(stateCmd))
+
+	// kx back/forward/drop predate kx state gaining subcommands. They stay
+	// registered and fully working — just hidden from --help and the README
+	// table — so existing scripts and muscle memory don't break.
+	for _, cmd := range []*cobra.Command{
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newDropCommand(services, "kx drop"),
+	} {
+		cmd.Hidden = true
+		root.AddCommand(withoutRefresh(cmd))
+	}
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),
@@ -104,6 +121,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newScaleCommand(services),
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
+		newCopyCommand(services),
 		newYamlCommand(services),
 		newTreeCommand(services),
 		newScanCommand(services),
@@ -130,9 +148,8 @@ func newGetCommand(services Services) *cobra.Command {
 		Use:   "get <resource> [index]... [kubectl flags]",
 		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
-			"Unrecognized flags are passed through to kubectl, so `-n <namespace>`,\n" +
-			"label selectors and output flags all work as usual.",
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api",
+			"`-n <namespace>`, label selectors and output flags all work as usual.",
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3",
 		Args:    cobra.MinimumNArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for
@@ -160,6 +177,10 @@ func newGetCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
 	cmd.Flags().BoolP("yes", "y", false,
 		"Skip the confirmation prompt for a namespace-wide --decode")
+	// Pure kubectl passthrough, parsed by hand like every other flag here —
+	// registered only so they appear in --help instead of vanishing.
+	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
 	return cmd
 }
 

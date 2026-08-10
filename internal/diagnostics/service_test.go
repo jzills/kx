@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -151,6 +152,57 @@ func TestGatherJobServiceAndPVC(t *testing.T) {
 		}
 		if data.PVC == nil || data.PVC.Phase != "Pending" {
 			t.Errorf("pvc health = %+v", data.PVC)
+		}
+	})
+
+	t.Run("ingress reports missing backends", func(t *testing.T) {
+		s := service(
+			&networkingv1.Ingress{
+				ObjectMeta: meta("web", "i1"),
+				Spec: networkingv1.IngressSpec{
+					Rules: []networkingv1.IngressRule{{
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
+									{Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{Name: "api"},
+									}},
+								},
+							},
+						},
+					}},
+				},
+			},
+			&corev1.Service{ObjectMeta: meta("web-frontend", "s1")},
+		)
+		data, err := s.Gather(context.Background(), kinds.Ingress, "web", ns)
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		if data.Ingress == nil || len(data.Ingress.MissingBackends) != 1 ||
+			data.Ingress.MissingBackends[0] != "api" {
+			t.Errorf("ingress health = %+v, want MissingBackends [api]", data.Ingress)
+		}
+	})
+
+	t.Run("ingress with an existing backend has no missing backends", func(t *testing.T) {
+		s := service(
+			&networkingv1.Ingress{
+				ObjectMeta: meta("web", "i1"),
+				Spec: networkingv1.IngressSpec{
+					DefaultBackend: &networkingv1.IngressBackend{
+						Service: &networkingv1.IngressServiceBackend{Name: "api"},
+					},
+				},
+			},
+			&corev1.Service{ObjectMeta: meta("api", "s1")},
+		)
+		data, err := s.Gather(context.Background(), kinds.Ingress, "web", ns)
+		if err != nil {
+			t.Fatalf("Gather: %v", err)
+		}
+		if data.Ingress == nil || len(data.Ingress.MissingBackends) != 0 {
+			t.Errorf("ingress health = %+v, want no missing backends", data.Ingress)
 		}
 	})
 }

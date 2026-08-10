@@ -442,3 +442,36 @@ func TestTreeAllNamespacesWithHTMLStillPrintsEveryTerminalTree(t *testing.T) {
 		}
 	}
 }
+
+// Every other scope-spanning listing (kx scan -A, kx diag -A, and tree's own
+// -n branch) prints a caption before its output; -A was the one gap.
+func TestTreeAllNamespacesPrintsAScopeBannerBeforeTheForest(t *testing.T) {
+	sink := captureRender(t)
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+	)
+	services := Services{
+		State:  &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config: config.Default(),
+		Kubernetes: func() (kubernetes.Interface, error) {
+			return client, nil
+		},
+	}
+	cmd := newTreeCommand(services)
+	cmd.SetContext(stoppedContext())
+	if err := cmd.Flags().Set("all-namespaces", "true"); err != nil {
+		t.Fatalf("set --all-namespaces: %v", err)
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	banner := strings.Index(sink.String(), "Namespace · all namespaces")
+	tree := strings.Index(sink.String(), "Namespace/prod")
+	if banner < 0 {
+		t.Fatalf("terminal output = %q, want a scope banner", sink.String())
+	}
+	if tree >= 0 && banner > tree {
+		t.Errorf("banner printed after the tree it scopes:\n%s", sink.String())
+	}
+}

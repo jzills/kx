@@ -119,6 +119,26 @@ func (s Service) attachKindHealth(
 			health.MostRecentJob = jobHealthFrom(recent)
 		}
 		data.CronJob = health
+	case kinds.Ingress:
+		ingress, err := s.Client.NetworkingV1().Ingresses(namespace).Get(ctx, name, get)
+		if err != nil {
+			return err
+		}
+		services, err := s.Client.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		known := make(map[string]bool, len(services.Items))
+		for i := range services.Items {
+			known[services.Items[i].Name] = true
+		}
+		var missing []string
+		for _, backendName := range ingressBackendServiceNames(ingress) {
+			if !known[backendName] {
+				missing = append(missing, backendName)
+			}
+		}
+		data.Ingress = &IngressHealth{MissingBackends: missing}
 	}
 	return nil
 }

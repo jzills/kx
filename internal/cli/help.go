@@ -2,6 +2,7 @@ package cli
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -21,12 +22,13 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"get", "secret", "top", "describe", "events", "logs", "labels", "annotations",
-		"label", "annotate", "yaml", "delete", "edit", "exec", "tree", "rollout",
-		"scale", "scan", "port-forward", "diagnostic", "namespace", "context",
+		"annotate", "annotations", "context", "cp", "delete", "describe",
+		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
+		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
+		"secret", "top", "tree", "yaml",
 	}},
-	{"History", []string{"state", "drop", "back", "forward"}},
-	{"Configuration", []string{"theme"}},
+	{"History", []string{"state"}},
+	{"Configuration", []string{"engine", "theme"}},
 }
 
 // installHelp replaces cobra's help output with the themed help screens, for
@@ -68,9 +70,14 @@ func rootSections(root *cobra.Command) []render.HelpSection {
 }
 
 func commandHelp(cmd *cobra.Command) render.CommandHelp {
+	spec := ParseUse(cmd.Use)
+
 	doc := cmd.Long
 	if doc == "" {
 		doc = cmd.Short
+	}
+	if spec.Passthrough != "" {
+		doc += "\n\nUnrecognized flags are passed through to kubectl."
 	}
 
 	// Use carries the argument spec after the command name; the name itself is
@@ -81,6 +88,15 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	} else {
 		usage += " [OPTIONS]"
 	}
+
+	var subcommands []render.HelpItem
+	for _, child := range cmd.Commands() {
+		if child.Hidden || child.Name() == "help" {
+			continue
+		}
+		subcommands = append(subcommands, render.HelpItem{Name: child.Name(), Doc: child.Short})
+	}
+	sort.Slice(subcommands, func(i, j int) bool { return subcommands[i].Name < subcommands[j].Name })
 
 	var options []render.HelpItem
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
@@ -105,6 +121,7 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		Path:     cmd.CommandPath(),
 		Doc:      doc,
 		Usage:    usage,
+		Commands: subcommands,
 		Args:     positionalArgs(cmd.Use),
 		Options:  options,
 		Aliases:  cmd.Aliases,

@@ -2,9 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"math"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,7 +21,9 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// The leading run of numbers are indexes; everything after is kubectl's.
+// The leading run of numbers are indexes; everything after is kubectl's. A
+// range token counts as a single leading argument here — it's expanded later,
+// in parseIndexes.
 func TestSplitLeadingIndexes(t *testing.T) {
 	cases := []struct {
 		args        []string
@@ -28,6 +35,13 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		{[]string{"1", "2", "-o", "wide"}, 2, "-o wide"},
 		{[]string{"--flag", "1"}, 0, "--flag 1"},
 		{nil, 0, ""},
+		{[]string{"9..17", "-o", "wide"}, 1, "-o wide"},
+		{[]string{"9..17", "3", "--tail=5"}, 2, "--tail=5"},
+		// A malformed range still belongs to the leading run — it should reach
+		// parseIndexes for a proper "not a valid range" error, rather than
+		// falling through to the generic "not a valid int" message that
+		// applies when the leading run is empty.
+		{[]string{"5..", "-o", "wide"}, 1, "-o wide"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -63,6 +77,89 @@ func TestParseIndexNamesTheArgument(t *testing.T) {
 	want := "Invalid value for 'indexes': 'abc' is not a valid int."
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// A range token expands into every index it spans, inclusive of both ends,
+// walking in whichever direction the two ends imply.
+func TestParseIndexesExpandsRanges(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want []int
+	}{
+		{"ascending", []string{"9..12"}, []int{9, 10, 11, 12}},
+		{"descending", []string{"12..9"}, []int{12, 11, 10, 9}},
+		{"single value", []string{"5..5"}, []int{5}},
+		{"mixed with literal indexes", []string{"1", "3..5", "7"}, []int{1, 3, 4, 5, 7}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseIndexes("indexes", tc.args)
+			if err != nil {
+				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// A malformed range is reported the same way a bad single index is: named,
+// quoted, and rejected before reaching the cluster.
+func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{"9..", "Invalid value for 'indexes': '9..' is not a valid range."},
+		{"..17", "Invalid value for 'indexes': '..17' is not a valid range."},
+		{"9..abc", "Invalid value for 'indexes': '9..abc' is not a valid range."},
+		{"9...17", "Invalid value for 'indexes': '9...17' is not a valid range."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.arg, func(t *testing.T) {
+			_, err := parseIndexes("indexes", []string{tc.arg})
+			if err == nil {
+				t.Fatalf("parseIndexes(%q) accepted a malformed range", tc.arg)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A pathological range shouldn't build a giant slice before any index is even
+// resolved against the current listing.
+func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
+	_, err := parseIndexes("indexes", []string{"1..999999"})
+	if err == nil {
+		t.Fatal("parseIndexes accepted an oversized range")
+	}
+}
+
+// A range whose ends sit near opposite bounds of int must still be rejected
+// as oversized, not silently accepted via an overflowed span that bypasses
+// maxRangeSpan and then loops from one end of int to the other. Run with a
+// timeout rather than a bare call: on the overflow this regresses, the
+// unbounded loop would otherwise hang the test (and eventually the CI
+// runner) instead of failing it cleanly.
+func TestParseIndexesRejectsOverflowingRanges(t *testing.T) {
+	arg := fmt.Sprintf("%d..%d", math.MaxInt64, math.MinInt64)
+	done := make(chan error, 1)
+	go func() {
+		_, err := parseIndexes("indexes", []string{arg})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("parseIndexes accepted a range whose span overflows int")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parseIndexes did not return — span overflow likely bypassed the maxRangeSpan guard")
 	}
 }
 
@@ -110,6 +207,9 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 		}
 		if err := cmd.Args(cmd, []string{"1", "2"}); err != nil {
 			t.Errorf("%s rejects two indexes: %v", name, err)
+		}
+		if err := cmd.Args(cmd, []string{"1", "3..5"}); err != nil {
+			t.Errorf("%s rejects a mixed index/range argument list: %v", name, err)
 		}
 		if !strings.Contains(cmd.Use, "...") {
 			t.Errorf("%s: Use = %q, want it to show a repeatable index", name, cmd.Use)
@@ -314,5 +414,114 @@ func TestStateViewsOnAnAbsentStateFile(t *testing.T) {
 		if !strings.Contains(out.String(), tc.want) {
 			t.Errorf("kx state %s output = %q, want %q", tc.flag, out.String(), tc.want)
 		}
+	}
+}
+
+// kx state drop --all clears history and slots after confirming, since it's
+// destructive in a way a single-position drop isn't (that only costs a
+// re-list of one entry; --all also discards the namespace/context slots).
+func TestDropAllConfirmsBeforeClearing(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var prompted string
+	services.Confirm = func(m string) error { prompted = m; return nil }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services, "kx state drop")
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --all: %v", err)
+	}
+	if prompted == "" {
+		t.Error("kx state drop --all did not prompt for confirmation")
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 0 {
+		t.Errorf("len(States) = %d, want 0 after drop --all", len(history.States))
+	}
+}
+
+// Declining the prompt must clear nothing.
+func TestDropAllAbortsWithoutConfirmation(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	services.Confirm = func(string) error { return errors.New("aborted") }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services, "kx state drop")
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx state drop --all succeeded despite an aborted confirmation")
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — an aborted drop --all must not clear anything", len(history.States))
+	}
+}
+
+func TestCopyRegistersHelpFlags(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	for _, name := range []string{"container", "no-preserve", "retries"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("--%s is not registered, so it will not appear in --help", name)
+		}
+	}
+}
+
+func TestCopyRequiresTwoArguments(t *testing.T) {
+	cmd := newCopyCommand(Services{})
+	if err := cmd.RunE(cmd, []string{"1:/etc/foo"}); err == nil {
+		t.Error("accepted a single argument, want src and dest required")
+	}
+}
+
+// The real bug this guards: an Args validator requiring 2 arguments runs
+// against the unstripped argv on the full cobra dispatch path (cmd.RunE
+// alone never invokes Args, which is why that shortcut wouldn't have caught
+// this) — `kx cp --help` is a single argument, so a MinimumNArgs(2) gate
+// rejects it with an arity error before RunE ever sees it and gets a chance
+// to recognize --help via passthrough.
+func TestCopyHelpDoesNotTriggerAnArityError(t *testing.T) {
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newCopyCommand(Services{})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("Execute with --help = %v, want nil (help handled, not an arity error)", err)
+	}
+}
+
+// port-forward had the identical bug, caught and fixed alongside cp's own
+// (both took a MinimumNArgs(2) validator from the same pattern).
+func TestPortForwardHelpDoesNotTriggerAnArityError(t *testing.T) {
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newPortForwardCommand(Services{})
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("Execute with --help = %v, want nil (help handled, not an arity error)", err)
 	}
 }

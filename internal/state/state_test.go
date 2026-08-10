@@ -476,6 +476,45 @@ func TestDropOnlyEntryFails(t *testing.T) {
 	}
 }
 
+// DropAll clears the whole file — the navigation stack and the
+// namespace/context slots together — since they live in one History struct
+// and "clear everything" is read literally.
+func TestDropAllClearsHistoryAndSlots(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+	if err := service.SaveNamed(State{Resources: namespaces("default", "prod"), Namespace: "default"}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory after DropAll: %v", err)
+	}
+	if len(history.States) != 0 {
+		t.Errorf("len(States) = %d, want 0", len(history.States))
+	}
+	if len(history.Named) != 0 {
+		t.Errorf("len(Named) = %d, want 0", len(history.Named))
+	}
+}
+
+// DropAll on a state file that has never been written must not error — a
+// fresh install has nothing to clear, and that's not a failure.
+func TestDropAllOnAbsentStateFileSucceeds(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll on an absent state file: %v", err)
+	}
+	if _, err := service.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory after DropAll: %v", err)
+	}
+}
+
 func TestFieldsResolvesIndex(t *testing.T) {
 	service := newTestService(t, 10)
 	save(t, service, State{Resources: pods("nginx", "redis"), Namespace: "prod"})

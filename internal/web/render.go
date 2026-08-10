@@ -10,7 +10,7 @@ import (
 	"github.com/jzills/kx/internal/render"
 )
 
-//go:embed layout.gohtml diag.gohtml scan.gohtml tree.gohtml
+//go:embed layout.gohtml diag.gohtml scan.gohtml tree.gohtml top.gohtml
 var templateFS embed.FS
 
 // stylesheet is compiled in, not read at runtime — the binary ships alone.
@@ -47,6 +47,8 @@ var (
 			ParseFS(templateFS, "layout.gohtml", "scan.gohtml"))
 	treeTemplate = template.Must(template.New("tree").Funcs(funcs).
 			ParseFS(templateFS, "layout.gohtml", "tree.gohtml"))
+	topTemplate = template.Must(template.New("top").Funcs(funcs).
+			ParseFS(templateFS, "layout.gohtml", "top.gohtml"))
 )
 
 // RenderDiag renders a diagnostic page.
@@ -109,6 +111,18 @@ func RenderScan(page ScanPage) ([]byte, error) {
 func RenderTree(page TreePage) ([]byte, error) {
 	var out bytes.Buffer
 	if err := treeTemplate.ExecuteTemplate(&out, "layout", page); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// RenderTop renders a kx top listing (pods or nodes) as a page.
+//
+// No clone-and-rebind needed: like RenderTree, a top page carries no
+// timestamps for "age" to bind per call — top.gohtml never references it.
+func RenderTop(page TopPage) ([]byte, error) {
+	var out bytes.Buffer
+	if err := topTemplate.ExecuteTemplate(&out, "layout", page); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

@@ -322,3 +322,172 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// trivyJSON is a synthetic (not captured) fixture in Trivy's native --format
+// json shape: one Results entry with three vulnerabilities (a fixed CRITICAL,
+// an unfixed HIGH, and an UNKNOWN-severity one Trivy's own vocabulary uses but
+// kx's canonical Severities does not), and a second Results entry with no
+// Vulnerabilities at all — a clean scan target contributes nothing.
+const trivyJSON = `{
+  "Results": [
+    {
+      "Target": "app (debian 12.5)",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-0001",
+          "PkgName": "openssl",
+          "InstalledVersion": "3.0.11-1",
+          "FixedVersion": "3.0.13-1",
+          "Severity": "CRITICAL",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-0001"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-0002",
+          "PkgName": "libcurl4",
+          "InstalledVersion": "7.88.1-10",
+          "FixedVersion": "",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-0002"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-0003",
+          "PkgName": "zlib1g",
+          "InstalledVersion": "1.2.13.dfsg-1",
+          "FixedVersion": "1.2.13.dfsg-1+deb12u1",
+          "Severity": "UNKNOWN",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-0003"
+        }
+      ]
+    },
+    {
+      "Target": "app (gobinary)",
+      "Vulnerabilities": null
+    }
+  ]
+}`
+
+func TestTrivyParseFindingsReadsEveryVulnerability(t *testing.T) {
+	findings, err := Trivy{}.ParseFindings(trivyJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("got %d findings, want 3", len(findings))
+	}
+
+	first := findings[0]
+	if first.ID != "CVE-2024-0001" {
+		t.Errorf("ID = %q", first.ID)
+	}
+	if first.Severity != "CRITICAL" {
+		t.Errorf("Severity = %q", first.Severity)
+	}
+	if first.Package != "openssl" {
+		t.Errorf("Package = %q", first.Package)
+	}
+	if first.Installed != "3.0.11-1" {
+		t.Errorf("Installed = %q", first.Installed)
+	}
+	if first.FixedIn != "3.0.13-1" {
+		t.Errorf("FixedIn = %q", first.FixedIn)
+	}
+	if first.URL != "https://avd.aquasec.com/nvd/cve-2024-0001" {
+		t.Errorf("URL = %q", first.URL)
+	}
+}
+
+func TestTrivyParseFindingsEmptyFixedVersionStaysEmpty(t *testing.T) {
+	findings, err := Trivy{}.ParseFindings(trivyJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "libcurl4" {
+			found = true
+			if f.FixedIn != "" {
+				t.Errorf("FixedIn = %q, want empty for an unfixed package", f.FixedIn)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no finding has Package \"libcurl4\"")
+	}
+}
+
+func TestTrivyParseFindingsFoldsUnknownSeverityToUnspecified(t *testing.T) {
+	findings, err := Trivy{}.ParseFindings(trivyJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.Package == "zlib1g" {
+			found = true
+			if f.Severity != "UNSPECIFIED" {
+				t.Errorf("Severity = %q, want UNSPECIFIED for Trivy's own UNKNOWN", f.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no finding has Package \"zlib1g\"")
+	}
+}
+
+func TestTrivyParseFindingsSkipsCleanTargets(t *testing.T) {
+	findings, err := Trivy{}.ParseFindings(trivyJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.ID, "gobinary") || strings.Contains(f.Package, "gobinary") {
+			t.Errorf("a finding leaked from the Vulnerabilities:null target: %+v", f)
+		}
+	}
+}
+
+func TestTrivyParseFindingsRejectsGarbage(t *testing.T) {
+	if _, err := (Trivy{}).ParseFindings("not json"); err == nil {
+		t.Error("ParseFindings accepted non-JSON")
+	}
+}
+
+func TestTrivyArgv(t *testing.T) {
+	trivy := Trivy{}
+	got := trivy.SummaryArgv("nginx:1.25")
+	if len(got) != 5 || got[2] != "--format" || got[3] != "json" || got[4] != "nginx:1.25" {
+		t.Errorf("SummaryArgv = %v, want a json format request", got)
+	}
+	passthrough := trivy.PassthroughArgv("nginx:1.25", []string{"--severity", "HIGH"})
+	if passthrough[len(passthrough)-1] != "HIGH" {
+		t.Errorf("PassthroughArgv = %v, want the extra flag forwarded", passthrough)
+	}
+	if preflight := trivy.PreflightArgv(); preflight[0] != "trivy" {
+		t.Errorf("PreflightArgv = %v", preflight)
+	}
+	if trivy.Name() != "trivy" {
+		t.Errorf("Name() = %q", trivy.Name())
+	}
+	if !strings.Contains(trivy.UnavailableMessage(), "trivy.dev") {
+		t.Errorf("UnavailableMessage() = %q, want it to link install docs", trivy.UnavailableMessage())
+	}
+}
+
+func TestGetEngineKnowsTrivy(t *testing.T) {
+	if _, err := GetEngine("trivy"); err != nil {
+		t.Errorf("GetEngine(trivy): %v", err)
+	}
+}
+
+func TestNamesAndExists(t *testing.T) {
+	names := Names()
+	if len(names) != 2 || names[0] != "scout" || names[1] != "trivy" {
+		t.Errorf("Names() = %v, want [scout trivy] in that order", names)
+	}
+	if !Exists("scout") || !Exists("trivy") {
+		t.Error("Exists false for a registered engine")
+	}
+	if Exists("nonexistent") {
+		t.Error("Exists true for an unregistered engine")
+	}
+}

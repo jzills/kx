@@ -2,7 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/web"
 )
 
 // TopCommand lists pod resource usage, indexed like `kx get`, with usage
@@ -20,12 +23,30 @@ type TopCommand struct {
 	Index   Indexer
 }
 
+// EnsureAvailable checks that the cluster's metrics API is registered
+// before kx top tries to use it — kubectl top depends on the metrics-server
+// add-on, not just kubectl itself, and without this check a missing
+// metrics-server surfaces as kubectl's own raw, unhelpful error text.
+// Mirrors ScanCommand.EnsureAvailable's preflight-probe shape exactly
+// (internal/cli/scan.go): a cheap probe, a friendly message on failure.
+func (c TopCommand) EnsureAvailable() error {
+	if c.Kubectl.Probe([]string{"get", "--raw", "/apis/metrics.k8s.io/v1beta1"}) != 0 {
+		return errors.New("metrics-server is not available — kx top needs it " +
+			"installed in the cluster. Install it: " +
+			"https://github.com/kubernetes-sigs/metrics-server#installation")
+	}
+	return nil
+}
+
 // Execute returns the indexed table to display, and the namespace it was
 // listed from — resolving that costs a `kubectl config view` when no -n was
 // given, and the caller needs the same answer for the caption.
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table, namespace string, err error) {
+	if err := c.EnsureAvailable(); err != nil {
+		return "", "", err
+	}
 	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
 	if err != nil {
 		return "", "", err
@@ -35,8 +56,9 @@ func (c TopCommand) Execute(
 	}
 
 	allNamespaces := allNamespaces(extraArgs)
-	// --containers is a different table shape entirely, and -A is unindexed
-	// anyway, so neither gets percentage columns.
+	// --containers is a different table shape entirely, so it never gets
+	// percentage columns — unlike -A, which does (see withUsagePercentages),
+	// even though it stays unindexed regardless.
 	hasContainers := false
 	for _, arg := range extraArgs {
 		if arg == "--containers" {
@@ -49,8 +71,8 @@ func (c TopCommand) Execute(
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
-	if !allNamespaces && !hasContainers && !noLimits {
-		output, err = c.withUsagePercentages(output, namespace)
+	if !hasContainers && !noLimits {
+		output, err = c.withUsagePercentages(output, namespace, allNamespaces)
 		if err != nil {
 			return "", "", err
 		}
@@ -82,20 +104,98 @@ func (c TopCommand) Execute(
 	return indexed, namespace, nil
 }
 
-// withUsagePercentages appends CPU%/MEM% columns computed against each pod's
-// limits.
+// ExecuteNodes lists node CPU/memory usage, indexed like kx get nodes.
 //
-// Only handles `kubectl top pods`' default per-pod shape; the caller filters
-// out the --containers and -A cases before this runs.
-func (c TopCommand) withUsagePercentages(output, namespace string) (string, error) {
+// Unlike Execute (pods), there is no limits lookup: kubectl top nodes
+// already reports CPU(%)/MEMORY(%) against node capacity natively, so this
+// only has to relabel those columns to kx's own CPU%/MEM% naming (values
+// untouched) — see relabelPercentColumns — so the existing IndexedTable
+// coloring, which keys off those exact header names, applies for free.
+func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, namespace string, err error) {
+	if err := c.EnsureAvailable(); err != nil {
+		return "", "", err
+	}
+	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
+	if err != nil {
+		return "", "", err
+	}
+	if filterTerm != "" {
+		output = c.Index.Filter(output, filterTerm)
+	}
+	output = relabelPercentColumns(output)
+
+	namespace = extractNamespace(extraArgs)
+	if namespace == "" {
+		namespace = c.Kubectl.CurrentNamespace()
+	}
+
+	indexed, names := c.Index.Add(output)
+	if len(names) > 0 {
+		if extraArgs == nil {
+			extraArgs = []string{}
+		}
+		var match *string
+		if filterTerm != "" {
+			match = &filterTerm
+		}
+		if err := c.State.Save(state.State{
+			Resources: state.NewResources(names, kinds.Node),
+			Namespace: namespace,
+			// Recorded as a `get nodes` query, matching kx get nodes' own
+			// convention, so a stale entry refreshes into the same listing
+			// shape the indexes were assigned against.
+			Query: &state.Query{Resource: "nodes", Args: extraArgs, Match: match},
+		}); err != nil {
+			return "", "", err
+		}
+	}
+	return indexed, namespace, nil
+}
+
+// relabelPercentColumns renames kubectl top nodes' native CPU(%)/MEMORY(%)
+// columns to kx's own CPU%/MEM% naming. Values are untouched — this is a
+// header rewrite only, so the existing render.UsageStyle-driven coloring in
+// IndexedTable (which looks up cells by the exact header names "CPU%"/
+// "MEM%") applies to nodes without any new coloring code.
+func relabelPercentColumns(output string) string {
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return output
+	}
+	cpuCol := indexOfHeader(headers, "CPU(%)")
+	memCol := indexOfHeader(headers, "MEMORY(%)")
+	if cpuCol < 0 && memCol < 0 {
+		return output
+	}
+	relabeled := append([]string{}, headers...)
+	if cpuCol >= 0 {
+		relabeled[cpuCol] = "CPU%"
+	}
+	if memCol >= 0 {
+		relabeled[memCol] = "MEM%"
+	}
+	table := make([][]string, 0, len(rows)+1)
+	table = append(table, relabeled)
+	table = append(table, rows...)
+	return index.Format(table)
+}
+
+// withUsagePercentages appends CPU%/MEM% columns computed against each
+// pod's limits. When allNamespaces, rows are keyed by their own NAMESPACE
+// column (present in kubectl top pods -A's own output) rather than the
+// single namespace passed in — pod names collide across namespaces, so a
+// bare-name key would silently give two different pods' rows the same
+// limit.
+func (c TopCommand) withUsagePercentages(output, namespace string, allNamespaces bool) (string, error) {
 	headers, rows, nameIdx := index.ParseTable(output)
 	cpuCol := indexOfHeader(headers, "CPU(cores)")
 	memCol := indexOfHeader(headers, "MEMORY(bytes)")
 	if headers == nil || cpuCol < 0 || memCol < 0 {
 		return output, nil
 	}
+	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
 
-	limits, err := c.podLimits(namespace)
+	limits, err := c.podLimits(namespace, allNamespaces)
 	if err != nil {
 		return "", err
 	}
@@ -103,7 +203,11 @@ func (c TopCommand) withUsagePercentages(output, namespace string) (string, erro
 	table := make([][]string, 0, len(rows)+1)
 	table = append(table, append(append([]string{}, headers...), "CPU%", "MEM%"))
 	for _, row := range rows {
-		limit := limits[row[nameIdx]]
+		rowNamespace := namespace
+		if namespaceIdx >= 0 {
+			rowNamespace = row[namespaceIdx]
+		}
+		limit := limits[rowNamespace+"/"+row[nameIdx]]
 		table = append(table, append(append([]string{}, row...),
 			percentCell(row[cpuCol], limit.CPU),
 			percentCell(row[memCol], limit.Memory),
@@ -119,14 +223,26 @@ type podLimit struct {
 	Memory *resource.Quantity
 }
 
-// podLimits sums each resource's limit across a pod's containers, matching how
-// `kubectl top pods` aggregates usage to the pod level.
+// podLimits sums each resource's limit across a pod's containers, matching
+// how `kubectl top pods` aggregates usage to the pod level, for one
+// namespace or (allNamespaces) the whole cluster. Keyed by
+// "namespace/name" in both cases — pod names alone collide across
+// namespaces, so a single shared key shape (rather than a bare-name map
+// for the single-namespace case and a different one for -A) is what lets
+// withUsagePercentages use one lookup expression regardless of scope.
 //
 // A container missing a limit makes that resource undefined for the whole pod:
 // a percentage against a partial denominator would read as healthy headroom
 // when it is nothing of the sort.
-func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
-	raw, err := c.Kubectl.Run([]string{"get", "pods", "-n", namespace, "-o", "json"})
+func (c TopCommand) podLimits(namespace string, allNamespaces bool) (map[string]podLimit, error) {
+	args := []string{"get", "pods"}
+	if allNamespaces {
+		args = append(args, "-A")
+	} else {
+		args = append(args, "-n", namespace)
+	}
+	args = append(args, "-o", "json")
+	raw, err := c.Kubectl.Run(args)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +250,8 @@ func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
 			} `json:"metadata"`
 			Spec struct {
 				Containers []struct {
@@ -180,7 +297,7 @@ func (c TopCommand) podLimits(namespace string) (map[string]podLimit, error) {
 		if memDefined {
 			entry.Memory = memTotal
 		}
-		limits[item.Metadata.Name] = entry
+		limits[item.Metadata.Namespace+"/"+item.Metadata.Name] = entry
 	}
 	return limits, nil
 }
@@ -203,6 +320,66 @@ func percentCell(usage string, limit *resource.Quantity) string {
 		return "—"
 	}
 	return strconv.Itoa(int(used*100/total)) + "%"
+}
+
+// topPageRows re-parses the already-indexed (and, for nodes, relabeled)
+// table text into page rows for --html. There is no richer domain struct
+// behind a top listing the way diagnostics.Report/scanner.ImageScan back
+// diag/scan's pages — this table text already is the whole of the data —
+// so this builds web.TopRow directly rather than converting from some
+// intermediate type. Degrades gracefully when a column is absent (the -A
+// pods case has no X column, since -A stays unindexed): that column's
+// TopRow fields stay at their zero value, which the template/grid render
+// as blank/"—".
+func topPageRows(indexed string) []web.TopRow {
+	headers, rows, nameIdx := index.ParseTable(indexed)
+	if headers == nil {
+		return nil
+	}
+	indexIdx := indexOfHeader(headers, "X")
+	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
+	cpuIdx := indexOfHeader(headers, "CPU(cores)")
+	memIdx := indexOfHeader(headers, "MEMORY(bytes)")
+	cpuPctIdx := indexOfHeader(headers, "CPU%")
+	memPctIdx := indexOfHeader(headers, "MEM%")
+
+	pageRows := make([]web.TopRow, len(rows))
+	for i, row := range rows {
+		pageRow := web.TopRow{Name: row[nameIdx]}
+		if indexIdx >= 0 {
+			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
+				pageRow.Index = n
+			}
+		}
+		if namespaceIdx >= 0 {
+			pageRow.Namespace = row[namespaceIdx]
+		}
+		if cpuIdx >= 0 {
+			pageRow.CPU = row[cpuIdx]
+		}
+		if memIdx >= 0 {
+			pageRow.Memory = row[memIdx]
+		}
+		if cpuPctIdx >= 0 {
+			pageRow.CPUPct = usageCell(row[cpuPctIdx], "cpu")
+		}
+		if memPctIdx >= 0 {
+			pageRow.MemPct = usageCell(row[memPctIdx], "memory")
+		}
+		pageRows[i] = pageRow
+	}
+	return pageRows
+}
+
+// usageCell parses a "NN%" cell (or "—" for unknown) into a page-ready
+// Usage, reusing web.NewUsage's classification so there is one coloring
+// rule, not a second one duplicated here.
+func usageCell(cell, kind string) web.Usage {
+	pct, err := strconv.Atoi(strings.TrimSuffix(cell, "%"))
+	if err != nil {
+		return web.Usage{}
+	}
+	return web.NewUsage(pct, kind)
 }
 
 func indexOfHeader(headers []string, name string) int {

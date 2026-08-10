@@ -9,6 +9,7 @@ import (
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
@@ -120,5 +121,73 @@ func TestArgvOfOnlyStrippedFlagsIsAnErrorNotAPanic(t *testing.T) {
 				t.Errorf("kx %v returned no error", tc.argv)
 			}
 		})
+	}
+}
+
+// The pre-restructure spellings (kx back/forward) must keep working — they're
+// hidden from --help, not removed — so scripts and muscle memory written
+// before kx state back/forward/drop existed don't break.
+func TestLegacyTopLevelHistoryCommandsStillWork(t *testing.T) {
+	services := argvServices(t)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"one"}, kinds.Pod), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"two"}, kinds.Pod), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	for _, name := range []string{"back", "forward"} {
+		quietRender(t)
+		if err := Execute(NewRoot(services, "test"), []string{name}); err != nil {
+			t.Errorf("kx %s: %v", name, err)
+		}
+	}
+}
+
+// The canonical spellings resolve to the same subcommands nested under state.
+//
+// cobra's Find falls back to the deepest command it can match rather than
+// erroring on an unrecognized trailing argument, so root.Find([]string{"state",
+// "back"}) returns "state" with no error even when "back" isn't a real
+// subcommand — the resolved command's own Name() must be checked, not just
+// the error, or this test cannot fail.
+func TestStateSubcommandsAreRegistered(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	stateCmd, _, err := root.Find([]string{"state"})
+	if err != nil {
+		t.Fatalf("root.Find(state): %v", err)
+	}
+	for _, name := range []string{"back", "drop", "forward"} {
+		cmd, _, err := root.Find([]string{"state", name})
+		if err != nil {
+			t.Errorf("kx state %s is not registered: %v", name, err)
+			continue
+		}
+		if cmd.Name() != name {
+			t.Errorf("root.Find(state, %s) resolved to %q, want %q", name, cmd.Name(), name)
+		}
+	}
+	for _, child := range stateCmd.Commands() {
+		if child.Hidden {
+			t.Errorf("kx state %s is hidden, want it visible", child.Name())
+		}
+	}
+}
+
+// The legacy top-level spellings are hidden from --help, not removed.
+func TestLegacyTopLevelHistoryCommandsAreHidden(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	for _, name := range []string{"back", "forward", "drop"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", name, err)
+		}
+		if !cmd.Hidden {
+			t.Errorf("kx %s is not hidden, want it hidden (kx state %s is now canonical)", name, name)
+		}
 	}
 }

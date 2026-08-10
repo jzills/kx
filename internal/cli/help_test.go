@@ -159,6 +159,66 @@ func TestParseUseDetectsRepeatableArgsAndPassthrough(t *testing.T) {
 	}
 }
 
+// Command names inside a section are alphabetized so the listing is scannable
+// without memorizing an editorial order; section titles keep their own order.
+func TestHelpSectionCommandsAreAlphabetized(t *testing.T) {
+	for _, section := range helpSections {
+		for i := 1; i < len(section.Commands); i++ {
+			if section.Commands[i-1] > section.Commands[i] {
+				t.Errorf("section %q: %q comes before %q, not alphabetical",
+					section.Title, section.Commands[i-1], section.Commands[i])
+			}
+		}
+	}
+}
+
+// Any command whose Use string passes through flags (describe, logs, edit,
+// exec, port-forward, cp, get, secret, scan) gets the note for free from its
+// Use string, rather than a hand-written sentence that can drift out of sync
+// per command.
+func TestCommandHelpNotesKubectlPassthrough(t *testing.T) {
+	passthroughNote := "Unrecognized flags are passed through to kubectl."
+
+	withPassthrough := &cobra.Command{
+		Use:   "describe <index>... [kubectl flags]",
+		Short: "Show full kubectl describe output.",
+	}
+	if !strings.Contains(commandHelp(withPassthrough).Doc, passthroughNote) {
+		t.Errorf("commandHelp(%q).Doc = %q, want it to contain %q",
+			withPassthrough.Use, commandHelp(withPassthrough).Doc, passthroughNote)
+	}
+
+	withoutPassthrough := &cobra.Command{
+		Use:   "scale <index> <replicas>",
+		Short: "Scale an indexed workload.",
+	}
+	if strings.Contains(commandHelp(withoutPassthrough).Doc, passthroughNote) {
+		t.Errorf("commandHelp(%q).Doc = %q, want no passthrough note",
+			withoutPassthrough.Use, commandHelp(withoutPassthrough).Doc)
+	}
+}
+
+// state gained subcommands in this change; its --help must list them so
+// they're not registered-but-undiscoverable.
+func TestStateHelpListsItsSubcommands(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	stateCmd, _, err := root.Find([]string{"state"})
+	if err != nil {
+		t.Fatalf("root.Find(state): %v", err)
+	}
+	help := commandHelp(stateCmd)
+	var names []string
+	for _, item := range help.Commands {
+		names = append(names, item.Name)
+	}
+	joined := strings.Join(names, " ")
+	for _, want := range []string{"back", "drop", "forward"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("kx state --help Commands = %q, missing %q", joined, want)
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
@@ -170,8 +230,11 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// cobra adds these itself; they aren't part of kx's surface.
-		if name == "help" || name == "completion" {
+		// cobra adds these itself; they aren't part of kx's surface. Hidden
+		// commands are the pre-restructure kx back/forward/drop spellings,
+		// deliberately absent from --help now that kx state back/forward/drop
+		// are canonical — see NewRoot.
+		if name == "help" || name == "completion" || cmd.Hidden {
 			continue
 		}
 		if !listed[name] {

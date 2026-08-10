@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -22,12 +23,68 @@ func parseIndex(name, arg string) (int, error) {
 	return index, nil
 }
 
+// maxRangeSpan caps how many indexes a single range token can expand to, so a
+// mistyped range like "1..999999" doesn't build a huge slice before any index
+// is even resolved against the current listing.
+const maxRangeSpan = 10000
+
+// expandRange expands a "start..end" token into every index it spans,
+// inclusive of both ends, walking in whichever direction start and end imply
+// (so "20..9" walks down). ok is false when arg isn't a range token at all,
+// so the caller falls back to treating it as a single index.
+func expandRange(name, arg string) (indexes []int, ok bool, err error) {
+	if !strings.Contains(arg, "..") {
+		return nil, false, nil
+	}
+	parts := strings.Split(arg, "..")
+	if len(parts) != 2 {
+		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+	}
+	start, startErr := strconv.Atoi(parts[0])
+	end, endErr := strconv.Atoi(parts[1])
+	if startErr != nil || endErr != nil {
+		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+	}
+	// start - end overflows int when the two ends sit near opposite bounds of
+	// the type (e.g. "9223372036854775807..-9223372036854775808"), wrapping
+	// around to a small value that would slip past the maxRangeSpan check
+	// below and then loop from one end of int to the other. big.Int can't
+	// overflow, so the span is computed there and converted back to int only
+	// once it's already known to be small.
+	span := new(big.Int).Sub(big.NewInt(int64(start)), big.NewInt(int64(end)))
+	span.Abs(span)
+	span.Add(span, big.NewInt(1))
+	if span.Cmp(big.NewInt(maxRangeSpan)) > 0 {
+		return nil, true, fmt.Errorf(
+			"Invalid value for '%s': '%s' spans more than %d indexes.", name, arg, maxRangeSpan)
+	}
+	step := 1
+	if start > end {
+		step = -1
+	}
+	indexes = make([]int, 0, span.Int64())
+	for i := start; ; i += step {
+		indexes = append(indexes, i)
+		if i == end {
+			break
+		}
+	}
+	return indexes, true, nil
+}
+
 func parseIndexes(name string, args []string) ([]int, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
 	}
 	indexes := make([]int, 0, len(args))
 	for _, arg := range args {
+		if expanded, ok, err := expandRange(name, arg); ok {
+			if err != nil {
+				return nil, err
+			}
+			indexes = append(indexes, expanded...)
+			continue
+		}
 		index, err := parseIndex(name, arg)
 		if err != nil {
 			return nil, err
@@ -76,7 +133,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "describe <index>... [kubectl flags]",
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -113,11 +170,14 @@ func newDescribeCommand(services Services) *cobra.Command {
 	}
 }
 
-// splitLeadingIndexes takes the run of numeric arguments at the front, leaving
-// the rest for kubectl.
+// splitLeadingIndexes takes the run of numeric-or-range arguments at the
+// front, leaving the rest for kubectl. A malformed range (e.g. "5..") still
+// counts as part of the leading run — it isn't fully validated here, only
+// shaped like a range, so it reaches parseIndexes for a proper error instead
+// of the generic "not a valid int" that applies when nothing leads at all.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
 	for i, arg := range args {
-		if _, err := strconv.Atoi(arg); err != nil {
+		if _, err := strconv.Atoi(arg); err != nil && !strings.Contains(arg, "..") {
 			return args[:i], args[i:]
 		}
 	}
@@ -130,7 +190,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
 			"DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -253,7 +313,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <index>...",
 		Short:   "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example: "  kx delete 3\n  kx delete 3 5 -y",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
@@ -337,10 +397,15 @@ func newRolloutCommand(services Services) *cobra.Command {
 
 func newPortForwardCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:                "port-forward <index> <port> [kubectl flags]",
-		Short:              "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
-		Example:            "  kx port-forward 1 8080:80",
-		Args:               cobra.MinimumNArgs(2),
+		Use:     "port-forward <index> <port> [kubectl flags]",
+		Short:   "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
+		Example: "  kx port-forward 1 8080:80",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, before passthrough can pull --help out of it —
+		// `kx port-forward --help` is a single argument, which used to fail
+		// a MinimumNArgs(2) gate before RunE ever saw it. The real "need an
+		// index and a port" check happens below, once passthrough has
+		// already resolved --help.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -360,12 +425,46 @@ func newPortForwardCommand(services Services) *cobra.Command {
 	}
 }
 
+func newCopyCommand(services Services) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cp <src> <dest> [kubectl flags]",
+		Short: "Copy files to or from an indexed pod via kubectl cp.",
+		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
+			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, before passthrough can pull --help out of it —
+		// `kx cp --help` is a single argument, which would fail a
+		// MinimumNArgs(2) gate before RunE ever saw it. The real "need a
+		// source and a destination" check happens below, once passthrough
+		// has already resolved --help.
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return fmt.Errorf("cp requires a source and a destination")
+			}
+			return CopyCommand{Kubectl: services.Kubectl, State: services.State}.
+				Execute(rest[0], rest[1], rest[2:])
+		},
+	}
+	// Pure kubectl passthrough, parsed by hand — registered only so they
+	// appear in --help instead of vanishing.
+	cmd.Flags().StringP("container", "c", "", "Container name, if the pod has more than one")
+	cmd.Flags().Bool("no-preserve", false,
+		"Don't preserve the copied file/directory's ownership and permissions")
+	cmd.Flags().Int("retries", 0, "Number of retries on a copy failure (0 disables)")
+	return cmd
+}
+
 func newYamlCommand(services Services) *cobra.Command {
 	var show string
 	cmd := &cobra.Command{
 		Use:     "yaml <index>...",
 		Short:   "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
@@ -415,7 +514,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 		Use:     use + " <index>...",
 		Short:   short,
 		Args:    cobra.MinimumNArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
 			if err != nil {
@@ -624,13 +723,37 @@ func newNavigateCommand(services Services, use, short string, delta int) *cobra.
 	}
 }
 
-func newDropCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+// prefix is the invocation the examples show — "kx state drop" for the
+// documented subcommand, "kx drop" for the hidden top-level alias kept for
+// existing scripts and muscle memory. Both share this constructor, so
+// without it the alias's own --help would show examples for a command it
+// isn't.
+func newDropCommand(services Services, prefix string) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
 		Use:     "drop <position>",
-		Short:   "Remove a history entry by position (shown in kx state --all).",
-		Example: "  kx drop 2",
-		Args:    cobra.ExactArgs(1),
+		Short:   "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) > 0 {
+					return fmt.Errorf("drop --all takes no position argument")
+				}
+				if err := services.confirm()(
+					"Clear all kx history, including namespace and context slots?",
+				); err != nil {
+					return err
+				}
+				if err := services.State.DropAll(); err != nil {
+					return err
+				}
+				render.Success("Cleared all history.")
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("drop requires a position, or --all to clear everything")
+			}
 			position, err := parseIndex("position", args[0])
 			if err != nil {
 				return err
@@ -643,4 +766,6 @@ func newDropCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Clear all history and namespace/context slots")
+	return cmd
 }

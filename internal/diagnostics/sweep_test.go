@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -270,6 +271,80 @@ func TestSweepReportsPVCs(t *testing.T) {
 	}
 	if data.PVC == nil || data.PVC.Phase != "Lost" {
 		t.Errorf("pvc = %+v, want phase Lost", data.PVC)
+	}
+}
+
+func TestSweepReportsIngressMissingBackend(t *testing.T) {
+	indexed := mustSweep(t, service(
+		&networkingv1.Ingress{
+			ObjectMeta: meta("web", "i1"),
+			Spec: networkingv1.IngressSpec{
+				DefaultBackend: &networkingv1.IngressBackend{
+					Service: &networkingv1.IngressServiceBackend{Name: "api"},
+				},
+			},
+		},
+	))
+
+	data, ok := indexed["Ingress/web"]
+	if !ok {
+		t.Fatalf("Ingress missing: %s", keys(indexed))
+	}
+	if data.Ingress == nil || len(data.Ingress.MissingBackends) != 1 ||
+		data.Ingress.MissingBackends[0] != "api" {
+		t.Errorf("ingress = %+v, want MissingBackends [api]", data.Ingress)
+	}
+}
+
+func TestSweepReportsIngressWithExistingBackend(t *testing.T) {
+	indexed := mustSweep(t, service(
+		&networkingv1.Ingress{
+			ObjectMeta: meta("web", "i1"),
+			Spec: networkingv1.IngressSpec{
+				DefaultBackend: &networkingv1.IngressBackend{
+					Service: &networkingv1.IngressServiceBackend{Name: "api"},
+				},
+			},
+		},
+		&corev1.Service{ObjectMeta: meta("api", "s1")},
+	))
+
+	data, ok := indexed["Ingress/web"]
+	if !ok {
+		t.Fatalf("Ingress missing: %s", keys(indexed))
+	}
+	if data.Ingress == nil || len(data.Ingress.MissingBackends) != 0 {
+		t.Errorf("ingress = %+v, want no missing backends", data.Ingress)
+	}
+}
+
+// A cluster-wide sweep must not let a same-named Service in a different
+// namespace mask a genuinely missing backend — the same regression
+// usageKey/endpointsKey guard against elsewhere in this file.
+func TestSweepIngressBackendLookupIsNamespaceQualified(t *testing.T) {
+	s := service(
+		&networkingv1.Ingress{
+			ObjectMeta: meta("web", "i1"), // namespace "prod", via meta()
+			Spec: networkingv1.IngressSpec{
+				DefaultBackend: &networkingv1.IngressBackend{
+					Service: &networkingv1.IngressServiceBackend{Name: "api"},
+				},
+			},
+		},
+		&corev1.Service{ObjectMeta: metaIn("other-ns", "api", "s1")},
+	)
+	results, err := s.Sweep(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	indexed := swept(t, results)
+	data, ok := indexed["Ingress/web"]
+	if !ok {
+		t.Fatalf("Ingress missing: %s", keys(indexed))
+	}
+	if data.Ingress == nil || len(data.Ingress.MissingBackends) != 1 ||
+		data.Ingress.MissingBackends[0] != "api" {
+		t.Errorf("ingress = %+v, want the cross-namespace Service to NOT satisfy the backend", data.Ingress)
 	}
 }
 
