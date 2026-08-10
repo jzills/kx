@@ -27,7 +27,9 @@ type Service interface {
 	// long-running commands (get --watch) where Run's full-buffer capture
 	// would block forever — kubectl get --watch never exits on its own.
 	// Stderr is captured and surfaced as the error on a non-zero exit,
-	// matching Run. An onLine error stops the stream early and is returned.
+	// matching Run. An onLine error stops the stream early, kills the
+	// subprocess (since it would otherwise keep running with nothing left
+	// to drain its output), and is returned.
 	Watch(args []string, onLine func(line string) error) error
 	// Probe runs silently and returns only the exit code.
 	Probe(args []string) int
@@ -121,10 +123,18 @@ func (e Exec) Watch(args []string, onLine func(line string) error) error {
 		}
 	}
 
-	waitErr := cmd.Wait()
 	if onLineErr != nil {
+		// onLine stopped the stream early — e.g. runWatch bailing out on a
+		// header line it can't make sense of. kubectl get --watch never exits
+		// on its own, so with nothing draining stdout anymore, a plain
+		// cmd.Wait() here would block forever on a process that is still
+		// running. Kill it first; the Wait() that follows only reaps it.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return onLineErr
 	}
+
+	waitErr := cmd.Wait()
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
 		return errors.New(strings.TrimSpace(stderr.String()))
