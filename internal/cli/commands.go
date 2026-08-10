@@ -22,12 +22,64 @@ func parseIndex(name, arg string) (int, error) {
 	return index, nil
 }
 
+// maxRangeSpan caps how many indexes a single range token can expand to, so a
+// mistyped range like "1..999999" doesn't build a huge slice before any index
+// is even resolved against the current listing.
+const maxRangeSpan = 10000
+
+// expandRange expands a "start..end" token into every index it spans,
+// inclusive of both ends, walking in whichever direction start and end imply
+// (so "20..9" walks down). ok is false when arg isn't a range token at all,
+// so the caller falls back to treating it as a single index.
+func expandRange(name, arg string) (indexes []int, ok bool, err error) {
+	if !strings.Contains(arg, "..") {
+		return nil, false, nil
+	}
+	parts := strings.Split(arg, "..")
+	if len(parts) != 2 {
+		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+	}
+	start, startErr := strconv.Atoi(parts[0])
+	end, endErr := strconv.Atoi(parts[1])
+	if startErr != nil || endErr != nil {
+		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+	}
+	span := start - end
+	if span < 0 {
+		span = -span
+	}
+	span++
+	if span > maxRangeSpan {
+		return nil, true, fmt.Errorf(
+			"Invalid value for '%s': '%s' spans more than %d indexes.", name, arg, maxRangeSpan)
+	}
+	step := 1
+	if start > end {
+		step = -1
+	}
+	indexes = make([]int, 0, span)
+	for i := start; ; i += step {
+		indexes = append(indexes, i)
+		if i == end {
+			break
+		}
+	}
+	return indexes, true, nil
+}
+
 func parseIndexes(name string, args []string) ([]int, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
 	}
 	indexes := make([]int, 0, len(args))
 	for _, arg := range args {
+		if expanded, ok, err := expandRange(name, arg); ok {
+			if err != nil {
+				return nil, err
+			}
+			indexes = append(indexes, expanded...)
+			continue
+		}
 		index, err := parseIndex(name, arg)
 		if err != nil {
 			return nil, err
@@ -76,7 +128,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "describe <index>... [kubectl flags]",
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -113,11 +165,14 @@ func newDescribeCommand(services Services) *cobra.Command {
 	}
 }
 
-// splitLeadingIndexes takes the run of numeric arguments at the front, leaving
-// the rest for kubectl.
+// splitLeadingIndexes takes the run of numeric-or-range arguments at the
+// front, leaving the rest for kubectl. A malformed range (e.g. "5..") still
+// counts as part of the leading run — it isn't fully validated here, only
+// shaped like a range, so it reaches parseIndexes for a proper error instead
+// of the generic "not a valid int" that applies when nothing leads at all.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
 	for i, arg := range args {
-		if _, err := strconv.Atoi(arg); err != nil {
+		if _, err := strconv.Atoi(arg); err != nil && !strings.Contains(arg, "..") {
 			return args[:i], args[i:]
 		}
 	}
@@ -130,7 +185,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
 			"DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -253,7 +308,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <index>...",
 		Short:   "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example: "  kx delete 3\n  kx delete 3 5 -y",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
@@ -404,7 +459,7 @@ func newYamlCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "yaml <index>...",
 		Short:   "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
@@ -454,7 +509,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 		Use:     use + " <index>...",
 		Short:   short,
 		Args:    cobra.MinimumNArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
 			if err != nil {

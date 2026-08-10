@@ -149,7 +149,7 @@ func newGetCommand(services Services) *cobra.Command {
 		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"`-n <namespace>`, label selectors and output flags all work as usual.",
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api",
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3",
 		Args:    cobra.MinimumNArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for

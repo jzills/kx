@@ -38,6 +38,13 @@ func runGet(services Services, resource string, args []string, options getOption
 			indexes = append(indexes, index)
 			continue
 		}
+		if expanded, ok, err := expandRange("indexes", arg); ok {
+			if err != nil {
+				return err
+			}
+			indexes = append(indexes, expanded...)
+			continue
+		}
 		extra = append(extra, arg)
 	}
 
