@@ -89,7 +89,7 @@ pipx run --spec kx-cli kx get pods
 
 `--watch` redraws the table live as resources are added, changed, or removed, instead of printing a table that never finishes. It's display-only — a watch never completes, so there's nothing to index. Non-tabular output (`-o json`/`yaml`/etc.) streams kubectl's own watch output directly instead.
 
-Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs and other resource types still use `kx get <resource>`.
+Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs work the same way — a CRD's own short name, kind, or plural — resolved from kubectl's own on-disk API-discovery cache, so kx never calls the API server just to look one up. A spelling that resolves neither way still falls back to `kx get <resource>`.
 
 Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `-h`/`--help` on any command shows usage, examples, and aliases.
 

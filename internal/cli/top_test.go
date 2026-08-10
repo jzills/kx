@@ -141,7 +141,7 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	states := &fakeState{}
 	output, namespace, err := TopCommand{
 		Kubectl: kubectl, State: states, Index: indexService(),
-	}.ExecuteNodes(nil)
+	}.ExecuteNodes("", nil)
 	if err != nil {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
@@ -162,12 +162,38 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	}
 }
 
+// -m/--match is registered as a general `kx top` flag with no note that it's
+// pods-only, so it must actually filter the nodes path too — not silently
+// list everything while the user believes they narrowed it down.
+func TestExecuteNodesFiltersByMatchTerm(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
+	states := &fakeState{}
+	output, _, err := TopCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.ExecuteNodes("node-a", nil)
+	if err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if !strings.Contains(output, "node-a") {
+		t.Errorf("output = %q, want node-a", output)
+	}
+	if strings.Contains(output, "node-b") {
+		t.Errorf("output = %q, want node-b filtered out", output)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d state entries, want 1", len(states.saved))
+	}
+	if match := states.saved[0].Query.Match; match == nil || *match != "node-a" {
+		t.Errorf("saved match = %v, want \"node-a\" — a stale entry must refresh with the same filter", match)
+	}
+}
+
 // kubectl top nodes already reports percentages against node capacity
 // natively — unlike pods, ExecuteNodes must never fetch or compute limits.
 func TestExecuteNodesNeverFetchesLimits(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
 	if _, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
-		ExecuteNodes(nil); err != nil {
+		ExecuteNodes("", nil); err != nil {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
 	if len(kubectl.calls) != 1 {
@@ -181,7 +207,7 @@ func TestExecuteNodesNeverFetchesLimits(t *testing.T) {
 func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	kubectl := &scriptedKubectl{probeCode: 1}
 	_, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
-		ExecuteNodes(nil)
+		ExecuteNodes("", nil)
 	if err == nil || !strings.Contains(err.Error(), "metrics-server is not available") {
 		t.Errorf("err = %v, want the friendly metrics-server message", err)
 	}

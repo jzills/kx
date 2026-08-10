@@ -153,7 +153,7 @@ func newTopCommand(services Services) *cobra.Command {
 			var output, namespace string
 			if nodes {
 				resourceLabel = "nodes"
-				output, namespace, err = command.ExecuteNodes(rest)
+				output, namespace, err = command.ExecuteNodes(match, rest)
 			} else {
 				scopedAllNamespaces = allNamespaces(rest)
 				output, namespace, err = command.Execute(match, rest, noLimits)

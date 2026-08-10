@@ -723,12 +723,17 @@ func newNavigateCommand(services Services, use, short string, delta int) *cobra.
 	}
 }
 
-func newDropCommand(services Services) *cobra.Command {
+// prefix is the invocation the examples show — "kx state drop" for the
+// documented subcommand, "kx drop" for the hidden top-level alias kept for
+// existing scripts and muscle memory. Both share this constructor, so
+// without it the alias's own --help would show examples for a command it
+// isn't.
+func newDropCommand(services Services, prefix string) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:     "drop <position>",
 		Short:   "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
-		Example: "  kx state drop 2\n  kx state drop --all",
+		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {

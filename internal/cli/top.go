@@ -111,13 +111,16 @@ func (c TopCommand) Execute(
 // only has to relabel those columns to kx's own CPU%/MEM% naming (values
 // untouched) — see relabelPercentColumns — so the existing IndexedTable
 // coloring, which keys off those exact header names, applies for free.
-func (c TopCommand) ExecuteNodes(extraArgs []string) (table, namespace string, err error) {
+func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, namespace string, err error) {
 	if err := c.EnsureAvailable(); err != nil {
 		return "", "", err
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
 	if err != nil {
 		return "", "", err
+	}
+	if filterTerm != "" {
+		output = c.Index.Filter(output, filterTerm)
 	}
 	output = relabelPercentColumns(output)
 
@@ -131,13 +134,17 @@ func (c TopCommand) ExecuteNodes(extraArgs []string) (table, namespace string, e
 		if extraArgs == nil {
 			extraArgs = []string{}
 		}
+		var match *string
+		if filterTerm != "" {
+			match = &filterTerm
+		}
 		if err := c.State.Save(state.State{
 			Resources: state.NewResources(names, kinds.Node),
 			Namespace: namespace,
 			// Recorded as a `get nodes` query, matching kx get nodes' own
 			// convention, so a stale entry refreshes into the same listing
 			// shape the indexes were assigned against.
-			Query: &state.Query{Resource: "nodes", Args: extraArgs},
+			Query: &state.Query{Resource: "nodes", Args: extraArgs, Match: match},
 		}); err != nil {
 			return "", "", err
 		}
