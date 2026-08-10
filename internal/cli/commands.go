@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -44,12 +45,16 @@ func expandRange(name, arg string) (indexes []int, ok bool, err error) {
 	if startErr != nil || endErr != nil {
 		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
 	}
-	span := start - end
-	if span < 0 {
-		span = -span
-	}
-	span++
-	if span > maxRangeSpan {
+	// start - end overflows int when the two ends sit near opposite bounds of
+	// the type (e.g. "9223372036854775807..-9223372036854775808"), wrapping
+	// around to a small value that would slip past the maxRangeSpan check
+	// below and then loop from one end of int to the other. big.Int can't
+	// overflow, so the span is computed there and converted back to int only
+	// once it's already known to be small.
+	span := new(big.Int).Sub(big.NewInt(int64(start)), big.NewInt(int64(end)))
+	span.Abs(span)
+	span.Add(span, big.NewInt(1))
+	if span.Cmp(big.NewInt(maxRangeSpan)) > 0 {
 		return nil, true, fmt.Errorf(
 			"Invalid value for '%s': '%s' spans more than %d indexes.", name, arg, maxRangeSpan)
 	}
@@ -57,7 +62,7 @@ func expandRange(name, arg string) (indexes []int, ok bool, err error) {
 	if start > end {
 		step = -1
 	}
-	indexes = make([]int, 0, span)
+	indexes = make([]int, 0, span.Int64())
 	for i := start; ; i += step {
 		indexes = append(indexes, i)
 		if i == end {
