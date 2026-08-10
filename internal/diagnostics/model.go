@@ -124,6 +124,18 @@ type CronJobHealth struct {
 	MostRecentJob *JobHealth
 }
 
+// IngressHealth is a structural check: do the Services an Ingress's rules
+// point at actually exist? Kubernetes has no loadBalancer-status signal
+// that's portable across ingress controllers (some never populate it even
+// when healthy), so that's deliberately not checked here — see CronJobHealth
+// above for the same reasoning applied to cron-expression parsing.
+type IngressHealth struct {
+	// MissingBackends are the referenced Service names (deduped, sorted) that
+	// do not exist in the Ingress's namespace. Empty means every backend
+	// resolved.
+	MissingBackends []string
+}
+
 // EventSummary is a grouped warning event.
 type EventSummary struct {
 	Reason        string
@@ -145,6 +157,7 @@ type Data struct {
 	Service       *ServiceHealth
 	PVC           *PVCHealth
 	CronJob       *CronJobHealth
+	Ingress       *IngressHealth
 	Pods          []PodDiagnostic
 	WarningEvents []EventSummary
 }

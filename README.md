@@ -104,7 +104,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
@@ -129,7 +129,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 ### Triage a namespace
 
 Bare `kx diag` sweeps the current namespace — Deployments, StatefulSets,
-DaemonSets, Jobs, CronJobs, Services, and PersistentVolumeClaims, plus pods
+DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims, and Ingresses, plus pods
 nothing owns — and prints a ranked table of what's unhealthy. Findings also
 draw on live resource usage (`kx top`): a pod running hot against its memory
 limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
@@ -142,7 +142,7 @@ limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
 `kx diag <index>` diagnoses a single resource: a verdict banner, a `SUMMARY`
 of findings (CrashLoopBackOff, image pull failures, OOMKills, unschedulable
 pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed
-CronJob runs, usage near limits), a per-pod status table, recent log tails
+CronJob runs, Ingresses referencing missing Services, usage near limits), a per-pod status table, recent log tails
 from broken containers, and warning events — one screen instead of four
 kubectl commands.
 

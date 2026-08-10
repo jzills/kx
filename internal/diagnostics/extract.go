@@ -2,11 +2,13 @@ package diagnostics
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -120,6 +122,38 @@ func serviceHealthFrom(service *corev1.Service, endpoints *corev1.Endpoints) *Se
 		health.NotReadyAddresses += len(subset.NotReadyAddresses)
 	}
 	return health
+}
+
+// ingressBackendServiceNames returns the deduped, sorted Service names
+// referenced by an Ingress's default backend and every rule's paths. A
+// "resource" backend (non-Service — e.g. a CRD-defined backend) has no
+// Service name and is skipped: existence can't be checked the same way, and
+// there's nothing to report against.
+func ingressBackendServiceNames(ingress *networkingv1.Ingress) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(backend networkingv1.IngressBackend) {
+		if backend.Service == nil || backend.Service.Name == "" {
+			return
+		}
+		if !seen[backend.Service.Name] {
+			seen[backend.Service.Name] = true
+			names = append(names, backend.Service.Name)
+		}
+	}
+	if ingress.Spec.DefaultBackend != nil {
+		add(*ingress.Spec.DefaultBackend)
+	}
+	for _, rule := range ingress.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			add(path.Backend)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
