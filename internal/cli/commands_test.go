@@ -217,6 +217,61 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 	}
 }
 
+// indexResolverFunc lets a test fail on a specific index rather than
+// uniformly, so validateIndexes can be proven to check every index in the
+// batch rather than stopping after the first one resolves.
+type indexResolverFunc func(int) (string, string, kinds.Kind, error)
+
+func (f indexResolverFunc) Fields(idx int) (string, string, kinds.Kind, error) {
+	return f(idx)
+}
+
+func TestValidateIndexesCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
+	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
+		if idx == 3 {
+			return "", "", "", fmt.Errorf("index %d is out of range", idx)
+		}
+		return "pod", "prod", kinds.Pod, nil
+	})
+	if err := validateIndexes(resolver, []int{1, 2, 3, 4}); err == nil {
+		t.Fatal("validateIndexes accepted a batch containing an out-of-range index")
+	}
+}
+
+func TestValidateIndexesAcceptsAWhollyValidBatch(t *testing.T) {
+	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
+		return "pod", "prod", kinds.Pod, nil
+	})
+	if err := validateIndexes(resolver, []int{1, 2, 3}); err != nil {
+		t.Fatalf("validateIndexes rejected a wholly valid batch: %v", err)
+	}
+}
+
+// A range that runs past the current listing must not delete anything —
+// not even the indexes that were in range — because there is no way to undo
+// a delete once it has run. Validating every index before acting on any of
+// them is the only way to make a bad range fail cleanly instead of partially.
+func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"1", "2..5", "-y"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("delete succeeded despite an out-of-range index in the batch")
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 — index 3 is out of range and "+
+			"should be caught before index 1 or 2 is deleted", len(kube.runs))
+	}
+}
+
 // switchServices wires the real state service against a temp file, so the
 // listing path and the switch path meet the way they do in the tool.
 //
