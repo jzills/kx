@@ -9,6 +9,7 @@ import (
 	"github.com/jzills/kx/internal/cli"
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
 )
 
@@ -37,7 +38,7 @@ func hasNoColorFlag(args []string) bool {
 // print verbatim; command errors go through the renderer, matching the Python
 // handle_errors decorator.
 func run() int {
-	loader := config.Loader{ThemeKnown: theme.Exists}
+	loader := config.Loader{ThemeKnown: theme.Exists, EngineKnown: scanner.Exists}
 	cfg, err := loader.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -404,3 +404,21 @@ func TestScanConsumesNoOpenBeforePort(t *testing.T) {
 			err.Error(), want)
 	}
 }
+
+// Proves the --engine fallback reads the configured default rather than a
+// hardcoded "scout" literal: an invalid Config.Engine must surface as an
+// "unknown engine" error naming it, which could not happen if the fallback
+// silently used "scout" (a name GetEngine always accepts) instead.
+func TestScanOmittedEngineUsesConfiguredDefault(t *testing.T) {
+	quietRender(t)
+	services := argvServices(t)
+	services.Config.Engine = "nonexistent-default"
+	cmd := newScanCommand(services)
+	err := cmd.RunE(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected an error resolving the configured default engine")
+	}
+	if !strings.Contains(err.Error(), "nonexistent-default") {
+		t.Errorf("err = %v, want it to name the configured default engine", err)
+	}
+}

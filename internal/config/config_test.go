@@ -22,7 +22,7 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.NoColor {
+	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.NoColor || cfg.Engine != DefaultEngine {
 		t.Errorf("defaults = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "bash" || cfg.Shells[1] != "sh" {
@@ -36,12 +36,13 @@ max_history = 3
 shells = ["zsh", "bash"]
 no_color = true
 theme = "solarized"
+engine = "trivy"
 `)
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 3 || !cfg.NoColor || cfg.Theme != "solarized" {
+	if cfg.MaxHistory != 3 || !cfg.NoColor || cfg.Theme != "solarized" || cfg.Engine != "trivy" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "zsh" {
@@ -50,17 +51,18 @@ theme = "solarized"
 }
 
 func TestEnvironmentOverridesFile(t *testing.T) {
-	loader := writeConfig(t, "max_history = 3\ntheme = \"solarized\"\n")
+	loader := writeConfig(t, "max_history = 3\ntheme = \"solarized\"\nengine = \"trivy\"\n")
 	t.Setenv("KX_MAX_HISTORY", "7")
 	t.Setenv("KX_THEME", "dracula")
 	t.Setenv("KX_SHELLS", "fish,sh")
 	t.Setenv("KX_NO_COLOR", "yes")
+	t.Setenv("KX_ENGINE", "scout")
 
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.NoColor {
+	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.NoColor || cfg.Engine != "scout" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "fish" {
@@ -191,5 +193,80 @@ func TestLoadAfterSaveTheme(t *testing.T) {
 	}
 	if cfg.Theme != "persisted" {
 		t.Errorf("Theme = %q, want persisted", cfg.Theme)
+	}
+}
+
+func TestUnknownEngineRejectedWhenValidatorSupplied(t *testing.T) {
+	loader := writeConfig(t, `engine = "nonexistent"`)
+	loader.EngineKnown = func(string) bool { return false }
+	_, err := loader.Load()
+	if err == nil || !strings.Contains(err.Error(), "unknown engine") {
+		t.Errorf("error = %v, want an unknown-engine complaint", err)
+	}
+}
+
+func TestSaveEngineReplacesExistingLinePreservingComments(t *testing.T) {
+	loader := writeConfig(t, "# my settings\nmax_history = 3\nengine = \"scout\"\n")
+	if err := loader.SaveEngine("trivy"); err != nil {
+		t.Fatalf("SaveEngine: %v", err)
+	}
+
+	data, err := os.ReadFile(loader.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `engine = "trivy"`) {
+		t.Errorf("engine not updated:\n%s", text)
+	}
+	if strings.Contains(text, `"scout"`) {
+		t.Errorf("old engine still present:\n%s", text)
+	}
+	if !strings.Contains(text, "# my settings") || !strings.Contains(text, "max_history = 3") {
+		t.Errorf("SaveEngine clobbered unrelated config:\n%s", text)
+	}
+}
+
+func TestSaveEngineAppendsWhenAbsent(t *testing.T) {
+	loader := writeConfig(t, "max_history = 3\n")
+	if err := loader.SaveEngine("trivy"); err != nil {
+		t.Fatalf("SaveEngine: %v", err)
+	}
+
+	data, _ := os.ReadFile(loader.Path)
+	if !strings.Contains(string(data), `engine = "trivy"`) {
+		t.Errorf("engine not appended:\n%s", data)
+	}
+	if !strings.Contains(string(data), "max_history = 3") {
+		t.Errorf("SaveEngine clobbered existing config:\n%s", data)
+	}
+}
+
+func TestSaveEngineCreatesFile(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "nested", "config.toml")}
+	if err := loader.SaveEngine("trivy"); err != nil {
+		t.Fatalf("SaveEngine: %v", err)
+	}
+
+	data, err := os.ReadFile(loader.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `engine = "trivy"`) {
+		t.Errorf("file contents = %q", data)
+	}
+}
+
+func TestLoadAfterSaveEngine(t *testing.T) {
+	loader := writeConfig(t, "max_history = 3\n")
+	if err := loader.SaveEngine("trivy"); err != nil {
+		t.Fatalf("SaveEngine: %v", err)
+	}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Engine != "trivy" {
+		t.Errorf("Engine = %q, want trivy", cfg.Engine)
 	}
 }

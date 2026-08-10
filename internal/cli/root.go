@@ -88,6 +88,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	installHelp(root, version)
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
+	root.AddCommand(withoutRefresh(newEngineCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
 

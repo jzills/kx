@@ -8,6 +8,7 @@ import (
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
 )
 
@@ -297,6 +298,31 @@ func (r *Renderer) ThemeList(active string) {
 			Styled(marker, theme.Header),
 			Styled(name, rowStyle),
 			Plain(r.swatch(name)),
+		})
+	}
+	r.Table(columns, rows)
+}
+
+// EngineList renders the registered scan engines, marking the current
+// default the same way ThemeList marks the active theme. There is no preview
+// column — a scan engine has no visual analog to a color swatch.
+func (r *Renderer) EngineList(active string) {
+	names := scanner.Names()
+	r.Caption("Engines", "", itemLabel(len(names)))
+
+	columns := []Column{{Header: "X", Right: true}, {Header: ""}, {Header: "ENGINE"}}
+	rows := make([][]Cell, 0, len(names))
+	for position, name := range names {
+		rowStyle := theme.Muted
+		marker := ""
+		if name == active {
+			rowStyle = theme.Body
+			marker = "→"
+		}
+		rows = append(rows, []Cell{
+			Styled(strconv.Itoa(position+1), rowStyle),
+			Styled(marker, theme.Header),
+			Styled(name, rowStyle),
 		})
 	}
 	r.Table(columns, rows)

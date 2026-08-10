@@ -15,6 +15,11 @@ import (
 // the theme registry lands, at which point config resolves it from there.
 const DefaultTheme = "github-dark"
 
+// DefaultEngine is the scan engine used when none is configured. Mirrors
+// DefaultTheme: a hardcoded literal here rather than importing scanner, same
+// stopgap as DefaultTheme not importing theme.
+const DefaultEngine = "scout"
+
 // Config is the resolved configuration. Defaults match the Python
 // implementation's dataclass defaults.
 type Config struct {
@@ -22,6 +27,7 @@ type Config struct {
 	Shells     []string
 	NoColor    bool
 	Theme      string
+	Engine     string
 }
 
 // Default returns the configuration used when nothing is set.
@@ -31,6 +37,7 @@ func Default() Config {
 		Shells:     []string{"bash", "sh"},
 		NoColor:    false,
 		Theme:      DefaultTheme,
+		Engine:     DefaultEngine,
 	}
 }
 
@@ -51,6 +58,9 @@ type Loader struct {
 	// ThemeKnown validates a configured theme name. Nil skips validation,
 	// which is what callers do before the theme registry exists.
 	ThemeKnown func(string) bool
+	// EngineKnown validates a configured scan engine name. Nil skips
+	// validation, mirroring ThemeKnown.
+	EngineKnown func(string) bool
 }
 
 func (l Loader) path() (string, error) {
@@ -104,6 +114,13 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.Theme = name
 		}
+		if value, ok := raw["engine"]; ok {
+			name, ok := value.(string)
+			if !ok {
+				return cfg, errors.New("kx: engine must be a string")
+			}
+			cfg.Engine = name
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
 	}
@@ -132,10 +149,18 @@ func (l Loader) Load() (Config, error) {
 	if value, ok := os.LookupEnv("KX_THEME"); ok {
 		cfg.Theme = value
 	}
+	if value, ok := os.LookupEnv("KX_ENGINE"); ok {
+		cfg.Engine = value
+	}
 
 	if l.ThemeKnown != nil && !l.ThemeKnown(cfg.Theme) {
 		return cfg, fmt.Errorf(
 			"kx: unknown theme '%s' (run kx theme to list themes)", cfg.Theme,
+		)
+	}
+	if l.EngineKnown != nil && !l.EngineKnown(cfg.Engine) {
+		return cfg, fmt.Errorf(
+			"kx: unknown engine '%s' (run kx engine to list engines)", cfg.Engine,
 		)
 	}
 	return cfg, nil
@@ -206,6 +231,39 @@ func (l Loader) SaveTheme(name string) error {
 	text := string(existing)
 	if themeLineRE.MatchString(text) {
 		text = replaceFirst(themeLineRE, text, line)
+	} else {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += line + "\n"
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+var engineLineRE = regexp.MustCompile(`(?m)^engine\s*=.*$`)
+
+// SaveEngine persists the default scan engine choice, mirroring SaveTheme.
+func (l Loader) SaveEngine(name string) error {
+	path, err := l.path()
+	if err != nil {
+		return err
+	}
+	line := fmt.Sprintf("engine = %q", name)
+
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(line+"\n"), 0o644)
+	}
+	if err != nil {
+		return err
+	}
+
+	text := string(existing)
+	if engineLineRE.MatchString(text) {
+		text = replaceFirst(engineLineRE, text, line)
 	} else {
 		if text != "" && !strings.HasSuffix(text, "\n") {
 			text += "\n"
