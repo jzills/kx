@@ -6,6 +6,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -337,4 +338,87 @@ func TestPhaseOr(t *testing.T) {
 	if phaseOr("Bound") != "Bound" {
 		t.Error("a real phase was rewritten")
 	}
+}
+
+func ingressBackend(serviceName string) networkingv1.IngressBackend {
+	return networkingv1.IngressBackend{
+		Service: &networkingv1.IngressServiceBackend{Name: serviceName},
+	}
+}
+
+func ingressRule(paths ...networkingv1.HTTPIngressPath) networkingv1.IngressRule {
+	return networkingv1.IngressRule{
+		IngressRuleValue: networkingv1.IngressRuleValue{
+			HTTP: &networkingv1.HTTPIngressRuleValue{Paths: paths},
+		},
+	}
+}
+
+func TestIngressBackendServiceNamesDefaultBackendOnly(t *testing.T) {
+	ingress := &networkingv1.Ingress{Spec: networkingv1.IngressSpec{
+		DefaultBackend: ingressBackendPtr("api"),
+	}}
+	got := ingressBackendServiceNames(ingress)
+	if len(got) != 1 || got[0] != "api" {
+		t.Errorf("names = %v, want [api]", got)
+	}
+}
+
+func TestIngressBackendServiceNamesFromRules(t *testing.T) {
+	ingress := &networkingv1.Ingress{Spec: networkingv1.IngressSpec{
+		Rules: []networkingv1.IngressRule{
+			ingressRule(
+				networkingv1.HTTPIngressPath{Backend: ingressBackend("web")},
+				networkingv1.HTTPIngressPath{Backend: ingressBackend("api")},
+			),
+		},
+	}}
+	got := ingressBackendServiceNames(ingress)
+	if len(got) != 2 || got[0] != "api" || got[1] != "web" {
+		t.Errorf("names = %v, want sorted [api web]", got)
+	}
+}
+
+func TestIngressBackendServiceNamesDedupesAcrossDefaultAndRules(t *testing.T) {
+	ingress := &networkingv1.Ingress{Spec: networkingv1.IngressSpec{
+		DefaultBackend: ingressBackendPtr("api"),
+		Rules: []networkingv1.IngressRule{
+			ingressRule(networkingv1.HTTPIngressPath{Backend: ingressBackend("api")}),
+		},
+	}}
+	got := ingressBackendServiceNames(ingress)
+	if len(got) != 1 || got[0] != "api" {
+		t.Errorf("names = %v, want deduped [api]", got)
+	}
+}
+
+// A "resource" backend (e.g. a CRD-defined backend, not a Service) has no
+// Service field and must be skipped without panicking — there is nothing to
+// check existence of.
+func TestIngressBackendServiceNamesSkipsResourceBackends(t *testing.T) {
+	ingress := &networkingv1.Ingress{Spec: networkingv1.IngressSpec{
+		Rules: []networkingv1.IngressRule{
+			ingressRule(networkingv1.HTTPIngressPath{
+				Backend: networkingv1.IngressBackend{
+					Resource: &corev1.TypedLocalObjectReference{Name: "not-a-service"},
+				},
+			}),
+		},
+	}}
+	got := ingressBackendServiceNames(ingress)
+	if len(got) != 0 {
+		t.Errorf("names = %v, want none — a resource backend has no Service to check", got)
+	}
+}
+
+func TestIngressBackendServiceNamesEmptyIngressYieldsNone(t *testing.T) {
+	ingress := &networkingv1.Ingress{}
+	if got := ingressBackendServiceNames(ingress); len(got) != 0 {
+		t.Errorf("names = %v, want none", got)
+	}
+}
+
+func ingressBackendPtr(serviceName string) *networkingv1.IngressBackend {
+	backend := ingressBackend(serviceName)
+	return &backend
 }
