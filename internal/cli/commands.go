@@ -94,6 +94,22 @@ func parseIndexes(name string, args []string) ([]int, error) {
 	return indexes, nil
 }
 
+// validateIndexes resolves every index against the current state before a
+// batch command acts on any of them. Without this, a command that loops
+// index-by-index (delete, describe, logs, yaml, label/annotation reads) only
+// discovers a bad index — e.g. a range that overruns the current listing —
+// after it has already acted on the indexes ahead of it. For delete that
+// partial action can't be undone, so the whole batch must validate clean
+// before any of it runs.
+func validateIndexes(resolver IndexResolver, indexes []int) error {
+	for _, index := range indexes {
+		if _, _, _, err := resolver.Fields(index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func itemCount(count int) string {
 	if count == 1 {
 		return "1 item"
@@ -154,6 +170,9 @@ func newDescribeCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
 			for _, index := range indexes {
 				name, namespace, kind, err := services.State.Fields(index)
@@ -211,6 +230,9 @@ func newLogsCommand(services Services) *cobra.Command {
 			}
 			indexes, err := parseIndexes("indexes", indexArgs)
 			if err != nil {
+				return err
+			}
+			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			if err := checkFollow(extra, len(indexes)); err != nil {
@@ -318,6 +340,9 @@ func newDeleteCommand(services Services) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
 			if err != nil {
+				return err
+			}
+			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			command := DeleteCommand{
@@ -471,6 +496,9 @@ func newYamlCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
 			var fields []string
 			if show != "" {
 				for _, field := range strings.Split(show, ",") {
@@ -518,6 +546,9 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes("indexes", args)
 			if err != nil {
+				return err
+			}
+			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			command := MetadataReadCommand{

@@ -54,6 +54,9 @@ func newEventsCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
 			client, err := services.Kubernetes()
 			if err != nil {
 				return err
