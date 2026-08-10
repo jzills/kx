@@ -110,8 +110,11 @@ type ShorthandSource interface {
 var shorthandSource ShorthandSource
 
 // SetShorthandSource installs the fallback consulted when kindMap misses.
-// Called once, from root.go, before any command runs. Passing nil removes
-// any previously installed source.
+// Called once, from cmd/kx/main.go, before any command runs — deliberately
+// not from cli.NewRoot, so internal/cli's own tests (which call NewRoot
+// directly, many times) never install a real discovery source that would
+// read the ambient kubeconfig. Passing nil removes any previously installed
+// source.
 func SetShorthandSource(source ShorthandSource) {
 	shorthandSource = source
 }

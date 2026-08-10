@@ -1,7 +1,9 @@
 package discovery
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sdiscovery "k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
 )
 
 // recordingTransport fails every request instantly and records whether it
@@ -126,6 +129,45 @@ func writeFixtureKubeconfig(t *testing.T, path, host string) {
 	}
 }
 
+// writeFixtureKubeconfigWithExecPlugin writes a kubeconfig whose user auths
+// via an `exec:` credential plugin that touches markerPath when run — proof,
+// for the test, of whether the plugin was ever invoked. Mirrors the `exec:`
+// block real EKS/GKE/AKS and kubelogin-style kubeconfigs carry.
+func writeFixtureKubeconfigWithExecPlugin(t *testing.T, path, host, markerPath string) {
+	t.Helper()
+	scriptPath := filepath.Join(filepath.Dir(path), "exec-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"touch '" + markerPath + "'\n" +
+		"echo '{\"apiVersion\":\"client.authentication.k8s.io/v1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"fake-token\"}}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(exec plugin script): %v", err)
+	}
+
+	contents := "apiVersion: v1\n" +
+		"kind: Config\n" +
+		"clusters:\n" +
+		"- name: test\n" +
+		"  cluster:\n" +
+		"    server: " + host + "\n" +
+		"    insecure-skip-tls-verify: true\n" +
+		"contexts:\n" +
+		"- name: test\n" +
+		"  context:\n" +
+		"    cluster: test\n" +
+		"    user: test\n" +
+		"current-context: test\n" +
+		"users:\n" +
+		"- name: test\n" +
+		"  user:\n" +
+		"    exec:\n" +
+		"      apiVersion: client.authentication.k8s.io/v1\n" +
+		"      command: " + scriptPath + "\n" +
+		"      interactiveMode: Never\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
 // setupFixtureEnv points KUBECONFIG and KUBECACHEDIR at a throwaway
 // kubeconfig and cache root, so these tests never touch the machine's real
 // ~/.kube. Returns the per-host cache directory ConfigFlags will actually
@@ -196,6 +238,72 @@ func TestNewDiscoveryClientFailsInstantlyWhenCacheIsMissing(t *testing.T) {
 	}
 	if _, err := client.ServerResourcesForGroupVersion("v1"); err == nil {
 		t.Fatal("expected an error for a missing cache entry")
+	}
+}
+
+// A cache miss must never invoke the kubeconfig's exec credential plugin:
+// rest.Config.TransportConfig() wires ExecProvider into the transport chain
+// OUTSIDE (before) WrapTransport, so without clearing it in WrapConfigFn the
+// plugin's RoundTrip — which can spawn a process, call out to a cloud IdP, or
+// block on an interactive login prompt — would run before refusingTransport
+// ever gets a chance to refuse the request.
+func TestNewDiscoveryClientNeverInvokesTheExecCredentialPlugin(t *testing.T) {
+	host := "https://198.51.100.7:6443" // TEST-NET-2 (RFC 5737): guaranteed unroutable
+	cacheRoot := t.TempDir()
+	t.Setenv("KUBECACHEDIR", cacheRoot)
+
+	kubeconfigDir := t.TempDir()
+	markerPath := filepath.Join(kubeconfigDir, "exec-plugin-ran")
+	kubeconfigPath := filepath.Join(kubeconfigDir, "kubeconfig")
+	writeFixtureKubeconfigWithExecPlugin(t, kubeconfigPath, host, markerPath)
+	t.Setenv("KUBECONFIG", kubeconfigPath)
+	// No fixture cache written: this is a cache miss, the exact path that
+	// reaches the transport (and, before the fix, the exec plugin) at all.
+
+	client, err := newDiscoveryClient()
+	if err != nil {
+		t.Fatalf("newDiscoveryClient: %v", err)
+	}
+	if _, err := client.ServerResourcesForGroupVersion("v1"); err == nil {
+		t.Fatal("expected an error for a missing cache entry")
+	}
+
+	if _, err := os.Stat(markerPath); err == nil {
+		t.Error("exec credential plugin was invoked; want it never run")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("Stat(markerPath): %v", err)
+	}
+}
+
+// The in-memory discovery cache reports refusingTransport's error via
+// apimachinery's utilruntime.HandleError, which by default logs to klog ->
+// stderr. Uninstrumented, that fires on every unrecognized token typed at
+// kx; Source.load must suppress it.
+func TestSourceLoadNeverLogsTheRefusedTransportError(t *testing.T) {
+	setupFixtureEnv(t, "https://198.51.100.7:6443") // no fixture: forces a cache miss
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+	klog.SetOutput(w)
+	t.Cleanup(func() {
+		klog.SetOutput(origStderr)
+	})
+
+	source := NewSource()
+	source.Resolve("nonexistent-thing")
+	klog.Flush()
+
+	os.Stderr = origStderr
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if strings.Contains(buf.String(), "Unhandled Error") {
+		t.Errorf("stderr contained an \"Unhandled Error\" klog line, want none:\n%s", buf.String())
 	}
 }
 

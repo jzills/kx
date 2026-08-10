@@ -21,6 +21,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	restclient "k8s.io/client-go/rest"
@@ -57,6 +58,24 @@ func newDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
 		config.WrapTransport = func(http.RoundTripper) http.RoundTripper {
 			return refusingTransport{}
 		}
+		// rest.Config.TransportConfig() wires ExecProvider/AuthProvider into
+		// the transport chain via Config.Wrap(...), which composes OUTSIDE
+		// (i.e. runs before) WrapTransport above. Left alone, an exec- or
+		// auth-provider kubeconfig (EKS/GKE/AKS, kubelogin, ...) would have
+		// its credential-fetching RoundTripper invoked — spawning a process
+		// or hitting a cloud IdP, possibly blocking on an interactive login
+		// prompt — before a request ever reaches refusingTransport. Clearing
+		// these fields ensures TransportConfig() never wraps in that
+		// machinery at all; see rest.Config.TransportConfig in
+		// k8s.io/client-go/rest/transport.go for the fields it reads to
+		// decide whether to do so.
+		config.ExecProvider = nil
+		config.AuthProvider = nil
+		config.AuthConfigPersister = nil
+		config.BearerToken = ""
+		config.BearerTokenFile = ""
+		config.Username = ""
+		config.Password = ""
 		return config
 	}
 	return flags.ToDiscoveryClient()
@@ -126,6 +145,34 @@ func (s *Source) Resolve(spelling string) (kinds.Kind, string, bool) {
 	return kind, s.plurals[kind], true
 }
 
+// withUnhandledErrorsSuppressed runs fn with apimachinery's
+// utilruntime.ErrorHandlers replaced with a no-op, then restores whatever
+// was installed before.
+//
+// k8s.io/client-go/discovery/cached/memory (the in-memory caching layer
+// ConfigFlags.ToDiscoveryClient() wraps around the real discovery client)
+// reports refusingTransport's error via utilruntime.HandleError, which by
+// default logs to klog -> stderr. That would otherwise fire on every
+// unrecognized token typed at kx — refusingTransport working as intended is
+// not something the user needs to see printed as an "Unhandled Error".
+//
+// utilruntime.ErrorHandlers is a package-level var, not scoped to a caller
+// or goroutine, so this only *looks* scoped to Source.load: nothing stops a
+// concurrent goroutine elsewhere in the process from calling
+// utilruntime.HandleError while this swap is in effect and having its error
+// silently dropped, or from racing the assignment outright. kx is a
+// single-threaded CLI — one command runs to completion before the next
+// package's client-go code (e.g. internal/k8s) ever touches
+// ErrorHandlers — so in practice this window is exactly the one synchronous
+// discovery call below and nothing else observes the swap. It would not be
+// safe to do this if kx ever ran concurrent client-go operations.
+func withUnhandledErrorsSuppressed(fn func()) {
+	previous := utilruntime.ErrorHandlers
+	utilruntime.ErrorHandlers = nil
+	defer func() { utilruntime.ErrorHandlers = previous }()
+	fn()
+}
+
 // load populates the lookup tables. Any failure (no kubeconfig, no cache
 // directory, a hard discovery error) leaves both maps empty — Resolve then
 // simply never matches anything, identical to no source being installed.
@@ -137,7 +184,11 @@ func (s *Source) load() {
 	if err != nil {
 		return
 	}
-	lists, discoveryErr := client.ServerPreferredResources()
+	var lists []*metav1.APIResourceList
+	var discoveryErr error
+	withUnhandledErrorsSuppressed(func() {
+		lists, discoveryErr = client.ServerPreferredResources()
+	})
 	shorthands, plurals, ok := buildLookup(lists, discoveryErr)
 	if !ok {
 		return

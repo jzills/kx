@@ -6,10 +6,8 @@ import (
 	"sync"
 
 	"github.com/jzills/kx/internal/config"
-	"github.com/jzills/kx/internal/discovery"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/k8s"
-	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -71,8 +69,6 @@ var (
 
 // NewRoot builds the kx command tree.
 func NewRoot(services Services, version string) *cobra.Command {
-	kinds.SetShorthandSource(discovery.NewSource())
-
 	root := &cobra.Command{
 		Use:           "kx",
 		Short:         "Select Kubernetes resources by index instead of typing names",

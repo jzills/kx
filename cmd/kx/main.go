@@ -8,6 +8,8 @@ import (
 
 	"github.com/jzills/kx/internal/cli"
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/discovery"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/theme"
@@ -50,6 +52,12 @@ func run() int {
 	// otherwise not surface it until after their first output.
 	render.Configure(cfg.Theme, cfg.NoColor || hasNoColorFlag(os.Args[1:]))
 
+	// Installed here rather than in cli.NewRoot so it only ever runs for the
+	// real binary: internal/cli's own tests call NewRoot directly, many
+	// times, and a real discovery.Source reads the ambient kubeconfig — on
+	// a kubeconfig with an exec-credential plugin, that would execute the
+	// plugin during `go test ./internal/cli/...`.
+	kinds.SetShorthandSource(discovery.NewSource())
 	root := cli.NewRoot(cli.NewServices(cfg), version)
 	if err := cli.Execute(root, os.Args[1:]); err != nil {
 		var silent cli.SilentError
