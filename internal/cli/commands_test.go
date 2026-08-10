@@ -3,10 +3,13 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -134,6 +137,29 @@ func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
 	_, err := parseIndexes("indexes", []string{"1..999999"})
 	if err == nil {
 		t.Fatal("parseIndexes accepted an oversized range")
+	}
+}
+
+// A range whose ends sit near opposite bounds of int must still be rejected
+// as oversized, not silently accepted via an overflowed span that bypasses
+// maxRangeSpan and then loops from one end of int to the other. Run with a
+// timeout rather than a bare call: on the overflow this regresses, the
+// unbounded loop would otherwise hang the test (and eventually the CI
+// runner) instead of failing it cleanly.
+func TestParseIndexesRejectsOverflowingRanges(t *testing.T) {
+	arg := fmt.Sprintf("%d..%d", math.MaxInt64, math.MinInt64)
+	done := make(chan error, 1)
+	go func() {
+		_, err := parseIndexes("indexes", []string{arg})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("parseIndexes accepted a range whose span overflows int")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parseIndexes did not return — span overflow likely bypassed the maxRangeSpan guard")
 	}
 }
 
