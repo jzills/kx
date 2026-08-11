@@ -28,6 +28,12 @@ func parseIndex(name, arg string) (int, error) {
 // is even resolved against the current listing.
 const maxRangeSpan = 10000
 
+// invalidRange formats the shared "not a valid range" error, so the several
+// ways expandRange can reject a token all say it identically.
+func invalidRange(name, arg string) error {
+	return fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+}
+
 // expandRange expands a "start..end" token into every index it spans,
 // inclusive of both ends, walking in whichever direction start and end imply
 // (so "20..9" walks down). ok is false when arg isn't a range token at all,
@@ -45,7 +51,7 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 	}
 	parts := strings.Split(arg, "..")
 	if len(parts) != 2 || (parts[0] == "" && parts[1] == "") {
-		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+		return nil, true, invalidRange(name, arg)
 	}
 
 	openStart := parts[0] == ""
@@ -56,7 +62,7 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 		var startErr error
 		start, startErr = strconv.Atoi(parts[0])
 		if startErr != nil {
-			return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+			return nil, true, invalidRange(name, arg)
 		}
 	}
 
@@ -70,7 +76,7 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 		var endErr error
 		end, endErr = strconv.Atoi(parts[1])
 		if endErr != nil {
-			return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+			return nil, true, invalidRange(name, arg)
 		}
 	}
 
@@ -79,7 +85,7 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 			return nil, true, fmt.Errorf(
 				"Invalid value for '%s': '%s' starts past the current listing (%s).", name, arg, itemCount(end))
 		}
-		return nil, true, fmt.Errorf("Invalid value for '%s': '%s' is not a valid range.", name, arg)
+		return nil, true, invalidRange(name, arg)
 	}
 
 	// start - end overflows int when the two ends sit near opposite bounds of
@@ -227,7 +233,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 }
 
 // splitLeadingIndexes takes the run of numeric-or-range arguments at the
-// front, leaving the rest for kubectl. A malformed range (e.g. "5..") still
+// front, leaving the rest for kubectl. A malformed range (e.g. "9..abc") still
 // counts as part of the leading run — it isn't fully validated here, only
 // shaped like a range, so it reaches parseIndexes for a proper error instead
 // of the generic "not a valid int" that applies when nothing leads at all.

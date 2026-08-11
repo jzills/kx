@@ -200,6 +200,10 @@ func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseIndexes accepted an oversized open-end range")
 	}
+	want := "Invalid value for 'indexes': '1..' spans more than 10000 indexes."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
 }
 
 // A pathological range shouldn't build a giant slice before any index is even
@@ -351,12 +355,13 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 // explicit range does.
 func TestDeleteAcceptsOpenRanges(t *testing.T) {
 	cases := []struct {
-		name string
-		arg  string
-		want int // number of kubectl delete calls expected
+		name      string
+		arg       string
+		want      int      // number of kubectl delete calls expected
+		wantNames []string // resource names, in the order they should be deleted
 	}{
-		{"open start", "..2", 2},
-		{"open end", "2..", 2},
+		{"open start", "..2", 2, []string{"nginx", "redis"}},
+		{"open end", "2..", 2, []string{"redis", "web"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,6 +381,16 @@ func TestDeleteAcceptsOpenRanges(t *testing.T) {
 			}
 			if len(kube.runs) != tc.want {
 				t.Errorf("delete %q ran kubectl %d times, want %d", tc.arg, len(kube.runs), tc.want)
+			}
+			// Each recorded run is "delete <kind> <name> -n <namespace>" — see
+			// DeleteCommand.Execute in resource.go — so the name is args[2].
+			for i, wantName := range tc.wantNames {
+				if i >= len(kube.runs) {
+					break
+				}
+				if got := kube.runs[i][2]; got != wantName {
+					t.Errorf("delete %q call %d deleted %q, want %q", tc.arg, i, got, wantName)
+				}
 			}
 		})
 	}
