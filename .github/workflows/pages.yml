@@ -76,6 +76,27 @@ jobs:
         # comes from site/hugo.toml, so a custom domain is one edit there.
         run: hugo --gc --minify
 
+      # Hugo resolves the theme's stylesheet through resources.Get, which
+      # returns nothing when the module's assets are missing — and the build
+      # still succeeds, publishing an unstyled site. That happened locally with
+      # a half-populated module cache, so it is asserted rather than assumed.
+      - name: Check the theme's CSS was built
+        working-directory: site
+        run: |
+          shopt -s nullglob
+          compiled=(public/css/compiled/*.css)
+          if [ ${#compiled[@]} -eq 0 ]; then
+            echo "::error::no compiled stylesheet in public/css/compiled — the site would publish unstyled"
+            exit 1
+          fi
+          for sheet in "${compiled[@]}"; do
+            size=$(wc -c < "$sheet")
+            echo "$sheet: $size bytes"
+            [ "$size" -gt 10000 ] || { echo "::error::$sheet is suspiciously small"; exit 1; }
+          done
+          test -n "$(ls public/css/kx-themes*.css 2>/dev/null)" || {
+            echo "::error::the generated palette stylesheet is missing"; exit 1; }
+
       - name: Upload artifact
         if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3

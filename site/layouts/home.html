@@ -1,0 +1,24 @@
+{{ define "main" }}
+  {{- /*
+    Hextra's home layout with the <h1> dropped.
+
+    The title it rendered read "kx — kubectl, indexed", directly above a hero
+    carrying the mark and the same tagline. The page still has the title in
+    <head>, which is what search results and the browser tab use; what is
+    removed is only the duplicate on the page itself.
+
+    Copied from the theme rather than patched, because a layout is a single
+    template with no hook for its heading.
+  */ -}}
+  <div class='hx:mx-auto hx:flex hextra-max-page-width'>
+    {{ partial "sidebar.html" (dict "context" . "disableSidebar" true "displayPlaceholder" true) }}
+    {{ partial "toc.html" . }}
+    <article class="hx:w-full hx:break-words hx:flex hx:min-h-[calc(100vh-var(--navbar-height))] hx:min-w-0 hx:justify-center hx:pb-8 hx:pr-[calc(env(safe-area-inset-right)-1.5rem)]">
+      <main id="content" class="hx:w-full hx:min-w-0 hextra-max-content-width hx:px-6 hx:pt-4 hx:md:px-12">
+        <div class="content">
+          {{ .Content }}
+        </div>
+      </main>
+    </article>
+  </div>
+{{ end }}
