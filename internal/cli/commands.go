@@ -192,7 +192,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "describe <index>... [kubectl flags]",
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -252,7 +252,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
 			"DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3\n  kx logs 3..",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -378,7 +378,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <index>...",
 		Short:   "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
@@ -532,7 +532,7 @@ func newYamlCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "yaml <index>...",
 		Short:   "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
@@ -585,7 +585,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 		Use:     use + " <index>...",
 		Short:   short,
 		Args:    cobra.MinimumNArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
