@@ -4,6 +4,7 @@ package kinds
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -117,6 +118,27 @@ var shorthandSource ShorthandSource
 // source.
 func SetShorthandSource(source ShorthandSource) {
 	shorthandSource = source
+}
+
+// Spelling is one recognized resource spelling and the kind it maps to.
+type Spelling struct {
+	Name string
+	Kind Kind
+}
+
+// Spellings returns every spelling kindMap recognizes, sorted by name.
+//
+// Exported for shell completion, which needs the spellings themselves rather
+// than the yes/no answer IsKindSpelling gives. CRD short names are not
+// included: resolving those means asking the discovery cache, and a completion
+// that reads from disk on every Tab is one people switch off.
+func Spellings() []Spelling {
+	spellings := make([]Spelling, 0, len(kindMap))
+	for name, kind := range kindMap {
+		spellings = append(spellings, Spelling{Name: name, Kind: kind})
+	}
+	sort.Slice(spellings, func(i, j int) bool { return spellings[i].Name < spellings[j].Name })
+	return spellings
 }
 
 // IsKindSpelling reports whether token names a known resource type.

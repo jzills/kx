@@ -147,6 +147,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	}
 
 	installCompletion(root)
+	installCompletions(root, services)
 	return root
 }
 

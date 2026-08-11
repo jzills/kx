@@ -134,11 +134,38 @@ var rolloutKinds = map[kinds.Kind]bool{
 	kinds.Deployment: true, kinds.StatefulSet: true, kinds.DaemonSet: true,
 }
 
-// rolloutActions are the kubectl rollout subcommands kx exposes. `status`
-// blocks until the rollout settles, so it streams rather than being captured.
-var rolloutActions = map[string]bool{
-	"status": true, "restart": true, "pause": true,
-	"resume": true, "history": true, "undo": true,
+// rolloutActions are the kubectl rollout subcommands kx exposes, in the order
+// help and completion list them. `status` blocks until the rollout settles, so
+// it streams rather than being captured.
+//
+// One ordered list rather than a set, because the same six names are the
+// command's validation, its help text and its shell completion, and three
+// copies of them drift.
+var rolloutActions = []struct{ Name, Doc string }{
+	{"status", "Show the rollout status"},
+	{"restart", "Restart the workload"},
+	{"pause", "Pause the rollout"},
+	{"resume", "Resume a paused rollout"},
+	{"history", "Show the revision history"},
+	{"undo", "Roll back to the previous revision"},
+}
+
+func isRolloutAction(action string) bool {
+	for _, candidate := range rolloutActions {
+		if candidate.Name == action {
+			return true
+		}
+	}
+	return false
+}
+
+// rolloutActionNames lists the actions for prose: help text and errors.
+func rolloutActionNames() []string {
+	names := make([]string, 0, len(rolloutActions))
+	for _, action := range rolloutActions {
+		names = append(names, action.Name)
+	}
+	return names
 }
 
 var interactiveRolloutActions = map[string]bool{"status": true}
@@ -151,7 +178,7 @@ type RolloutCommand struct {
 
 // Execute returns the captured output, or "" for actions that stream directly.
 func (c RolloutCommand) Execute(action string, index int) (string, error) {
-	if !rolloutActions[action] {
+	if !isRolloutAction(action) {
 		return "", fmt.Errorf("unknown rollout action '%s'.", action)
 	}
 	name, namespace, kind, err := c.State.Fields(index)

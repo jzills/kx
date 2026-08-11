@@ -436,11 +436,14 @@ func newScaleCommand(services Services) *cobra.Command {
 
 func newRolloutCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:       "rollout <action> <index>",
-		Short:     "Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.",
-		Example:   "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
-		ValidArgs: []string{"status", "restart", "pause", "resume", "history", "undo"},
-		Args:      cobra.ExactArgs(2),
+		Use: "rollout <action> <index>",
+		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
+			") on a Deployment, StatefulSet, or DaemonSet.",
+		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
+		// No ValidArgs: cobra stops completing entirely once it is set, which
+		// left `kx rollout status <TAB>` offering filenames instead of the
+		// index it wants. installCompletions covers both positions.
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			index, err := parseIndex("index", args[1])
 			if err != nil {

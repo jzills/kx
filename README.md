@@ -91,7 +91,9 @@ pipx run --spec kx-cli kx get pods
 
 Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs work the same way — a CRD's own short name, kind, or plural — resolved from kubectl's own on-disk API-discovery cache, so kx never calls the API server just to look one up. A spelling that resolves neither way still falls back to `kx get <resource>`.
 
-Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `-h`/`--help` on any command shows usage, examples, and aliases.
+Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version and how the binary was built, and `-h`/`--help` on any command shows usage, arguments, examples, and aliases.
+
+`kx completion <bash|zsh|fish|powershell>` prints a completion script. It completes indexes from the saved listing with the resource each one points at, so `kx describe <TAB>` offers `1  api-7d8f (Pod)` rather than a bare number — plus resource types, rollout actions, themes, engines, and namespaces for `-n`. Everything is answered from `~/.kx/state.json` and needs no API call.
 
 ### Commands
 
