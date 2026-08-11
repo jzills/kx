@@ -537,6 +537,27 @@ func TestFieldsOutOfRange(t *testing.T) {
 	}
 }
 
+func TestCountReturnsTheCurrentListingSize(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx", "redis", "web"), Namespace: "prod"})
+
+	count, err := service.Count()
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Count() = %d, want 3", count)
+	}
+}
+
+func TestCountWithNoStateReturnsErrNoState(t *testing.T) {
+	service := newTestService(t, 10)
+
+	if _, err := service.Count(); err != ErrNoState {
+		t.Errorf("Count() with no state = %v, want ErrNoState", err)
+	}
+}
+
 // The regression this whole change exists for: two resources of different
 // kinds sharing a name must both be indexed and resolve to their own correct
 // kind, surviving a real on-disk round trip — not just the in-memory struct.

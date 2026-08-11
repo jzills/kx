@@ -15,6 +15,10 @@ type fakeResolver struct {
 	namespace string
 	kind      kinds.Kind
 	err       error
+	// count and countErr back Count(), used by tests that expand an
+	// open-ended range ("5..") against a fixed listing size.
+	count    int
+	countErr error
 }
 
 func (f fakeResolver) Fields(int) (string, string, kinds.Kind, error) {
@@ -22,6 +26,10 @@ func (f fakeResolver) Fields(int) (string, string, kinds.Kind, error) {
 		return "", "", "", f.err
 	}
 	return f.name, f.namespace, f.kind, nil
+}
+
+func (f fakeResolver) Count() (int, error) {
+	return f.count, f.countErr
 }
 
 func pod(name string) fakeResolver {

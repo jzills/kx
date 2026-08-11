@@ -40,7 +40,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	var indexes []int
 	if len(indexArgs) > 0 {
 		var err error
-		indexes, err = parseIndexes("indexes", indexArgs)
+		indexes, err = parseIndexes(services.State, "indexes", indexArgs)
 		if err != nil {
 			return err
 		}

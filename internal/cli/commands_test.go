@@ -95,7 +95,7 @@ func TestParseIndexesExpandsRanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseIndexes("indexes", tc.args)
+			got, err := parseIndexes(fakeResolver{}, "indexes", tc.args)
 			if err != nil {
 				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
 			}
@@ -113,14 +113,12 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 		arg  string
 		want string
 	}{
-		{"9..", "Invalid value for 'indexes': '9..' is not a valid range."},
-		{"..17", "Invalid value for 'indexes': '..17' is not a valid range."},
 		{"9..abc", "Invalid value for 'indexes': '9..abc' is not a valid range."},
 		{"9...17", "Invalid value for 'indexes': '9...17' is not a valid range."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.arg, func(t *testing.T) {
-			_, err := parseIndexes("indexes", []string{tc.arg})
+			_, err := parseIndexes(fakeResolver{}, "indexes", []string{tc.arg})
 			if err == nil {
 				t.Fatalf("parseIndexes(%q) accepted a malformed range", tc.arg)
 			}
@@ -131,10 +129,87 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 	}
 }
 
+// "..5" defaults the start to 1; "5.." defaults the end to the size of the
+// current listing, reported by the resolver's Count().
+func TestParseIndexesExpandsOpenRanges(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		count int
+		want  []int
+	}{
+		{"open start", []string{"..5"}, 0, []int{1, 2, 3, 4, 5}},
+		{"open end", []string{"5.."}, 8, []int{5, 6, 7, 8}},
+		{"open end, single item", []string{"5.."}, 5, []int{5}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := fakeResolver{count: tc.count}
+			got, err := parseIndexes(resolver, "indexes", tc.args)
+			if err != nil {
+				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// A bare ".." is not "everything" — it's rejected the same way a malformed
+// range is, so a destructive command like delete never expands an
+// unqualified ".." into the whole listing by accident.
+func TestParseIndexesRejectsBareDoubleDot(t *testing.T) {
+	_, err := parseIndexes(fakeResolver{}, "indexes", []string{".."})
+	if err == nil {
+		t.Fatal("parseIndexes accepted a bare '..'")
+	}
+	want := "Invalid value for 'indexes': '..' is not a valid range."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// An open-end range whose start is already past the current listing is a
+// hard error — not a silent reverse-walk (unlike an explicit "20..9") and
+// not a silent no-op.
+func TestParseIndexesRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	_, err := parseIndexes(fakeResolver{count: 3}, "indexes", []string{"5.."})
+	if err == nil {
+		t.Fatal("parseIndexes accepted '5..' starting past a 3-item listing")
+	}
+	want := "Invalid value for 'indexes': '5..' starts past the current listing (3 items)."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// An open-end range propagates the resolver's error (e.g. no state saved
+// yet) directly, rather than reporting it as a malformed range.
+func TestParseIndexesPropagatesCountErrorForOpenEndRange(t *testing.T) {
+	wantErr := errors.New("no state found")
+	_, err := parseIndexes(fakeResolver{countErr: wantErr}, "indexes", []string{"5.."})
+	if err != wantErr {
+		t.Errorf("parseIndexes(%q) error = %v, want %v", "5..", err, wantErr)
+	}
+}
+
+// An open-end range still respects maxRangeSpan once its end is resolved.
+func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
+	_, err := parseIndexes(fakeResolver{count: 999999}, "indexes", []string{"1.."})
+	if err == nil {
+		t.Fatal("parseIndexes accepted an oversized open-end range")
+	}
+	want := "Invalid value for 'indexes': '1..' spans more than 10000 indexes."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
 // A pathological range shouldn't build a giant slice before any index is even
 // resolved against the current listing.
 func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
-	_, err := parseIndexes("indexes", []string{"1..999999"})
+	_, err := parseIndexes(fakeResolver{}, "indexes", []string{"1..999999"})
 	if err == nil {
 		t.Fatal("parseIndexes accepted an oversized range")
 	}
@@ -150,7 +225,7 @@ func TestParseIndexesRejectsOverflowingRanges(t *testing.T) {
 	arg := fmt.Sprintf("%d..%d", math.MaxInt64, math.MinInt64)
 	done := make(chan error, 1)
 	go func() {
-		_, err := parseIndexes("indexes", []string{arg})
+		_, err := parseIndexes(fakeResolver{}, "indexes", []string{arg})
 		done <- err
 	}()
 	select {
@@ -226,6 +301,10 @@ func (f indexResolverFunc) Fields(idx int) (string, string, kinds.Kind, error) {
 	return f(idx)
 }
 
+func (f indexResolverFunc) Count() (int, error) {
+	return 0, nil
+}
+
 func TestValidateIndexesCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
 	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
 		if idx == 3 {
@@ -269,6 +348,103 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	if len(kube.runs) != 0 {
 		t.Errorf("kubectl was called %d times, want 0 — index 3 is out of range and "+
 			"should be caught before index 1 or 2 is deleted", len(kube.runs))
+	}
+}
+
+// Open ranges resolve against the real listing end-to-end, the same way an
+// explicit range does.
+func TestDeleteAcceptsOpenRanges(t *testing.T) {
+	cases := []struct {
+		name      string
+		arg       string
+		want      int      // number of kubectl delete calls expected
+		wantNames []string // resource names, in the order they should be deleted
+	}{
+		{"open start", "..2", 2, []string{"nginx", "redis"}},
+		{"open end", "2..", 2, []string{"redis", "web"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &recordingKubectl{}
+			services := switchServices(t, kube)
+			if err := services.State.Save(state.State{
+				Resources: state.NewResources([]string{"nginx", "redis", "web"}, kinds.Pod),
+				Namespace: "prod",
+			}); err != nil {
+				t.Fatalf("Save pods: %v", err)
+			}
+
+			cmd := newDeleteCommand(services)
+			cmd.SetArgs([]string{tc.arg, "-y"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("delete %q: %v", tc.arg, err)
+			}
+			if len(kube.runs) != tc.want {
+				t.Errorf("delete %q ran kubectl %d times, want %d", tc.arg, len(kube.runs), tc.want)
+			}
+			// Each recorded run is "delete <kind> <name> -n <namespace>" — see
+			// DeleteCommand.Execute in resource.go — so the name is args[2].
+			for i, wantName := range tc.wantNames {
+				if i >= len(kube.runs) {
+					break
+				}
+				if got := kube.runs[i][2]; got != wantName {
+					t.Errorf("delete %q call %d deleted %q, want %q", tc.arg, i, got, wantName)
+				}
+			}
+		})
+	}
+}
+
+// An open-end range whose start is already past the current listing must not
+// delete anything — the #211 batch-validation guarantee extends to open
+// ranges, since the "past the listing" check runs during parsing, before any
+// index is acted on.
+func TestDeleteRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"5..", "-y"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("delete succeeded despite '5..' starting past a 2-item listing")
+	}
+	if !strings.Contains(err.Error(), "starts past the current listing") {
+		t.Errorf("error = %q, want it to mention starting past the current listing", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.runs))
+	}
+}
+
+func TestDescribeRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDescribeCommand(services)
+	cmd.SetArgs([]string{"5.."})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("describe succeeded despite '5..' starting past a 2-item listing")
+	}
+	if !strings.Contains(err.Error(), "starts past the current listing") {
+		t.Errorf("error = %q, want it to mention starting past the current listing", err)
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.interactive))
 	}
 }
 
