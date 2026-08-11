@@ -1,0 +1,12 @@
+<!-- Cropped from internal/web/wordmark.svg: same mark the --html reports use,
+     with the canvas trimmed to the glyphs so it reads at navbar size.
+     fill=currentColor so the navbar can colour it from the active palette. -->
+<svg viewBox="0 0 300 220" xmlns="http://www.w3.org/2000/svg" fill="currentColor"
+     role="img" aria-label="kx">
+    <text x="150" y="26" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">██╗  ██╗██╗  ██╗</text>
+    <text x="150" y="62" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">██║ ██╔╝╚██╗██╔╝</text>
+    <text x="150" y="98" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">█████╔╝  ╚███╔╝ </text>
+    <text x="150" y="134" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">██╔═██╗  ██╔██╗ </text>
+    <text x="150" y="170" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">██║  ██╗██╔╝ ██╗</text>
+    <text x="150" y="206" text-anchor="middle" font-family="'Courier New', 'Lucida Console', monospace" font-size="30" xml:space="preserve">╚═╝  ╚═╝╚═╝  ╚═╝</text>
+</svg>

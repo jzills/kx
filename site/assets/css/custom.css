@@ -1,7 +1,7 @@
 /* kx site styling.
  *
  * The palette itself is generated — see kx-themes.css and
- * tools/gen-site-theme. Nothing here hardcodes a colour; every rule reads a
+ * tools/gen-site-theme. Nothing here hardcodes a color; every rule reads a
  * --kx-* property, so a palette added to internal/theme restyles this page
  * without anyone editing it.
  */
@@ -219,4 +219,19 @@ body {
   .kx-themes__swatch {
     transition: none;
   }
+}
+
+/* Navbar mark
+ * ------------------------------------------------------------------ */
+
+.kx-navbar-mark {
+  display: inline-flex;
+  align-items: center;
+  color: var(--kx-accent);
+}
+
+.kx-navbar-mark svg {
+  height: 2.1rem;
+  width: auto;
+  display: block;
 }

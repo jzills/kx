@@ -120,7 +120,7 @@ toc: false
 </div>
 
 <div class="kx-section">
-  <h2 class="kx-section__title">In your colours</h2>
+  <h2 class="kx-section__title">In your colors</h2>
   <p class="kx-section__lede">
     <code>kx theme</code> restyles the terminal, the HTML reports — and this
     page. Same palettes, one registry. Pick one:

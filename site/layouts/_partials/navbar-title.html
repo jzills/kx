@@ -1,0 +1,24 @@
+{{- /*
+  Overrides Hextra's navbar title.
+
+  The theme emits the logo as two <img> tags, one per light/dark mode. An
+  image cannot inherit currentColor, so the mark would have stayed one fixed
+  green whichever palette the reader picks — and with Hextra's own toggle off,
+  the second image is dead weight anyway.
+
+  Inlined instead, so the mark takes its colour from the active palette like
+  everything else on the page. Cropped from the same wordmark the --html
+  reports use: the original canvas is mostly empty, which is why it read as
+  tiny at the height a navbar allows.
+
+  hx:ltr:mr-auto is load-bearing — it is what pushes the menu to the right.
+*/ -}}
+<a
+  class="kx-navbar-mark hx:flex hx:items-center hx:hover:opacity-75 hx:ltr:mr-auto hx:rtl:ml-auto"
+  href="{{ .Site.Home.RelPermalink }}"
+  aria-label="{{ .Site.Title }}"
+>
+  {{- with resources.Get "kx-mark.svg" }}
+    {{- .Content | safeHTML }}
+  {{- end }}
+</a>

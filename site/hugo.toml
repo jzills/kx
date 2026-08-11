@@ -42,24 +42,23 @@ title = "kx"
 [params]
   description = "kubectl, indexed. Select Kubernetes resources by number instead of typing names."
 
+  # Both off: layouts/_partials/custom/navbar-title.html draws the mark
+  # itself, inlined so it takes its colour from the active palette.
   [params.navbar]
     displayTitle = false
-    displayLogo = true
-    [params.navbar.logo]
-      path = "img/banner.svg"
-      dark = "img/banner.svg"
-      height = 22
+    displayLogo = false
 
   [params.footer]
     enable = true
     displayCopyright = false
     displayPoweredBy = false
 
-  # Hextra's own toggle. kx's palettes are mostly dark, so dark is the default
-  # and the picker in the hero switches between the full set.
+  # Hextra's light/dark toggle is off: the kx palettes replace it. The picker
+  # on the page offers all ten, `light` among them, so a second control that
+  # only knows two would disagree with the one that knows the rest.
   [params.theme]
     default = "dark"
-    displayToggle = true
+    displayToggle = false
 
 [menu]
   [[menu.main]]

@@ -2,8 +2,8 @@
  *
  * Every palette kx renders in the terminal, as CSS. Two things read these:
  * the kx-* properties style the page's own components, and the three
- * primary-* properties are Hextra's, which derives its whole colour ramp
- * from them — so choosing a kx palette recolours the theme's chrome too.
+ * primary-* properties are Hextra's, which derives its whole color ramp
+ * from them — so choosing a kx palette recolors the theme's chrome too.
  */
 
 :root {

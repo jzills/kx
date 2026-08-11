@@ -1,5 +1,5 @@
 // Command gen-site-theme writes the kx palettes out as CSS for the Hugo site,
-// so the website, the terminal and the --html reports are coloured from one
+// so the website, the terminal and the --html reports are colored from one
 // registry rather than three copies of the same hex values.
 //
 //	go run ./tools/gen-site-theme
@@ -77,7 +77,7 @@ func main() {
 }
 
 // renderData writes the palette list the picker iterates: the name it sets on
-// the document, and the two colours its swatch shows.
+// the document, and the two colors its swatch shows.
 func renderData() (string, error) {
 	type swatch struct {
 		Name       string `json:"name"`
@@ -122,8 +122,8 @@ func render() (string, error) {
 		" *\n" +
 		" * Every palette kx renders in the terminal, as CSS. Two things read these:\n" +
 		" * the kx-* properties style the page's own components, and the three\n" +
-		" * primary-* properties are Hextra's, which derives its whole colour ramp\n" +
-		" * from them — so choosing a kx palette recolours the theme's chrome too.\n" +
+		" * primary-* properties are Hextra's, which derives its whole color ramp\n" +
+		" * from them — so choosing a kx palette recolors the theme's chrome too.\n" +
 		" */\n")
 
 	// Hextra puts .dark on <html> for its own toggle. An explicit pick sets
@@ -174,7 +174,7 @@ func block(name string) (string, error) {
 	}
 
 	// Hextra builds --color-primary-50 through -900 from these three, so the
-	// accent has to reach it as HSL components rather than as a hex colour.
+	// accent has to reach it as HSL components rather than as a hex color.
 	hue, saturation, lightness, err := toHSL(styles[theme.Accent])
 	if err != nil {
 		return "", fmt.Errorf("%s: accent %q: %w", name, styles[theme.Accent], err)
