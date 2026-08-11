@@ -154,8 +154,9 @@ func render() (string, error) {
 	// written by hand would be the thing that goes missing when a palette is
 	// added.
 	out.WriteString("\n/* Show only the media matching the active palette: the terminal capture\n" +
-		"   (tools/gen-site-terminal) and the demo recording (demo/render-themes.sh). */\n")
-	for _, attribute := range []string{"data-kx-terminal", "data-kx-demo"} {
+		"   (tools/gen-site-terminal), the demo recording (demo/render-themes.sh)\n" +
+		"   and the report screenshots (demo/shoot-reports.py). */\n")
+	for _, attribute := range []string{"data-kx-terminal", "data-kx-demo", "data-kx-shot"} {
 		fmt.Fprintf(&out, "[%s] { display: none; }\n", attribute)
 		fmt.Fprintf(&out, "[%s=%q] { display: block; }\n", attribute, defaultDark)
 		for _, name := range names() {

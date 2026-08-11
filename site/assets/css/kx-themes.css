@@ -235,7 +235,8 @@
 }
 
 /* Show only the media matching the active palette: the terminal capture
-   (tools/gen-site-terminal) and the demo recording (demo/render-themes.sh). */
+   (tools/gen-site-terminal), the demo recording (demo/render-themes.sh)
+   and the report screenshots (demo/shoot-reports.py). */
 [data-kx-terminal] { display: none; }
 [data-kx-terminal="github-dark"] { display: block; }
 [data-kx-theme="dracula"] [data-kx-terminal="github-dark"] { display: none; }
@@ -276,5 +277,25 @@
 [data-kx-theme="mono"] [data-kx-demo="mono"] { display: block; }
 [data-kx-theme="light"] [data-kx-demo="github-dark"] { display: none; }
 [data-kx-theme="light"] [data-kx-demo="light"] { display: block; }
+[data-kx-shot] { display: none; }
+[data-kx-shot="github-dark"] { display: block; }
+[data-kx-theme="dracula"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="dracula"] [data-kx-shot="dracula"] { display: block; }
+[data-kx-theme="nord"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="nord"] [data-kx-shot="nord"] { display: block; }
+[data-kx-theme="gruvbox"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="gruvbox"] [data-kx-shot="gruvbox"] { display: block; }
+[data-kx-theme="solarized-dark"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="solarized-dark"] [data-kx-shot="solarized-dark"] { display: block; }
+[data-kx-theme="catppuccin-mocha"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="catppuccin-mocha"] [data-kx-shot="catppuccin-mocha"] { display: block; }
+[data-kx-theme="tokyo-night"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="tokyo-night"] [data-kx-shot="tokyo-night"] { display: block; }
+[data-kx-theme="rose-pine"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="rose-pine"] [data-kx-shot="rose-pine"] { display: block; }
+[data-kx-theme="mono"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="mono"] [data-kx-shot="mono"] { display: block; }
+[data-kx-theme="light"] [data-kx-shot="github-dark"] { display: none; }
+[data-kx-theme="light"] [data-kx-shot="light"] { display: block; }
 
 /* Palettes: github-dark, dracula, nord, gruvbox, solarized-dark, catppuccin-mocha, tokyo-night, rose-pine, mono, light */

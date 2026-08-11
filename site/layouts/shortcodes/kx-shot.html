@@ -1,0 +1,25 @@
+{{- /*
+  A --html report screenshot, one per palette.
+
+  Named by report, so the same shortcode serves diag, scan and tree:
+
+      {{< kx-shot report="diag" alt="..." >}}
+
+  Iterates the generated palette list, like the demo recordings, so a palette
+  cannot gain a slot with no screenshot behind it.
+*/ -}}
+{{- $report := .Get "report" -}}
+{{- $alt := .Get "alt" | default (printf "kx %s --html dashboard" $report) -}}
+{{- $default := "github-dark" -}}
+{{- range hugo.Data.kx_themes }}
+  <img
+    class="kx-media"
+    data-kx-shot="{{ .name }}"
+    src="{{ printf "img/%s-html-%s.png" $report .name | relURL }}"
+    alt="{{ $alt }} in the {{ .name }} theme"
+    {{ if ne .name $default }}loading="lazy"{{ end }}
+    decoding="async"
+    width="1440"
+    height="900"
+  />
+{{- end }}

@@ -121,8 +121,25 @@ toc: false
 <div class="kx-section">
   <h2 class="kx-section__title">Browser reports</h2>
   <p class="kx-section__lede">
-    Sweep rows expand into a resource's full report; image rows expand into the
-    CVEs behind their counts.
+    <code>--html</code> renders the same analysis as a page and opens it. Sweep
+    rows expand into a resource's full report; image rows expand into the CVEs
+    behind their counts. Bound to localhost, nothing written to disk.
   </p>
-  <img class="kx-media" src="img/diag-html.png" alt="kx diag --html dashboard" loading="lazy" decoding="async" width="800" />
+  {{< kx-shot report="diag" alt="kx diag --html dashboard" >}}
+</div>
+
+<div class="kx-section">
+  <h3 class="kx-section__title">kx scan --html</h3>
+  <p class="kx-section__lede">
+    Per-image severity counts, with the CVE table grouped by image below.
+  </p>
+  {{< kx-shot report="scan" alt="kx scan --html dashboard" >}}
+</div>
+
+<div class="kx-section">
+  <h3 class="kx-section__title">kx tree --html</h3>
+  <p class="kx-section__lede">
+    The ownership graph as a collapsible tree, indexed like every other listing.
+  </p>
+  {{< kx-shot report="tree" alt="kx tree --html dashboard" >}}
 </div>

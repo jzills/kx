@@ -14,19 +14,16 @@ title = "kx"
   [[module.imports]]
     path = "github.com/imfing/hextra"
 
-  # The dashboard screenshots are committed at the repo root for the README.
-  # Mounted rather than copied so the two cannot drift. The demo recordings are
-  # not mounted from ../demo: the site uses its own per-palette set under
-  # static/demo, and mounting the README's would publish 4 MB nothing links to.
+  # Nothing is mounted from the repo root. The README's single-theme GIFs and
+  # screenshots are for GitHub, which cannot theme anything; the site keeps its
+  # own per-palette set under static/, and mounting the README's as well would
+  # publish several megabytes nothing links to.
   [[module.mounts]]
     source = "assets"
     target = "assets"
   [[module.mounts]]
     source = "static"
     target = "static"
-  [[module.mounts]]
-    source = "../assets"
-    target = "static/img"
 
 [markup]
   [markup.highlight]
