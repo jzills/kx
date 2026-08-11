@@ -14,7 +14,7 @@ toc: false
 </div>
 
 <div class="kx-section">
-  <img class="kx-media" src="demo/demo.gif" alt="Listing pods with kx and acting on them by index" loading="lazy" decoding="async" width="800" />
+  {{< kx-demo >}}
 </div>
 
 <div class="kx-section" id="install">

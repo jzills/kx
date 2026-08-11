@@ -1,0 +1,23 @@
+{{- /*
+  The demo recording, one per palette.
+
+  Iterates the same generated list the picker and the stylesheet use, so a
+  palette cannot end up with a recording nothing shows, or a slot with no
+  recording behind it.
+
+  Only the default is eager: the other nine are the same 1.5 MB each, and
+  fetching all ten would cost 15 MB to show one.
+*/ -}}
+{{- $default := "github-dark" -}}
+{{- range hugo.Data.kx_themes }}
+  <img
+    class="kx-media"
+    data-kx-demo="{{ .name }}"
+    src="{{ printf "demo/demo-%s.gif" .name | relURL }}"
+    alt="Listing pods with kx and acting on them by index, in the {{ .name }} theme"
+    {{ if ne .name $default }}loading="lazy"{{ end }}
+    decoding="async"
+    width="1200"
+    height="750"
+  />
+{{- end }}

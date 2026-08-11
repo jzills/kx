@@ -153,17 +153,20 @@ func render() (string, error) {
 	// because this is where the palette list already lives: a rule pair
 	// written by hand would be the thing that goes missing when a palette is
 	// added.
-	out.WriteString("\n/* Show only the terminal capture matching the active palette. */\n")
-	fmt.Fprintf(&out, "[data-kx-terminal] { display: none; }\n")
-	fmt.Fprintf(&out, "[data-kx-terminal=%q] { display: block; }\n", defaultDark)
-	for _, name := range names() {
-		if name == defaultDark {
-			continue
+	out.WriteString("\n/* Show only the media matching the active palette: the terminal capture\n" +
+		"   (tools/gen-site-terminal) and the demo recording (demo/render-themes.sh). */\n")
+	for _, attribute := range []string{"data-kx-terminal", "data-kx-demo"} {
+		fmt.Fprintf(&out, "[%s] { display: none; }\n", attribute)
+		fmt.Fprintf(&out, "[%s=%q] { display: block; }\n", attribute, defaultDark)
+		for _, name := range names() {
+			if name == defaultDark {
+				continue
+			}
+			fmt.Fprintf(&out,
+				"[data-kx-theme=%q] [%s=%q] { display: none; }\n"+
+					"[data-kx-theme=%q] [%s=%q] { display: block; }\n",
+				name, attribute, defaultDark, name, attribute, name)
 		}
-		fmt.Fprintf(&out,
-			"[data-kx-theme=%q] [data-kx-terminal=%q] { display: none; }\n"+
-				"[data-kx-theme=%q] [data-kx-terminal=%q] { display: block; }\n",
-			name, defaultDark, name, name)
 	}
 
 	// The picker needs the list, and duplicating it in a template is how it

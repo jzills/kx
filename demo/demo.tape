@@ -27,7 +27,7 @@ Type "kx get deployments"
 Enter
 Sleep 2s
 
-Type "kx tree 7 --index"
+Type "kx tree 7"
 Enter
 Sleep 3s
 
