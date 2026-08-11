@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -268,5 +269,33 @@ func TestLoadAfterSaveEngine(t *testing.T) {
 	}
 	if cfg.Engine != "trivy" {
 		t.Errorf("Engine = %q, want trivy", cfg.Engine)
+	}
+}
+
+// Settings is what `kx --help` lists under Environment, so an override Load
+// honours but Settings omits is one a user can only discover by reading the
+// source. The loader's own text is the reference: every KX_* variable it looks
+// up must be documented.
+func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
+	source, err := os.ReadFile("config.go")
+	if err != nil {
+		t.Fatalf("ReadFile(config.go): %v", err)
+	}
+
+	documented := map[string]bool{}
+	for _, setting := range Settings() {
+		documented[setting.Env] = true
+	}
+
+	// LookupEnv is how Load reads every override; the literal beside it is the
+	// variable name.
+	lookups := regexp.MustCompile(`LookupEnv\("(KX_[A-Z_]+)"\)`).FindAllStringSubmatch(string(source), -1)
+	if len(lookups) == 0 {
+		t.Fatal("found no LookupEnv calls in config.go; this test can no longer see what Load reads")
+	}
+	for _, lookup := range lookups {
+		if !documented[lookup[1]] {
+			t.Errorf("Load reads %s, but Settings() does not document it", lookup[1])
+		}
 	}
 }

@@ -177,15 +177,21 @@ func NewService(maxHistory int) *Service {
 	return &Service{MaxHistory: maxHistory}
 }
 
-func (s *Service) path() (string, error) {
-	if s.Path != "" {
-		return s.Path, nil
-	}
+// File returns the default state file path, mirroring config.File so the help
+// screen can name both without hardcoding either.
+func File() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate home directory: %w", err)
 	}
 	return filepath.Join(home, ".kx", "state.json"), nil
+}
+
+func (s *Service) path() (string, error) {
+	if s.Path != "" {
+		return s.Path, nil
+	}
+	return File()
 }
 
 func (s *Service) loadHistory() (History, error) {
