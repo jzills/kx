@@ -501,6 +501,17 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	return name, current.Namespace, kind, nil
 }
 
+// Count returns how many resources are in the current listing — the same
+// entry Fields resolves indexes against. Used to resolve the open end of a
+// "5.." range.
+func (s *Service) Count() (int, error) {
+	current, err := s.Load()
+	if err != nil {
+		return 0, err
+	}
+	return current.Resources.Len(), nil
+}
+
 // soleKind returns the kind every resource in an entry shares, or "" when the
 // entry spans several — a namespace-wide tree, a triage sweep.
 func soleKind(entry State) kinds.Kind {
