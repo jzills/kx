@@ -347,6 +347,84 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	}
 }
 
+// Open ranges resolve against the real listing end-to-end, the same way an
+// explicit range does.
+func TestDeleteAcceptsOpenRanges(t *testing.T) {
+	cases := []struct {
+		name string
+		arg  string
+		want int // number of kubectl delete calls expected
+	}{
+		{"open start", "..2", 2},
+		{"open end", "2..", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &recordingKubectl{}
+			services := switchServices(t, kube)
+			if err := services.State.Save(state.State{
+				Resources: state.NewResources([]string{"nginx", "redis", "web"}, kinds.Pod),
+				Namespace: "prod",
+			}); err != nil {
+				t.Fatalf("Save pods: %v", err)
+			}
+
+			cmd := newDeleteCommand(services)
+			cmd.SetArgs([]string{tc.arg, "-y"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("delete %q: %v", tc.arg, err)
+			}
+			if len(kube.runs) != tc.want {
+				t.Errorf("delete %q ran kubectl %d times, want %d", tc.arg, len(kube.runs), tc.want)
+			}
+		})
+	}
+}
+
+// An open-end range whose start is already past the current listing must not
+// delete anything — the #211 batch-validation guarantee extends to open
+// ranges, since the "past the listing" check runs during parsing, before any
+// index is acted on.
+func TestDeleteRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"5..", "-y"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("delete succeeded despite '5..' starting past a 2-item listing")
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.runs))
+	}
+}
+
+func TestDescribeRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDescribeCommand(services)
+	cmd.SetArgs([]string{"5.."})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("describe succeeded despite '5..' starting past a 2-item listing")
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.interactive))
+	}
+}
+
 // switchServices wires the real state service against a temp file, so the
 // listing path and the switch path meet the way they do in the tool.
 //
