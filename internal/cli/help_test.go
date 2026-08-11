@@ -219,6 +219,28 @@ func TestStateHelpListsItsSubcommands(t *testing.T) {
 	}
 }
 
+// --watch is parsed by hand (isWatch) rather than by cobra, so nothing forces
+// it to be registered — and for a while it wasn't, leaving a flag kx gives its
+// own live-table behaviour documented only in the README. Both listing
+// commands run through runGet, so both honour it and both must show it.
+func TestListingCommandsDocumentWatch(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	for _, name := range []string{"get", "secret"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", name, err)
+		}
+		var options []string
+		for _, option := range commandHelp(cmd).Options {
+			options = append(options, option.Name)
+		}
+		joined := strings.Join(options, " ")
+		if !strings.Contains(joined, "--watch") {
+			t.Errorf("kx %s --help Options = %q, missing --watch", name, joined)
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
