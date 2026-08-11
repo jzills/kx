@@ -124,13 +124,9 @@ func scopeCaption(parts ...string) string {
 
 func newTreeCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tree [index]",
-		Short: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace.",
-		Long: "Graphs ownership references from controllers down to containers.\n" +
-			"With no index, graphs every workload in the current namespace, or in\n" +
-			"the namespace given by -n, or every namespace as a forest with -A.\n" +
-			"A Namespace index graphs that namespace. Assigns indexes to tree\n" +
-			"nodes by default; --no-index skips that.",
+		Use:     "tree [index]",
+		Short:   "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace.",
+		Long:    "Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.",
 		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -n prod\n  kx tree -A",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

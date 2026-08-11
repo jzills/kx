@@ -36,6 +36,90 @@ func padName(name string, width int) string {
 	return name + strings.Repeat(" ", width-len(name))
 }
 
+// helpWidth is the width help text wraps to.
+//
+// Capped rather than taken straight from the terminal: prose set to the full
+// width of a maximized window is measurably harder to read, and the help
+// screens are mostly prose. Narrow terminals still get their own width, and
+// off-terminal output keeps pipeWidth so redirected help is never re-wrapped
+// to something a reader didn't ask for.
+const helpMaxWidth = 92
+
+func (r *Renderer) helpWidth() int {
+	width := r.width()
+	if width > helpMaxWidth {
+		return helpMaxWidth
+	}
+	return width
+}
+
+// wrapText breaks text into lines that fit within width, preserving the blank
+// lines between paragraphs. Words longer than the width (a URL, a long path)
+// are left whole rather than broken, since a split one can't be clicked or
+// copied.
+func wrapText(text string, width int) []string {
+	if width < 20 {
+		width = 20
+	}
+	var lines []string
+	for _, paragraph := range strings.Split(text, "\n") {
+		fields := strings.Fields(paragraph)
+		if len(fields) == 0 {
+			lines = append(lines, "")
+			continue
+		}
+		current := fields[0]
+		for _, word := range fields[1:] {
+			if len(current)+1+len(word) > width {
+				lines = append(lines, current)
+				current = word
+				continue
+			}
+			current += " " + word
+		}
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+// itemBlock renders a titled name/description list, wrapping each description
+// into the column the names leave behind so a long one stacks under itself
+// rather than running off the terminal.
+//
+// The name column is the caller's minimum, widened to fit this block's own
+// names: the blocks on a screen line up with each other where they can, and a
+// block whose names overflow moves its own descriptions across together.
+func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
+	if len(items) == 0 {
+		return
+	}
+	nameWidth := minWidth
+	for _, item := range items {
+		if len(item.Name) > nameWidth {
+			nameWidth = len(item.Name)
+		}
+	}
+
+	const gutter = "  "
+	indent := len(gutter) + nameWidth + len(gutter)
+	docWidth := r.helpWidth() - indent
+
+	r.Blank()
+	r.line(r.style(theme.Header, title))
+	for _, item := range items {
+		name := gutter + r.style(theme.Body, padName(item.Name, nameWidth)) + gutter
+		wrapped := wrapText(item.Doc, docWidth)
+		if len(wrapped) == 0 {
+			r.line(strings.TrimRight(name, " "))
+			continue
+		}
+		r.line(name + r.style(theme.Muted, wrapped[0]))
+		for _, continuation := range wrapped[1:] {
+			r.line(strings.Repeat(" ", indent) + r.style(theme.Muted, continuation))
+		}
+	}
+}
+
 // RootHelp is everything the top-level help screen shows.
 //
 // Passed in rather than built here so the screen states one set of facts: the
@@ -71,20 +155,22 @@ func (r *Renderer) RootHelp(help RootHelp) {
 	r.Blank()
 	r.line(r.style(theme.Muted, "Usage") + "  kx [OPTIONS] COMMAND [ARGS]...")
 
-	r.rootBlock("Selecting resources", help.Selecting)
+	r.itemBlock("Selecting resources", help.Selecting, rootNameWidth)
 
 	for _, section := range help.Sections {
-		r.Blank()
-		r.line(r.style(theme.Header, section.Title))
+		// The command list is the one block that truncates rather than wraps:
+		// a one-line-per-command index stays scannable, and the full text is
+		// one `kx COMMAND --help` away.
+		items := make([]HelpItem, 0, len(section.Items))
 		for _, item := range section.Items {
-			r.line("  " + r.style(theme.Body, padName(item.Name, rootNameWidth)) + "  " +
-				r.style(theme.Muted, shortHelp(item.Doc, shortHelpLimit)))
+			items = append(items, HelpItem{Name: item.Name, Doc: shortHelp(item.Doc, shortHelpLimit)})
 		}
+		r.itemBlock(section.Title, items, rootNameWidth)
 	}
 
-	r.rootBlock("Options", help.Options)
-	r.rootBlock("Files", help.Files)
-	r.rootBlock("Environment", help.Environment)
+	r.itemBlock("Options", help.Options, rootNameWidth)
+	r.itemBlock("Files", help.Files, rootNameWidth)
+	r.itemBlock("Environment", help.Environment, rootNameWidth)
 
 	if len(help.Footer) > 0 {
 		r.Blank()
@@ -99,29 +185,10 @@ func (r *Renderer) RootHelp(help RootHelp) {
 	}
 }
 
-// rootBlock renders one titled name/description block, or nothing when it is
-// empty — the sections below the command list are all optional.
-//
-// The column is the page's, widened if this block's own names overflow it, so
-// a long name pushes its block's descriptions across together instead of
-// leaving one row jutting out of the alignment.
-func (r *Renderer) rootBlock(title string, items []HelpItem) {
-	if len(items) == 0 {
-		return
-	}
-	width := rootNameWidth
-	for _, item := range items {
-		if len(item.Name) > width {
-			width = len(item.Name)
-		}
-	}
-	r.Blank()
-	r.line(r.style(theme.Header, title))
-	for _, item := range items {
-		r.line("  " + r.style(theme.Body, padName(item.Name, width)) + "  " +
-			r.style(theme.Muted, item.Doc))
-	}
-}
+// commandNameWidth is the name column on a command screen. Wider than the root
+// screen's because a flag carries its shorthand and its value type
+// ("-n, --namespace string") where a command carries only its name.
+const commandNameWidth = 22
 
 // CommandHelp renders the help screen for a single command.
 type CommandHelp struct {
@@ -131,6 +198,10 @@ type CommandHelp struct {
 	Commands []HelpItem
 	Args     []HelpItem
 	Options  []HelpItem
+	// Global are the flags inherited from the root command. Kept apart from
+	// Options so a command's own flags read as a short list rather than being
+	// padded out by ones every command has.
+	Global   []HelpItem
 	Aliases  []string
 	Examples []string
 }
@@ -139,7 +210,7 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 	r.Blank()
 	r.line(r.style(theme.Header, help.Path))
 	if help.Doc != "" {
-		for _, line := range strings.Split(help.Doc, "\n") {
+		for _, line := range wrapText(help.Doc, r.helpWidth()) {
 			r.line(r.style(theme.Muted, line))
 		}
 	}
@@ -147,31 +218,16 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 	r.line(r.style(theme.Muted, "Usage") + "  " + help.Usage)
 
 	if len(help.Commands) > 0 {
-		r.Blank()
-		r.line(r.style(theme.Header, "Commands"))
+		items := make([]HelpItem, 0, len(help.Commands))
 		for _, item := range help.Commands {
-			r.line("  " + r.style(theme.Body, padName(item.Name, 14)) + "  " +
-				r.style(theme.Muted, shortHelp(item.Doc, shortHelpLimit)))
+			items = append(items, HelpItem{Name: item.Name, Doc: shortHelp(item.Doc, shortHelpLimit)})
 		}
+		r.itemBlock("Commands", items, commandNameWidth)
 	}
 
-	if len(help.Args) > 0 {
-		r.Blank()
-		r.line(r.style(theme.Header, "Arguments"))
-		for _, arg := range help.Args {
-			r.line("  " + r.style(theme.Body, padName(arg.Name, 20)) + "  " +
-				r.style(theme.Muted, arg.Doc))
-		}
-	}
-
-	r.Blank()
-	r.line(r.style(theme.Header, "Options"))
-	for _, option := range help.Options {
-		r.line("  " + r.style(theme.Body, padName(option.Name, 20)) + "  " +
-			r.style(theme.Muted, option.Doc))
-	}
-	r.line("  " + r.style(theme.Body, padName("-h, --help", 20)) + "  " +
-		r.style(theme.Muted, "Show this message and exit"))
+	r.itemBlock("Arguments", help.Args, commandNameWidth)
+	r.itemBlock("Options", help.Options, commandNameWidth)
+	r.itemBlock("Global options", help.Global, commandNameWidth)
 
 	if len(help.Aliases) > 0 {
 		r.Blank()

@@ -312,10 +312,8 @@ func newScanCommand(services Services) *cobra.Command {
 			"by default, or the raw scanner output with --full. Requires the CLI for the " +
 			"selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; " +
 			"or Trivy via --engine trivy, https://trivy.dev/ — see kx engine).",
-		Long: "Resolves the unique container images of a workload and scans each for\n" +
-			"vulnerabilities, printing a severity summary table.\n\n" +
-			"Requires the CLI for the selected engine. Docker Scout is the default:\n" +
-			"https://docs.docker.com/scout/\n" +
+		Long: "Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.\n\n" +
+			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
 			"Run 'kx engine' to see or change the default.",
 		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
