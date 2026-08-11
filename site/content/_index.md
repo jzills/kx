@@ -4,7 +4,7 @@ toc: false
 ---
 
 <div class="kx-hero">
-  <img class="kx-hero__logo" src="img/banner.svg" alt="kx" />
+  <span class="kx-hero__logo">{{< kx-mark >}}</span>
   <p class="kx-hero__tagline">kubectl, indexed.</p>
   <p class="kx-hero__blurb">
     Run <code>kx get pods</code> once and every row gets a number. From then on

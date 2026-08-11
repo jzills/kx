@@ -40,8 +40,15 @@ body {
 }
 
 .kx-hero__logo {
-  width: min(100%, 34rem);
-  height: auto;
+  display: block;
+  color: var(--kx-accent);
+}
+
+.kx-hero__logo svg {
+  height: clamp(4.5rem, 13vw, 7.5rem);
+  width: auto;
+  display: block;
+  margin: 0 auto;
 }
 
 /* A demo GIF is well over a megabyte; below-the-fold ones stay unfetched
