@@ -305,7 +305,8 @@ func sweepPageScope(scopeLabel string) string {
 
 func newScanCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "scan [index] [scanner flags]",
+		Use:        "scan [index] [scanner flags]",
+		SuggestFor: []string{"cve", "cves", "vuln", "vulns", "vulnerabilities"},
 		Short: "Scan the unique container images of an indexed workload for vulnerabilities, " +
 			"or a whole namespace when no index is given (-n to pick one, -A for every " +
 			"namespace); prints a severity summary table " +

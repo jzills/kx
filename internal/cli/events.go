@@ -94,10 +94,11 @@ func newEventsCommand(services Services) *cobra.Command {
 
 func newTopCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "top [resource] [kubectl flags]",
-		Short:   "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
-		Long:    "Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.",
-		Example: "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
+		Use:        "top [resource] [kubectl flags]",
+		SuggestFor: []string{"usage", "metrics", "stats"},
+		Short:      "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
+		Long:       "Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.",
+		Example:    "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
 		// `resource` means something narrower here than it does to kx get.
 		Annotations:        map[string]string{"arg.resource": "pods (the default) or nodes"},
 		DisableFlagParsing: true,
