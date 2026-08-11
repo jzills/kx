@@ -397,8 +397,12 @@ func TestDeleteRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
 
 	cmd := newDeleteCommand(services)
 	cmd.SetArgs([]string{"5..", "-y"})
-	if err := cmd.Execute(); err == nil {
+	err := cmd.Execute()
+	if err == nil {
 		t.Fatal("delete succeeded despite '5..' starting past a 2-item listing")
+	}
+	if !strings.Contains(err.Error(), "starts past the current listing") {
+		t.Errorf("error = %q, want it to mention starting past the current listing", err)
 	}
 	if len(kube.runs) != 0 {
 		t.Errorf("kubectl was called %d times, want 0", len(kube.runs))
@@ -417,8 +421,12 @@ func TestDescribeRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
 
 	cmd := newDescribeCommand(services)
 	cmd.SetArgs([]string{"5.."})
-	if err := cmd.Execute(); err == nil {
+	err := cmd.Execute()
+	if err == nil {
 		t.Fatal("describe succeeded despite '5..' starting past a 2-item listing")
+	}
+	if !strings.Contains(err.Error(), "starts past the current listing") {
+		t.Errorf("error = %q, want it to mention starting past the current listing", err)
 	}
 	if len(kube.interactive) != 0 {
 		t.Errorf("kubectl was called %d times, want 0", len(kube.interactive))
