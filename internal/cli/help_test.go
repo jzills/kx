@@ -105,21 +105,21 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 		use  string
 		want []string
 	}{
-		{"get <resource> [kubectl flags]", []string{"resource:required"}},
-		{"describe <index>... [kubectl flags]", []string{"index:required"}},
-		{"secret [index]... [kubectl flags]", []string{"index:optional"}},
-		{"scan [index] [scanner flags]", []string{"index:optional"}},
+		{"get <resource> [kubectl flags]", []string{"<resource>"}},
+		{"describe <index>... [kubectl flags]", []string{"<index>..."}},
+		{"secret [index]... [kubectl flags]", []string{"[index]..."}},
+		{"scan [index] [scanner flags]", []string{"[index]"}},
 		{"top [kubectl flags]", nil},
-		{"scale <index> <replicas>", []string{"index:required", "replicas:required"}},
+		{"scale <index> <replicas>", []string{"<index>", "<replicas>"}},
 		{"exec <index> [kubectl flags] [-- command...]",
-			[]string{"index:required", "command:optional"}},
-		{"label <index> [key=value...]", []string{"index:required", "key=value:optional"}},
-		{"tree [index]", []string{"index:optional"}},
+			[]string{"<index>", "[command]..."}},
+		{"label <index> [key=value...]", []string{"<index>", "[key=value]..."}},
+		{"tree [index]", []string{"[index]"}},
 	}
 	for _, tc := range cases {
 		var got []string
-		for _, arg := range positionalArgs(tc.use) {
-			got = append(got, arg.Name+":"+arg.Doc)
+		for _, arg := range positionalArgs(&cobra.Command{Use: tc.use}) {
+			got = append(got, arg.Name)
 		}
 		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 			t.Errorf("positionalArgs(%q) = %v, want %v", tc.use, got, tc.want)
@@ -381,5 +381,87 @@ func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
 	// config.Settings() and would go undocumented if only that list drove this.
 	if !documented["NO_COLOR"] {
 		t.Error("Environment block omits NO_COLOR, which kx honors")
+	}
+}
+
+// The Arguments block used to read "required" or "optional" and nothing else,
+// which the Usage line above it already showed. Every argument any command
+// declares must now say what it is — a new command with a new argument name
+// fails here until argDocs describes it.
+func TestEveryArgumentIsDocumented(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, arg := range ParseUse(cmd.Use).Args {
+			if doc := argDoc(cmd, arg.Name); doc == "" {
+				t.Errorf("%s takes %q, but nothing describes it", cmd.CommandPath(), arg.Name)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// A flag that takes a value reads no differently from a switch unless the help
+// says so, and the two spellings of a flag's name were rendered three
+// different ways across the screens.
+func TestOptionsShowShorthandFirstAndValueType(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cases := []struct{ command, flag, want string }{
+		{"diagnostic", "namespace", "-n, --namespace string"},
+		{"diagnostic", "port", "--port int"},
+		{"diagnostic", "all-namespaces", "-A, --all-namespaces"},
+		{"label", "remove", "--remove strings"},
+	}
+	for _, tc := range cases {
+		cmd, _, err := root.Find([]string{tc.command})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", tc.command, err)
+		}
+		flag := cmd.Flags().Lookup(tc.flag)
+		if flag == nil {
+			t.Fatalf("kx %s has no --%s", tc.command, tc.flag)
+		}
+		if got := flagSpelling(flag); got != tc.want {
+			t.Errorf("kx %s --%s renders as %q, want %q", tc.command, tc.flag, got, tc.want)
+		}
+	}
+}
+
+// --no-color and --help apply to every command and say nothing about the one
+// being read, so they sit in their own block rather than padding out the list
+// of flags that are actually the command's.
+func TestGlobalFlagsAreSeparatedFromTheCommandsOwn(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"tree"})
+	if err != nil {
+		t.Fatalf("root.Find(tree): %v", err)
+	}
+	help := commandHelp(cmd)
+
+	var own, global []string
+	for _, option := range help.Options {
+		own = append(own, option.Name)
+	}
+	for _, option := range help.Global {
+		global = append(global, option.Name)
+	}
+
+	for _, name := range own {
+		if strings.Contains(name, "--no-color") {
+			t.Errorf("--no-color is listed among kx tree's own options: %v", own)
+		}
+	}
+	joined := strings.Join(global, " ")
+	for _, want := range []string{"--no-color", "-h, --help"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("Global options = %v, missing %s", global, want)
+		}
+	}
+	if len(own) == 0 {
+		t.Error("kx tree's own options are empty; the split swallowed them")
 	}
 }

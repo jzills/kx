@@ -248,10 +248,9 @@ func splitLeadingIndexes(args []string) (indexes, rest []string) {
 
 func newLogsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logs <index>... [kubectl flags]",
-		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
-		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
-			"DaemonSets and Services aggregate logs across the pods they own.",
+		Use:                "logs <index>... [kubectl flags]",
+		Short:              "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
+		Long:               "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.",
 		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3\n  kx logs 3..",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
@@ -346,10 +345,9 @@ func newEditCommand(services Services) *cobra.Command {
 
 func newExecCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec <index> [kubectl flags] [-- command...]",
-		Short: "Open an interactive shell in an indexed pod (bash, falling back to sh).",
-		Long: "Runs a command inside an indexed pod. With no command, tries each\n" +
-			"configured shell in turn (bash, then sh by default).",
+		Use:                "exec <index> [kubectl flags] [-- command...]",
+		Short:              "Open an interactive shell in an indexed pod (bash, falling back to sh).",
+		Long:               "Runs a command inside an indexed pod. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
