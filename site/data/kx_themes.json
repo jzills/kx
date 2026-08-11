@@ -1,0 +1,62 @@
+[
+  {
+    "name": "github-dark",
+    "accent": "#3fb950",
+    "background": "#0d1117",
+    "border": "#30363d"
+  },
+  {
+    "name": "dracula",
+    "accent": "#bd93f9",
+    "background": "#282a36",
+    "border": "#44475a"
+  },
+  {
+    "name": "nord",
+    "accent": "#88c0d0",
+    "background": "#2e3440",
+    "border": "#4c566a"
+  },
+  {
+    "name": "gruvbox",
+    "accent": "#fe8019",
+    "background": "#282828",
+    "border": "#504945"
+  },
+  {
+    "name": "solarized-dark",
+    "accent": "#268bd2",
+    "background": "#002b36",
+    "border": "#586e75"
+  },
+  {
+    "name": "catppuccin-mocha",
+    "accent": "#cba6f7",
+    "background": "#1e1e2e",
+    "border": "#45475a"
+  },
+  {
+    "name": "tokyo-night",
+    "accent": "#7aa2f7",
+    "background": "#1a1b26",
+    "border": "#414868"
+  },
+  {
+    "name": "rose-pine",
+    "accent": "#c4a7e7",
+    "background": "#191724",
+    "border": "#403d52"
+  },
+  {
+    "name": "mono",
+    "accent": "#ffffff",
+    "background": "#101010",
+    "border": "#333333"
+  },
+  {
+    "name": "light",
+    "accent": "#1a7f37",
+    "background": "#ffffff",
+    "border": "#d0d7de"
+  }
+]

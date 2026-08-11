@@ -1,0 +1,222 @@
+/* kx site styling.
+ *
+ * The palette itself is generated — see kx-themes.css and
+ * tools/gen-site-theme. Nothing here hardcodes a colour; every rule reads a
+ * --kx-* property, so a palette added to internal/theme restyles this page
+ * without anyone editing it.
+ */
+
+body {
+  background-color: var(--kx-background);
+  color: var(--kx-body);
+}
+
+/* Hero
+ * ------------------------------------------------------------------ */
+
+.kx-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 3.5rem 1rem 2.5rem;
+  text-align: center;
+}
+
+.kx-hero__tagline {
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--kx-accent);
+  margin: 0;
+}
+
+.kx-hero__blurb {
+  max-width: 46rem;
+  margin: 0;
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  line-height: 1.6;
+  color: var(--kx-muted);
+}
+
+.kx-hero__logo {
+  width: min(100%, 34rem);
+  height: auto;
+}
+
+/* A demo GIF is well over a megabyte; below-the-fold ones stay unfetched
+ * until they are scrolled to. */
+.kx-media {
+  width: 100%;
+  max-width: 56rem;
+  margin: 0 auto;
+  display: block;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+}
+
+/* Install
+ * ------------------------------------------------------------------ */
+
+.kx-install {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  max-width: 56rem;
+  margin: 0 auto;
+}
+
+.kx-install__card {
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+  padding: 0.9rem 1rem;
+}
+
+.kx-install__label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kx-muted);
+  margin-bottom: 0.35rem;
+}
+
+.kx-install__command {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+  color: var(--kx-body);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.kx-install__command::before {
+  content: "$ ";
+  color: var(--kx-accent);
+}
+
+/* Feature cards
+ * ------------------------------------------------------------------ */
+
+.kx-features {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.kx-feature {
+  border: 1px solid var(--kx-border);
+  border-radius: 0.6rem;
+  background-color: var(--kx-surface);
+  padding: 1.1rem 1.2rem;
+}
+
+.kx-feature__title {
+  font-weight: 600;
+  color: var(--kx-accent);
+  margin: 0 0 0.4rem;
+}
+
+.kx-feature__body {
+  margin: 0;
+  color: var(--kx-muted);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+/* Terminal sample
+ * ------------------------------------------------------------------ */
+
+.kx-terminal {
+  max-width: 56rem;
+  margin: 0 auto;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.kx-terminal pre {
+  margin: 0;
+  color: var(--kx-body);
+}
+
+.kx-terminal .c-accent { color: var(--kx-accent); }
+.kx-terminal .c-muted  { color: var(--kx-muted); }
+.kx-terminal .c-ok     { color: var(--kx-status-ok); }
+.kx-terminal .c-warn   { color: var(--kx-status-warn); }
+.kx-terminal .c-bad    { color: var(--kx-status-bad); }
+
+/* Theme picker
+ * ------------------------------------------------------------------ */
+
+.kx-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+.kx-themes__swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 999px;
+  background-color: var(--kx-surface);
+  color: var(--kx-muted);
+  padding: 0.3rem 0.7rem 0.3rem 0.4rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.kx-themes__swatch:hover,
+.kx-themes__swatch[aria-pressed="true"] {
+  color: var(--kx-accent);
+  border-color: var(--kx-accent);
+}
+
+.kx-themes__dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--kx-border);
+}
+
+/* Sections
+ * ------------------------------------------------------------------ */
+
+.kx-section {
+  padding: 2.5rem 1rem;
+}
+
+.kx-section__title {
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 650;
+  color: var(--kx-body);
+  margin: 0 0 0.5rem;
+}
+
+.kx-section__lede {
+  text-align: center;
+  color: var(--kx-muted);
+  max-width: 44rem;
+  margin: 0 auto 1.75rem;
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kx-themes__swatch {
+    transition: none;
+  }
+}

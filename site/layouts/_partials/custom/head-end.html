@@ -1,0 +1,13 @@
+{{- /*
+  The generated palette stylesheet.
+
+  Linked separately rather than @import-ed from custom.css: Hextra runs that
+  file through its Tailwind build, which leaves a plain CSS @import in place as
+  a literal, so the browser would have requested a URL nothing publishes.
+
+  Fingerprinted so a palette change busts the cache.
+*/ -}}
+{{- with resources.Get "css/kx-themes.css" }}
+  {{- $themes := . | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $themes.RelPermalink }}" integrity="{{ $themes.Data.Integrity }}" />
+{{- end }}

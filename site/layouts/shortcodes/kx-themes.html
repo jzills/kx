@@ -1,0 +1,66 @@
+{{- /*
+  The theme picker, rendered from data/kx_themes.json — which
+  tools/gen-site-theme writes from internal/theme, so this list is the same
+  one `kx theme` prints in the terminal and cannot drift from it.
+
+  Each swatch sets data-kx-theme on <html>; kx-themes.css has a block per
+  palette, written after the light and dark defaults so an explicit choice
+  wins over Hextra's own toggle.
+*/ -}}
+<div class="kx-themes" role="group" aria-label="Colour theme">
+  {{- range hugo.Data.kx_themes }}
+  <button
+    type="button"
+    class="kx-themes__swatch"
+    data-kx-theme-choice="{{ .name }}"
+    aria-pressed="false"
+  >
+    <span
+      class="kx-themes__dot"
+      style="background: {{ .background }}; border-color: {{ .accent }};"
+      aria-hidden="true"
+    ></span>
+    {{ .name }}
+  </button>
+  {{- end }}
+</div>
+
+<script>
+  (function () {
+    var STORAGE_KEY = "kx-theme";
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll("[data-kx-theme-choice]");
+
+    function apply(name) {
+      if (name) {
+        root.setAttribute("data-kx-theme", name);
+      } else {
+        root.removeAttribute("data-kx-theme");
+      }
+      buttons.forEach(function (button) {
+        var chosen = button.getAttribute("data-kx-theme-choice") === name;
+        button.setAttribute("aria-pressed", chosen ? "true" : "false");
+      });
+    }
+
+    buttons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        var name = button.getAttribute("data-kx-theme-choice");
+        // Clicking the active palette returns to Hextra's light/dark toggle.
+        var next = root.getAttribute("data-kx-theme") === name ? null : name;
+        try {
+          next ? localStorage.setItem(STORAGE_KEY, next) : localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+          /* Private browsing refuses storage; the choice still applies. */
+        }
+        apply(next);
+      });
+    });
+
+    try {
+      apply(localStorage.getItem(STORAGE_KEY));
+    } catch (e) {
+      /* No stored choice is readable, so the defaults stand. */
+    }
+  })();
+</script>

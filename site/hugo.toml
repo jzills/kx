@@ -1,0 +1,79 @@
+# Hugo configuration for the kx site.
+#
+# Phase one is a landing page. The docs layout is deliberately already wired —
+# Hextra ships both, so adding content/docs/ turns on the sidebar, the
+# right-hand table of contents and search without restructuring anything here.
+baseURL = "https://jzills.github.io/kx/"
+title = "kx"
+[languages.en]
+  label = "English"
+
+# The site is its own Hugo module so Hextra never enters the CLI's go.mod,
+# where it would show up in Dependabot runs and the vulnerability gate.
+[module]
+  [[module.imports]]
+    path = "github.com/imfing/hextra"
+
+  # The demo GIFs and dashboard screenshots are committed at the repo root for
+  # the README. Mounted rather than copied so the two can never drift, and so
+  # a re-recorded tape updates both at once.
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "../assets"
+    target = "static/img"
+  [[module.mounts]]
+    source = "../demo"
+    target = "static/demo"
+    files = ["*.gif"]
+
+[markup]
+  [markup.highlight]
+    noClasses = false
+  [markup.goldmark.renderer]
+    # The landing page is hand-written HTML in a markdown file: hero, install
+    # cards, feature grid. Goldmark drops raw HTML unless told otherwise.
+    unsafe = true
+
+[params]
+  description = "kubectl, indexed. Select Kubernetes resources by number instead of typing names."
+
+  [params.navbar]
+    displayTitle = false
+    displayLogo = true
+    [params.navbar.logo]
+      path = "img/banner.svg"
+      dark = "img/banner.svg"
+      height = 22
+
+  [params.footer]
+    enable = true
+    displayCopyright = false
+    displayPoweredBy = false
+
+  # Hextra's own toggle. kx's palettes are mostly dark, so dark is the default
+  # and the picker in the hero switches between the full set.
+  [params.theme]
+    default = "dark"
+    displayToggle = true
+
+[menu]
+  [[menu.main]]
+    name = "Install"
+    pageRef = "/#install"
+    weight = 1
+  [[menu.main]]
+    name = "Commands"
+    pageRef = "/#commands"
+    weight = 2
+  [[menu.main]]
+    identifier = "github"
+    name = "GitHub"
+    url = "https://github.com/jzills/kx"
+    weight = 3
+    [menu.main.params]
+      icon = "github"
