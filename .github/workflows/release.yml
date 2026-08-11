@@ -100,7 +100,9 @@ jobs:
 
       - name: Check the bundled version matches the release
         run: |
-          ACTUAL="$(./dist/binaries/kx_linux_amd64/kx --version)"
+          # First line only: --version also reports commit, build date and
+          # toolchain below it, none of which the release name pins.
+          ACTUAL="$(./dist/binaries/kx_linux_amd64/kx --version | head -1)"
           EXPECTED="kx ${{ steps.version.outputs.value }}"
           test "$ACTUAL" = "$EXPECTED" || { echo "expected '$EXPECTED', got '$ACTUAL'"; exit 1; }
 

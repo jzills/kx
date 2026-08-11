@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/jzills/kx/internal/buildinfo"
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/k8s"
@@ -69,15 +70,22 @@ var (
 
 // NewRoot builds the kx command tree.
 func NewRoot(services Services, version string) *cobra.Command {
+	// Resolved here so an unstamped build reports its module and VCS metadata
+	// everywhere the version appears, not just under --version.
+	info := buildinfo.Resolve(version)
 	root := &cobra.Command{
 		Use:           "kx",
 		Short:         "Select Kubernetes resources by index instead of typing names",
-		Version:       version,
+		Version:       info.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	// Match the Python CLI, which exposes -v as the version alias and -h for help.
-	root.SetVersionTemplate("kx {{.Version}}\n")
+	//
+	// The text is rendered here rather than left to the template engine: it is
+	// a fixed block with no template actions in it, and building it in Go keeps
+	// a path containing "{{" from being executed as one.
+	root.SetVersionTemplate(versionText(info))
 	root.Flags().BoolP("version", "v", false, "Show the kx version and exit")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
 
@@ -85,7 +93,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// from it means the resource type doesn't exist — refreshing the listing
 	// would be beside the point. Every other command resolves an index, where a
 	// NotFound usually means the saved listing has gone stale.
-	installHelp(root, version)
+	installHelp(root, info.Version)
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))
