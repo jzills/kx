@@ -50,7 +50,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes("indexes", args)
+			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
 				return err
 			}
