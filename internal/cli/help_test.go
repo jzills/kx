@@ -465,3 +465,105 @@ func TestGlobalFlagsAreSeparatedFromTheCommandsOwn(t *testing.T) {
 		t.Error("kx tree's own options are empty; the split swallowed them")
 	}
 }
+
+// SuggestFor covers the spellings cobra's own edit-distance rule misses:
+// `kx rm 3` is not a typo for delete, it is a different tool's word for it.
+//
+// A value cobra would already suggest must not be listed, or the command is
+// appended twice and the prompt reads "Did you mean this? logs logs".
+func TestSuggestForAddsWhatEditDistanceMisses(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, value := range cmd.SuggestFor {
+			occurrences := 0
+			for _, suggestion := range root.SuggestionsFor(value) {
+				if suggestion == cmd.Name() {
+					occurrences++
+				}
+			}
+			switch occurrences {
+			case 1:
+			case 0:
+				t.Errorf("kx %s lists SuggestFor %q, which suggests nothing", cmd.Name(), value)
+			default:
+				t.Errorf("kx %s lists SuggestFor %q, which cobra already suggests — %s would be offered %d times",
+					cmd.Name(), value, cmd.Name(), occurrences)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// A suggestion for a spelling that already runs something is never seen, and
+// would be wrong if it were: `kx forward` is a real command, so offering
+// port-forward for it would contradict what the word does.
+func TestSuggestForDoesNotShadowRealSpellings(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, value := range cmd.SuggestFor {
+			if found, _, err := root.Find([]string{value}); err == nil && found != root {
+				t.Errorf("kx %s suggests %q, but %q already runs kx %s",
+					cmd.Name(), value, value, found.Name())
+			}
+			if kinds.IsKindSpelling(value) {
+				t.Errorf("kx %s suggests %q, but %q is a kind spelling and runs kx get %s",
+					cmd.Name(), value, value, value)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// How indexes resolve is the one concept no command's own behaviour reveals,
+// and it lived only in the README: that the history is a stack with a cursor,
+// and that namespaces and contexts sit in slots outside it — which is why
+// `kx ns 2` survives any number of `kx get` runs when no other index does.
+func TestStateAndSwitchHelpExplainTheSlots(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	cases := []struct {
+		command string
+		phrases []string
+	}{
+		// `kx ns 2` is the claim itself, not the preamble to it: an index that
+		// survives intervening listings, which nothing else in kx does.
+		{"state", []string{"cursor", "max_history", "slots of their own", "kx ns 2", "--targets", "kx get ns"}},
+		{"namespace", []string{"slot of its own", "kx get ns"}},
+		{"context", []string{"slot of its own"}},
+	}
+	for _, tc := range cases {
+		cmd, _, err := root.Find([]string{tc.command})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", tc.command, err)
+		}
+		doc := commandHelp(cmd).Doc
+		for _, phrase := range tc.phrases {
+			if !strings.Contains(doc, phrase) {
+				t.Errorf("kx %s --help does not mention %q:\n%s", tc.command, phrase, doc)
+			}
+		}
+	}
+}
+
+// kx context has no `kx get` equivalent to route people to, so the paragraph
+// that sends namespace users there must not appear on it.
+func TestContextHelpOmitsTheNamespaceOnlyAdvice(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"context"})
+	if err != nil {
+		t.Fatalf("root.Find(context): %v", err)
+	}
+	if strings.Contains(commandHelp(cmd).Doc, "kx get ns") {
+		t.Error("kx context --help points at kx get ns, which lists namespaces, not contexts")
+	}
+}

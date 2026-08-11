@@ -173,8 +173,9 @@ func newGetCommand(services Services) *cobra.Command {
 		// The indexes are documented here because runGet accepts them —
 		// `kx get pods 1 3` re-fetches those two — and neither the help screen
 		// nor the README table mentioned it.
-		Use:   "get <resource> [index]... [kubectl flags]",
-		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
+		Use:        "get <resource> [index]... [kubectl flags]",
+		SuggestFor: []string{"list", "ls", "ps"},
+		Short:      "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"`-n <namespace>`, label selectors and output flags all work as usual.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
