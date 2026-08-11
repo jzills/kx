@@ -149,7 +149,7 @@ func newGetCommand(services Services) *cobra.Command {
 		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"`-n <namespace>`, label selectors and output flags all work as usual.",
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..",
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
 		Args:    cobra.MinimumNArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for
@@ -181,7 +181,18 @@ func newGetCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	registerWatchFlag(cmd)
 	return cmd
+}
+
+// registerWatchFlag declares --watch on the listing commands that honour it.
+//
+// kubectl owns the flag and isWatch parses it by hand, but kx gives it its own
+// behaviour — a live-redrawing table instead of a stream — so leaving it
+// unregistered made a kx feature visible only in the README.
+func registerWatchFlag(cmd *cobra.Command) {
+	cmd.Flags().BoolP("watch", "w", false,
+		"Redraw the listing live as resources change; a watch never completes, so results are not indexed")
 }
 
 func extractNamespaceFor(services Services, extraArgs []string) string {

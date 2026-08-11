@@ -326,5 +326,6 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	registerWatchFlag(cmd)
 	return cmd
 }
