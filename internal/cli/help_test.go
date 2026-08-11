@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // The theme listing numbers its rows, so typing the number is the obvious
@@ -252,15 +255,131 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// cobra adds these itself; they aren't part of kx's surface. Hidden
-		// commands are the pre-restructure kx back/forward/drop spellings,
-		// deliberately absent from --help now that kx state back/forward/drop
-		// are canonical — see NewRoot.
-		if name == "help" || name == "completion" || cmd.Hidden {
+		// `help` is cobra's and isn't part of kx's surface. Hidden commands are
+		// the pre-restructure kx back/forward/drop spellings, deliberately
+		// absent from --help now that kx state back/forward/drop are
+		// canonical — see NewRoot.
+		if name == "help" || cmd.Hidden {
 			continue
 		}
 		if !listed[name] {
 			t.Errorf("command %q is not in any help section", name)
 		}
+	}
+}
+
+// The completion command works whether or not it is advertised, so nothing
+// failed while it was invisible: cobra built it during Execute, after the help
+// screen and the README generator had already read the command tree.
+func TestCompletionAppearsOnTheRootScreen(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	if _, _, err := root.Find([]string{"completion"}); err != nil {
+		t.Fatalf("root.Find(completion): %v", err)
+	}
+
+	for _, section := range rootSections(root) {
+		for _, item := range section.Items {
+			if item.Name == "completion" {
+				if item.Doc == "" {
+					t.Error("completion is listed with no description")
+				}
+				return
+			}
+		}
+	}
+	t.Error("completion is registered but absent from every root help section")
+}
+
+// The front page teaches the index workflow by example, so a renamed or
+// removed command would leave it demonstrating a spelling kx no longer
+// accepts.
+func TestSelectingBlockUsesRealSpellings(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	ranges := false
+
+	for _, item := range selecting {
+		fields := strings.Fields(item.Name)
+		if len(fields) < 2 || fields[0] != "kx" {
+			t.Errorf("selecting example %q does not start with 'kx <something>'", item.Name)
+			continue
+		}
+		// Whatever follows `kx` must resolve the way Execute resolves it:
+		// a registered command, or a kind spelling rewritten to `kx get`.
+		verb := fields[1]
+		cmd, _, err := root.Find([]string{verb})
+		if (err != nil || cmd == root) && !kinds.IsKindSpelling(verb) {
+			t.Errorf("selecting example %q: %q is neither a command nor a kind", item.Name, verb)
+		}
+		// Only the spelling column counts: an ellipsis in a description ("rows
+		// 1, 2, 3...") contains ".." without demonstrating a range.
+		if strings.Contains(item.Name, "..") {
+			ranges = true
+		}
+	}
+
+	if !ranges {
+		t.Error("selecting block never mentions range syntax, which exists nowhere else in --help")
+	}
+}
+
+// The options block is derived from the registered flags rather than written
+// out beside them; the copy it replaced described --version with wording the
+// flag itself had never carried.
+func TestRootOptionsMirrorTheRegisteredFlags(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	shown := map[string]string{}
+	for _, option := range rootOptions(root) {
+		shown[option.Name] = option.Doc
+	}
+
+	root.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" || flag.Hidden {
+			return
+		}
+		doc, ok := shown[flagNames(flag)]
+		if !ok {
+			t.Errorf("flag %q is registered on kx but missing from the root Options block", flag.Name)
+			return
+		}
+		if doc != flag.Usage {
+			t.Errorf("flag %q: root help says %q, the flag says %q", flag.Name, doc, flag.Usage)
+		}
+	})
+
+	if _, ok := shown["-h, --help"]; !ok {
+		t.Error("root Options block omits -h, --help")
+	}
+}
+
+// Configuration lived only in the README: nothing in the binary named the file
+// kx reads, the file it writes, or a single environment override.
+func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
+	names := []string{}
+	for _, item := range files() {
+		names = append(names, item.Name)
+	}
+	joined := strings.Join(names, " ")
+	for _, want := range []string{"config.toml", "state.json"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("Files block = %q, missing %s", joined, want)
+		}
+	}
+
+	documented := map[string]bool{}
+	for _, item := range environment() {
+		documented[item.Name] = true
+		if item.Doc == "" {
+			t.Errorf("environment variable %s is listed with no description", item.Name)
+		}
+	}
+	for _, setting := range config.Settings() {
+		if !documented[setting.Env] {
+			t.Errorf("config override %s is missing from the Environment block", setting.Env)
+		}
+	}
+	// Honored by the renderer rather than the config loader, so it isn't in
+	// config.Settings() and would go undocumented if only that list drove this.
+	if !documented["NO_COLOR"] {
+		t.Error("Environment block omits NO_COLOR, which kx honors")
 	}
 }

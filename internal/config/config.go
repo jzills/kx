@@ -41,6 +41,33 @@ func Default() Config {
 	}
 }
 
+// Setting documents one configuration key: its name in config.toml, the
+// environment variable that overrides it, and what it controls.
+//
+// Exported so the help screen can list what kx reads without keeping its own
+// copy of the list. Only the documentation is shared — each key's parsing stays
+// in Load, since no two of them parse alike.
+type Setting struct {
+	Key string
+	Env string
+	Doc string
+}
+
+// Settings is every key kx reads, in the order the help screen lists them.
+//
+// TestSettingsDocumentsEveryEnvOverride keeps this in step with Load: an
+// override the loader honours but this list omits is one a user can only find
+// by reading the source.
+func Settings() []Setting {
+	return []Setting{
+		{"theme", "KX_THEME", "Color theme for all output; see kx theme"},
+		{"engine", "KX_ENGINE", "Default scan engine for kx scan; see kx engine"},
+		{"max_history", "KX_MAX_HISTORY", "Number of kx get results kept in history"},
+		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
+		{"no_color", "KX_NO_COLOR", "Disable styled output, like --no-color"},
+	}
+}
+
 // File returns the config file path.
 func File() (string, error) {
 	home, err := os.UserHomeDir()

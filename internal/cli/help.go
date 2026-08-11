@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -29,6 +33,99 @@ var helpSections = []struct {
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
+	{"Shell", []string{"completion"}},
+}
+
+// selecting is the index workflow, on the screen people reach for first.
+//
+// Every line here is a feature that existed only in the README: the numbering
+// itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
+// has none. A per-command --help can't teach any of it, because none of it
+// belongs to one command.
+var selecting = []render.HelpItem{
+	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
+	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
+	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
+	{Name: "kx delete 3 5", Doc: "Several indexes at once"},
+	{Name: "kx delete 3..7", Doc: "A range; '..5' and '5..' leave an end open"},
+	{Name: "kx get pods -A", Doc: "Every namespace, unindexed — names aren't unique"},
+}
+
+var footer = []string{
+	"Run 'kx COMMAND --help' for a command's options and examples.",
+	"https://github.com/jzills/kx",
+}
+
+// files names the two paths kx reads and writes. Resolved from the packages
+// that own them rather than written out here, so the screen can't name a path
+// kx doesn't use. A home directory kx can't locate is left out rather than
+// guessed at.
+func files() []render.HelpItem {
+	var items []render.HelpItem
+	if path, err := config.File(); err == nil {
+		items = append(items, render.HelpItem{
+			Name: homeRelative(path), Doc: "Settings; the Environment keys below override it",
+		})
+	}
+	if path, err := state.File(); err == nil {
+		items = append(items, render.HelpItem{
+			Name: homeRelative(path), Doc: "Saved listings, navigated with kx state",
+		})
+	}
+	return items
+}
+
+// homeRelative abbreviates a path under the home directory to "~/...", which is
+// both shorter than the absolute path and what a reader can paste back into a
+// shell. Anything outside the home directory is left alone.
+func homeRelative(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	rest, found := strings.CutPrefix(path, home+string(filepath.Separator))
+	if !found {
+		return path
+	}
+	return "~" + string(filepath.Separator) + rest
+}
+
+// environment lists the config overrides, plus the one convention kx honors
+// that isn't its own.
+func environment() []render.HelpItem {
+	var items []render.HelpItem
+	for _, setting := range config.Settings() {
+		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
+	}
+	return append(items, render.HelpItem{
+		Name: "NO_COLOR", Doc: "Disable styled output, per no-color.org",
+	})
+}
+
+// rootOptions renders the root command's own flags, plus the help flag cobra
+// adds during execution and so isn't registered yet when help is built.
+func rootOptions(root *cobra.Command) []render.HelpItem {
+	var options []render.HelpItem
+	// LocalFlags rather than Flags: it merges the persistent set in, so
+	// --no-color is listed exactly once whether or not anything has parsed
+	// flags yet.
+	root.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" || flag.Hidden {
+			return
+		}
+		options = append(options, render.HelpItem{Name: flagNames(flag), Doc: flag.Usage})
+	})
+	return append(options, render.HelpItem{
+		Name: "-h, --help", Doc: "Show this message and exit",
+	})
+}
+
+// flagNames spells a flag the way both help screens do.
+func flagNames(flag *pflag.Flag) string {
+	if flag.Shorthand == "" {
+		return "--" + flag.Name
+	}
+	return "-" + flag.Shorthand + ", --" + flag.Name
 }
 
 // installHelp replaces cobra's help output with the themed help screens, for
@@ -36,7 +133,15 @@ var helpSections = []struct {
 func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {
-			render.RootHelp(rootSections(root), version)
+			render.ShowRootHelp(render.RootHelp{
+				Selecting:   selecting,
+				Sections:    rootSections(root),
+				Options:     rootOptions(root),
+				Files:       files(),
+				Environment: environment(),
+				Footer:      footer,
+				Version:     version,
+			})
 			return
 		}
 		render.ShowCommandHelp(commandHelp(cmd))

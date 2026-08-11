@@ -78,7 +78,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	}
 	// Match the Python CLI, which exposes -v as the version alias and -h for help.
 	root.SetVersionTemplate("kx {{.Version}}\n")
-	root.Flags().BoolP("version", "v", false, "Show the installed version")
+	root.Flags().BoolP("version", "v", false, "Show the kx version and exit")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
 
 	// `get` is the only command that doesn't consume an index, so a NotFound
@@ -137,7 +137,26 @@ func NewRoot(services Services, version string) *cobra.Command {
 	} {
 		root.AddCommand(withRefresh(services, cmd))
 	}
+
+	installCompletion(root)
 	return root
+}
+
+// installCompletion adds cobra's completion command up front and gives it kx's
+// voice.
+//
+// Cobra otherwise creates it during Execute, which left a working command that
+// no help screen could see: not the root listing, which is built from the
+// command tree, and not the README table generated from the same tree. Shell
+// completion was real but discoverable only by knowing cobra.
+func installCompletion(root *cobra.Command) {
+	root.InitDefaultCompletionCmd()
+	completion, _, err := root.Find([]string{"completion"})
+	if err != nil || completion == root {
+		return
+	}
+	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
+	completion.Example = "  kx completion zsh > \"${fpath[1]}/_kx\"\n  source <(kx completion bash)"
 }
 
 func newGetCommand(services Services) *cobra.Command {
