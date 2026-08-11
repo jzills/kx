@@ -15,6 +15,9 @@ import (
 // need: turning an index into the resource it names.
 type IndexResolver interface {
 	Fields(index int) (name, namespace string, kind kinds.Kind, err error)
+	// Count returns how many resources are in the current listing, used to
+	// resolve the open end of a "5.." range.
+	Count() (int, error)
 }
 
 // DescribeCommand shows kubectl describe output for an indexed resource.
