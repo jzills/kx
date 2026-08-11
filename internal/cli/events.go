@@ -47,7 +47,7 @@ func newEventsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:     "events <index>...",
 		Short:   "Show Kubernetes events for one or more indexed resources.",
-		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3",
+		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3\n  kx events 3..",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)

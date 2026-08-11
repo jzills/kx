@@ -58,9 +58,9 @@ func (r *Renderer) RootHelp(sections []HelpSection, version string) {
 	r.Blank()
 	r.line(r.style(theme.Header, "Options"))
 	for _, option := range []HelpItem{
-		{"--no-color", "Disable styled output."},
-		{"-v, --version", "Show the kx version and exit."},
-		{"-h, --help", "Show this message and exit."},
+		{"--no-color", "Disable styled output"},
+		{"-v, --version", "Show the kx version and exit"},
+		{"-h, --help", "Show this message and exit"},
 	} {
 		r.line("  " + r.style(theme.Body, padName(option.Name, 14)) + "  " +
 			r.style(theme.Muted, option.Doc))
@@ -120,7 +120,7 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 			r.style(theme.Muted, option.Doc))
 	}
 	r.line("  " + r.style(theme.Body, padName("-h, --help", 20)) + "  " +
-		r.style(theme.Muted, "Show this message and exit."))
+		r.style(theme.Muted, "Show this message and exit"))
 
 	if len(help.Aliases) > 0 {
 		r.Blank()
