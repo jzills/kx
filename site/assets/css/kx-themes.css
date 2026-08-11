@@ -234,4 +234,26 @@
   --primary-lightness: 30%;
 }
 
+/* Show only the terminal capture matching the active palette. */
+[data-kx-terminal] { display: none; }
+[data-kx-terminal="github-dark"] { display: block; }
+[data-kx-theme="dracula"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="dracula"] [data-kx-terminal="dracula"] { display: block; }
+[data-kx-theme="nord"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="nord"] [data-kx-terminal="nord"] { display: block; }
+[data-kx-theme="gruvbox"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="gruvbox"] [data-kx-terminal="gruvbox"] { display: block; }
+[data-kx-theme="solarized-dark"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="solarized-dark"] [data-kx-terminal="solarized-dark"] { display: block; }
+[data-kx-theme="catppuccin-mocha"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="catppuccin-mocha"] [data-kx-terminal="catppuccin-mocha"] { display: block; }
+[data-kx-theme="tokyo-night"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="tokyo-night"] [data-kx-terminal="tokyo-night"] { display: block; }
+[data-kx-theme="rose-pine"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="rose-pine"] [data-kx-terminal="rose-pine"] { display: block; }
+[data-kx-theme="mono"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="mono"] [data-kx-terminal="mono"] { display: block; }
+[data-kx-theme="light"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="light"] [data-kx-terminal="light"] { display: block; }
+
 /* Palettes: github-dark, dracula, nord, gruvbox, solarized-dark, catppuccin-mocha, tokyo-night, rose-pine, mono, light */

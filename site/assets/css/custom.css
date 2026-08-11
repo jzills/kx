@@ -97,6 +97,10 @@ body {
   white-space: nowrap;
 }
 
+.kx-install__command + .kx-install__command {
+  margin-top: 0.3rem;
+}
+
 .kx-install__command::before {
   content: "$ ";
   color: var(--kx-accent);

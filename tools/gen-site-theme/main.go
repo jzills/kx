@@ -148,6 +148,24 @@ func render() (string, error) {
 		fmt.Fprintf(&out, "\n[data-kx-theme=%q] {\n%s}\n", name, declarations)
 	}
 
+	// The terminal sample is captured once per palette (see
+	// tools/gen-site-terminal), and only the active one is shown. Emitted here
+	// because this is where the palette list already lives: a rule pair
+	// written by hand would be the thing that goes missing when a palette is
+	// added.
+	out.WriteString("\n/* Show only the terminal capture matching the active palette. */\n")
+	fmt.Fprintf(&out, "[data-kx-terminal] { display: none; }\n")
+	fmt.Fprintf(&out, "[data-kx-terminal=%q] { display: block; }\n", defaultDark)
+	for _, name := range names() {
+		if name == defaultDark {
+			continue
+		}
+		fmt.Fprintf(&out,
+			"[data-kx-theme=%q] [data-kx-terminal=%q] { display: none; }\n"+
+				"[data-kx-theme=%q] [data-kx-terminal=%q] { display: block; }\n",
+			name, defaultDark, name, name)
+	}
+
 	// The picker needs the list, and duplicating it in a template is how it
 	// would come to disagree with the registry.
 	fmt.Fprintf(&out, "\n/* Palettes: %s */\n", strings.Join(names(), ", "))

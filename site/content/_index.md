@@ -35,6 +35,7 @@ toc: false
     <div class="kx-install__card">
       <div class="kx-install__label">krew</div>
       <div class="kx-install__command">kubectl krew install idx</div>
+      <div class="kx-install__command">alias kx="kubectl idx"</div>
     </div>
     <div class="kx-install__card">
       <div class="kx-install__label">Try it without installing</div>
@@ -49,19 +50,7 @@ toc: false
     Indexes come from the last listing and stay put. Several at once, or a
     range — either end can be left open.
   </p>
-  <div class="kx-terminal">
-<pre><span class="c-muted">$</span> kx get pods
-  <span class="c-accent">X</span>  <span class="c-accent">NAME</span>                     <span class="c-accent">READY</span>   <span class="c-accent">STATUS</span>             <span class="c-accent">AGE</span>
-  1  api-7d8f4c6b9-2xk4l      1/1     <span class="c-ok">Running</span>            4d
-  2  web-5c9f8d7a4-mn3pq      1/1     <span class="c-ok">Running</span>            4d
-  3  worker-6b8d9f2c1-qr7st   0/1     <span class="c-bad">CrashLoopBackOff</span>   12m
-  4  cache-9f3a1b8e5-vw2xy    1/1     <span class="c-ok">Running</span>            9d
-
-<span class="c-muted">$</span> kx logs 3 <span class="c-muted">--tail=50</span>
-<span class="c-muted">$</span> kx delete 2 4
-<span class="c-muted">$</span> kx describe 1..3
-<span class="c-muted">$</span> kx diag</pre>
-  </div>
+  {{< kx-terminal >}}
 </div>
 
 <div class="kx-section">
