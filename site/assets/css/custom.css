@@ -55,9 +55,11 @@ body {
  * until they are scrolled to. */
 .kx-media {
   width: 100%;
-  /* 1200px is the recordings' native width, so they never upscale into a
-     blur; the report screenshots are wider and scale down cleanly. */
-  max-width: 75rem;
+  /* 1024px is the recordings' native width — the same width
+     --hextra-max-content-width leaves this section at desktop, so they
+     render pixel-for-pixel there instead of being downscaled into a blur.
+     The report screenshots are wider and scale down cleanly. */
+  max-width: 64rem;
   margin: 0 auto;
   display: block;
   border: 1px solid var(--kx-border);
