@@ -46,9 +46,16 @@ func (s Services) confirm() func(string) error {
 
 // NewServices builds the production service set from the loaded config.
 func NewServices(cfg config.Config) Services {
+	client := kubectl.New()
+	states := state.NewService(cfg.MaxHistory)
+	// Every entry the state service writes records the context it was listed
+	// against. Wired here, as a hook rather than a value, because the state
+	// service is the one thing every save path goes through — the tree walk and
+	// the triage sweep both save without holding a kubectl service of their own.
+	states.Context = client.CurrentContext
 	return Services{
-		Kubectl:    kubectl.New(),
-		State:      state.NewService(cfg.MaxHistory),
+		Kubectl:    client,
+		State:      states,
 		Index:      index.Service{},
 		Config:     cfg,
 		Kubernetes: kubernetesClient,
