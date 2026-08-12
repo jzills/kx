@@ -48,7 +48,7 @@ var selecting = []render.HelpItem{
 	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
 	{Name: "kx delete 3 5", Doc: "Several indexes at once"},
 	{Name: "kx delete 3..7", Doc: "A range; '..5' and '5..' leave an end open"},
-	{Name: "kx get pods -A", Doc: "Every namespace, unindexed — names aren't unique"},
+	{Name: "kx get pods -A", Doc: "Every namespace; indexes carry their namespace"},
 }
 
 var footer = []string{

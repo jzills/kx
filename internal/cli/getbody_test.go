@@ -214,3 +214,122 @@ func TestGetWatchResolvesIndexFirst(t *testing.T) {
 		t.Errorf("watch args = %v, want %v", kube.watchArgs, want)
 	}
 }
+
+// Indexes from an -A listing can resolve into different namespaces, and kubectl
+// cannot fetch named resources across namespaces in one call. The relist issues
+// one call per namespace and stitches the results, so `kx get pods 1 2` means
+// the same thing on an -A listing as on any other.
+func TestGetRelistAcrossNamespacesCallsKubectlPerNamespace(t *testing.T) {
+	kube := &fakeKubectl{
+		outputs: []string{
+			// The -A listing being indexed.
+			"NAMESPACE   NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"default     api-7d8f   1/1     Running   0          5d\n" +
+				"staging     api-7d8f   1/1     Running   0          3d",
+			// One reply per namespace, each without a NAMESPACE column,
+			// which is what kubectl returns for a namespaced query.
+			"NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"api-7d8f   1/1     Running   0          5d",
+			"NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"api-7d8f   1/1     Running   0          3d",
+		},
+	}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	if err := runGet(services, "pods", []string{"1", "2"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	relists := kube.calls[1:]
+	if len(relists) != 2 {
+		t.Fatalf("made %d relist calls, want one per namespace: %v", len(relists), relists)
+	}
+	if got := joinArgs(relists[0]); got != "get pods api-7d8f -n default" {
+		t.Errorf("first call = %q, want it scoped to default", got)
+	}
+	if got := joinArgs(relists[1]); got != "get pods api-7d8f -n staging" {
+		t.Errorf("second call = %q, want it scoped to staging", got)
+	}
+}
+
+// The stitched table has to keep saying which namespace each row came from, or
+// the relisted indexes resolve no better than the ones they replaced.
+func TestGetRelistAcrossNamespacesKeepsTheNamespaceColumn(t *testing.T) {
+	kube := &fakeKubectl{
+		outputs: []string{
+			"NAMESPACE   NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"default     api-7d8f   1/1     Running   0          5d\n" +
+				"staging     api-7d8f   1/1     Running   0          3d",
+			"NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"api-7d8f   1/1     Running   0          5d",
+			"NAME       READY   STATUS    RESTARTS   AGE\n" +
+				"api-7d8f   1/1     Running   0          3d",
+		},
+	}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	if err := runGet(services, "pods", []string{"1", "2"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	current, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries := current.Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("relist saved %d resources, want 2: %+v", len(entries), entries)
+	}
+	if entries[0].Namespace != "default" || entries[1].Namespace != "staging" {
+		t.Errorf("namespaces = %q, %q; want default, staging",
+			entries[0].Namespace, entries[1].Namespace)
+	}
+}
+
+// A relist whose indexes all sit in one namespace keeps the single call and the
+// plain table it has always produced — no NAMESPACE column appears just because
+// the machinery for one exists.
+func TestGetRelistWithinOneNamespaceStaysASingleCall(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	before := len(kube.calls)
+	if err := runGet(services, "pods", []string{"1", "2"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if got := len(kube.calls) - before; got != 1 {
+		t.Errorf("made %d calls for a single-namespace relist, want 1", got)
+	}
+	want := "get pods nginx-abc-xyz redis-def-uvw -n prod"
+	if got := joinArgs(kube.calls[len(kube.calls)-1]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+	// The call count and args alone cannot tell the two paths apart — with one
+	// group the stitching path issues the same single call. What separates them
+	// is the shape of what it saves: the stitched table carries a NAMESPACE
+	// column and per-resource namespaces, which a single-namespace listing must
+	// not grow.
+	current, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "prod" {
+		t.Errorf("entry namespace = %q, want prod", current.Namespace)
+	}
+	for _, entry := range current.Resources.Entries() {
+		if entry.Namespace != "" {
+			t.Errorf("resource %q gained namespace %q from the stitching path",
+				entry.Name, entry.Namespace)
+		}
+	}
+}

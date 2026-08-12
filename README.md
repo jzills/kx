@@ -85,7 +85,7 @@ pipx run --spec kx-cli kx get pods
 
 ## Usage
 
-`kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Several can be given at once (`kx delete 3 5`), and a run of consecutive ones can be written as a range instead of listing them out (`kx delete 3..7`, walking either direction); either end can be left open (`kx delete ..5` from the start, `kx delete 5..` to the end of the current listing). Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are display-only — names aren't unique across namespaces.
+`kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Several can be given at once (`kx delete 3 5`), and a run of consecutive ones can be written as a range instead of listing them out (`kx delete 3..7`, walking either direction); either end can be left open (`kx delete ..5` from the start, `kx delete 5..` to the end of the current listing). Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are indexed like any other: each row records the namespace it came from, so `kx describe 7` reaches a resource in a namespace you aren't in, and two pods sharing a name in different namespaces both keep their own number.
 
 `--watch` redraws the table live as resources are added, changed, or removed, instead of printing a table that never finishes. It's display-only — a watch never completes, so there's nothing to index. Non-tabular output (`-o json`/`yaml`/etc.) streams kubectl's own watch output directly instead.
 

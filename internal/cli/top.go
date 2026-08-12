@@ -57,8 +57,7 @@ func (c TopCommand) Execute(
 
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
-	// percentage columns — unlike -A, which does (see withUsagePercentages),
-	// even though it stays unindexed regardless.
+	// percentage columns — unlike -A, which does (see withUsagePercentages).
 	hasContainers := false
 	for _, arg := range extraArgs {
 		if arg == "--containers" {
@@ -77,10 +76,6 @@ func (c TopCommand) Execute(
 			return "", "", err
 		}
 	}
-	if allNamespaces {
-		// Names aren't unique across namespaces — matches kx get's rule.
-		return output, namespace, nil
-	}
 
 	indexed, names := c.Index.Add(output)
 	if len(names) > 0 {
@@ -91,9 +86,16 @@ func (c TopCommand) Execute(
 		if extraArgs == nil {
 			extraArgs = []string{}
 		}
+		// An -A listing has no single namespace for the entry — each resource
+		// carries its own, read from the table's NAMESPACE column, exactly as
+		// `kx get -A` records them.
+		entryNamespace := namespace
+		if allNamespaces {
+			entryNamespace = ""
+		}
 		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, kinds.Pod),
-			Namespace: namespace,
+			Resources: resourcesFrom(names, kinds.Pod),
+			Namespace: entryNamespace,
 			// Recorded as a `get pods` query so a stale entry refreshes into a
 			// listing, which is what the indexes were assigned against.
 			Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},
@@ -139,7 +141,7 @@ func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, 
 			match = &filterTerm
 		}
 		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, kinds.Node),
+			Resources: resourcesFrom(names, kinds.Node),
 			Namespace: namespace,
 			// Recorded as a `get nodes` query, matching kx get nodes' own
 			// convention, so a stale entry refreshes into the same listing
@@ -327,10 +329,10 @@ func percentCell(usage string, limit *resource.Quantity) string {
 // behind a top listing the way diagnostics.Report/scanner.ImageScan back
 // diag/scan's pages — this table text already is the whole of the data —
 // so this builds web.TopRow directly rather than converting from some
-// intermediate type. Degrades gracefully when a column is absent (the -A
-// pods case has no X column, since -A stays unindexed): that column's
-// TopRow fields stay at their zero value, which the template/grid render
-// as blank/"—".
+// intermediate type. Degrades gracefully when a column is absent (a
+// --no-limits listing has no CPU%/MEM% columns): that column's TopRow
+// fields stay at their zero value, which the template/grid render as
+// blank/"—".
 func topPageRows(indexed string) []web.TopRow {
 	headers, rows, nameIdx := index.ParseTable(indexed)
 	if headers == nil {
