@@ -1,20 +1,20 @@
 {{ define "main" }}
   {{- /*
-    Hextra's home layout with the <h1> dropped.
+    Hextra's home layout, with the <h1>, the sidebar placeholder and the table
+    of contents removed.
 
-    The title it rendered read "kx — kubectl, indexed", directly above a hero
-    carrying the mark and the same tagline. The page still has the title in
-    <head>, which is what search results and the browser tab use; what is
-    removed is only the duplicate on the page itself.
+    The theme reserves space for all three on every page. On a landing page
+    with no sidebar to show and no headings worth listing, that left the
+    content column at 672px of a 1440px viewport — narrow enough that the
+    terminal sample, which is a fixed-width capture, had to scroll sideways.
 
-    Copied from the theme rather than patched, because a layout is a single
-    template with no hook for its heading.
+    The <h1> went for a different reason: it rendered "kx — kubectl, indexed"
+    directly above a hero carrying the mark and the same tagline. The title
+    stays in <head>, which is what tabs and search results use.
   */ -}}
-  <div class='hx:mx-auto hx:flex hextra-max-page-width'>
-    {{ partial "sidebar.html" (dict "context" . "disableSidebar" true "displayPlaceholder" true) }}
-    {{ partial "toc.html" . }}
-    <article class="hx:w-full hx:break-words hx:flex hx:min-h-[calc(100vh-var(--navbar-height))] hx:min-w-0 hx:justify-center hx:pb-8 hx:pr-[calc(env(safe-area-inset-right)-1.5rem)]">
-      <main id="content" class="hx:w-full hx:min-w-0 hextra-max-content-width hx:px-6 hx:pt-4 hx:md:px-12">
+  <div class="hx:mx-auto hx:flex hextra-max-page-width">
+    <article class="hx:w-full hx:break-words hx:flex hx:min-h-[calc(100vh-var(--navbar-height))] hx:min-w-0 hx:justify-center hx:pb-8">
+      <main id="content" class="hx:w-full hx:min-w-0 hx:px-6 hx:pt-4 hx:md:px-12">
         <div class="content">
           {{ .Content }}
         </div>

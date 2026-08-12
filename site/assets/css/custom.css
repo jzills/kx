@@ -55,7 +55,9 @@ body {
  * until they are scrolled to. */
 .kx-media {
   width: 100%;
-  max-width: 56rem;
+  /* 1200px is the recordings' native width, so they never upscale into a
+     blur; the report screenshots are wider and scale down cleanly. */
+  max-width: 75rem;
   margin: 0 auto;
   display: block;
   border: 1px solid var(--kx-border);
@@ -69,7 +71,10 @@ body {
 .kx-install {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  /* Wide enough for the longest command on a card, "uvx --from kx-cli kx get
+     pods", which was clipped mid-word at 16rem. A command a reader cannot see
+     all of is worse than a grid that wraps to fewer columns. */
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
   max-width: 56rem;
   margin: 0 auto;
 }

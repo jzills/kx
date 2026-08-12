@@ -40,6 +40,10 @@ var command = []string{"get", "pods", "-n", "diagnostics"}
 // silently lengthen the page.
 const maxRows = 9
 
+// captureColumns is the pty width the capture is taken at. Wide enough that
+// kx's table is never the thing being constrained; see capture.
+const captureColumns = 110
+
 func main() {
 	binary, err := buildKx()
 	if err != nil {
@@ -112,16 +116,22 @@ func buildKx() (string, error) {
 // truecolor, which is what makes the emitted colours the palette's exact hex
 // rather than the nearest of 256.
 func capture(binary, palette string) (string, error) {
-	run := exec.Command("script", "-qec",
-		strings.Join(append([]string{binary}, command...), " "), "/dev/null")
+	// stty rather than COLUMNS: kx measures the terminal with an ioctl, which
+	// reads the pty's own size and ignores the environment entirely. Setting
+	// COLUMNS here looked like it pinned the width and pinned nothing — every
+	// capture was whatever width the operator's terminal happened to be.
+	//
+	// The width is a ceiling, not a target. kx's table has a natural minimum
+	// per listing (this one comes to about 101 columns) and will not shrink
+	// below it, so a narrower value changes nothing while a wider one would
+	// pad the sample out to fill it.
+	inner := fmt.Sprintf("stty cols %d; %s", captureColumns,
+		strings.Join(append([]string{binary}, command...), " "))
+	run := exec.Command("script", "-qec", inner, "/dev/null")
 	run.Env = append(os.Environ(),
 		"KX_THEME="+palette,
 		"COLORTERM=truecolor",
 		"TERM=xterm-256color",
-		// script(1) inherits the caller's width; pinning it keeps every
-		// palette's capture the same shape and stops a wide terminal padding
-		// the sample out to 200 columns.
-		"COLUMNS=98",
 	)
 	output, err := run.Output()
 	if err != nil {
