@@ -39,6 +39,13 @@ body {
   color: var(--kx-muted);
 }
 
+.kx-hero__blurb code {
+  /* A code chip breaking mid-command (kx / exec 1) splits its own pill
+     background across two lines. Keeping each chip whole is what a
+     container-width fix can't guarantee at every viewport. */
+  white-space: nowrap;
+}
+
 .kx-hero__logo {
   display: block;
   color: var(--kx-accent);
