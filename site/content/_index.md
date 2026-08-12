@@ -15,7 +15,7 @@ toc: false
 </div>
 
 <div class="kx-section">
-  {{< kx-hero-terminal >}}
+{{< kx-hero-terminal >}}
 </div>
 
 <div class="kx-section" id="install">
@@ -48,10 +48,10 @@ toc: false
 <div class="kx-section" id="commands">
   <h2 class="kx-section__title">One listing, every command</h2>
   <p class="kx-section__lede">
-    Indexes come from the last listing and stay put. Several at once, or a
-    range — either end can be left open.
+    Indexes come from the last listing and stay put. Several at once, a
+    range, or a range left open — <code>kx delete 1 2..4 5..</code>.
   </p>
-  {{< kx-terminal >}}
+{{< kx-terminal >}}
 </div>
 
 <div class="kx-section">
