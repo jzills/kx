@@ -117,7 +117,10 @@ body {
 .kx-features {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  /* 20rem, not 17: there are six cards, and a minimum narrow enough to fit
+     four across leaves the second row half empty. This holds them to three
+     and three at desktop width. */
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
   max-width: 72rem;
   margin: 0 auto;
 }
@@ -213,6 +216,9 @@ body {
 
 .kx-section {
   padding: 2.5rem 1rem;
+  /* The navbar is sticky, so a section jumped to from the menu would otherwise
+     start underneath it with its heading hidden. */
+  scroll-margin-top: 5rem;
 }
 
 .kx-section__title {
