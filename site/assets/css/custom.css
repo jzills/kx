@@ -163,6 +163,10 @@ body {
 
 .kx-terminal pre {
   margin: 0;
+  /* Hextra styles .content pre with vertical padding only, so the capture's
+     first line sat flush against the left edge. Inline padding only: the
+     vertical is the theme's and is fine. */
+  padding-inline: 0.85rem;
   color: var(--kx-body);
 }
 
