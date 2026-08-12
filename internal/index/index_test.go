@@ -19,6 +19,12 @@ const singleRowOutput = "NAME             READY   STATUS    RESTARTS   AGE\n" +
 const contextsOutput = "CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE\n" +
 	"*         docker-desktop   docker-desktop   docker-desktop   diagnostics"
 
+// The same command with more than one context, which is where the marker column
+// shows its real shape: it is blank on every row but the active one.
+const twoContextsOutput = "CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE\n" +
+	"          alt              docker-desktop   docker-desktop   default\n" +
+	"*         docker-desktop   docker-desktop   docker-desktop   diagnostics"
+
 func TestParseOutputHeaders(t *testing.T) {
 	headers, rows, nameIdx := parseOutput(podsOutput)
 	want := []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
@@ -441,5 +447,82 @@ func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
 	}
 	if got := strings.Join(rows[0], "|"); got != "1|alpha|日本語|ConfigMap" {
 		t.Errorf("re-parsed row = %q, want 1|alpha|日本語|ConfigMap\n%s", got, indexed)
+	}
+}
+
+// `kubectl config get-contexts` marks the active context in a leading CURRENT
+// column that is blank on every other row. Trimming a line before splitting it
+// on runs of 2+ spaces makes that blank cell disappear, shifting every value one
+// column left — a non-current context's NAME then reads as its CLUSTER, and
+// since both rows end up claiming the same NAME, Add's dedupe drops one of them
+// outright.
+func TestParseTableKeepsABlankFirstColumn(t *testing.T) {
+	headers, rows, nameIdx := ParseTable(twoContextsOutput)
+
+	if len(headers) != 5 || nameIdx != 1 {
+		t.Fatalf("headers = %v, nameIdx = %d; want 5 headers with NAME at 1", headers, nameIdx)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0][0] != "" || rows[0][1] != "alt" {
+		t.Errorf("non-current row = %q, want an empty CURRENT and NAME 'alt'", rows[0])
+	}
+	if rows[1][0] != "*" || rows[1][1] != "docker-desktop" {
+		t.Errorf("current row = %q, want CURRENT '*' and NAME 'docker-desktop'", rows[1])
+	}
+}
+
+// The consequence users actually hit: a context that isn't the active one has
+// no index, so `kx context <n>` cannot reach it and the number it does offer
+// points at a different context than the row shows.
+func TestAddIndexesEveryContextIncludingNonCurrent(t *testing.T) {
+	_, entries := Service{}.Add(twoContextsOutput)
+
+	if len(entries) != 2 {
+		t.Fatalf("names = %v, want both contexts indexed", entries)
+	}
+	if entries[0] != "alt" || entries[1] != "docker-desktop" {
+		t.Errorf("names = %v, want [alt docker-desktop]", entries)
+	}
+}
+
+// The streaming path parses the header once and each row separately, so it needs
+// the same treatment as ParseTable or `--watch` disagrees with a plain listing.
+func TestTableShapeRowKeepsABlankFirstColumn(t *testing.T) {
+	shape, ok := ParseHeader(strings.Split(twoContextsOutput, "\n")[0])
+	if !ok {
+		t.Fatal("ParseHeader returned ok=false")
+	}
+
+	row := shape.Row(strings.Split(twoContextsOutput, "\n")[1])
+
+	if len(row) != 5 {
+		t.Fatalf("row = %q, want 5 fields", row)
+	}
+	if row[0] != "" || row[1] != "alt" {
+		t.Errorf("row = %q, want an empty CURRENT and NAME 'alt'", row)
+	}
+}
+
+// The split cap has to shrink along with the row when a blank first column is
+// inferred, or the last column stops being the unsplit remainder: a value
+// carrying its own 2+-space run gets cut in two and the row grows a field it
+// should not have. Same guarantee ParseTable already makes for an ordinary row
+// (TestParseOutputLastColumnNotTruncated), held for the shifted shape too.
+func TestBlankFirstColumnKeepsTheLastColumnWhole(t *testing.T) {
+	output := "CURRENT   NAME   CLUSTER   NOTE\n" +
+		"          alt    local     restarted  twice"
+
+	_, rows, _ := ParseTable(output)
+
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if len(rows[0]) != 4 {
+		t.Fatalf("row = %q, want 4 fields", rows[0])
+	}
+	if rows[0][3] != "restarted  twice" {
+		t.Errorf("last column = %q, want %q kept whole", rows[0][3], "restarted  twice")
 	}
 }
