@@ -7,9 +7,10 @@ toc: false
   <span class="kx-hero__logo">{{< kx-mark >}}</span>
   <p class="kx-hero__tagline">kubectl, indexed.</p>
   <p class="kx-hero__blurb">
-    Run <code>kx get pods</code> once and every row gets a number. From then on
-    you reference resources by that number instead of typing names —
-    <code>kx logs 3</code>, <code>kx delete 2 5</code>, <code>kx exec 1</code>.
+    Run <code>kx get &lt;resource&gt;</code> once and every row gets a number.
+    From then on you reference resources by that number instead of typing
+    names — <code>kx logs 3</code>, <code>kx delete 2 5</code>, <code>kx exec
+    1</code>.
   </p>
 </div>
 

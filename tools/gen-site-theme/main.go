@@ -77,13 +77,24 @@ func main() {
 }
 
 // renderData writes the palette list the picker iterates: the name it sets on
-// the document, and the two colors its swatch shows.
+// the document, the two colors its swatch shows, and whether the palette reads
+// as light or dark overall.
+//
+// Mode exists because Hextra has its own light/dark switch, wired to a "dark"
+// or "light" class on <html> rather than to anything of ours, and several of
+// its own components — the navbar among them — key their styling off that
+// class rather than off the --kx-* properties. The site's kx-theme picker has
+// to drive that class too, or picking a light palette leaves Hextra's own
+// chrome dark. Computed here rather than hardcoded as "only 'light' is light"
+// in the JS that reads it, so a future light palette doesn't have to be found
+// and special-cased by hand in two separate scripts.
 func renderData() (string, error) {
 	type swatch struct {
 		Name       string `json:"name"`
 		Accent     string `json:"accent"`
 		Background string `json:"background"`
 		Border     string `json:"border"`
+		Mode       string `json:"mode"`
 	}
 	swatches := make([]swatch, 0, len(names()))
 	for _, name := range names() {
@@ -91,11 +102,16 @@ func renderData() (string, error) {
 		if err != nil {
 			return "", err
 		}
+		mode, err := backgroundMode(styles[theme.Background])
+		if err != nil {
+			return "", fmt.Errorf("%s: background %q: %w", name, styles[theme.Background], err)
+		}
 		swatches = append(swatches, swatch{
 			Name:       name,
 			Accent:     styles[theme.Accent],
 			Background: styles[theme.Background],
 			Border:     styles[theme.Border],
+			Mode:       mode,
 		})
 	}
 	encoded, err := json.MarshalIndent(swatches, "", "  ")
@@ -103,6 +119,23 @@ func renderData() (string, error) {
 		return "", err
 	}
 	return string(encoded) + "\n", nil
+}
+
+// backgroundMode classifies a background as "light" or "dark" by HSL
+// lightness, reusing the same conversion block already computes for Hextra's
+// primary-color ramp. 60% is a wide margin either side of every registered
+// background — the lightest dark-mode background sits under 20%, the one
+// light-mode background at 100% — so it is not a threshold that needs
+// retuning as palettes are added.
+func backgroundMode(hex string) (string, error) {
+	_, _, lightness, err := toHSL(hex)
+	if err != nil {
+		return "", err
+	}
+	if lightness >= 60 {
+		return "light", nil
+	}
+	return "dark", nil
 }
 
 // Names returns the palettes the site offers, in registry order.
