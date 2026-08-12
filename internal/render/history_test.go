@@ -44,6 +44,84 @@ func TestStateHistoryWithEntriesRendersTheTable(t *testing.T) {
 	}
 }
 
+// The context an entry was listed in is what decides whether its indexes still
+// mean anything, so `kx state --all` has to show it. One shared context is a
+// property of the whole listing, so it captions the table rather than repeating
+// itself down a column.
+func TestStateHistoryCaptionsASharedContext(t *testing.T) {
+	history := state.History{
+		States: []state.State{
+			{Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+				Namespace: "prod", Context: "docker-desktop"},
+			{Resources: state.NewResources([]string{"redis"}, kinds.Pod),
+				Namespace: "prod", Context: "docker-desktop"},
+		},
+		Cursor: 1,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if !strings.Contains(out, "docker-desktop") {
+		t.Errorf("output = %q, want it to name the shared context", out)
+	}
+	if strings.Contains(out, "CONTEXT") {
+		t.Errorf("output = %q, want no CONTEXT column when every entry shares one", out)
+	}
+}
+
+// Entries from different clusters are the case the column exists for: which
+// entry belongs to which context is per row, not a property of the listing.
+func TestStateHistoryAddsAContextColumnWhenEntriesDiffer(t *testing.T) {
+	history := state.History{
+		States: []state.State{
+			{Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+				Namespace: "prod", Context: "staging"},
+			{Resources: state.NewResources([]string{"redis"}, kinds.Pod),
+				Namespace: "prod", Context: "production"},
+		},
+		Cursor: 1,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	for _, want := range []string{"CONTEXT", "staging", "production"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
+// A kubeconfig with no current context stamps nothing, and an empty column of
+// empty values is worse than no column.
+func TestStateHistoryOmitsAnUnknownContext(t *testing.T) {
+	history := state.History{
+		States: []state.State{{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+		}},
+		Cursor: 0,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if strings.Contains(out, "CONTEXT") {
+		t.Errorf("output = %q, want no CONTEXT column when no entry records one", out)
+	}
+}
+
+// `kx state` shows one entry, so its context goes in the caption beside the
+// namespace — the same place the entry's other scope already lives.
+func TestStateNamesTheEntryContext(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+			Context:   "docker-desktop",
+		})
+	})
+
+	if !strings.Contains(out, "docker-desktop") {
+		t.Errorf("output = %q, want the caption to name the entry's context", out)
+	}
+}
+
 func slotHistory() state.History {
 	return state.History{
 		States: []state.State{{

@@ -14,11 +14,18 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 )
 
-// Resource is one indexed row: the name kubectl reported and the kind it was
-// listed as.
+// Resource is one indexed row: the name kubectl reported, the kind it was
+// listed as, and the namespace it lives in.
+//
+// Namespace is carried per resource, not just per entry, because a listing can
+// span namespaces — `kx get -A` is exactly that — and an index has to resolve
+// to the one place its resource actually is. It is omitted for the ordinary
+// single-namespace listing, whose namespace the entry already records; see
+// Service.Fields for the fallback that makes both shapes resolve.
 type Resource struct {
-	Name string     `json:"name"`
-	Kind kinds.Kind `json:"kind"`
+	Name      string     `json:"name"`
+	Kind      kinds.Kind `json:"kind"`
+	Namespace string     `json:"namespace,omitempty"`
 }
 
 // Resources is an ordered name→kind mapping.
@@ -116,11 +123,19 @@ type Query struct {
 	Match    *string  `json:"match"`
 }
 
-// State is one history entry: an indexed listing and the namespace it came from.
+// State is one history entry: an indexed listing, the namespace it came from,
+// and the kubeconfig context it was taken against.
+//
+// Context is what stops an index counted in one cluster from being spent in
+// another: names repeat across clusters, so without it `kx get deploy` in
+// staging followed by a context switch leaves every index silently pointing at
+// a prod resource of the same name. Empty means unknown — a kubeconfig with no
+// current context — and is never treated as a mismatch.
 type State struct {
 	Resources Resources `json:"resources"`
 	Namespace string    `json:"namespace"`
 	Query     *Query    `json:"query"`
+	Context   string    `json:"context,omitempty"`
 }
 
 // Names satisfies index.Resolver.
@@ -130,7 +145,13 @@ func (s State) Names() []string { return s.Resources.Names() }
 // increasing int — a version mismatch always means "reset", so there is no
 // partial-compatibility case for semver's major/minor/patch semantics to
 // express.
-const currentSchemaVersion = 1
+//
+// 2 added State.Context and Resource.Namespace. Both are additive, and a
+// version 1 file would decode without error, but it would decode wrong: an
+// absent context reads as "unknown", which is the value that waives the
+// cluster check, so every pre-upgrade entry would be trusted in whatever
+// context the user happens to be in now. Resetting once is the cheaper answer.
+const currentSchemaVersion = 2
 
 // History is the stack of listings with a cursor marking the current entry,
 // plus the per-kind slots that sit outside the stack.
@@ -167,6 +188,33 @@ type Service struct {
 	MaxHistory int
 	// Path is the state file. Empty means ~/.kx/state.json.
 	Path string
+	// Context reports the active kubeconfig context, stamped onto every entry
+	// this service writes.
+	//
+	// A hook rather than a value so it is read at save time, not at service
+	// construction: `kx context 2` switches contexts inside a single process,
+	// and the listing saved after that switch belongs to the new one.
+	//
+	// Nil leaves entries unstamped, which reads as "unknown" everywhere it is
+	// consumed — the shape a Service built literally in a test has.
+	Context func() string
+}
+
+// context reports the active context, or "" when no hook is wired.
+func (s *Service) context() string {
+	if s.Context == nil {
+		return ""
+	}
+	return s.Context()
+}
+
+// stamp records the context an entry was listed against, leaving one the
+// caller already set alone.
+func (s *Service) stamp(entry State) State {
+	if entry.Context == "" {
+		entry.Context = s.context()
+	}
+	return entry
 }
 
 // NewService builds a state service with the configured history depth.
@@ -377,6 +425,7 @@ func (s *Service) Save(state State) error {
 	if maxHistory < 1 {
 		maxHistory = 1
 	}
+	state = s.stamp(state)
 
 	var states []State
 	var named map[kinds.Kind]State
@@ -491,6 +540,20 @@ func (s *Service) DropAll() error {
 	return s.saveHistory(History{})
 }
 
+// namespaceAt reports the namespace the resource at a 1-based index lives in.
+//
+// The resource's own namespace wins, falling back to the entry's. Both shapes
+// are legitimate and neither can be dropped: a listing that spans namespaces
+// (`kx get -A`) has no single entry namespace to fall back to, and an ordinary
+// single-namespace listing records nothing per resource, so a lookup that only
+// consulted the resource would resolve every index to the empty namespace.
+func namespaceAt(entry State, idx int) string {
+	if resource, ok := entry.Resources.At(idx); ok && resource.Namespace != "" {
+		return resource.Namespace
+	}
+	return entry.Namespace
+}
+
 // Fields resolves an index to the resource it names, plus its namespace and kind.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
 	current, err := s.Load()
@@ -504,7 +567,7 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	return name, current.Namespace, kind, nil
+	return name, namespaceAt(current, idx), kind, nil
 }
 
 // Count returns how many resources are in the current listing — the same
@@ -593,7 +656,7 @@ func (s *Service) FieldsExpecting(
 	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
 		return "", "", err
 	}
-	return name, current.Namespace, nil
+	return name, namespaceAt(current, idx), nil
 }
 
 // backHint offers `kx back` when the entry one step back lists the kind asked
@@ -665,6 +728,7 @@ func (s *Service) SaveNamed(entry State) error {
 	if kind == "" {
 		return fmt.Errorf("state: a slot needs a single-kind listing")
 	}
+	entry = s.stamp(entry)
 	history, err := s.loadHistory()
 	if err != nil {
 		// No usable stack yet. The slot is independent of it, so it is still
@@ -709,7 +773,7 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)
 	}
-	return name, entry.Namespace, nil
+	return name, namespaceAt(entry, idx), nil
 }
 
 // compile-time checks that the service satisfies the interfaces its consumers

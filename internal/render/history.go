@@ -38,6 +38,30 @@ func entryLabel(count int) string {
 // than a history entry means you can reach this without anything being wrong.
 const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
 
+// spansContexts reports whether the stack holds entries from more than one
+// context, which is the only shape where the context belongs in a column.
+//
+// Deliberately blind to whether the contexts are empty: a stack that records
+// none agrees with itself, and must not be mistaken for one that disagrees.
+func spansContexts(states []state.State) bool {
+	for _, entry := range states {
+		if entry.Context != states[0].Context {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedContext returns the one context every entry was listed in, or "" when
+// they disagree — that stack gets the column instead — or when none recorded
+// one, which has nothing to say either way.
+func sharedContext(states []state.State) string {
+	if len(states) == 0 || spansContexts(states) {
+		return ""
+	}
+	return states[0].Context
+}
+
 // StateHistory renders the history stack, marking the entry the cursor is on.
 func (r *Renderer) StateHistory(history state.History) {
 	if len(history.States) == 0 {
@@ -49,15 +73,26 @@ func (r *Renderer) StateHistory(history state.History) {
 		r.switchTargetSummary(history)
 		return
 	}
-	r.Caption("History", "", entryLabel(len(history.States)))
+	// The context decides whether an entry's indexes still mean anything, so it
+	// has to be visible — but where depends on the stack. One context shared by
+	// every entry is a property of the listing and captions it; entries from
+	// different clusters need it per row. A stack that records none (no current
+	// context in the kubeconfig) shows neither, since a column of empty values
+	// is worse than no column.
+	r.Caption("History", sharedContext(history.States), entryLabel(len(history.States)))
 
+	perRow := spansContexts(history.States)
 	columns := []Column{
 		{Header: "X", Right: true},
 		{Header: ""},
 		{Header: "KIND"},
 		{Header: "NAMESPACE"},
-		{Header: "ITEMS", Right: true},
 	}
+	if perRow {
+		columns = append(columns, Column{Header: "CONTEXT"})
+	}
+	columns = append(columns, Column{Header: "ITEMS", Right: true})
+
 	rows := make([][]Cell, 0, len(history.States))
 	for position, entry := range history.States {
 		rowStyle := theme.Muted
@@ -66,13 +101,16 @@ func (r *Renderer) StateHistory(history state.History) {
 			rowStyle = theme.Body
 			marker = "→"
 		}
-		rows = append(rows, []Cell{
+		row := []Cell{
 			Styled(strconv.Itoa(position+1), rowStyle),
 			Styled(marker, theme.Header),
 			Styled(kindLabel(entry.Resources), rowStyle),
 			Styled(entry.Namespace, rowStyle),
-			Styled(strconv.Itoa(entry.Resources.Len()), rowStyle),
-		})
+		}
+		if perRow {
+			row = append(row, Styled(entry.Context, rowStyle))
+		}
+		rows = append(rows, append(row, Styled(strconv.Itoa(entry.Resources.Len()), rowStyle)))
 	}
 	r.Table(columns, rows)
 	r.switchTargetSummary(history)
@@ -151,7 +189,9 @@ func (r *Renderer) SwitchTargets(history state.History) {
 // is what `kx state` shows.
 func (r *Renderer) State(entry state.State) {
 	count := entry.Resources.Len()
-	r.Caption(kindLabel(entry.Resources), entry.Namespace, itemLabel(count))
+	// The context sits beside the namespace: both say where the listing was
+	// taken, and Caption drops either when it is empty.
+	r.Caption(kindLabel(entry.Resources), entry.Namespace, entry.Context, itemLabel(count))
 
 	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"}}
 	rows := make([][]Cell, 0, count)
