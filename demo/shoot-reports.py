@@ -15,7 +15,7 @@ demo/seed.sh), and playwright with chromium. The environment for that is not
 committed — it is a screenshotting tool, not part of building kx:
 
     python3 -m venv /tmp/shotenv
-    /tmp/shotenv/bin/pip install playwright
+    /tmp/shotenv/bin/pip install playwright pillow
     /tmp/shotenv/bin/playwright install chromium
     /tmp/shotenv/bin/python demo/shoot-reports.py
 """
@@ -142,6 +142,40 @@ LAST_ROW_BOTTOM = """
 ROW_MARGIN = 10
 
 
+def pad_bottom(destination: Path) -> None:
+    """Give the shot as much room below its last row as it has above its first.
+
+    Clipping to a row boundary leaves the content flush against the bottom
+    edge while the top keeps the page's own margin, so the image looks cropped
+    rather than framed. The padding is filled with the background sampled from
+    the corner, which is the palette's own, so it extends the page rather than
+    matting it in some other colour.
+    """
+    from PIL import Image
+
+    image = Image.open(destination).convert("RGB")
+    width, height = image.size
+    background = image.getpixel((2, 2))
+
+    # The top inset is however far down the first non-background pixel sits.
+    # Sampling every third column is plenty to find it and much faster than
+    # every one.
+    inset = next(
+        (
+            y
+            for y in range(height)
+            if any(image.getpixel((x, y)) != background for x in range(0, width, 3))
+        ),
+        0,
+    )
+    if inset <= 0:
+        return
+
+    padded = Image.new("RGB", (width, height + inset), background)
+    padded.paste(image, (0, 0))
+    padded.save(destination)
+
+
 def shoot(page, url: str, destination: Path) -> None:
     page.goto(url, wait_until="networkidle")
     # The grids hydrate after load; without settling, a shot can catch the
@@ -163,16 +197,31 @@ def shoot(page, url: str, destination: Path) -> None:
         path=str(destination),
         clip={"x": 0, "y": 0, "width": VIEWPORT["width"], "height": height},
     )
+    pad_bottom(destination)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", choices=sorted(REPORTS), action="append")
     parser.add_argument("--theme", action="append")
+    parser.add_argument(
+        "--repad",
+        action="store_true",
+        help="re-apply the bottom padding to existing shots, without re-shooting",
+    )
     args = parser.parse_args()
 
     reports = args.report or sorted(REPORTS)
     themes = args.theme or palettes()
+
+    if args.repad:
+        for report in reports:
+            for theme in themes:
+                destination = OUTPUT_DIR / f"{report}-html-{theme}.png"
+                if destination.exists():
+                    pad_bottom(destination)
+                    print(f"padded {destination.relative_to(ROOT)}")
+        return 0
 
     try:
         from playwright.sync_api import sync_playwright
