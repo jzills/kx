@@ -65,6 +65,18 @@ func NewOrderedResources(entries []Resource) Resources {
 // Entries returns the resources in index order.
 func (r Resources) Entries() []Resource { return r.entries }
 
+// Spanning reports whether the listing records namespaces per resource, which
+// is what an all-namespace listing produces and what distinguishes "this entry
+// has no single namespace" from "this entry's namespace went unrecorded".
+func (r Resources) Spanning() bool {
+	for _, e := range r.entries {
+		if e.Namespace != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Len returns the number of indexed resources.
 func (r Resources) Len() int { return len(r.entries) }
 
@@ -347,7 +359,12 @@ func (s *Service) loadHistory() (History, error) {
 		// and a context slot's scope is a context, which is legitimately empty
 		// when the kubeconfig has no current one — defaulting it to "default"
 		// would caption the listing with a context that does not exist.
-		if state.Namespace == "" {
+		//
+		// Nor does a listing that spans namespaces: its resources each record
+		// their own, so an empty entry namespace is the accurate answer rather
+		// than an unrecorded one, and "default" would caption an all-namespace
+		// listing with a namespace it never came from.
+		if state.Namespace == "" && !state.Resources.Spanning() {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)

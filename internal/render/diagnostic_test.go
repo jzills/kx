@@ -128,9 +128,10 @@ func TestTriageFullOmitsNotShownFooter(t *testing.T) {
 	}
 }
 
-// The all-namespaces footer swaps in AllNamespacesNote instead of the index
-// hint either way; --full must not also tack on a healthy count there.
-func TestTriageFullAllNamespacesKeepsAllNamespacesNote(t *testing.T) {
+// --full shows everything, so its footer must not also claim a healthy count is
+// hidden — cluster-wide sweeps included, which now carry the same index hint as
+// every other sweep.
+func TestTriageFullAllNamespacesClaimsNothingIsHidden(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			AllNamespaces: true, Checked: 1, Full: true,
@@ -142,8 +143,8 @@ func TestTriageFullAllNamespacesKeepsAllNamespacesNote(t *testing.T) {
 	if strings.Contains(out, "not shown") {
 		t.Errorf("--full footer still claims resources are not shown:\n%s", out)
 	}
-	if !strings.Contains(out, AllNamespacesNote) {
-		t.Errorf("--full footer dropped the all-namespaces note:\n%s", out)
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("--full footer dropped the index hint:\n%s", out)
 	}
 }
 
@@ -173,11 +174,11 @@ func TestTriageIndexColumnIsLabelled(t *testing.T) {
 	}
 }
 
-// A cluster-wide sweep saves no state, so there are no indexes to print: the
-// X column gives way to NAMESPACE, without which two rows called web-abc are
-// indistinguishable. The footer swaps the per-index hint for the note kx get -A
-// prints, since neither listing can be selected from.
-func TestTriageAllNamespacesSwapsTheIndexColumnForNamespace(t *testing.T) {
+// A cluster-wide sweep leads with its index, then the namespace: the number is
+// what `kx diag <n>` acts on, and the namespace is what separates two rows
+// sharing a name. It used to trade the index column away for the namespace,
+// back when -A saved no state to index against.
+func TestTriageAllNamespacesLeadsWithIndexThenNamespace(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			AllNamespaces: true, Checked: 3, Healthy: 1,
@@ -190,21 +191,19 @@ func TestTriageAllNamespacesSwapsTheIndexColumnForNamespace(t *testing.T) {
 	})
 	lines := strings.Split(out, "\n")
 
-	if got := strings.Fields(lines[0]); len(got) == 0 || !strings.Contains(lines[0], "all namespaces") {
+	if !strings.Contains(lines[0], "all namespaces") {
 		t.Errorf("caption = %q, want it scoped to all namespaces", lines[0])
 	}
 	header := strings.Fields(lines[1])
-	if len(header) < 2 || header[0] != "KIND" || header[1] != "NAMESPACE" {
-		t.Errorf("header = %q, want KIND then NAMESPACE and no X column", lines[1])
+	if len(header) < 3 || header[0] != "X" || header[1] != "KIND" || header[2] != "NAMESPACE" {
+		t.Errorf("header = %q, want X, KIND then NAMESPACE", lines[1])
 	}
-	if !strings.Contains(lines[2], "prod") {
-		t.Errorf("row = %q, want the namespace shown", lines[2])
+	row := strings.Fields(lines[2])
+	if len(row) < 3 || row[0] != "1" || row[2] != "prod" {
+		t.Errorf("row = %q, want index 1 and namespace prod", lines[2])
 	}
-	if !strings.Contains(out, AllNamespacesNote) {
-		t.Errorf("footer does not explain the missing indexes:\n%s", out)
-	}
-	if strings.Contains(out, "kx diag <index> for detail") {
-		t.Errorf("footer offers indexes that were never saved:\n%s", out)
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("footer does not offer the indexes it saved:\n%s", out)
 	}
 }
 
@@ -240,5 +239,54 @@ func TestTriageHasNoBlankLineAfterCaption(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	if strings.TrimSpace(lines[1]) == "" {
 		t.Errorf("blank line between caption and header:\n%s", out)
+	}
+}
+
+// A cluster-wide sweep is indexed now, so it needs both columns: the index to
+// act on and the namespace to tell two same-named rows apart. It used to swap
+// one for the other, because there were no indexes to print.
+func TestTriageAllNamespacesKeepsBothIndexAndNamespaceColumns(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			AllNamespaces: true,
+			Checked:       2,
+			Full:          true,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+					Verdict: diagnostics.Critical},
+				{Kind: kinds.Deployment, Name: "web", Namespace: "staging",
+					Verdict: diagnostics.Critical},
+			},
+		})
+	})
+
+	for _, want := range []string{"X", "NAMESPACE", "prod", "staging"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+	// Both rows are named web; without their numbers neither can be acted on.
+	for _, want := range []string{"1", "2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want index %q", out, want)
+		}
+	}
+}
+
+// The footer pointed at "indexes not saved for all-namespace listings"; a swept
+// -A listing is indexed, so it gets the same hint every other sweep does.
+func TestTriageAllNamespacesHintsAtTheIndex(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			AllNamespaces: true, Checked: 1, Full: true,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+					Verdict: diagnostics.Critical},
+			},
+		})
+	})
+
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("output = %q, want the index hint", out)
 	}
 }

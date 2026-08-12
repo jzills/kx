@@ -15,7 +15,7 @@ import (
 
 func namespaceTree(t *testing.T, b Builder, indexed bool) (string, []Resource) {
 	t.Helper()
-	node, resources, err := b.BuildNamespace(context.Background(), ns, indexed)
+	node, resources, err := b.BuildNamespace(context.Background(), ns, indexed, 0)
 	if err != nil {
 		t.Fatalf("BuildNamespace: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestNamespaceForestNumbersFromOne(t *testing.T) {
 		&appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "rs1", owner("d1"))},
 		podWith("web-abc-1", "p1", nil, owner("rs1")),
 	)
-	node, resources, err := b.BuildNamespace(context.Background(), ns, true)
+	node, resources, err := b.BuildNamespace(context.Background(), ns, true, 0)
 	if err != nil {
 		t.Fatalf("BuildNamespace: %v", err)
 	}
@@ -147,9 +147,9 @@ func TestNamespaceForestNumbersFromOne(t *testing.T) {
 		t.Errorf("Namespace root index = %d, want it unindexed", node.Index)
 	}
 	want := []Resource{
-		{Name: "web", Kind: kinds.Deployment},
-		{Name: "web-abc", Kind: kinds.ReplicaSet},
-		{Name: "web-abc-1", Kind: kinds.Pod},
+		{Name: "web", Kind: kinds.Deployment, Namespace: ns},
+		{Name: "web-abc", Kind: kinds.ReplicaSet, Namespace: ns},
+		{Name: "web-abc-1", Kind: kinds.Pod, Namespace: ns},
 	}
 	for i := range want {
 		if resources[i] != want[i] {
@@ -200,6 +200,54 @@ func TestNamespacesListsSorted(t *testing.T) {
 	for i := range want {
 		if names[i] != want[i] {
 			t.Errorf("names[%d] = %q, want %q", i, names[i], want[i])
+		}
+	}
+}
+
+// Every walked resource records the namespace it was found in, so a forest
+// spanning namespaces can still resolve an index to one place. Within a single
+// namespace it is the same value on every entry; across an -A sweep it is the
+// only thing telling two same-named workloads apart.
+func TestNamespaceForestRecordsTheNamespace(t *testing.T) {
+	b := builder(
+		&appsv1.Deployment{ObjectMeta: meta("web", "d1")},
+		&appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "rs1", owner("d1"))},
+	)
+
+	_, resources := namespaceTree(t, b, true)
+
+	if len(resources) == 0 {
+		t.Fatal("walk recorded no resources")
+	}
+	for _, resource := range resources {
+		if resource.Namespace != ns {
+			t.Errorf("resource %s/%s recorded namespace %q, want %q",
+				resource.Kind, resource.Name, resource.Namespace, ns)
+		}
+	}
+}
+
+// A single-resource tree records it too — the sweep is not the only caller, and
+// an entry that carried none would fall back to the listing's namespace, which
+// for an -A tree is empty.
+func TestResourceTreeRecordsTheNamespace(t *testing.T) {
+	b := builder(
+		&appsv1.Deployment{ObjectMeta: meta("web", "d1")},
+		&appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "rs1", owner("d1"))},
+	)
+
+	_, resources, err := b.BuildResource(context.Background(), kinds.Deployment, "web", ns, true)
+	if err != nil {
+		t.Fatalf("BuildResource: %v", err)
+	}
+
+	if len(resources) == 0 {
+		t.Fatal("walk recorded no resources")
+	}
+	for _, resource := range resources {
+		if resource.Namespace != ns {
+			t.Errorf("resource %s/%s recorded namespace %q, want %q",
+				resource.Kind, resource.Name, resource.Namespace, ns)
 		}
 	}
 }

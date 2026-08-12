@@ -22,11 +22,17 @@ import (
 	"github.com/jzills/kx/internal/tree"
 )
 
-// Resource is a node recorded for indexing, so `kx tree --index` can save the
-// tree as state and later commands can resolve those indexes.
+// Resource is a node recorded for indexing, so `kx tree` can save the tree as
+// state and later commands can resolve those indexes.
+//
+// Namespace is carried per resource because an -A forest spans them, and an
+// index there has to resolve to the one namespace its resource is in. A
+// single-namespace walk records the same value on every entry, which costs
+// nothing and keeps the two shapes identical to read.
 type Resource struct {
-	Name string
-	Kind kinds.Kind
+	Name      string
+	Kind      kinds.Kind
+	Namespace string
 }
 
 // Builder walks ownership references against a Kubernetes API client.
@@ -59,8 +65,17 @@ var rootOrder = []kinds.Kind{
 }
 
 // collector accumulates the indexed resources as the walk adds nodes.
+//
+// namespace is fixed for the whole walk: both entry points graph one namespace
+// at a time, so stamping it here is what lets an -A sweep — which calls them
+// once per namespace — end up with entries that name their own.
 type collector struct {
 	indexed   bool
+	namespace string
+	// offset is the number already assigned before this walk began, so a
+	// forest of namespaces numbers continuously instead of restarting at 1 in
+	// each. Zero for a walk that owns the whole numbering.
+	offset    int
 	resources []Resource
 }
 
@@ -71,8 +86,8 @@ func (c *collector) add(parent *tree.Node, style, prefix, name string, kind kind
 	if !c.indexed {
 		return parent.Add(label, style)
 	}
-	c.resources = append(c.resources, Resource{Name: name, Kind: kind})
-	return parent.AddIndexed(label, style, len(c.resources))
+	c.resources = append(c.resources, Resource{Name: name, Kind: kind, Namespace: c.namespace})
+	return parent.AddIndexed(label, style, c.offset+len(c.resources))
 }
 
 func ownedBy(meta metav1.ObjectMeta, uid types.UID) bool {
@@ -88,12 +103,12 @@ func ownedBy(meta metav1.ObjectMeta, uid types.UID) bool {
 func (b Builder) BuildResource(
 	ctx context.Context, kind kinds.Kind, name, namespace string, indexed bool,
 ) (*tree.Node, []Resource, error) {
-	c := &collector{indexed: indexed}
+	c := &collector{indexed: indexed, namespace: namespace}
 
 	root := &tree.Node{Label: string(kind) + "/" + name, Style: theme.Header}
 	if indexed {
 		// The root is itself indexable, and numbers first.
-		c.resources = append(c.resources, Resource{Name: name, Kind: kind})
+		c.resources = append(c.resources, Resource{Name: name, Kind: kind, Namespace: namespace})
 		root.Index = 1
 	}
 
@@ -321,9 +336,14 @@ type ownerRef struct {
 // clarity than it buys, but it is not a uniqueness guarantee.
 //
 // Unlike BuildResource, the Namespace root is not indexed — children number
-// from 1.
+// from startAt+1.
+//
+// startAt lets a caller walking several namespaces number the whole forest
+// continuously: restarting at 1 per namespace would put several rows under the
+// same number, which is the one thing an index may never do. Pass 0 for a
+// single-namespace walk.
 func (b Builder) BuildNamespace(
-	ctx context.Context, namespace string, indexed bool,
+	ctx context.Context, namespace string, indexed bool, startAt int,
 ) (*tree.Node, []Resource, error) {
 	deployments, err := b.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -435,7 +455,7 @@ func (b Builder) BuildNamespace(
 	}
 	sortRoots(roots, order)
 
-	c := &collector{indexed: indexed}
+	c := &collector{indexed: indexed, namespace: namespace, offset: startAt}
 	root := &tree.Node{Label: "Namespace/" + namespace, Style: theme.Header}
 	if len(roots) == 0 {
 		root.Add("(no workloads)", theme.Muted)

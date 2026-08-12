@@ -136,7 +136,8 @@ DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims, and Ingresses, plu
 nothing owns — and prints a ranked table of what's unhealthy. Findings also
 draw on live resource usage (`kx top`): a pod running hot against its memory
 limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
-`kx diag 1` or `kx logs 2` drill straight in.
+`kx diag 1` or `kx logs 2` drill straight in. `-A` sweeps every namespace and
+indexes that too, adding a NAMESPACE column beside the numbers.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>

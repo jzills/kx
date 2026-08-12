@@ -317,7 +317,7 @@ func TestTreeExecuteAllNamespacesReturnsOneRootPerNamespace(t *testing.T) {
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
 	)
 	command := TreeCommand{Builder: graph.Builder{Client: client}}
-	roots, err := command.ExecuteAllNamespaces(context.Background())
+	roots, _, err := command.ExecuteAllNamespaces(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ExecuteAllNamespaces: %v", err)
 	}
@@ -333,23 +333,85 @@ func TestTreeExecuteAllNamespacesReturnsOneRootPerNamespace(t *testing.T) {
 	}
 }
 
-// -A never indexes, matching kx get -A and kx diag -A: names repeat across
-// namespaces, so there is nothing stable to index.
-func TestTreeExecuteAllNamespacesNeverIndexes(t *testing.T) {
+// -A indexes now, matching kx get -A: each walked resource carries the
+// namespace it was found in, so an index resolves to one place.
+func TestTreeExecuteAllNamespacesIndexes(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
 	)
 	command := TreeCommand{Builder: graph.Builder{Client: client}}
-	roots, err := command.ExecuteAllNamespaces(context.Background())
+
+	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {
 		t.Fatalf("ExecuteAllNamespaces: %v", err)
 	}
+
 	if len(roots) != 1 || len(roots[0].Children) != 1 {
 		t.Fatalf("roots = %+v, want exactly one namespace with one workload", roots)
 	}
+	if roots[0].Children[0].Index != 1 {
+		t.Errorf("workload index = %d, want 1", roots[0].Children[0].Index)
+	}
+	if len(resources) != 1 || resources[0].Namespace != "prod" {
+		t.Errorf("resources = %+v, want one recorded in prod", resources)
+	}
+}
+
+// Numbers run straight through the forest rather than restarting per
+// namespace. Restarting would put several rows under the same number, which is
+// the one thing an index may never do.
+func TestTreeExecuteAllNamespacesNumbersContinuouslyAcrossNamespaces(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "alpha"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "beta"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "alpha"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "beta"}},
+	)
+	command := TreeCommand{Builder: graph.Builder{Client: client}}
+
+	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
+	if err != nil {
+		t.Fatalf("ExecuteAllNamespaces: %v", err)
+	}
+
+	if len(roots) != 2 {
+		t.Fatalf("roots = %d, want 2", len(roots))
+	}
+	if got := roots[0].Children[0].Index; got != 1 {
+		t.Errorf("first namespace's workload index = %d, want 1", got)
+	}
+	if got := roots[1].Children[0].Index; got != 2 {
+		t.Errorf("second namespace's workload index = %d, want 2 (numbering must not restart)", got)
+	}
+	// Both are named web; the namespace is the only thing separating them.
+	if len(resources) != 2 {
+		t.Fatalf("resources = %+v, want 2", resources)
+	}
+	if resources[0].Namespace != "alpha" || resources[1].Namespace != "beta" {
+		t.Errorf("namespaces = %q, %q; want alpha, beta",
+			resources[0].Namespace, resources[1].Namespace)
+	}
+}
+
+// --no-index still opts out, for -A as for any other tree.
+func TestTreeExecuteAllNamespacesRespectsNoIndex(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
+	)
+	command := TreeCommand{Builder: graph.Builder{Client: client}}
+
+	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), false)
+	if err != nil {
+		t.Fatalf("ExecuteAllNamespaces: %v", err)
+	}
+
 	if roots[0].Children[0].Index != 0 {
-		t.Errorf("workload index = %d, want 0 (unindexed)", roots[0].Children[0].Index)
+		t.Errorf("workload index = %d, want 0 with indexing off", roots[0].Children[0].Index)
+	}
+	if len(resources) != 0 {
+		t.Errorf("resources = %+v, want none with indexing off", resources)
 	}
 }
 
@@ -473,5 +535,44 @@ func TestTreeAllNamespacesPrintsAScopeBannerBeforeTheForest(t *testing.T) {
 	}
 	if tree >= 0 && banner > tree {
 		t.Errorf("banner printed after the tree it scopes:\n%s", sink.String())
+	}
+}
+
+// The command has to actually save what the walk indexed. ExecuteAllNamespaces
+// returning resources proves nothing on its own — an earlier version of this
+// change returned them and dropped them on the floor, leaving `kx tree -A`
+// printing numbers that resolved to nothing.
+func TestTreeAllNamespacesCommandSavesTheWalk(t *testing.T) {
+	captureRender(t)
+	services := treeHTMLServices(t, "prod",
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "alpha"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "beta"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "alpha"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "beta"}},
+	)
+	cmd := newTreeCommand(services)
+	cmd.SetContext(context.Background())
+	if err := cmd.Flags().Set("all-namespaces", "true"); err != nil {
+		t.Fatalf("set -A: %v", err)
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	current, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries := current.Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d resources, want 2: %+v", len(entries), entries)
+	}
+	if entries[0].Namespace != "alpha" || entries[1].Namespace != "beta" {
+		t.Errorf("namespaces = %q, %q; want alpha, beta",
+			entries[0].Namespace, entries[1].Namespace)
+	}
+	if current.Namespace != "" {
+		t.Errorf("entry namespace = %q, want empty for a forest", current.Namespace)
 	}
 }

@@ -209,15 +209,17 @@
     var allNamespaces = mount.getAttribute("data-all-namespaces") === "true";
 
     var columns = [];
-    if (!allNamespaces) {
-      // "X", not "#": every indexed listing in kx (internal/render/history.go,
-      // triage.go, listing.go) heads its index column "X" — this grid
-      // shouldn't invent a different convention for the same concept.
-      // width 72, not the letter's own width: the header cell also holds
-      // the sort-direction arrow, and the two together were crowding "X"
-      // into a text-overflow ellipsis at 56.
-      columns.push({ title: "X", field: "Index", width: 72, hozAlign: "right", sorter: "number" });
-    }
+    // "X", not "#": every indexed listing in kx (internal/render/history.go,
+    // triage.go, listing.go) heads its index column "X" — this grid
+    // shouldn't invent a different convention for the same concept.
+    // width 72, not the letter's own width: the header cell also holds
+    // the sort-direction arrow, and the two together were crowding "X"
+    // into a text-overflow ellipsis at 56.
+    //
+    // Present for an all-namespace sweep too: those are indexed now, and the
+    // Namespace column below joins it rather than replacing it, matching the
+    // terminal table in internal/render/triage.go.
+    columns.push({ title: "X", field: "Index", width: 72, hozAlign: "right", sorter: "number" });
     columns.push({
       title: "Kind", field: "Kind", width: 175,
       headerFilter: "list",

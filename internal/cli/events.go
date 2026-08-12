@@ -166,7 +166,6 @@ func newTopCommand(services Services) *cobra.Command {
 					// many namespaces span the listing, so there is no
 					// single one to name.
 					namespace = "all namespaces"
-					note = render.AllNamespacesNote
 				}
 			}
 			if err != nil {

@@ -48,7 +48,7 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tre
 
 // ExecuteNamespace graphs the whole ownership forest for a namespace.
 func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*tree.Node, error) {
-	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed)
+	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -59,24 +59,30 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 }
 
 // ExecuteAllNamespaces graphs the ownership forest for every namespace, one
-// root per namespace.
+// root per namespace, and returns the walked resources in index order.
 //
-// Results are never indexed or saved, matching kx get -A and kx diag -A:
-// names repeat across namespaces, so there is nothing stable to index.
-func (c TreeCommand) ExecuteAllNamespaces(ctx context.Context) ([]*tree.Node, error) {
+// Numbering runs continuously through the forest rather than restarting in each
+// namespace: two namespaces would otherwise both hold a node numbered 1, and an
+// index that names two rows names neither. Each resource records the namespace
+// it came from, which is what lets the saved indexes resolve afterwards.
+func (c TreeCommand) ExecuteAllNamespaces(
+	ctx context.Context, indexed bool,
+) ([]*tree.Node, []graph.Resource, error) {
 	namespaces, err := c.Builder.Namespaces(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	roots := make([]*tree.Node, 0, len(namespaces))
+	var resources []graph.Resource
 	for _, namespace := range namespaces {
-		node, _, err := c.Builder.BuildNamespace(ctx, namespace, false)
+		node, walked, err := c.Builder.BuildNamespace(ctx, namespace, indexed, len(resources))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		roots = append(roots, node)
+		resources = append(resources, walked...)
 	}
-	return roots, nil
+	return roots, resources, nil
 }
 
 // save records the tree's nodes as a state entry.
@@ -90,7 +96,9 @@ func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed 
 	// Order is the order the indexes were assigned during the walk.
 	entries := make([]state.Resource, 0, len(resources))
 	for _, resource := range resources {
-		entries = append(entries, state.Resource{Name: resource.Name, Kind: resource.Kind})
+		entries = append(entries, state.Resource{
+			Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
+		})
 	}
 	return c.Save(state.State{
 		Resources: state.NewOrderedResources(entries),
@@ -176,9 +184,14 @@ func newTreeCommand(services Services) *cobra.Command {
 			if len(args) == 0 {
 				if allNamespaces {
 					stop := render.Status("resolving ownership graphs")
-					roots, err := command.ExecuteAllNamespaces(ctx)
+					roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
 					stop()
 					if err != nil {
+						return err
+					}
+					// Saved with no entry namespace: the forest spans them, and
+					// each resource records its own.
+					if err := command.save(resources, "", indexed); err != nil {
 						return err
 					}
 					render.ScopeBanner("Namespace", "all namespaces", "")
@@ -281,7 +294,7 @@ func newTreeCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"Sweep every namespace, as a forest of per-namespace trees; results are not indexed")
+		"Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it")
 	cmd.Flags().Bool("html", false,
 		"Render the tree as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,
