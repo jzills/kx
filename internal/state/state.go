@@ -170,6 +170,38 @@ type History struct {
 // ErrNoState is returned when no state file exists yet.
 var ErrNoState = errors.New("No state found. Run `kx get <resource>` first.")
 
+// ContextMismatchError reports that an index was counted in one kubeconfig
+// context and is being spent in another.
+//
+// This is not a stale listing — the resource it names may well exist here — and
+// that is exactly why it has to be refused rather than warned about: names
+// repeat across clusters, so resolving it succeeds and acts on a *different*
+// resource that happens to share a name.
+type ContextMismatchError struct {
+	Index   int
+	Listed  string
+	Current string
+	// Relist names the command that rebuilds what this index counted against,
+	// and is set only when kx cannot rebuild it itself.
+	//
+	// A history entry carries the `kx get` query that produced it, so the caller
+	// replays that and shows a fresh listing; there is nothing to advise. A slot
+	// carries no query, and the history stack's query relists something else
+	// entirely — replaying it for `kx ns 2` answers with a pods table. So the
+	// slot's error names its own relist command and is reported as-is.
+	Relist string
+}
+
+func (e ContextMismatchError) Error() string {
+	message := fmt.Sprintf(
+		"Index %d was listed in context '%s'; the current context is '%s'.",
+		e.Index, e.Listed, e.Current)
+	if e.Relist == "" {
+		return message
+	}
+	return message + fmt.Sprintf(" Run '%s' to relist here.", e.Relist)
+}
+
 // ErrSchemaChanged is returned when a state file's version doesn't match this
 // build's — including files with no version key at all, which is every file
 // written before versioning existed. The file has already been reset to a
@@ -554,10 +586,34 @@ func namespaceAt(entry State, idx int) string {
 	return entry.Namespace
 }
 
+// checkContext refuses an index counted against a listing from another cluster.
+//
+// Either side unknown waives the check rather than failing it: a kubeconfig
+// with no current-context is a legitimate setup, and treating "I don't know"
+// as "they differ" would break kx for it entirely.
+//
+// Checked before the index is resolved, so a listing from the wrong cluster is
+// reported as such even when the index is also out of range — the alternative
+// answers with the size of a listing the user is no longer looking at.
+// relist names the command that rebuilds what the index counted against, and is
+// empty for a history entry, which the caller replays from its own saved query.
+func (s *Service) checkContext(entry State, idx int, relist string) error {
+	current := s.context()
+	if entry.Context == "" || current == "" || entry.Context == current {
+		return nil
+	}
+	return ContextMismatchError{
+		Index: idx, Listed: entry.Context, Current: current, Relist: relist,
+	}
+}
+
 // Fields resolves an index to the resource it names, plus its namespace and kind.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
 	current, err := s.Load()
 	if err != nil {
+		return "", "", "", err
+	}
+	if err := s.checkContext(current, idx, ""); err != nil {
 		return "", "", "", err
 	}
 	name, err = index.Resolve(current, idx)
@@ -639,6 +695,10 @@ func (s *Service) FieldsExpecting(
 				"No state found — run '%s' to list %s first.", relist, plural)
 		}
 		// An unreadable state file already explains itself.
+		return "", "", err
+	}
+
+	if err := s.checkContext(current, idx, ""); err != nil {
 		return "", "", err
 	}
 
@@ -762,6 +822,18 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 	if !ok {
 		return "", "", fmt.Errorf(
 			"No %s listing yet — run '%s' to list them.", plural, relist)
+	}
+
+	// Contexts are the one listing that isn't cluster-bound: they live in
+	// kubeconfig, and this slot exists to switch between them. Guarding it would
+	// make `kx context 2` unusable the moment it had been used once, because the
+	// switch it performs is itself what creates the mismatch — you could switch
+	// away and never switch back. Every other slot is a server object and is
+	// checked; see checkContext.
+	if kind != kinds.Context {
+		if err := s.checkContext(entry, idx, relist); err != nil {
+			return "", "", err
+		}
 	}
 
 	name, err = index.Resolve(entry, idx)
