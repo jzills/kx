@@ -47,6 +47,13 @@ title = "kx"
     displayCopyright = false
     displayPoweredBy = false
 
+  # Defaults to on, with nothing to search yet — a single landing page with no
+  # search index configured. flexsearch.js still loaded unconditionally and
+  # threw on every keypress, since the box it looks for only exists once real
+  # docs content turns the sidebar on (see the file header above).
+  [params.search]
+    enable = false
+
   # Hextra's light/dark toggle is off: the kx palettes replace it. The picker
   # on the page offers all ten, `light` among them, so a second control that
   # only knows two would disagree with the one that knows the rest.
