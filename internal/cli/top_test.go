@@ -284,9 +284,23 @@ func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
 	}
 }
 
+// topRow is the text topPageRows is handed in production: exactly what
+// index.Add produced, since TopCommand.Execute returns that string and the
+// caller passes the same one to both render.IndexedTable and here.
+//
+// Built through Add rather than written out by hand. The literal it replaced
+// was the *rendered* shape — indented two spaces, columns spread four apart —
+// which nothing ever feeds back into the parser, and which quietly disagreed
+// with Format's real output (no indent, gaps of exactly two).
+func topRow(t *testing.T, table string) string {
+	t.Helper()
+	indexed, _ := index.Service{}.Add(table)
+	return indexed
+}
+
 func TestTopPageRowsParsesIndexedTable(t *testing.T) {
-	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
-		"  1    web-1    5m           12%     64Mi             80%   \n"
+	indexed := topRow(t, "NAME    CPU(cores)   CPU%   MEMORY(bytes)   MEM%\n"+
+		"web-1   5m           12%    64Mi            80%")
 	rows := topPageRows(indexed)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
@@ -341,14 +355,20 @@ func TestTopPageRowsPopulatesNamespaceFromTheNamespaceColumn(t *testing.T) {
 // stays empty rather than defaulting to something misleading, and the grid
 // only shows the column when at least one row actually has one.
 func TestTopPageRowsLeavesNamespaceEmptyWithoutANamespaceColumn(t *testing.T) {
-	indexed := "  X    NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
-		"  1    web-1    5m           12%     64Mi             80%   \n"
+	indexed := topRow(t, "NAME    CPU(cores)   CPU%   MEMORY(bytes)   MEM%\n"+
+		"web-1   5m           12%    64Mi            80%")
 	rows := topPageRows(indexed)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
 	if rows[0].Namespace != "" {
 		t.Errorf("Namespace = %q, want empty (no NAMESPACE column in single-namespace mode)", rows[0].Namespace)
+	}
+	// Asserting only on Namespace let this pass against a fixture whose columns
+	// were shifted by one, since the shifted row had no NAMESPACE column either.
+	// Pin a value that moves when the columns move.
+	if rows[0].Name != "web-1" {
+		t.Errorf("Name = %q, want web-1 — columns are misaligned", rows[0].Name)
 	}
 }
 

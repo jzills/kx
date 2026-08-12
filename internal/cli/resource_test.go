@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -831,5 +832,103 @@ func TestContextsReturnsTheActiveContext(t *testing.T) {
 	}
 	if current != "test" {
 		t.Errorf("context = %q, want the active context", current)
+	}
+}
+
+// kubectl marks the active context in a CURRENT column that is blank on every
+// other row. kx can recover that blank while parsing kubectl's own output, but
+// not afterwards: Add prepends the X column, which makes the blank cell
+// *interior*, and Format's two-space padding then renders it
+// indistinguishable from a column separator. IndexedTable re-parses that text
+// to draw the table, so every value on a non-current row shifted one column
+// left and each context's CLUSTER appeared under its NAME.
+//
+// The column is dropped rather than defended, because it was already redundant:
+// Execute returns the active context and it captions the table.
+func TestContextsDropsTheCurrentMarkerColumn(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	table, _, err := ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if strings.Contains(table, "CURRENT") {
+		t.Errorf("table still carries the CURRENT column:\n%s", table)
+	}
+	// The table has to survive the re-parse IndexedTable performs on it, which
+	// is the whole point of dropping the column.
+	headers, rows, nameIdx := index.ParseTable(table)
+	if len(rows) != 2 {
+		t.Fatalf("re-parsed rows = %d, want 2:\n%s", len(rows), table)
+	}
+	if rows[0][nameIdx] != "alt" || rows[1][nameIdx] != "docker-desktop" {
+		t.Errorf("re-parsed names = %q, %q; want alt, docker-desktop (headers %v)",
+			rows[0][nameIdx], rows[1][nameIdx], headers)
+	}
+}
+
+// Dropping a column must not lose the rest of the row.
+func TestContextsKeepsTheRemainingColumns(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+
+	table, _, err := ContextsCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Compared as parsed headers, not as substrings: `strings.Contains(table,
+	// "NAME")` is satisfied by "NAMESPACE", so a version that dropped NAME as
+	// well as CURRENT passed that check.
+	headers, rows, _ := index.ParseTable(table)
+	want := []string{"X", "NAME", "CLUSTER", "NAMESPACE"}
+	if len(headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", headers, want)
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Errorf("headers[%d] = %q, want %q (full: %v)", i, headers[i], want[i], headers)
+		}
+	}
+	if len(rows) != 2 || rows[0][3] != "default" || rows[1][3] != "diagnostics" {
+		t.Errorf("rows lost their trailing values: %v", rows)
+	}
+}
+
+// Both contexts must reach the slot, or `kx context <n>` cannot select the one
+// that isn't active — the failure that started this.
+func TestContextsIndexesEveryContext(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	names := states.named[0].Resources.Names()
+	if len(names) != 2 || names[0] != "alt" || names[1] != "docker-desktop" {
+		t.Errorf("slot names = %v, want [alt docker-desktop]", names)
 	}
 }

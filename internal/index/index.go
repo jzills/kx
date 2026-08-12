@@ -104,12 +104,41 @@ func splitColumns(line string, n int) []string {
 	return columnSepRE.Split(trimmed, n)
 }
 
+// blankFirstColumn reports whether a data row leaves its first column empty,
+// which whitespace splitting cannot otherwise see.
+//
+// `kubectl config get-contexts` is the case this exists for: it marks the
+// active context in a leading CURRENT column that is blank on every other row.
+// Trimming the line first makes that empty cell vanish and shifts every value
+// one column left, so a non-current context's NAME reads as its CLUSTER — and
+// because both rows then claim the same NAME, Add's dedupe drops one entirely.
+//
+// Only the *leading* cell is inferred, and only from the row's own indentation.
+// That is deliberately narrower than reconstructing columns from the header's
+// byte offsets, which this parser tried once and reverted: kubectl recomputes
+// each --watch row's widths independently, so a value wider than the header saw
+// gets sliced at a stale offset. Nothing here depends on any column's width.
+// kubectl left-aligns, so a row that is blank where its first value belongs has
+// no other reading.
+func blankFirstColumn(line string) bool {
+	rest := strings.TrimLeft(line, " \t")
+	return rest != line && rest != ""
+}
+
 // Row splits one data line into exactly len(s.Headers) fields, padding with
 // "" for a line shorter than the header (Python's slicing did this; Go
 // indexing would panic without it).
 func (s TableShape) Row(line string) []string {
-	cols := splitColumns(line, len(s.Headers))
-	for len(cols) < len(s.Headers) {
+	count := len(s.Headers)
+	var cols []string
+	if count > 1 && blankFirstColumn(line) {
+		// The remainder holds one fewer field, so the cap shifts with it —
+		// otherwise the last column stops absorbing its own trailing spaces.
+		cols = append([]string{""}, splitColumns(line, count-1)...)
+	} else {
+		cols = splitColumns(line, count)
+	}
+	for len(cols) < count {
 		cols = append(cols, "")
 	}
 	return cols
