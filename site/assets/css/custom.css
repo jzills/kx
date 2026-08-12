@@ -201,7 +201,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  border: 1px solid var(--kx-border);
+  border: 0.1em solid var(--kx-border);
   border-radius: 999px;
   background-color: var(--kx-surface);
   color: var(--kx-muted);
