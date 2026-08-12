@@ -54,7 +54,7 @@ toc: false
 {{< kx-terminal >}}
 </div>
 
-<div class="kx-section">
+<div class="kx-section" id="features">
   <h2 class="kx-section__title">More than a shorter kubectl</h2>
   <div class="kx-features">
     <div class="kx-feature">
@@ -109,7 +109,7 @@ toc: false
   </div>
 </div>
 
-<div class="kx-section">
+<div class="kx-section" id="themes">
   <h2 class="kx-section__title">In your colors</h2>
   <p class="kx-section__lede">
     <code>kx theme</code> restyles the terminal, the HTML reports — and this
@@ -119,7 +119,7 @@ toc: false
   {{< kx-themes >}}
 </div>
 
-<div class="kx-section">
+<div class="kx-section" id="reports">
   <h2 class="kx-section__title">Browser reports</h2>
   <p class="kx-section__lede">
     <code>--html</code> renders the same analysis as a page and opens it. Sweep
