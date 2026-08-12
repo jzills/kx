@@ -496,7 +496,11 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 // -A is still never indexed or saved to state — names aren't unique across
 // namespaces — even though it now computes percentages same as any other
 // top listing.
-func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
+// `kx top -A` indexes like `kx get -A` now that a resource carries its own
+// namespace — the two have always shared this rule, including while it was
+// "no indexes for -A". The fixture's two rows share the name web-1, so the
+// namespace is the only thing telling them apart.
+func TestTopAllNamespacesIsIndexed(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
 	states := &fakeState{}
 	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
@@ -504,12 +508,36 @@ func TestTopAllNamespacesIsNotIndexed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
+
 	headers, _, _ := index.ParseTable(output)
-	if indexOfHeader(headers, "X") >= 0 {
-		t.Errorf("-A output was indexed:\n%s", output)
+	if indexOfHeader(headers, "X") < 0 {
+		t.Errorf("-A output was not indexed:\n%s", output)
 	}
-	if len(states.saved) != 0 {
-		t.Errorf("-A saved state, want none")
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries, want 1", len(states.saved))
+	}
+	entries := states.saved[0].Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d resources, want 2 (same-named rows must not collapse)", len(entries))
+	}
+	if entries[0].Namespace != "prod" || entries[1].Namespace != "staging" {
+		t.Errorf("namespaces = %q, %q; want prod, staging",
+			entries[0].Namespace, entries[1].Namespace)
+	}
+}
+
+// The entry-level namespace stays empty for -A, so Fields' fallback never hands
+// one listing's namespace to a row that belongs to another.
+func TestTopAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
+	kubectl := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	states := &fakeState{}
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute("", []string{"-A"}, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := states.saved[0].Namespace; got != "" {
+		t.Errorf("entry namespace = %q, want empty for an -A listing", got)
 	}
 }
 
@@ -543,8 +571,13 @@ func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if output != topAllNamespacesOutput {
-		t.Errorf("--no-limits -A output was modified:\n%s", output)
+	// Asserted on the columns rather than on the whole string: -A output is
+	// indexed now, so it is no longer byte-identical to kubectl's, and the
+	// subject here is the absence of the percentage columns and of the lookup
+	// that fills them.
+	headers, _, _ := index.ParseTable(output)
+	if indexOfHeader(headers, "CPU%") >= 0 || indexOfHeader(headers, "MEM%") >= 0 {
+		t.Errorf("--no-limits -A gained percentage columns:\n%s", output)
 	}
 	if len(kubectl.calls) != 1 {
 		t.Errorf("kubectl called %d times, want 1 (no limits lookup with --no-limits)", len(kubectl.calls))

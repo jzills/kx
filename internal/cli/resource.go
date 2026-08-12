@@ -494,7 +494,7 @@ func (c ContextsCommand) Execute() (table, context string, err error) {
 	indexed, names := c.Index.Add(dropColumn(output, "CURRENT"))
 	if len(names) > 0 {
 		if err := c.State.SaveNamed(state.State{
-			Resources: state.NewResources(names, kinds.Context),
+			Resources: resourcesFrom(names, kinds.Context),
 			Namespace: current,
 		}); err != nil {
 			return "", "", err

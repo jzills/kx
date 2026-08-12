@@ -227,14 +227,14 @@ func TestAddPrependsIndexColumn(t *testing.T) {
 		t.Errorf("indexes are not 1-based: %q, %q", lines[1], lines[2])
 	}
 	want := []string{"nginx-abc-xyz", "redis-def-uvw"}
-	if len(names) != 2 || names[0] != want[0] || names[1] != want[1] {
-		t.Errorf("names = %v, want %v", names, want)
+	if len(names) != 2 || names[0].Name != want[0] || names[1].Name != want[1] {
+		t.Errorf("names = %+v, want %v", names, want)
 	}
 }
 
 func TestAddSingleRow(t *testing.T) {
 	_, names := Service{}.Add(singleRowOutput)
-	if len(names) != 1 || names[0] != "only-pod-abc" {
+	if len(names) != 1 || names[0].Name != "only-pod-abc" {
 		t.Errorf("names = %v, want [only-pod-abc]", names)
 	}
 }
@@ -275,7 +275,7 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 		"pod-a     0/1     Pending\n" +
 		"pod-b     1/1     Running"
 	output, names := Service{}.Add(duplicated)
-	if len(names) != 2 || names[0] != "pod-a" || names[1] != "pod-b" {
+	if len(names) != 2 || names[0].Name != "pod-a" || names[1].Name != "pod-b" {
 		t.Fatalf("names = %v, want [pod-a pod-b]", names)
 	}
 	if strings.Contains(output, "Pending") {
@@ -437,9 +437,9 @@ func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
 		"alpha                日本語      ConfigMap\n" +
 		"beta                 abcdef   ConfigMap"
 
-	indexed, names := Service{}.Add(output)
-	if strings.Join(names, "|") != "alpha|beta" {
-		t.Fatalf("names = %v", names)
+	indexed, entries := Service{}.Add(output)
+	if len(entries) != 2 || entries[0].Name != "alpha" || entries[1].Name != "beta" {
+		t.Fatalf("entries = %+v, want alpha then beta", entries)
 	}
 	headers, rows, _ := ParseTable(indexed)
 	if got := strings.Join(headers, "|"); got != "X|NAME|NOTE|KIND" {
@@ -482,7 +482,7 @@ func TestAddIndexesEveryContextIncludingNonCurrent(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("names = %v, want both contexts indexed", entries)
 	}
-	if entries[0] != "alt" || entries[1] != "docker-desktop" {
+	if entries[0].Name != "alt" || entries[1].Name != "docker-desktop" {
 		t.Errorf("names = %v, want [alt docker-desktop]", entries)
 	}
 }
@@ -524,5 +524,59 @@ func TestBlankFirstColumnKeepsTheLastColumnWhole(t *testing.T) {
 	}
 	if rows[0][3] != "restarted  twice" {
 		t.Errorf("last column = %q, want %q kept whole", rows[0][3], "restarted  twice")
+	}
+}
+
+// Captured from `kubectl get pods -A`: NAMESPACE leads, and the same workload
+// name recurs across namespaces — which is the whole reason -A went unindexed
+// until now.
+const allNamespacesOutput = "NAMESPACE      NAME                            READY   STATUS    RESTARTS   AGE\n" +
+	"default        api-7d8f                        1/1     Running   0          5d\n" +
+	"staging        api-7d8f                        1/1     Running   0          3d\n" +
+	"staging        web-1                           1/1     Running   0          3d"
+
+// An -A listing carries each row's namespace, so an index can resolve to the
+// one place its resource actually lives.
+func TestAddCarriesTheNamespaceOfEachRow(t *testing.T) {
+	_, entries := Service{}.Add(allNamespacesOutput)
+
+	if len(entries) != 3 {
+		t.Fatalf("entries = %+v, want 3", entries)
+	}
+	if entries[0].Name != "api-7d8f" || entries[0].Namespace != "default" {
+		t.Errorf("entries[0] = %+v, want api-7d8f in default", entries[0])
+	}
+	if entries[1].Name != "api-7d8f" || entries[1].Namespace != "staging" {
+		t.Errorf("entries[1] = %+v, want api-7d8f in staging", entries[1])
+	}
+}
+
+// The dedupe that keeps displayed indexes in step with saved state keys on NAME
+// alone, which is right for a single namespace and wrong the moment a listing
+// spans them: two namespaces running the same workload name are two resources,
+// and collapsing them drops one from the table entirely.
+func TestAddKeepsSameNamedRowsFromDifferentNamespaces(t *testing.T) {
+	table, entries := Service{}.Add(allNamespacesOutput)
+
+	if len(entries) != 3 {
+		t.Fatalf("entries = %+v, want all three rows indexed", entries)
+	}
+	if strings.Count(table, "api-7d8f") != 2 {
+		t.Errorf("table dropped a same-named row:\n%s", table)
+	}
+}
+
+// Without a NAMESPACE column there is nothing to disambiguate by, so the
+// name-only collapse has to stay — it is what stops a displayed index from
+// pointing at a different resource than the saved one.
+func TestAddStillCollapsesDuplicateNamesWithoutANamespaceColumn(t *testing.T) {
+	duplicated := "NAME    READY   STATUS\n" +
+		"api     1/1     Running\n" +
+		"api     1/1     Running"
+
+	_, entries := Service{}.Add(duplicated)
+
+	if len(entries) != 1 {
+		t.Errorf("entries = %+v, want the duplicate name collapsed", entries)
 	}
 }

@@ -144,18 +144,21 @@ func (s TableShape) Row(line string) []string {
 	return cols
 }
 
-// parseOutput splits kubectl table output into headers, rows and the position
-// of the NAME column. Returns a nil header slice when the output isn't a table
-// kx can index.
-func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
+// parseTable splits kubectl table output into the header shape and its rows.
+// Returns ok=false when the output isn't a table kx can index.
+//
+// Returns the whole TableShape rather than the three loose values the exported
+// wrapper hands back, because Add needs NamespaceIdx as well and rebuilding the
+// shape from a []string of headers would mean locating those columns twice.
+func parseTable(output string) (shape TableShape, rows [][]string, ok bool) {
 	lines := strings.Split(output, "\n")
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return nil, nil, 0
+		return TableShape{}, nil, false
 	}
 
-	shape, ok := ParseHeader(lines[0])
+	shape, ok = ParseHeader(lines[0])
 	if !ok {
-		return nil, nil, 0
+		return TableShape{}, nil, false
 	}
 
 	for _, line := range lines[1:] {
@@ -163,6 +166,17 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 			continue
 		}
 		rows = append(rows, shape.Row(line))
+	}
+	return shape, rows, true
+}
+
+// parseOutput splits kubectl table output into headers, rows and the position
+// of the NAME column. Returns a nil header slice when the output isn't a table
+// kx can index.
+func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
+	shape, rows, ok := parseTable(output)
+	if !ok {
+		return nil, nil, 0
 	}
 	return shape.Headers, rows, shape.NameIdx
 }
@@ -229,39 +243,61 @@ func CountRows(output string) (count int, tabular bool) {
 	return len(rows), true
 }
 
+// Entry is one indexed row: the resource's name, and the namespace it was
+// listed in when the table said so.
+//
+// Namespace is empty for the ordinary single-namespace listing, whose table has
+// no NAMESPACE column and whose namespace the caller already knows. It is
+// populated only for an all-namespace listing, where it is the sole thing
+// distinguishing two rows that share a name.
+type Entry struct {
+	Name      string
+	Namespace string
+}
+
 // Service prefixes kubectl output with an index column and filters it by name.
 type Service struct{}
 
 // Add prefixes an "X" index column to kubectl output and returns the indexed
-// table alongside the resource names, in index order.
-func (Service) Add(output string) (string, []string) {
-	headers, rows, nameIdx := parseOutput(output)
-	if headers == nil {
+// table alongside the entries it assigned, in index order.
+func (Service) Add(output string) (string, []Entry) {
+	shape, rows, ok := parseTable(output)
+	if !ok {
 		return output, nil
 	}
 
-	// Index numbers must map 1:1 to saved state, which is keyed by name.
-	// Collapse any repeated NAME (first-seen wins) so the displayed indexes
-	// and the state entries can never desync.
-	seen := make(map[string]bool, len(rows))
+	// Index numbers must map 1:1 to saved state, so a row that is
+	// indistinguishable from an earlier one is collapsed (first-seen wins) —
+	// otherwise the displayed indexes and the state entries desync.
+	//
+	// What "indistinguishable" means depends on the table. Name alone is right
+	// for a single namespace, and wrong the moment a listing spans them: two
+	// namespaces running the same workload name hold two different resources,
+	// and collapsing them drops one from the table entirely. So the key takes
+	// in the namespace whenever the table reports one.
+	seen := make(map[Entry]bool, len(rows))
 	unique := make([][]string, 0, len(rows))
+	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
-		if seen[row[nameIdx]] {
+		entry := Entry{Name: row[shape.NameIdx]}
+		if shape.NamespaceIdx >= 0 {
+			entry.Namespace = row[shape.NamespaceIdx]
+		}
+		if seen[entry] {
 			continue
 		}
-		seen[row[nameIdx]] = true
+		seen[entry] = true
 		unique = append(unique, row)
+		entries = append(entries, entry)
 	}
 
-	names := make([]string, 0, len(unique))
 	allRows := make([][]string, 0, len(unique)+1)
-	allRows = append(allRows, append([]string{"X"}, headers...))
+	allRows = append(allRows, append([]string{"X"}, shape.Headers...))
 	for i, row := range unique {
-		names = append(names, row[nameIdx])
 		allRows = append(allRows, append([]string{strconv.Itoa(i + 1)}, row...))
 	}
 
-	return Format(allRows), names
+	return Format(allRows), entries
 }
 
 // Filter drops rows whose NAME doesn't contain term, case-insensitively.

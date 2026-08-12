@@ -3,6 +3,7 @@ package cli
 import (
 	"strings"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 )
@@ -18,10 +19,31 @@ type getOptions struct {
 	Yes    bool
 }
 
-// allNamespacesNote explains why an -A listing has no indexes, since the
-// absence is otherwise indistinguishable from a bug. It lives in render so the
-// triage sweep can print the same sentence for the same reason.
-const allNamespacesNote = render.AllNamespacesNote
+// namespaceGroup is a run of resolved names sharing a namespace, in the order
+// their indexes were given.
+type namespaceGroup struct {
+	Namespace string
+	Names     []string
+}
+
+// groupByNamespace collects resolved entries by namespace, preserving the order
+// each namespace was first seen so the stitched table lists rows in roughly the
+// order the indexes did. Always returns at least one group for a non-empty
+// input, so callers can read groups[0] without a length check.
+func groupByNamespace(entries []index.Entry) []namespaceGroup {
+	var groups []namespaceGroup
+	at := map[string]int{}
+	for _, entry := range entries {
+		position, seen := at[entry.Namespace]
+		if !seen {
+			at[entry.Namespace] = len(groups)
+			groups = append(groups, namespaceGroup{Namespace: entry.Namespace})
+			position = len(groups) - 1
+		}
+		groups[position].Names = append(groups[position].Names, entry.Name)
+	}
+	return groups
+}
 
 // runGet is the shared body of `get` and `secret`.
 //
@@ -63,23 +85,43 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	if len(indexes) > 0 {
 		expected := kinds.Normalize(resource)
-		names := make([]string, 0, len(indexes))
-		namespace := ""
-		for _, index := range indexes {
+		resolved := make([]index.Entry, 0, len(indexes))
+		for _, idx := range indexes {
 			// FieldsExpecting rather than Fields: the resource type was named on
 			// the command line, so an out-of-range index or an empty history can
 			// be reported against that kind instead of against whatever listing
 			// happens to be current.
-			name, ns, err := services.State.FieldsExpecting(index, expected)
+			name, ns, err := services.State.FieldsExpecting(idx, expected)
 			if err != nil {
 				return err
 			}
-			names = append(names, name)
-			namespace = ns
+			resolved = append(resolved, index.Entry{Name: name, Namespace: ns})
+		}
+		groups := groupByNamespace(resolved)
+
+		// Indexes from an -A listing can land in different namespaces, and
+		// kubectl cannot fetch named resources across namespaces in one call.
+		// One call per namespace, stitched back together. An explicit -n means
+		// the user overrode the scope, so there is nothing to span.
+		if len(groups) > 1 && extractNamespace(extra) == "" && !isWatch(extra) {
+			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+			stop := render.Status("fetching " + resource)
+			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
+			stop()
+			if err != nil {
+				return err
+			}
+			render.IndexedTable(output, resource, "all namespaces", "")
+			return nil
+		}
+
+		names := make([]string, 0, len(resolved))
+		for _, entry := range resolved {
+			names = append(names, entry.Name)
 		}
 		// The listing's own namespace, unless the user named one.
-		if namespace != "" && extractNamespace(extra) == "" {
-			extra = append(extra, "-n", namespace)
+		if groups[0].Namespace != "" && extractNamespace(extra) == "" {
+			extra = append(extra, "-n", groups[0].Namespace)
 		}
 		extra = append(names, extra...)
 	}
@@ -109,12 +151,10 @@ func runGet(services Services, resource string, args []string, options getOption
 		return err
 	}
 
-	note := ""
 	if allNamespaces(extra) {
 		namespace = "all namespaces"
-		note = allNamespacesNote
 	}
-	render.IndexedTable(output, resource, namespace, note)
+	render.IndexedTable(output, resource, namespace, "")
 	return nil
 }
 
