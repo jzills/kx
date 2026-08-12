@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // The theme listing numbers its rows, so typing the number is the obvious
@@ -102,21 +105,21 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 		use  string
 		want []string
 	}{
-		{"get <resource> [kubectl flags]", []string{"resource:required"}},
-		{"describe <index>... [kubectl flags]", []string{"index:required"}},
-		{"secret [index]... [kubectl flags]", []string{"index:optional"}},
-		{"scan [index] [scanner flags]", []string{"index:optional"}},
+		{"get <resource> [kubectl flags]", []string{"<resource>"}},
+		{"describe <index>... [kubectl flags]", []string{"<index>..."}},
+		{"secret [index]... [kubectl flags]", []string{"[index]..."}},
+		{"scan [index] [scanner flags]", []string{"[index]"}},
 		{"top [kubectl flags]", nil},
-		{"scale <index> <replicas>", []string{"index:required", "replicas:required"}},
+		{"scale <index> <replicas>", []string{"<index>", "<replicas>"}},
 		{"exec <index> [kubectl flags] [-- command...]",
-			[]string{"index:required", "command:optional"}},
-		{"label <index> [key=value...]", []string{"index:required", "key=value:optional"}},
-		{"tree [index]", []string{"index:optional"}},
+			[]string{"<index>", "[command]..."}},
+		{"label <index> [key=value...]", []string{"<index>", "[key=value]..."}},
+		{"tree [index]", []string{"[index]"}},
 	}
 	for _, tc := range cases {
 		var got []string
-		for _, arg := range positionalArgs(tc.use) {
-			got = append(got, arg.Name+":"+arg.Doc)
+		for _, arg := range positionalArgs(&cobra.Command{Use: tc.use}) {
+			got = append(got, arg.Name)
 		}
 		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 			t.Errorf("positionalArgs(%q) = %v, want %v", tc.use, got, tc.want)
@@ -219,6 +222,28 @@ func TestStateHelpListsItsSubcommands(t *testing.T) {
 	}
 }
 
+// --watch is parsed by hand (isWatch) rather than by cobra, so nothing forces
+// it to be registered — and for a while it wasn't, leaving a flag kx gives its
+// own live-table behaviour documented only in the README. Both listing
+// commands run through runGet, so both honour it and both must show it.
+func TestListingCommandsDocumentWatch(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	for _, name := range []string{"get", "secret"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", name, err)
+		}
+		var options []string
+		for _, option := range commandHelp(cmd).Options {
+			options = append(options, option.Name)
+		}
+		joined := strings.Join(options, " ")
+		if !strings.Contains(joined, "--watch") {
+			t.Errorf("kx %s --help Options = %q, missing --watch", name, joined)
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
@@ -230,15 +255,315 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// cobra adds these itself; they aren't part of kx's surface. Hidden
-		// commands are the pre-restructure kx back/forward/drop spellings,
-		// deliberately absent from --help now that kx state back/forward/drop
-		// are canonical — see NewRoot.
-		if name == "help" || name == "completion" || cmd.Hidden {
+		// `help` is cobra's and isn't part of kx's surface. Hidden commands are
+		// the pre-restructure kx back/forward/drop spellings, deliberately
+		// absent from --help now that kx state back/forward/drop are
+		// canonical — see NewRoot.
+		if name == "help" || cmd.Hidden {
 			continue
 		}
 		if !listed[name] {
 			t.Errorf("command %q is not in any help section", name)
 		}
+	}
+}
+
+// The completion command works whether or not it is advertised, so nothing
+// failed while it was invisible: cobra built it during Execute, after the help
+// screen and the README generator had already read the command tree.
+func TestCompletionAppearsOnTheRootScreen(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	if _, _, err := root.Find([]string{"completion"}); err != nil {
+		t.Fatalf("root.Find(completion): %v", err)
+	}
+
+	for _, section := range rootSections(root) {
+		for _, item := range section.Items {
+			if item.Name == "completion" {
+				if item.Doc == "" {
+					t.Error("completion is listed with no description")
+				}
+				return
+			}
+		}
+	}
+	t.Error("completion is registered but absent from every root help section")
+}
+
+// The front page teaches the index workflow by example, so a renamed or
+// removed command would leave it demonstrating a spelling kx no longer
+// accepts.
+func TestSelectingBlockUsesRealSpellings(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	ranges := false
+
+	for _, item := range selecting {
+		fields := strings.Fields(item.Name)
+		if len(fields) < 2 || fields[0] != "kx" {
+			t.Errorf("selecting example %q does not start with 'kx <something>'", item.Name)
+			continue
+		}
+		// Whatever follows `kx` must resolve the way Execute resolves it:
+		// a registered command, or a kind spelling rewritten to `kx get`.
+		verb := fields[1]
+		cmd, _, err := root.Find([]string{verb})
+		if (err != nil || cmd == root) && !kinds.IsKindSpelling(verb) {
+			t.Errorf("selecting example %q: %q is neither a command nor a kind", item.Name, verb)
+		}
+		// Only the spelling column counts: an ellipsis in a description ("rows
+		// 1, 2, 3...") contains ".." without demonstrating a range.
+		if strings.Contains(item.Name, "..") {
+			ranges = true
+		}
+	}
+
+	if !ranges {
+		t.Error("selecting block never mentions range syntax, which exists nowhere else in --help")
+	}
+}
+
+// The options block is derived from the registered flags rather than written
+// out beside them; the copy it replaced described --version with wording the
+// flag itself had never carried.
+func TestRootOptionsMirrorTheRegisteredFlags(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	shown := map[string]string{}
+	for _, option := range rootOptions(root) {
+		shown[option.Name] = option.Doc
+	}
+
+	root.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" || flag.Hidden {
+			return
+		}
+		doc, ok := shown[flagNames(flag)]
+		if !ok {
+			t.Errorf("flag %q is registered on kx but missing from the root Options block", flag.Name)
+			return
+		}
+		if doc != flag.Usage {
+			t.Errorf("flag %q: root help says %q, the flag says %q", flag.Name, doc, flag.Usage)
+		}
+	})
+
+	if _, ok := shown["-h, --help"]; !ok {
+		t.Error("root Options block omits -h, --help")
+	}
+}
+
+// Configuration lived only in the README: nothing in the binary named the file
+// kx reads, the file it writes, or a single environment override.
+func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
+	names := []string{}
+	for _, item := range files() {
+		names = append(names, item.Name)
+	}
+	joined := strings.Join(names, " ")
+	for _, want := range []string{"config.toml", "state.json"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("Files block = %q, missing %s", joined, want)
+		}
+	}
+
+	documented := map[string]bool{}
+	for _, item := range environment() {
+		documented[item.Name] = true
+		if item.Doc == "" {
+			t.Errorf("environment variable %s is listed with no description", item.Name)
+		}
+	}
+	for _, setting := range config.Settings() {
+		if !documented[setting.Env] {
+			t.Errorf("config override %s is missing from the Environment block", setting.Env)
+		}
+	}
+	// Honored by the renderer rather than the config loader, so it isn't in
+	// config.Settings() and would go undocumented if only that list drove this.
+	if !documented["NO_COLOR"] {
+		t.Error("Environment block omits NO_COLOR, which kx honors")
+	}
+}
+
+// The Arguments block used to read "required" or "optional" and nothing else,
+// which the Usage line above it already showed. Every argument any command
+// declares must now say what it is — a new command with a new argument name
+// fails here until argDocs describes it.
+func TestEveryArgumentIsDocumented(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, arg := range ParseUse(cmd.Use).Args {
+			if doc := argDoc(cmd, arg.Name); doc == "" {
+				t.Errorf("%s takes %q, but nothing describes it", cmd.CommandPath(), arg.Name)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// A flag that takes a value reads no differently from a switch unless the help
+// says so, and the two spellings of a flag's name were rendered three
+// different ways across the screens.
+func TestOptionsShowShorthandFirstAndValueType(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cases := []struct{ command, flag, want string }{
+		{"diagnostic", "namespace", "-n, --namespace string"},
+		{"diagnostic", "port", "--port int"},
+		{"diagnostic", "all-namespaces", "-A, --all-namespaces"},
+		{"label", "remove", "--remove strings"},
+	}
+	for _, tc := range cases {
+		cmd, _, err := root.Find([]string{tc.command})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", tc.command, err)
+		}
+		flag := cmd.Flags().Lookup(tc.flag)
+		if flag == nil {
+			t.Fatalf("kx %s has no --%s", tc.command, tc.flag)
+		}
+		if got := flagSpelling(flag); got != tc.want {
+			t.Errorf("kx %s --%s renders as %q, want %q", tc.command, tc.flag, got, tc.want)
+		}
+	}
+}
+
+// --no-color and --help apply to every command and say nothing about the one
+// being read, so they sit in their own block rather than padding out the list
+// of flags that are actually the command's.
+func TestGlobalFlagsAreSeparatedFromTheCommandsOwn(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"tree"})
+	if err != nil {
+		t.Fatalf("root.Find(tree): %v", err)
+	}
+	help := commandHelp(cmd)
+
+	var own, global []string
+	for _, option := range help.Options {
+		own = append(own, option.Name)
+	}
+	for _, option := range help.Global {
+		global = append(global, option.Name)
+	}
+
+	for _, name := range own {
+		if strings.Contains(name, "--no-color") {
+			t.Errorf("--no-color is listed among kx tree's own options: %v", own)
+		}
+	}
+	joined := strings.Join(global, " ")
+	for _, want := range []string{"--no-color", "-h, --help"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("Global options = %v, missing %s", global, want)
+		}
+	}
+	if len(own) == 0 {
+		t.Error("kx tree's own options are empty; the split swallowed them")
+	}
+}
+
+// SuggestFor covers the spellings cobra's own edit-distance rule misses:
+// `kx rm 3` is not a typo for delete, it is a different tool's word for it.
+//
+// A value cobra would already suggest must not be listed, or the command is
+// appended twice and the prompt reads "Did you mean this? logs logs".
+func TestSuggestForAddsWhatEditDistanceMisses(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, value := range cmd.SuggestFor {
+			occurrences := 0
+			for _, suggestion := range root.SuggestionsFor(value) {
+				if suggestion == cmd.Name() {
+					occurrences++
+				}
+			}
+			switch occurrences {
+			case 1:
+			case 0:
+				t.Errorf("kx %s lists SuggestFor %q, which suggests nothing", cmd.Name(), value)
+			default:
+				t.Errorf("kx %s lists SuggestFor %q, which cobra already suggests — %s would be offered %d times",
+					cmd.Name(), value, cmd.Name(), occurrences)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// A suggestion for a spelling that already runs something is never seen, and
+// would be wrong if it were: `kx forward` is a real command, so offering
+// port-forward for it would contradict what the word does.
+func TestSuggestForDoesNotShadowRealSpellings(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, value := range cmd.SuggestFor {
+			if found, _, err := root.Find([]string{value}); err == nil && found != root {
+				t.Errorf("kx %s suggests %q, but %q already runs kx %s",
+					cmd.Name(), value, value, found.Name())
+			}
+			if kinds.IsKindSpelling(value) {
+				t.Errorf("kx %s suggests %q, but %q is a kind spelling and runs kx get %s",
+					cmd.Name(), value, value, value)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// How indexes resolve is the one concept no command's own behaviour reveals,
+// and it lived only in the README: that the history is a stack with a cursor,
+// and that namespaces and contexts sit in slots outside it — which is why
+// `kx ns 2` survives any number of `kx get` runs when no other index does.
+func TestStateAndSwitchHelpExplainTheSlots(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	cases := []struct {
+		command string
+		phrases []string
+	}{
+		// `kx ns 2` is the claim itself, not the preamble to it: an index that
+		// survives intervening listings, which nothing else in kx does.
+		{"state", []string{"cursor", "max_history", "slots of their own", "kx ns 2", "--targets", "kx get ns"}},
+		{"namespace", []string{"slot of its own", "kx get ns"}},
+		{"context", []string{"slot of its own"}},
+	}
+	for _, tc := range cases {
+		cmd, _, err := root.Find([]string{tc.command})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", tc.command, err)
+		}
+		doc := commandHelp(cmd).Doc
+		for _, phrase := range tc.phrases {
+			if !strings.Contains(doc, phrase) {
+				t.Errorf("kx %s --help does not mention %q:\n%s", tc.command, phrase, doc)
+			}
+		}
+	}
+}
+
+// kx context has no `kx get` equivalent to route people to, so the paragraph
+// that sends namespace users there must not appear on it.
+func TestContextHelpOmitsTheNamespaceOnlyAdvice(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"context"})
+	if err != nil {
+		t.Fatalf("root.Find(context): %v", err)
+	}
+	if strings.Contains(commandHelp(cmd).Doc, "kx get ns") {
+		t.Error("kx context --help points at kx get ns, which lists namespaces, not contexts")
 	}
 }

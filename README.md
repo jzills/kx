@@ -91,7 +91,9 @@ pipx run --spec kx-cli kx get pods
 
 Known kinds can drop the `get`: `kx pods`, `kx deploy -n kube-system`, `kx svc --match api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) included. An integer after a kind relists just that index: `kx po 3`. CRDs work the same way — a CRD's own short name, kind, or plural — resolved from kubectl's own on-disk API-discovery cache, so kx never calls the API server just to look one up. A spelling that resolves neither way still falls back to `kx get <resource>`.
 
-Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version, and `-h`/`--help` on any command shows usage, examples, and aliases.
+Global flags: `--no-color` disables styled output, `-v`/`--version` prints the installed version and how the binary was built, and `-h`/`--help` on any command shows usage, arguments, examples, and aliases.
+
+`kx completion <bash|zsh|fish|powershell>` prints a completion script. It completes indexes from the saved listing with the resource each one points at, so `kx describe <TAB>` offers `1  api-7d8f (Pod)` rather than a bare number — plus resource types, rollout actions, themes, engines, and namespaces for `-n`. Everything is answered from `~/.kx/state.json` and needs no API call.
 
 ### Commands
 
@@ -108,7 +110,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed pod (bash, falling back to sh). |
-| `kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx label <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove labels on an indexed resource. |
 | `kx labels <index>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | `kx logs <index>... [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
@@ -117,13 +119,14 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; or Trivy via --engine trivy, https://trivy.dev/ — see kx engine). |
-| `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
+| `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 <!-- commands-table-end -->
 
 ### Triage a namespace

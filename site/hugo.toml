@@ -1,0 +1,91 @@
+# Hugo configuration for the kx site.
+#
+# Phase one is a landing page. The docs layout is deliberately already wired —
+# Hextra ships both, so adding content/docs/ turns on the sidebar, the
+# right-hand table of contents and search without restructuring anything here.
+baseURL = "https://jzills.github.io/kx/"
+title = "kx"
+[languages.en]
+  label = "English"
+
+# The site is its own Hugo module so Hextra never enters the CLI's go.mod,
+# where it would show up in Dependabot runs and the vulnerability gate.
+[module]
+  [[module.imports]]
+    path = "github.com/imfing/hextra"
+
+  # Nothing is mounted from the repo root. The README's single-theme GIFs and
+  # screenshots are for GitHub, which cannot theme anything; the site keeps its
+  # own per-palette set under static/, and mounting the README's as well would
+  # publish several megabytes nothing links to.
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+
+[markup]
+  [markup.highlight]
+    noClasses = false
+  [markup.goldmark.renderer]
+    # The landing page is hand-written HTML in a markdown file: hero, install
+    # cards, feature grid. Goldmark drops raw HTML unless told otherwise.
+    unsafe = true
+
+[params]
+  description = "kubectl, indexed. Select Kubernetes resources by number instead of typing names."
+
+  # Both off: layouts/_partials/custom/navbar-title.html draws the mark
+  # itself, inlined so it takes its colour from the active palette.
+  [params.navbar]
+    displayTitle = false
+    displayLogo = false
+
+  [params.footer]
+    enable = true
+    displayCopyright = false
+    displayPoweredBy = false
+
+  # Defaults to on, with nothing to search yet — a single landing page with no
+  # search index configured. flexsearch.js still loaded unconditionally and
+  # threw on every keypress, since the box it looks for only exists once real
+  # docs content turns the sidebar on (see the file header above).
+  [params.search]
+    enable = false
+
+  # Hextra's light/dark toggle is off: the kx palettes replace it. The picker
+  # on the page offers all ten, `light` among them, so a second control that
+  # only knows two would disagree with the one that knows the rest.
+  [params.theme]
+    default = "dark"
+    displayToggle = false
+
+[menu]
+  [[menu.main]]
+    name = "Install"
+    pageRef = "/#install"
+    weight = 1
+  [[menu.main]]
+    name = "Commands"
+    pageRef = "/#commands"
+    weight = 2
+  [[menu.main]]
+    name = "Features"
+    pageRef = "/#features"
+    weight = 3
+  [[menu.main]]
+    name = "Themes"
+    pageRef = "/#themes"
+    weight = 4
+  [[menu.main]]
+    name = "Reports"
+    pageRef = "/#reports"
+    weight = 5
+  [[menu.main]]
+    identifier = "github"
+    name = "GitHub"
+    url = "https://github.com/jzills/kx"
+    weight = 6
+    [menu.main.params]
+      icon = "github"

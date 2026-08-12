@@ -297,10 +297,8 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		Use:     use + " [index]... [kubectl flags]",
 		Short:   "List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets.",
 		Aliases: aliases,
-		Long: "Lists Secrets exactly as kx get does. With --decode, prints an\n" +
-			"indexed Secret's data in plaintext, or every Secret in the namespace\n" +
-			"when no index is given.",
-		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3",
+		Long:    "Lists Secrets exactly as kx get does. With --decode, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.",
+		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3\n  kx secret 3..",
 		// Everything not a kx flag belongs to kubectl.
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -326,5 +324,6 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	registerWatchFlag(cmd)
 	return cmd
 }

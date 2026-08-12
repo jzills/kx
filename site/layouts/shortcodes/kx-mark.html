@@ -1,0 +1,10 @@
+{{- /*
+  The kx mark, inlined so it takes its colour from the active palette.
+
+  Markdown cannot reach resources.Get, and an <img> cannot inherit
+  currentColor — which is why the hero mark stayed one fixed green while
+  everything around it changed theme.
+*/ -}}
+{{- with resources.Get "kx-mark.svg" -}}
+  {{- .Content | safeHTML -}}
+{{- end -}}

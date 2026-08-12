@@ -191,8 +191,9 @@ func splitAtDoubleDash(args []string) (before, after []string) {
 func newDescribeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "describe <index>... [kubectl flags]",
+		SuggestFor:         []string{"detail", "details"},
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -248,11 +249,11 @@ func splitLeadingIndexes(args []string) (indexes, rest []string) {
 
 func newLogsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logs <index>... [kubectl flags]",
-		Short: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
-		Long: "Streams logs for an indexed resource. Deployments, StatefulSets,\n" +
-			"DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3",
+		Use:                "logs <index>... [kubectl flags]",
+		SuggestFor:         []string{"tail"},
+		Short:              "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
+		Long:               "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3\n  kx logs 3..",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -346,10 +347,10 @@ func newEditCommand(services Services) *cobra.Command {
 
 func newExecCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec <index> [kubectl flags] [-- command...]",
-		Short: "Open an interactive shell in an indexed pod (bash, falling back to sh).",
-		Long: "Runs a command inside an indexed pod. With no command, tries each\n" +
-			"configured shell in turn (bash, then sh by default).",
+		Use:                "exec <index> [kubectl flags] [-- command...]",
+		SuggestFor:         []string{"sh", "shell", "bash", "ssh", "attach"},
+		Short:              "Open an interactive shell in an indexed pod (bash, falling back to sh).",
+		Long:               "Runs a command inside an indexed pod. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
@@ -376,10 +377,11 @@ func newExecCommand(services Services) *cobra.Command {
 func newDeleteCommand(services Services) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:     "delete <index>...",
-		Short:   "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5",
-		Args:    cobra.MinimumNArgs(1),
+		Use:        "delete <index>...",
+		SuggestFor: []string{"rm", "remove", "destroy"},
+		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
+		Example:    "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
+		Args:       cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -438,11 +440,14 @@ func newScaleCommand(services Services) *cobra.Command {
 
 func newRolloutCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:       "rollout <action> <index>",
-		Short:     "Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.",
-		Example:   "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
-		ValidArgs: []string{"status", "restart", "pause", "resume", "history", "undo"},
-		Args:      cobra.ExactArgs(2),
+		Use: "rollout <action> <index>",
+		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
+			") on a Deployment, StatefulSet, or DaemonSet.",
+		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
+		// No ValidArgs: cobra stops completing entirely once it is set, which
+		// left `kx rollout status <TAB>` offering filenames instead of the
+		// index it wants. installCompletions covers both positions.
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			index, err := parseIndex("index", args[1])
 			if err != nil {
@@ -465,9 +470,10 @@ func newRolloutCommand(services Services) *cobra.Command {
 
 func newPortForwardCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "port-forward <index> <port> [kubectl flags]",
-		Short:   "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
-		Example: "  kx port-forward 1 8080:80",
+		Use:        "port-forward <index> <port> [kubectl flags]",
+		SuggestFor: []string{"pf", "portforward", "proxy"},
+		Short:      "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
+		Example:    "  kx port-forward 1 8080:80",
 		// No Args validator: cobra's arity check runs against the
 		// unstripped argv, before passthrough can pull --help out of it —
 		// `kx port-forward --help` is a single argument, which used to fail
@@ -495,8 +501,9 @@ func newPortForwardCommand(services Services) *cobra.Command {
 
 func newCopyCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "cp <src> <dest> [kubectl flags]",
-		Short: "Copy files to or from an indexed pod via kubectl cp.",
+		Use:        "cp <src> <dest> [kubectl flags]",
+		SuggestFor: []string{"copy"},
+		Short:      "Copy files to or from an indexed pod via kubectl cp.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
 			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
 		// No Args validator: cobra's arity check runs against the
@@ -530,10 +537,11 @@ func newCopyCommand(services Services) *cobra.Command {
 func newYamlCommand(services Services) *cobra.Command {
 	var show string
 	cmd := &cobra.Command{
-		Use:     "yaml <index>...",
-		Short:   "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3",
-		Args:    cobra.MinimumNArgs(1),
+		Use:        "yaml <index>...",
+		SuggestFor: []string{"manifest", "spec"},
+		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
+		Example:    "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
+		Args:       cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -585,7 +593,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 		Use:     use + " <index>...",
 		Short:   short,
 		Args:    cobra.MinimumNArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -670,11 +678,13 @@ func newMetadataWriteCommand(services Services, verb, field, short string) *cobr
 // shape: no argument lists, an index switches.
 func newSwitchCommand(services Services, use, alias, short string, isContext bool) *cobra.Command {
 	return &cobra.Command{
-		Use:     use + " [index]",
-		Short:   short,
-		Aliases: []string{alias},
-		Args:    cobra.MaximumNArgs(1),
-		Example: "  kx " + use + "\n  kx " + use + " 2",
+		Use:        use + " [index]",
+		Short:      short,
+		Long:       switchLong(use, isContext),
+		Aliases:    []string{alias},
+		Args:       cobra.MaximumNArgs(1),
+		Example:    "  kx " + use + "\n  kx " + use + " 2",
+		SuggestFor: switchSuggestions(isContext),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listSwitchTargets(services, isContext)
@@ -688,6 +698,37 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 			return switchTo(services, use, index, isContext)
 		},
 	}
+}
+
+// switchLong explains the slot these listings are saved to.
+//
+// The slot is the part that surprises people: an index here survives any number
+// of `kx get` runs in between, which is the opposite of how every other index in
+// kx behaves. Saying so on the command that reads it, not only under kx state.
+func switchLong(use string, isContext bool) string {
+	subject := "namespaces"
+	if isContext {
+		subject = "kubeconfig contexts"
+	}
+	long := "Lists " + subject + ", or switches to one by index.\n\n" +
+		"The listing is saved to a slot of its own, outside the `kx get` " +
+		"history, so an index here keeps meaning the same entry however much " +
+		"you have listed since. `kx state --targets` shows the slot without " +
+		"listing again."
+	if isContext {
+		return long
+	}
+	return long + "\n\nTo act on a namespace rather than switch to it — " +
+		"describe, label, delete — list it with `kx get ns`, which stacks it " +
+		"like any other listing."
+}
+
+func switchSuggestions(isContext bool) []string {
+	if isContext {
+		return []string{"ctx", "kubectx", "use-context"}
+	}
+	// `kubens` and OpenShift's `project` are what people arrive from.
+	return []string{"kubens", "project", "projects"}
 }
 
 func listSwitchTargets(services Services, isContext bool) error {
@@ -729,9 +770,24 @@ func newStateCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "state [position]",
 		Short: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets.",
+		Long: "Shows the listing that indexes currently resolve against.\n\n" +
+			"kx keeps a stack of recent `kx get` results — `max_history` of them, " +
+			"10 by default — with a cursor marking the current one. `--all` lists " +
+			"the stack, a position jumps to an entry, and `back`/`forward` step " +
+			"through it.\n\n" +
+			"Namespaces and contexts sit in slots of their own, outside that " +
+			"stack: `kx ns 2` counts against the namespaces you last listed " +
+			"however much you have listed since, and switching namespace never " +
+			"pushes work off the stack. `--targets` expands both slots, so you " +
+			"can pick a number without listing again.\n\n" +
+			"To act on a namespace rather than switch to it, list it with " +
+			"`kx get ns`. That stacks it like any other listing — `kx describe 2`, " +
+			"`kx label 2` — and refreshes the slot too, so the two spellings never " +
+			"disagree about what 2 means.",
 		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
 			"  kx state 2",
-		Args: cobra.MaximumNArgs(1),
+		SuggestFor: []string{"history", "stack", "cursor"},
+		Args:       cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Both read the whole file, and the slots live outside the stack, so
 			// --targets works on a history that is empty — the shape a fresh

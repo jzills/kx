@@ -47,7 +47,7 @@ func newEventsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:     "events <index>...",
 		Short:   "Show Kubernetes events for one or more indexed resources.",
-		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3",
+		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3\n  kx events 3..",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
@@ -94,12 +94,13 @@ func newEventsCommand(services Services) *cobra.Command {
 
 func newTopCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "top [resource] [kubectl flags]",
-		Short: "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
-		Long: "Lists pod or node CPU and memory usage with kubectl top, assigns\n" +
-			"indexes, and shows CPU%/MEM% — computed against each pod's limits\n" +
-			"for pods, native to kubectl for nodes.",
-		Example:            "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
+		Use:        "top [resource] [kubectl flags]",
+		SuggestFor: []string{"usage", "metrics", "stats"},
+		Short:      "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
+		Long:       "Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.",
+		Example:    "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits",
+		// `resource` means something narrower here than it does to kx get.
+		Annotations:        map[string]string{"arg.resource": "pods (the default) or nodes"},
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)

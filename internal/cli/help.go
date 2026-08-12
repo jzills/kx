@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -29,6 +33,144 @@ var helpSections = []struct {
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
+	{"Shell", []string{"completion"}},
+}
+
+// selecting is the index workflow, on the screen people reach for first.
+//
+// Every line here is a feature that existed only in the README: the numbering
+// itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
+// has none. A per-command --help can't teach any of it, because none of it
+// belongs to one command.
+var selecting = []render.HelpItem{
+	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
+	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
+	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
+	{Name: "kx delete 3 5", Doc: "Several indexes at once"},
+	{Name: "kx delete 3..7", Doc: "A range; '..5' and '5..' leave an end open"},
+	{Name: "kx get pods -A", Doc: "Every namespace, unindexed — names aren't unique"},
+}
+
+var footer = []string{
+	"Run 'kx COMMAND --help' for a command's options and examples.",
+	"https://github.com/jzills/kx",
+}
+
+// files names the two paths kx reads and writes. Resolved from the packages
+// that own them rather than written out here, so the screen can't name a path
+// kx doesn't use. A home directory kx can't locate is left out rather than
+// guessed at.
+func files() []render.HelpItem {
+	var items []render.HelpItem
+	if path, err := config.File(); err == nil {
+		items = append(items, render.HelpItem{
+			Name: homeRelative(path), Doc: "Settings; the Environment keys below override it",
+		})
+	}
+	if path, err := state.File(); err == nil {
+		items = append(items, render.HelpItem{
+			Name: homeRelative(path), Doc: "Saved listings, navigated with kx state",
+		})
+	}
+	return items
+}
+
+// homeRelative abbreviates a path under the home directory to "~/...", which is
+// both shorter than the absolute path and what a reader can paste back into a
+// shell. Anything outside the home directory is left alone.
+func homeRelative(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	rest, found := strings.CutPrefix(path, home+string(filepath.Separator))
+	if !found {
+		return path
+	}
+	return "~" + string(filepath.Separator) + rest
+}
+
+// environment lists the config overrides, plus the one convention kx honors
+// that isn't its own.
+func environment() []render.HelpItem {
+	var items []render.HelpItem
+	for _, setting := range config.Settings() {
+		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
+	}
+	return append(items, render.HelpItem{
+		Name: "NO_COLOR", Doc: "Disable styled output, per no-color.org",
+	})
+}
+
+// rootOptions renders the root command's own flags, plus the help flag cobra
+// adds during execution and so isn't registered yet when help is built.
+func rootOptions(root *cobra.Command) []render.HelpItem {
+	var options []render.HelpItem
+	// LocalFlags rather than Flags: it merges the persistent set in, so
+	// --no-color is listed exactly once whether or not anything has parsed
+	// flags yet.
+	root.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" || flag.Hidden {
+			return
+		}
+		options = append(options, render.HelpItem{Name: flagNames(flag), Doc: flag.Usage})
+	})
+	return append(options, render.HelpItem{
+		Name: "-h, --help", Doc: "Show this message and exit",
+	})
+}
+
+// flagNames spells a flag the way both help screens do.
+func flagNames(flag *pflag.Flag) string {
+	if flag.Shorthand == "" {
+		return "--" + flag.Name
+	}
+	return "-" + flag.Shorthand + ", --" + flag.Name
+}
+
+// flagSpelling is flagNames plus the kind of value the flag takes, so a reader
+// can tell `--port` wants a number from `--full`, which wants nothing.
+func flagSpelling(flag *pflag.Flag) string {
+	name := flagNames(flag)
+	switch flag.Value.Type() {
+	case "bool":
+		return name
+	case "stringArray", "stringSlice":
+		return name + " strings"
+	default:
+		return name + " " + flag.Value.Type()
+	}
+}
+
+// argDocs describes each positional argument kx accepts.
+//
+// Keyed by the name in the Use string rather than by command, because the
+// names are shared — two dozen commands take an `index`, and it means the same
+// thing to all of them. A command needing something more specific overrides it
+// with an "arg.<name>" annotation.
+//
+// TestEveryArgumentIsDocumented fails on a name that reaches here undescribed,
+// so a new command can't quietly fall back to "required".
+var argDocs = map[string]string{
+	"index":     "Row number from the current listing; run kx state to see it",
+	"resource":  "Resource type: pods, deploy, svc, a CRD, or any kubectl kind",
+	"position":  "History position, as numbered by kx state --all",
+	"name":      "Name, or the row number from the listing shown above",
+	"action":    "status, restart, pause, resume, history, or undo",
+	"replicas":  "Number of replicas to scale to",
+	"port":      "Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port",
+	"src":       "Source path, or <index>:<path> inside the pod",
+	"dest":      "Destination path, or <index>:<path> inside the pod",
+	"key=value": "Key and value to set; repeatable",
+	"command":   "Command to run in the pod instead of a shell",
+}
+
+// argDoc describes one argument, preferring a command's own annotation.
+func argDoc(cmd *cobra.Command, name string) string {
+	if doc, ok := cmd.Annotations["arg."+name]; ok {
+		return doc
+	}
+	return argDocs[name]
 }
 
 // installHelp replaces cobra's help output with the themed help screens, for
@@ -36,7 +178,15 @@ var helpSections = []struct {
 func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {
-			render.RootHelp(rootSections(root), version)
+			render.ShowRootHelp(render.RootHelp{
+				Selecting:   selecting,
+				Sections:    rootSections(root),
+				Options:     rootOptions(root),
+				Files:       files(),
+				Environment: environment(),
+				Footer:      footer,
+				Version:     version,
+			})
 			return
 		}
 		render.ShowCommandHelp(commandHelp(cmd))
@@ -72,9 +222,12 @@ func rootSections(root *cobra.Command) []render.HelpSection {
 func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	spec := ParseUse(cmd.Use)
 
-	doc := cmd.Long
+	// Trimmed because cobra writes its own Long strings (the completion
+	// command's) with a trailing newline, which rendered as a stray blank line
+	// under the description.
+	doc := strings.TrimSpace(cmd.Long)
 	if doc == "" {
-		doc = cmd.Short
+		doc = strings.TrimSpace(cmd.Short)
 	}
 	if spec.Passthrough != "" {
 		doc += "\n\nUnrecognized flags are passed through to kubectl."
@@ -98,16 +251,27 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	}
 	sort.Slice(subcommands, func(i, j int) bool { return subcommands[i].Name < subcommands[j].Name })
 
-	var options []render.HelpItem
-	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+	// Split so a command's own flags aren't padded out by the ones every
+	// command inherits. LocalFlags excludes a parent's persistent flags unless
+	// this command shadows one, in which case its own wins — which is what a
+	// reader of this screen wants either way.
+	var global []render.HelpItem
+	cmd.InheritedFlags().VisitAll(func(flag *pflag.Flag) {
 		if flag.Name == "help" || flag.Hidden {
 			return
 		}
-		names := "--" + flag.Name
-		if flag.Shorthand != "" {
-			names += "  -" + flag.Shorthand
+		global = append(global, render.HelpItem{Name: flagSpelling(flag), Doc: flag.Usage})
+	})
+	global = append(global, render.HelpItem{
+		Name: "-h, --help", Doc: "Show this message and exit",
+	})
+
+	var options []render.HelpItem
+	cmd.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name == "help" || flag.Hidden {
+			return
 		}
-		options = append(options, render.HelpItem{Name: names, Doc: flag.Usage})
+		options = append(options, render.HelpItem{Name: flagSpelling(flag), Doc: flag.Usage})
 	})
 
 	var examples []string
@@ -122,8 +286,9 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		Doc:      doc,
 		Usage:    usage,
 		Commands: subcommands,
-		Args:     positionalArgs(cmd.Use),
+		Args:     positionalArgs(cmd),
 		Options:  options,
+		Global:   global,
 		Aliases:  cmd.Aliases,
 		Examples: examples,
 	}
@@ -183,16 +348,35 @@ func ParseUse(use string) UseSpec {
 	return spec
 }
 
-func positionalArgs(use string) []render.HelpItem {
+// positionalArgs documents a command's arguments.
+//
+// The name column carries the Use string's own punctuation — <required>,
+// [optional], a trailing ellipsis for repeatable — so the description column
+// is free to say what the argument is. It used to hold the word "required" or
+// "optional" and nothing else, which the Usage line above it already showed.
+func positionalArgs(cmd *cobra.Command) []render.HelpItem {
 	var args []render.HelpItem
-	for _, arg := range ParseUse(use).Args {
-		doc := "optional"
-		if arg.Required {
-			doc = "required"
-		}
-		args = append(args, render.HelpItem{Name: arg.Name, Doc: doc})
+	for _, arg := range ParseUse(cmd.Use).Args {
+		args = append(args, render.HelpItem{
+			Name: argSpelling(arg),
+			Doc:  argDoc(cmd, arg.Name),
+		})
 	}
 	return args
+}
+
+// argSpelling writes an argument the way the Use string and the README table
+// do: angle brackets for required, square for optional, ellipsis for
+// repeatable.
+func argSpelling(arg Arg) string {
+	name := "<" + arg.Name + ">"
+	if !arg.Required {
+		name = "[" + arg.Name + "]"
+	}
+	if arg.Variadic {
+		name += "..."
+	}
+	return name
 }
 
 // CommandOrder returns the command names in the order the root help screen

@@ -24,6 +24,11 @@ version="${1:?usage: build_binaries.sh <version> [outdir]}"
 outdir="${2:-dist}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Reported by `kx --version`. Both are best-effort: a source tarball with no
+# git history still builds, it just has less to say about itself.
+commit="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+date="$(date -u +%Y-%m-%d)"
+
 targets=(
   "linux amd64"
   "linux arm64"
@@ -56,10 +61,14 @@ for target in "${targets[@]}"; do
   fi
 
   echo "building ${os}/${arch}"
-  # -s -w strip the symbol and DWARF tables; the version is stamped in rather
-  # than read from a metadata file, so there is nothing to ship alongside.
+  # -s -w strip the symbol and DWARF tables; the build metadata is stamped in
+  # rather than read from a file, so there is nothing to ship alongside.
+  # -trimpath drops the VCS stamping the toolchain would otherwise embed, so
+  # commit and date are passed explicitly for `kx --version` to report.
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-    go build -trimpath -ldflags "-s -w -X main.version=${version}" \
+    go build -trimpath -ldflags "-s -w -X main.version=${version} \
+      -X github.com/jzills/kx/internal/buildinfo.commit=${commit} \
+      -X github.com/jzills/kx/internal/buildinfo.date=${date}" \
     -o "$stage/kx${exe}" "$root/cmd/kx"
 
   # The archive holds kx/kx, matching what .krew.yaml's bin: kx/kx expects.

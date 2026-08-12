@@ -163,15 +163,12 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     use + " [index]",
-		Short:   "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
-		Aliases: aliases,
-		Long: "Analyses health signals — replica counts, container states, resource\n" +
-			"usage and warning events — and reports findings by severity.\n" +
-			"With no index, sweeps every workload in the current namespace, or in\n" +
-			"the namespace given by -n, or in every namespace with -A. Healthy\n" +
-			"resources are left out of the terminal table by default; --full\n" +
-			"includes them. The HTML report (--html) always includes them.",
+		Use:        use + " [index]",
+		SuggestFor: []string{"debug", "triage", "health", "why", "status"},
+		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
+		Aliases:    aliases,
+		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n  kx " + use + " -A",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

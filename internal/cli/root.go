@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/jzills/kx/internal/buildinfo"
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/k8s"
@@ -69,23 +70,30 @@ var (
 
 // NewRoot builds the kx command tree.
 func NewRoot(services Services, version string) *cobra.Command {
+	// Resolved here so an unstamped build reports its module and VCS metadata
+	// everywhere the version appears, not just under --version.
+	info := buildinfo.Resolve(version)
 	root := &cobra.Command{
 		Use:           "kx",
 		Short:         "Select Kubernetes resources by index instead of typing names",
-		Version:       version,
+		Version:       info.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	// Match the Python CLI, which exposes -v as the version alias and -h for help.
-	root.SetVersionTemplate("kx {{.Version}}\n")
-	root.Flags().BoolP("version", "v", false, "Show the installed version")
+	//
+	// The text is rendered here rather than left to the template engine: it is
+	// a fixed block with no template actions in it, and building it in Go keeps
+	// a path containing "{{" from being executed as one.
+	root.SetVersionTemplate(versionText(info))
+	root.Flags().BoolP("version", "v", false, "Show the kx version and exit")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
 
 	// `get` is the only command that doesn't consume an index, so a NotFound
 	// from it means the resource type doesn't exist — refreshing the listing
 	// would be beside the point. Every other command resolves an index, where a
 	// NotFound usually means the saved listing has gone stale.
-	installHelp(root, version)
+	installHelp(root, info.Version)
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))
@@ -137,7 +145,27 @@ func NewRoot(services Services, version string) *cobra.Command {
 	} {
 		root.AddCommand(withRefresh(services, cmd))
 	}
+
+	installCompletion(root)
+	installCompletions(root, services)
 	return root
+}
+
+// installCompletion adds cobra's completion command up front and gives it kx's
+// voice.
+//
+// Cobra otherwise creates it during Execute, which left a working command that
+// no help screen could see: not the root listing, which is built from the
+// command tree, and not the README table generated from the same tree. Shell
+// completion was real but discoverable only by knowing cobra.
+func installCompletion(root *cobra.Command) {
+	root.InitDefaultCompletionCmd()
+	completion, _, err := root.Find([]string{"completion"})
+	if err != nil || completion == root {
+		return
+	}
+	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
+	completion.Example = "  kx completion zsh > \"${fpath[1]}/_kx\"\n  source <(kx completion bash)"
 }
 
 func newGetCommand(services Services) *cobra.Command {
@@ -145,11 +173,12 @@ func newGetCommand(services Services) *cobra.Command {
 		// The indexes are documented here because runGet accepts them —
 		// `kx get pods 1 3` re-fetches those two — and neither the help screen
 		// nor the README table mentioned it.
-		Use:   "get <resource> [index]... [kubectl flags]",
-		Short: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
+		Use:        "get <resource> [index]... [kubectl flags]",
+		SuggestFor: []string{"list", "ls", "ps"},
+		Short:      "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
 			"`-n <namespace>`, label selectors and output flags all work as usual.",
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3",
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
 		Args:    cobra.MinimumNArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for
@@ -181,7 +210,18 @@ func newGetCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	registerWatchFlag(cmd)
 	return cmd
+}
+
+// registerWatchFlag declares --watch on the listing commands that honour it.
+//
+// kubectl owns the flag and isWatch parses it by hand, but kx gives it its own
+// behaviour — a live-redrawing table instead of a stream — so leaving it
+// unregistered made a kx feature visible only in the README.
+func registerWatchFlag(cmd *cobra.Command) {
+	cmd.Flags().BoolP("watch", "w", false,
+		"Redraw the listing live as resources change; a watch never completes, so results are not indexed")
 }
 
 func extractNamespaceFor(services Services, extraArgs []string) string {
