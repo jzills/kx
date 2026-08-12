@@ -1,0 +1,118 @@
+name: Pages
+
+# The site is built on every push to develop and on pull requests, but only
+# published from develop. A PR that breaks the build fails here rather than at
+# deploy time.
+#
+# Publishing requires Pages to be enabled on the repository with "GitHub
+# Actions" as the source; until it is, the deploy job is the only thing that
+# fails and the build job still guards the site.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "site/**"
+      - "assets/**"
+      - "demo/*.gif"
+      - "tools/gen-site-theme/**"
+      - "internal/theme/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "assets/**"
+      - "demo/*.gif"
+      - "tools/gen-site-theme/**"
+      - "internal/theme/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Hextra requires the extended build; see site/hugo.toml.
+  HUGO_VERSION: 0.164.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Hugo extended
+        run: |
+          curl -sSL -o hugo.tar.gz \
+            "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
+          tar xzf hugo.tar.gz hugo
+          sudo install hugo /usr/local/bin/hugo
+          hugo version
+
+      # The palette CSS is generated from internal/theme, so a palette added
+      # there must not reach the site only when someone remembers to rerun the
+      # generator. Regenerating and diffing catches a stale commit the same way
+      # the README command table does.
+      - name: Check the generated palette stylesheet is current
+        run: |
+          go run ./tools/gen-site-theme || true
+          if ! git diff --quiet -- site/assets/css/kx-themes.css site/data/kx_themes.json; then
+            echo "::error::site palette files are stale — run 'go run ./tools/gen-site-theme' and commit the result"
+            git diff -- site/assets/css/kx-themes.css site/data/kx_themes.json
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: site
+        # --gc prunes stale cache entries; --minify is what the published site
+        # should be measured as, so PR builds exercise the same path. baseURL
+        # comes from site/hugo.toml, so a custom domain is one edit there.
+        run: hugo --gc --minify
+
+      # Hugo resolves the theme's stylesheet through resources.Get, which
+      # returns nothing when the module's assets are missing — and the build
+      # still succeeds, publishing an unstyled site. That happened locally with
+      # a half-populated module cache, so it is asserted rather than assumed.
+      - name: Check the theme's CSS was built
+        working-directory: site
+        run: |
+          shopt -s nullglob
+          compiled=(public/css/compiled/*.css)
+          if [ ${#compiled[@]} -eq 0 ]; then
+            echo "::error::no compiled stylesheet in public/css/compiled — the site would publish unstyled"
+            exit 1
+          fi
+          for sheet in "${compiled[@]}"; do
+            size=$(wc -c < "$sheet")
+            echo "$sheet: $size bytes"
+            [ "$size" -gt 10000 ] || { echo "::error::$sheet is suspiciously small"; exit 1; }
+          done
+          test -n "$(ls public/css/kx-themes*.css 2>/dev/null)" || {
+            echo "::error::the generated palette stylesheet is missing"; exit 1; }
+
+      - name: Upload artifact
+        if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/public
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

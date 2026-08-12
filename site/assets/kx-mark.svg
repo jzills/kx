@@ -2,8 +2,9 @@
      The kx mark as rectangles rather than text: drawn as <text> it only
      lines up where the reader has a monospace font carrying the box-drawing
      glyphs, and falls apart into offset blocks where they don't. -->
-<svg class="wordmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 216"
-     shape-rendering="crispEdges" role="img" aria-label="kx">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 216"
+     fill="currentColor" shape-rendering="crispEdges"
+     role="img" aria-label="kx">
   <rect x="0" y="0" width="18" height="36"/>
   <rect x="18" y="0" width="18" height="36"/>
   <rect x="36" y="15.5" width="11.5" height="5"/>

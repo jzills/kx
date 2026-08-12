@@ -1,0 +1,76 @@
+{{- /*
+  The generated palette stylesheet.
+
+  Linked separately rather than @import-ed from custom.css: Hextra runs that
+  file through its Tailwind build, which leaves a plain CSS @import in place as
+  a literal, so the browser would have requested a URL nothing publishes.
+
+  Fingerprinted so a palette change busts the cache.
+*/ -}}
+{{- with resources.Get "css/kx-themes.css" }}
+  {{- $themes := . | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $themes.RelPermalink }}" integrity="{{ $themes.Data.Integrity }}" />
+{{- end }}
+
+{{- /*
+  Apply the stored (or default) palette, and the light/dark class it implies,
+  before the first paint.
+
+  Hextra's own theme.js is a <head> script that runs just before this one; it
+  unconditionally sets a "dark"/"light" class on <html> from
+  site.Params.theme.default, and that part happens whether or not the toggle
+  is shown. Nothing sets data-kx-theme, which is ours, or corrects that class
+  for whichever kx palette is actually stored. This runs immediately after
+  theme.js, in the same head, so the correction lands before anything paints;
+  doing it only where the picker itself lives, far down the page, would show
+  the wrong navbar for as long as the rest of the page takes to load.
+
+  Setting the class here is not the end of it, though: Hextra also ships
+  assets/js/core/theme.js, a *body* script (unconditional — it runs whether
+  or not the toggle is displayed) that unconditionally reapplies a class from
+  localStorage["color-theme"] on every load, falling back to
+  site.Params.theme.default when that key is unset. Since we only ever write
+  to our own "kx-theme" key, that script found its key missing on every load
+  and reset the class straight back to the configured default a moment after
+  this script got it right — confirmed by watching the class flip via a
+  console trace. Writing color-theme here too, in the same value, means that
+  later script finds an answer already waiting and reapplies the same class
+  we set, rather than overriding it.
+
+  The name → mode lookup is generated from the same data the picker reads
+  (kx-themes.html), so a palette can't go missing from one and not the other.
+*/ -}}
+<script>
+  (function () {
+    var MODES = {};
+    {{- range hugo.Data.kx_themes }}
+    {{/* jsonify alone still gets re-escaped as an opaque JS string by Hugo's
+         contextual auto-escaping inside <script>; safeJS is what tells it
+         this text is already valid JS and to leave it alone. */}}
+    MODES[{{ .name | jsonify | safeJS }}] = {{ .mode | jsonify | safeJS }};
+    {{- end }}
+    // Matches DEFAULT_THEME in kx-themes.html and defaultDark in
+    // tools/gen-site-theme.
+    var DEFAULT_THEME = "github-dark";
+
+    var stored = null;
+    try {
+      stored = localStorage.getItem("kx-theme");
+    } catch (e) {
+      /* Private browsing refuses storage; the default still applies. */
+    }
+
+    var name = stored || DEFAULT_THEME;
+    var mode = MODES[name] || "dark";
+    document.documentElement.setAttribute("data-kx-theme", name);
+    document.documentElement.classList.remove("light", "dark");
+    document.documentElement.classList.add(mode);
+    document.documentElement.style.colorScheme = mode;
+    try {
+      localStorage.setItem("color-theme", mode);
+    } catch (e) {
+      /* Same private-browsing case as above; Hextra's body script will fall
+         back to the Hugo default too, matching whatever we just set. */
+    }
+  })();
+</script>

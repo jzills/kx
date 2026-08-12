@@ -1,0 +1,37 @@
+{{ define "main" }}
+  {{- /*
+    Hextra's home layout, with the sidebar's desktop placeholder, the table of
+    contents and the <h1> removed.
+
+    The theme reserves space for all three on every page. On a landing page
+    with no headings worth listing, that left the content column at 672px of
+    a 1440px viewport — narrow enough that the terminal sample, which is a
+    fixed-width capture, had to scroll sideways.
+
+    hextra-max-content-width is kept: without it the page runs the full width
+    of the browser, which is too wide to read and left the feature grid fitting
+    four cards on one row and two on the next.
+
+    The <h1> went for a different reason: it rendered "kx — kubectl, indexed"
+    directly above a hero carrying the mark and the same tagline. The title
+    stays in <head>, which is what tabs and search results use.
+  */ -}}
+  <div class="hx:mx-auto hx:flex hextra-max-page-width">
+    {{- /*
+      displayPlaceholder false is what keeps this from reserving the desktop
+      width stock Hextra does (see above) — but the element itself has to
+      exist: core/menu.js reads .hextra-sidebar-container unconditionally on
+      every page load and null-derefs without it, hamburger menu or not. On
+      mobile, where that width concern doesn't apply, this is what the
+      hamburger actually opens: page nav plus this page's own headings.
+    */ -}}
+    {{ partial "sidebar.html" (dict "context" . "disableSidebar" true "displayPlaceholder" false) }}
+    <article class="hx:w-full hx:break-words hx:flex hx:min-h-[calc(100vh-var(--navbar-height))] hx:min-w-0 hx:justify-center hx:pb-8">
+      <main id="content" class="hx:w-full hx:min-w-0 hextra-max-content-width hx:px-6 hx:pt-4 hx:md:px-12">
+        <div class="content">
+          {{ .Content }}
+        </div>
+      </main>
+    </article>
+  </div>
+{{ end }}

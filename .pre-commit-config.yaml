@@ -24,3 +24,13 @@ repos:
         entry: go run ./tools/gen-command-table
         pass_filenames: false
         always_run: true
+
+      - id: gen-site-theme
+        name: Regenerate site palette stylesheet
+        language: system
+        # Same contract as gen-command-table: reads internal/theme so the site
+        # is coloured from the registry the terminal and --html reports use,
+        # and exits non-zero when it rewrites the generated files.
+        entry: go run ./tools/gen-site-theme
+        pass_filenames: false
+        always_run: true
