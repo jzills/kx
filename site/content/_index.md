@@ -9,13 +9,13 @@ toc: false
   <p class="kx-hero__blurb">
     Run <code>kx get &lt;resource&gt;</code> once and every row gets a number.
     From then on you reference resources by that number instead of typing
-    names — <code>kx logs 3</code>, <code>kx delete 2 5</code>, <code>kx exec
+    names — <code>kx logs 2</code>, <code>kx delete 2 5</code>, <code>kx exec
     1</code>.
   </p>
 </div>
 
 <div class="kx-section">
-  {{< kx-demo >}}
+  {{< kx-hero-terminal >}}
 </div>
 
 <div class="kx-section" id="install">

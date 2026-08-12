@@ -234,9 +234,9 @@
   --primary-lightness: 30%;
 }
 
-/* Show only the media matching the active palette: the terminal capture
-   (tools/gen-site-terminal), the demo recording (demo/render-themes.sh)
-   and the report screenshots (demo/shoot-reports.py). */
+/* Show only the media matching the active palette: the terminal captures
+   (tools/gen-site-terminal) and the report screenshots
+   (demo/shoot-reports.py). */
 [data-kx-terminal] { display: none; }
 [data-kx-terminal="github-dark"] { display: block; }
 [data-kx-theme="dracula"] [data-kx-terminal="github-dark"] { display: none; }
@@ -257,26 +257,6 @@
 [data-kx-theme="mono"] [data-kx-terminal="mono"] { display: block; }
 [data-kx-theme="light"] [data-kx-terminal="github-dark"] { display: none; }
 [data-kx-theme="light"] [data-kx-terminal="light"] { display: block; }
-[data-kx-demo] { display: none; }
-[data-kx-demo="github-dark"] { display: block; }
-[data-kx-theme="dracula"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="dracula"] [data-kx-demo="dracula"] { display: block; }
-[data-kx-theme="nord"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="nord"] [data-kx-demo="nord"] { display: block; }
-[data-kx-theme="gruvbox"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="gruvbox"] [data-kx-demo="gruvbox"] { display: block; }
-[data-kx-theme="solarized-dark"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="solarized-dark"] [data-kx-demo="solarized-dark"] { display: block; }
-[data-kx-theme="catppuccin-mocha"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="catppuccin-mocha"] [data-kx-demo="catppuccin-mocha"] { display: block; }
-[data-kx-theme="tokyo-night"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="tokyo-night"] [data-kx-demo="tokyo-night"] { display: block; }
-[data-kx-theme="rose-pine"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="rose-pine"] [data-kx-demo="rose-pine"] { display: block; }
-[data-kx-theme="mono"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="mono"] [data-kx-demo="mono"] { display: block; }
-[data-kx-theme="light"] [data-kx-demo="github-dark"] { display: none; }
-[data-kx-theme="light"] [data-kx-demo="light"] { display: block; }
 [data-kx-shot] { display: none; }
 [data-kx-shot="github-dark"] { display: block; }
 [data-kx-theme="dracula"] [data-kx-shot="github-dark"] { display: none; }

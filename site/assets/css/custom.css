@@ -51,14 +51,13 @@ body {
   margin: 0 auto;
 }
 
-/* A demo GIF is well over a megabyte; below-the-fold ones stay unfetched
- * until they are scrolled to. */
+/* The report screenshots (kx-shot.html): several hundred KB each, so
+ * below-the-fold ones stay unfetched until they are scrolled to. */
 .kx-media {
   width: 100%;
-  /* 1024px is the recordings' native width — the same width
-     --hextra-max-content-width leaves this section at desktop, so they
-     render pixel-for-pixel there instead of being downscaled into a blur.
-     The report screenshots are wider and scale down cleanly. */
+  /* The shots are captured wider than this, so they only ever scale down —
+     PNG screenshots tolerate that far better than the monospace recording
+     that used to live in this section did. */
   max-width: 64rem;
   margin: 0 auto;
   display: block;
