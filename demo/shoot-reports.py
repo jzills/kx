@@ -36,7 +36,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = ROOT / "site" / "static" / "img"
+# assets/, not static/: Hugo can read an image's real dimensions from a
+# resource, and the shots are each a different height now that they are trimmed
+# to a whole grid row. A static/ file cannot be introspected, so the shortcode
+# would have to hardcode a size and reserve the wrong space.
+OUTPUT_DIR = ROOT / "site" / "assets" / "img"
 THEME_DATA = ROOT / "site" / "data" / "kx_themes.json"
 
 # The reports the site shows. `scan` is included but needs its engine's CLI, so
@@ -114,13 +118,51 @@ def stop(process) -> None:
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
 
 
+# Trim the shot to the last grid row that fits entirely on screen.
+#
+# A viewport-sized screenshot slices whichever row straddles the bottom edge,
+# which reads as a broken image rather than as a report that continues. Ending
+# on a row boundary looks deliberate. Tabulator draws every row — tree nodes,
+# CVEs, sweep findings — as .tabulator-row, and its group headers as
+# .tabulator-group, so one rule covers all three reports.
+LAST_ROW_BOTTOM = """
+(maxHeight) => {
+  let bottom = 0;
+  const rows = document.querySelectorAll('.tabulator-row, .tabulator-group');
+  for (const row of rows) {
+    const edge = row.getBoundingClientRect().bottom;
+    if (edge <= maxHeight && edge > bottom) bottom = edge;
+  }
+  return Math.round(bottom);
+}
+"""
+
+# How much of the viewport bottom to ignore when looking for the last row, so
+# the search never picks one whose separator would still be clipped.
+ROW_MARGIN = 10
+
+
 def shoot(page, url: str, destination: Path) -> None:
     page.goto(url, wait_until="networkidle")
     # The grids hydrate after load; without settling, a shot can catch the
     # table mid-render.
     page.wait_for_timeout(600)
+
+    height = VIEWPORT["height"]
+    bottom = page.evaluate(LAST_ROW_BOTTOM, height - ROW_MARGIN)
+    # A report with no grid at all — or one whose first row is already taller
+    # than the viewport — keeps the full frame rather than an empty sliver.
+    if bottom > height // 2:
+        # Exactly the row's edge, with nothing added: even ten pixels past it
+        # shows the top sliver of the next row, which is the thing that reads
+        # as a broken image rather than as a report that continues below.
+        height = bottom
+
     destination.parent.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(destination))
+    page.screenshot(
+        path=str(destination),
+        clip={"x": 0, "y": 0, "width": VIEWPORT["width"], "height": height},
+    )
 
 
 def main() -> int:

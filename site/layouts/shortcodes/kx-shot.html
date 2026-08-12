@@ -1,25 +1,35 @@
 {{- /*
   A --html report screenshot, one per palette.
 
-  Named by report, so the same shortcode serves diag, scan and tree:
-
       {{< kx-shot report="diag" alt="..." >}}
 
   Iterates the generated palette list, like the demo recordings, so a palette
   cannot gain a slot with no screenshot behind it.
+
+  Dimensions are read from the files rather than written here. The shots are
+  trimmed to end on a whole grid row, so each is a slightly different height,
+  and a hardcoded one would reserve the wrong space and shift the page as the
+  image loads. A missing shot warns at build time instead of publishing a
+  broken image.
 */ -}}
 {{- $report := .Get "report" -}}
 {{- $alt := .Get "alt" | default (printf "kx %s --html dashboard" $report) -}}
 {{- $default := "github-dark" -}}
 {{- range hugo.Data.kx_themes }}
+  {{- $name := .name -}}
+  {{- $path := printf "img/%s-html-%s.png" $report $name -}}
+  {{- with resources.Get $path }}
   <img
     class="kx-media"
-    data-kx-shot="{{ .name }}"
-    src="{{ printf "img/%s-html-%s.png" $report .name | relURL }}"
-    alt="{{ $alt }} in the {{ .name }} theme"
-    {{ if ne .name $default }}loading="lazy"{{ end }}
+    data-kx-shot="{{ $name }}"
+    src="{{ .RelPermalink }}"
+    width="{{ .Width }}"
+    height="{{ .Height }}"
+    alt="{{ $alt }} in the {{ $name }} theme"
+    {{ if ne $name $default }}loading="lazy"{{ end }}
     decoding="async"
-    width="1440"
-    height="900"
   />
+  {{- else }}
+    {{- warnf "kx-shot: no screenshot at assets/%s — run demo/shoot-reports.py" $path }}
+  {{- end }}
 {{- end }}
