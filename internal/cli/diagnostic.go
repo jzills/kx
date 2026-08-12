@@ -55,9 +55,10 @@ type TriageCommand struct {
 // grid filters healthy rows away client-side and an index must resolve
 // whatever the grid can show.
 //
-// A cluster-wide sweep saves no state: there are no indexes for a
-// cross-namespace listing to protect, since names repeat across namespaces.
-// kx get -A follows the same rule.
+// A cluster-wide sweep saves state like any other, with each resource
+// recording the namespace it was swept from — the entry itself records none,
+// since there is no single namespace the listing came from. kx get -A follows
+// the same rule.
 func (c TriageCommand) Execute(
 	ctx context.Context, namespace string, allNamespaces, full bool,
 ) (render.TriageResult, error) {
@@ -100,22 +101,22 @@ func (c TriageCommand) Execute(
 		Full:          full,
 	}
 
-	// A cluster-wide sweep neither saves state nor drops rows: there are no
-	// indexes to build entries for, and none to protect from a repeated name.
-	if allNamespaces {
-		return result, nil
-	}
-
 	// Every swept resource is indexed, not just the unhealthy ones printed by
 	// default, so an index resolves whatever row the HTML grid's full
 	// inventory shows — reports is severity-sorted, so unhealthy's own
 	// positions are unaffected, a prefix of this same order.
 	var entries []state.Resource
 	for _, report := range reports {
-		entries = append(entries, state.Resource{Name: report.Name, Kind: report.Kind})
+		entries = append(entries, state.Resource{
+			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
+		})
 	}
 
 	if len(entries) > 0 {
+		// namespace is already "" for a cluster-wide sweep — blanked above, the
+		// way client-go's listers spell "every namespace" — which is exactly what
+		// the entry wants: no single namespace, each resource recording its own.
+		// A second guard here would be dead code.
 		if err := c.Save(state.State{
 			Resources: state.NewOrderedResources(entries),
 			Namespace: namespace,
@@ -283,7 +284,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"Sweep every namespace; results are not indexed")
+		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("html", false,

@@ -121,7 +121,7 @@
       <script type="application/json" id="kx-diag-data">{{diagRowsJSON .Reports}}</script>
       {{range $i, $r := .Reports}}<template id="diag-detail-{{$i}}">{{template "report" $r}}</template>{{end}}
       <footer>
-        {{if .AllNamespaces}}indexes not saved for all-namespace listings{{else}}kx diag &lt;index&gt; for the same detail in your terminal{{end}}
+        kx diag &lt;index&gt; for the same detail in your terminal
       </footer>
     {{end}}
   </div>

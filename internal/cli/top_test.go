@@ -11,7 +11,6 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
-	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -246,8 +245,9 @@ func TestTopCommandAllNamespacesCaptionSaysAllNamespaces(t *testing.T) {
 	if strings.Contains(sink.String(), "· prod ·") {
 		t.Errorf("output = %q, want no single namespace named in the caption", sink.String())
 	}
-	if !strings.Contains(sink.String(), render.AllNamespacesNote) {
-		t.Errorf("output = %q, want the all-namespaces note explaining no indexes", sink.String())
+	// The note explaining why -A had no indexes is gone, because it does now.
+	if !strings.Contains(sink.String(), "X") {
+		t.Errorf("output = %q, want an index column", sink.String())
 	}
 }
 

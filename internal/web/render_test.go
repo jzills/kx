@@ -439,8 +439,10 @@ func TestRenderDiagSweepIndexesRows(t *testing.T) {
 // the index column and adds namespace instead (diagColumns in kx-grid.js) —
 // a client-side decision this test can't observe directly. What it pins is
 // the one thing the server controls: the mount's data-all-namespaces
-// attribute, which is what that column choice branches on.
-func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
+// attribute, which is what that column choice branches on. The grid adds a
+// Namespace column on that flag; it keeps the index column either way, since
+// an -A sweep is indexed now.
+func TestRenderDiagAllNamespacesFlagsItsGridMount(t *testing.T) {
 	page := sweepPage(t)
 	page.AllNamespaces = true
 	page.Scope = "all namespaces"

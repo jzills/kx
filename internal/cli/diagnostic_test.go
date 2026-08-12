@@ -62,11 +62,13 @@ func triageOf(gatherer Gatherer, saved *[]state.State) TriageCommand {
 	}
 }
 
-// -A sweeps every namespace and saves nothing: names repeat across namespaces,
-// so an index would resolve to whichever row happened to be written last.
-func TestTriageAllNamespacesSweepsEverythingAndSavesNothing(t *testing.T) {
+// -A sweeps every namespace and indexes what it finds, now that a resource
+// carries the namespace it was found in. Two same-named workloads in different
+// namespaces must each keep their own number.
+func TestTriageAllNamespacesSweepsEverythingAndIndexesIt(t *testing.T) {
 	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
 		unhealthy(kinds.Deployment, "web", "prod"),
+		unhealthy(kinds.Deployment, "web", "staging"),
 	}}
 	var saved []state.State
 
@@ -79,10 +81,39 @@ func TestTriageAllNamespacesSweepsEverythingAndSavesNothing(t *testing.T) {
 		t.Errorf("swept %q, want every namespace", gatherer.sweptWith)
 	}
 	if !result.AllNamespaces {
-		t.Error("result is not marked all-namespaces, so it would render an X column")
+		t.Error("result is not marked all-namespaces")
 	}
-	if len(saved) != 0 {
-		t.Errorf("saved %d states, want none", len(saved))
+	if len(saved) != 1 {
+		t.Fatalf("saved %d states, want 1", len(saved))
+	}
+	entries := saved[0].Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d resources, want 2 (same-named rows must not collapse)", len(entries))
+	}
+	if entries[0].Namespace != "prod" || entries[1].Namespace != "staging" {
+		t.Errorf("namespaces = %q, %q; want prod, staging",
+			entries[0].Namespace, entries[1].Namespace)
+	}
+}
+
+// The entry namespace stays empty for a cluster-wide sweep, so Fields' fallback
+// never hands one namespace's name to a row from another.
+func TestTriageAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
+	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
+		unhealthy(kinds.Deployment, "web", "prod"),
+	}}
+	var saved []state.State
+
+	if _, err := triageOf(gatherer, &saved).
+		Execute(context.Background(), "ignored", true, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(saved) != 1 {
+		t.Fatalf("saved %d states, want 1", len(saved))
+	}
+	if saved[0].Namespace != "" {
+		t.Errorf("entry namespace = %q, want empty for a cluster-wide sweep", saved[0].Namespace)
 	}
 }
 

@@ -96,16 +96,15 @@ type TopPage struct {
 	Rows  []TopRow
 }
 
-// TopRow is one pod's or node's usage. Index is 0 for the -A pods listing,
-// which stays unindexed — the same "unset" convention DiagRow.Index uses
-// for -A mode.
+// TopRow is one pod's or node's usage.
 type TopRow struct {
 	Index int
 	Name  string
 	// Namespace is empty in single-namespace mode (no NAMESPACE column to
 	// read it from) — the grid only shows this column when at least one
 	// row actually has one, matching the -A-only NAMESPACE column
-	// kubectl top pods -A's own terminal output already has.
+	// kubectl top pods -A's own terminal output already has. An -A listing
+	// carries both this and an Index now.
 	Namespace      string
 	CPU, Memory    string
 	CPUPct, MemPct Usage
@@ -255,7 +254,7 @@ func sortedKeys(styles map[string]string) []string {
 // rather than reimplemented in JS from JSON.
 type DiagRow struct {
 	Row       int
-	Index     int // 1-based, matches the sweep's index column; unset in -A mode
+	Index     int // 1-based, matches the sweep's index column
 	Kind      string
 	Name      string
 	Namespace string

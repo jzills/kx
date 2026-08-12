@@ -1388,3 +1388,39 @@ func TestFieldsNamedAllowsTheContextSlot(t *testing.T) {
 		t.Errorf("name = %q, want %q — switching back must stay possible", name, "staging")
 	}
 }
+
+// An entry whose resources carry their own namespaces spans several, so it has
+// no entry-level namespace by design. Defaulting that empty value to "default"
+// — which every stack entry used to get, back when an empty namespace could
+// only mean "unrecorded" — captions an all-namespace listing with a namespace
+// it never came from.
+func TestSpanningEntryKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewOrderedResources([]Resource{
+		{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+		{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
+	})})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — the listing spans namespaces", loaded.Namespace)
+	}
+}
+
+// An entry recording no namespace anywhere is genuinely unscoped, and still
+// reads back as "default" so nothing downstream has to handle an empty one.
+func TestUnscopedEntryStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx")})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default", loaded.Namespace)
+	}
+}
