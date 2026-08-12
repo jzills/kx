@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1236,5 +1237,154 @@ func TestSaveWithNoContextHookStampsNothing(t *testing.T) {
 	}
 	if loaded.Context != "" {
 		t.Errorf("Context = %q, want empty", loaded.Context)
+	}
+}
+
+// listedIn seeds an entry recorded against one context, then leaves the service
+// reporting another — the shape of `kx get pods` followed by `kx context 2`.
+func listedIn(t *testing.T, listed, current string, entry State) *Service {
+	t.Helper()
+	service := newTestService(t, 10)
+	service.Context = func() string { return listed }
+	if err := service.Save(entry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	service.Context = func() string { return current }
+	return service
+}
+
+// An index counted in one cluster must not be spent in another: names repeat
+// across clusters, so the resource it resolves to is a different resource that
+// happens to share a name.
+func TestFieldsRefusesAnIndexFromAnotherContext(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Fields(1)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Fields = %v, want a ContextMismatchError", err)
+	}
+	if mismatch.Listed != "staging" || mismatch.Current != "production" {
+		t.Errorf("mismatch = %+v, want listed staging, current production", mismatch)
+	}
+}
+
+func TestContextMismatchErrorNamesBothContexts(t *testing.T) {
+	err := ContextMismatchError{Index: 3, Listed: "staging", Current: "production"}
+
+	for _, want := range []string{"3", "staging", "production"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Error() = %q, want it to name %q", err.Error(), want)
+		}
+	}
+}
+
+func TestFieldsAllowsAMatchingContext(t *testing.T) {
+	service := listedIn(t, "staging", "staging",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields on a matching context = %v, want nil", err)
+	}
+}
+
+// An entry with no recorded context is from a kubeconfig that names no current
+// one. Unknown is not a mismatch — blocking on it would break kx for anyone
+// whose kubeconfig has no current-context set.
+func TestFieldsAllowsAnEntryWithNoRecordedContext(t *testing.T) {
+	service := listedIn(t, "", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields on an unrecorded context = %v, want nil", err)
+	}
+}
+
+func TestFieldsAllowsAnUnknownCurrentContext(t *testing.T) {
+	service := listedIn(t, "staging", "",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields with no current context = %v, want nil", err)
+	}
+}
+
+func TestFieldsExpectingRefusesAnIndexFromAnotherContext(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, err := service.FieldsExpecting(1, kinds.Pod)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("FieldsExpecting = %v, want a ContextMismatchError", err)
+	}
+}
+
+// The namespace slot is as cluster-bound as any listing: namespaces are server
+// objects, and the ones in another cluster are different namespaces.
+func TestFieldsNamedRefusesForTheNamespaceSlot(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	if err := service.SaveNamed(State{Resources: namespaces("default", "kube-system")}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	service.Context = func() string { return "production" }
+
+	_, _, err := service.FieldsNamed(2, kinds.Namespace)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("FieldsNamed on the namespace slot = %v, want a ContextMismatchError", err)
+	}
+	// A slot has no query to replay, so it must carry its own relist command —
+	// without it the caller falls back to replaying the history stack, which
+	// answers a namespace question with whatever was last listed.
+	if mismatch.Relist != "kx ns" {
+		t.Errorf("Relist = %q, want %q", mismatch.Relist, "kx ns")
+	}
+}
+
+// A history entry carries the query that built it, so the caller replays that
+// rather than advising a command. An entry that advised one would be telling
+// the user to do what kx is about to do for them.
+func TestStackMismatchCarriesNoRelistHint(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Fields(1)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Fields = %v, want a ContextMismatchError", err)
+	}
+	if mismatch.Relist != "" {
+		t.Errorf("Relist = %q, want empty so the caller replays the saved query", mismatch.Relist)
+	}
+}
+
+// The context slot is the one exemption, and it is not a special case so much
+// as the point: contexts live in kubeconfig, not in a cluster, and the slot
+// exists to switch between them. Guarding it would make `kx context 2`
+// unusable the moment it had been used once — the switch it performs is what
+// creates the mismatch that would then block the next switch.
+func TestFieldsNamedAllowsTheContextSlot(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	if err := service.SaveNamed(State{
+		Resources: NewResources([]string{"staging", "production"}, kinds.Context),
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	service.Context = func() string { return "production" }
+
+	name, _, err := service.FieldsNamed(1, kinds.Context)
+	if err != nil {
+		t.Fatalf("FieldsNamed on the context slot = %v, want it to resolve", err)
+	}
+	if name != "staging" {
+		t.Errorf("name = %q, want %q — switching back must stay possible", name, "staging")
 	}
 }

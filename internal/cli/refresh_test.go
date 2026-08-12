@@ -162,6 +162,148 @@ func TestStaleRefreshHintsWhenThereIsNoQueryToReplay(t *testing.T) {
 	}
 }
 
+// A listing from another cluster is recovered exactly like a stale one: the
+// saved query is re-run — against the context the user is in now — so a fresh
+// listing is on screen to pick from. The original command is never retried,
+// which is the property that stops anything reaching the wrong cluster.
+func TestIsStaleRecognizesAContextMismatch(t *testing.T) {
+	err := state.ContextMismatchError{Index: 1, Listed: "staging", Current: "production"}
+	if !isStale(err) {
+		t.Error("isStale on a ContextMismatchError = false, want true")
+	}
+}
+
+// mismatchServices seeds a listing recorded against another context, with the
+// service reporting the one the user has since switched to.
+func mismatchServices(t *testing.T, kube kubectl.Service, query *state.Query) Services {
+	t.Helper()
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	store.Context = func() string { return "staging" }
+	if err := store.Save(state.State{
+		Resources: state.NewResources([]string{"api-old"}, kinds.Pod),
+		Namespace: "prod",
+		Query:     query,
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	store.Context = func() string { return "production" }
+	return Services{
+		Kubectl: kube, State: store, Index: index.Service{}, Config: config.Default(),
+	}
+}
+
+func mismatchCommand(services Services) *cobra.Command {
+	return withRefresh(services, &cobra.Command{
+		Use: "describe",
+		RunE: func(*cobra.Command, []string) error {
+			_, _, _, err := services.State.Fields(1)
+			return err
+		},
+	})
+}
+
+// A mismatch is not churn, and saying "state was stale" for it describes the
+// wrong problem: the listing is intact, it just belongs to another cluster.
+func TestContextMismatchRefreshLeadNamesTheContext(t *testing.T) {
+	out := captureRender(t)
+	services := mismatchServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Resource: "pods", Args: []string{}})
+
+	cmd := mismatchCommand(services)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("mismatch command returned no error")
+	}
+
+	if strings.Contains(out.String(), "State was stale") {
+		t.Errorf("a context mismatch reported itself as stale state:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "context") {
+		t.Errorf("refresh lead does not mention the context:\n%s", out.String())
+	}
+}
+
+// The listing has to land below the failure that explains it, the same way a
+// stale refresh does — it is what the next index is picked from.
+func TestContextMismatchPrintsTheListingBelowTheError(t *testing.T) {
+	out := captureRender(t)
+	services := mismatchServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Resource: "pods", Args: []string{}})
+
+	cmd := mismatchCommand(services)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("mismatch command returned no error")
+	}
+
+	failure := strings.Index(out.String(), "was listed in context 'staging'")
+	listing := strings.Index(out.String(), "nginx-abc-xyz")
+	if failure < 0 || listing < 0 {
+		t.Fatalf("output missing the error or the refreshed listing:\n%s", out.String())
+	}
+	if failure > listing {
+		t.Errorf("listing rendered above the error:\n%s", out.String())
+	}
+}
+
+// The refreshed listing belongs to the context the user is in now, not the one
+// it was replayed from — otherwise the very next index mismatches again.
+func TestContextMismatchRefreshSavesUnderTheCurrentContext(t *testing.T) {
+	captureRender(t)
+	services := mismatchServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Resource: "pods", Args: []string{}})
+
+	cmd := mismatchCommand(services)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("mismatch command returned no error")
+	}
+
+	if _, _, _, err := services.State.Fields(1); err != nil {
+		t.Errorf("index after refresh = %v, want it to resolve in the current context", err)
+	}
+}
+
+// A slot mismatch cannot be recovered by replaying the history stack: the
+// stack's query relists something else entirely, so `kx ns 2` after a context
+// switch would answer with a pods table. The slot has no query of its own, so
+// the error names the command that refills it instead of a listing being
+// conjured from an unrelated one.
+func TestNamespaceSlotMismatchDoesNotReplayTheStackQuery(t *testing.T) {
+	out := captureRender(t)
+	kube := &fakeKubectl{output: podsOutput}
+	services := mismatchServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	if err := services.State.SaveNamed(state.State{
+		Resources: state.NewResources([]string{"default", "kube-system"}, kinds.Namespace),
+		Context:   "staging",
+	}); err != nil {
+		t.Fatalf("seed slot: %v", err)
+	}
+
+	cmd := withRefresh(services, &cobra.Command{
+		Use: "namespace",
+		RunE: func(*cobra.Command, []string) error {
+			_, _, err := services.State.FieldsNamed(2, kinds.Namespace)
+			return err
+		},
+	})
+	err := cmd.RunE(cmd, nil)
+	if err == nil {
+		t.Fatal("slot mismatch returned no error")
+	}
+
+	if strings.Contains(out.String(), "nginx-abc-xyz") {
+		t.Errorf("a namespace slot mismatch relisted pods:\n%s", out.String())
+	}
+	// Returned rather than rendered: nothing was recovered, so the error travels
+	// to the entrypoint to be printed like any other failure. A SilentError here
+	// would mean the refresh path had swallowed it after showing nothing.
+	var silent SilentError
+	if errors.As(err, &silent) {
+		t.Fatalf("slot mismatch was reported as already-handled, but nothing was shown")
+	}
+	if !strings.Contains(err.Error(), "kx ns") {
+		t.Errorf("error = %q, want it to name the command that refills the slot", err)
+	}
+}
+
 // A probe confirming the resource is gone turns a plain failure into stale
 // state; a probe that succeeds leaves the failure alone.
 func TestEnsureExists(t *testing.T) {
