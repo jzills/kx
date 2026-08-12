@@ -10,7 +10,7 @@ toc: false
     Run <code>kx get &lt;resource&gt;</code> once and every row gets a number.
     From then on you reference resources by that number instead of typing
     names — <code>kx logs 2</code>, <code>kx delete 2 5</code>, <code>kx exec
-    1</code>.
+    1</code>
   </p>
 </div>
 
@@ -49,7 +49,7 @@ toc: false
   <h2 class="kx-section__title">One listing, every command</h2>
   <p class="kx-section__lede">
     Indexes come from the last listing and stay put. Several at once, a
-    range, or a range left open — <code>kx delete 1 2..4 5..</code>.
+    range, or a range left open — <code>kx delete 1 2..4 5..</code>
   </p>
 {{< kx-terminal >}}
 </div>
@@ -71,7 +71,7 @@ toc: false
       <p class="kx-feature__body">
         <code>kx scan</code> resolves a workload's unique images and scans each
         one, printing a severity summary. Docker Scout by default, Trivy with
-        <code>--engine trivy</code>.
+        <code>--engine trivy</code>
       </p>
     </div>
     <div class="kx-feature">
