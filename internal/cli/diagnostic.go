@@ -55,9 +55,10 @@ type TriageCommand struct {
 // grid filters healthy rows away client-side and an index must resolve
 // whatever the grid can show.
 //
-// A cluster-wide sweep saves no state: there are no indexes for a
-// cross-namespace listing to protect, since names repeat across namespaces.
-// kx get -A follows the same rule.
+// A cluster-wide sweep saves state like any other, with each resource
+// recording the namespace it was swept from — the entry itself records none,
+// since there is no single namespace the listing came from. kx get -A follows
+// the same rule.
 func (c TriageCommand) Execute(
 	ctx context.Context, namespace string, allNamespaces, full bool,
 ) (render.TriageResult, error) {
@@ -100,25 +101,26 @@ func (c TriageCommand) Execute(
 		Full:          full,
 	}
 
-	// A cluster-wide sweep neither saves state nor drops rows: there are no
-	// indexes to build entries for, and none to protect from a repeated name.
-	if allNamespaces {
-		return result, nil
-	}
-
 	// Every swept resource is indexed, not just the unhealthy ones printed by
 	// default, so an index resolves whatever row the HTML grid's full
 	// inventory shows — reports is severity-sorted, so unhealthy's own
 	// positions are unaffected, a prefix of this same order.
 	var entries []state.Resource
 	for _, report := range reports {
-		entries = append(entries, state.Resource{Name: report.Name, Kind: report.Kind})
+		entries = append(entries, state.Resource{
+			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
+		})
 	}
 
 	if len(entries) > 0 {
+		// namespace is already "" for a cluster-wide sweep — blanked above, the
+		// way client-go's listers spell "every namespace" — which is exactly what
+		// the entry wants: no single namespace, each resource recording its own.
+		// A second guard here would be dead code.
 		if err := c.Save(state.State{
-			Resources: state.NewOrderedResources(entries),
-			Namespace: namespace,
+			Resources:     state.NewOrderedResources(entries),
+			Namespace:     namespace,
+			AllNamespaces: allNamespaces,
 		}); err != nil {
 			return render.TriageResult{}, err
 		}
@@ -138,7 +140,7 @@ func (c TriageCommand) Execute(
 func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 	scope := result.Namespace
 	if result.AllNamespaces {
-		scope = "all namespaces"
+		scope = render.AllNamespaces
 	}
 	return web.DiagPage{
 		Meta:          meta,
@@ -164,7 +166,7 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        use + " [index]",
-		SuggestFor: []string{"debug", "triage", "health", "why", "status"},
+		SuggestFor: []string{"triage", "health", "why", "status"},
 		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases:    aliases,
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
@@ -237,9 +239,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				scope := namespace
 				if allNamespaces {
-					scope = "all namespaces"
+					scope = render.AllNamespaces
 				}
-				meta, err := pageMeta(services.Config.Theme, "kx diag · "+scope,
+				meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
 				if err != nil {
 					return err
@@ -268,7 +270,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return nil
 			}
 			meta, err := pageMeta(services.Config.Theme,
-				"kx diag · "+string(report.Kind)+"/"+report.Name,
+				"diag · "+string(report.Kind)+"/"+report.Name,
 				invocation(use, args[0], portFlag(port)))
 			if err != nil {
 				return err
@@ -283,7 +285,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"Sweep every namespace; results are not indexed")
+		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("html", false,

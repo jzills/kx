@@ -46,9 +46,16 @@ func (s Services) confirm() func(string) error {
 
 // NewServices builds the production service set from the loaded config.
 func NewServices(cfg config.Config) Services {
+	client := kubectl.New()
+	states := state.NewService(cfg.MaxHistory)
+	// Every entry the state service writes records the context it was listed
+	// against. Wired here, as a hook rather than a value, because the state
+	// service is the one thing every save path goes through — the tree walk and
+	// the triage sweep both save without holding a kubectl service of their own.
+	states.Context = client.CurrentContext
 	return Services{
-		Kubectl:    kubectl.New(),
-		State:      state.NewService(cfg.MaxHistory),
+		Kubectl:    client,
+		State:      states,
 		Index:      index.Service{},
 		Config:     cfg,
 		Kubernetes: kubernetesClient,
@@ -93,7 +100,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// from it means the resource type doesn't exist — refreshing the listing
 	// would be beside the point. Every other command resolves an index, where a
 	// NotFound usually means the saved listing has gone stale.
-	installHelp(root, info.Version)
+	installHelp(root, info.ShortTag())
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))
@@ -125,6 +132,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newLogsCommand(services),
 		newEditCommand(services),
 		newExecCommand(services),
+		newDebugCommand(services),
 		newDeleteCommand(services),
 		newScaleCommand(services),
 		newRolloutCommand(services),
@@ -209,7 +217,7 @@ func newGetCommand(services Services) *cobra.Command {
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
-	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
 	registerWatchFlag(cmd)
 	return cmd
 }

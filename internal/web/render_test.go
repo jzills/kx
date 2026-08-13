@@ -2,7 +2,9 @@ package web
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"html"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +26,9 @@ func testMeta(t *testing.T) Meta {
 		t.Fatalf("WebStyles returned %v", err)
 	}
 	return Meta{
-		Title:      "kx diag",
+		// The title starts at the command, the way pageMeta's callers spell
+		// it; the invocation is the command line itself, so it keeps its "kx".
+		Title:      "diag · diagnostics",
 		Invocation: "kx diag 1",
 		Captured:   time.Date(2026, 8, 1, 9, 41, 22, 0, time.UTC),
 		URL:        "http://127.0.0.1:41287",
@@ -439,8 +443,10 @@ func TestRenderDiagSweepIndexesRows(t *testing.T) {
 // the index column and adds namespace instead (diagColumns in kx-grid.js) —
 // a client-side decision this test can't observe directly. What it pins is
 // the one thing the server controls: the mount's data-all-namespaces
-// attribute, which is what that column choice branches on.
-func TestRenderDiagAllNamespacesSwapsIndexForNamespace(t *testing.T) {
+// attribute, which is what that column choice branches on. The grid adds a
+// Namespace column on that flag; it keeps the index column either way, since
+// an -A sweep is indexed now.
+func TestRenderDiagAllNamespacesFlagsItsGridMount(t *testing.T) {
 	page := sweepPage(t)
 	page.AllNamespaces = true
 	page.Scope = "all namespaces"
@@ -628,8 +634,8 @@ func TestAnchorsUseThePaletteAccent(t *testing.T) {
 }
 
 // The masthead's plain-text "kx" wordmark was replaced with an inline SVG
-// logomark so the report carries the same brand mark as kx --help's kxArt
-// banner. It must pick up the theme the same way the text wordmark did: via
+// logomark so the report carries the same brand mark as the one kx --help
+// prints. It must pick up the theme the same way the text wordmark did: via
 // the palette's accent custom property, not a fixed color, or a theme swap
 // would recolor everything else on the page except the logo.
 func TestWordmarkUsesThePaletteAccent(t *testing.T) {
@@ -650,6 +656,99 @@ func TestWordmarkUsesThePaletteAccent(t *testing.T) {
 	if !strings.Contains(rule, "fill: var(--accent);") {
 		t.Error(".wordmark does not fill through the palette's accent custom " +
 			"property, so the masthead logo would not recolor with the theme")
+	}
+}
+
+// The tab icon is the same mark, drawn from the same lines, in the palette the
+// report was rendered with — a page saved under one theme and one saved under
+// another are told apart in a tab strip by their icons.
+//
+// It has to survive html/template's URL filter, which rewrites any scheme it
+// doesn't recognise to "#ZgotmplZ" and would leave every report with a broken
+// icon; that is what the decode below is really checking.
+func TestFaviconCarriesThePaletteAccent(t *testing.T) {
+	for _, name := range []string{"github-dark", "dracula"} {
+		t.Run(name, func(t *testing.T) {
+			styles, err := theme.WebStyles(name)
+			if err != nil {
+				t.Fatalf("WebStyles returned %v", err)
+			}
+			meta := testMeta(t)
+			meta.Styles = styles
+
+			out, err := RenderDiag(DiagPage{
+				Meta: meta, Single: true,
+				Reports: []diagnostics.Report{{
+					Kind: kinds.Pod, Name: "quiet", Namespace: "diagnostics",
+					Verdict: diagnostics.OK,
+				}},
+			})
+			if err != nil {
+				t.Fatalf("RenderDiag returned %v", err)
+			}
+
+			_, rest, found := strings.Cut(string(out),
+				`<link rel="icon" type="image/svg+xml" href="`)
+			if !found {
+				t.Fatalf("no favicon link in the page head; ZgotmplZ present: %v",
+					strings.Contains(string(out), "ZgotmplZ"))
+			}
+			// html/template writes "+" as &#43; inside a URL attribute, which
+			// is what a browser decodes before fetching it.
+			href, _, _ := strings.Cut(rest, `"`)
+			encoded, ok := strings.CutPrefix(html.UnescapeString(href),
+				"data:image/svg+xml;base64,")
+			if !ok {
+				t.Fatalf("favicon href is not an inline svg data URI: %s", href)
+			}
+			svg, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				t.Fatalf("favicon is not decodable base64: %v", err)
+			}
+			if !strings.Contains(string(svg), `fill="`+styles[theme.Accent]+`"`) {
+				t.Errorf("favicon is not filled with %s's accent %s: %s",
+					name, styles[theme.Accent], svg)
+			}
+			if !strings.Contains(string(svg), "<rect") {
+				t.Errorf("favicon carries no shapes: %s", svg)
+			}
+		})
+	}
+}
+
+// Every report shape is a browser tab, so every one of them needs the icon —
+// the head is shared, and this is what says so: a page type rendered through
+// some other layout would be the one tab still showing the browser's blank
+// default.
+func TestEveryReportCarriesTheFavicon(t *testing.T) {
+	pages := map[string]func() ([]byte, error){
+		"diag": func() ([]byte, error) {
+			return RenderDiag(DiagPage{
+				Meta: testMeta(t), Single: true,
+				Reports: []diagnostics.Report{criticalReport(t)},
+			})
+		},
+		"scan": func() ([]byte, error) { return RenderScan(scanPage(t)) },
+		"tree": func() ([]byte, error) {
+			return RenderTree(TreePage{Meta: testMeta(t), Scope: "prod", Root: ownershipTree()})
+		},
+		"top": func() ([]byte, error) {
+			return RenderTop(TopPage{
+				Meta: testMeta(t), Scope: "prod",
+				Rows: []TopRow{{Index: 1, Name: "api-gateway-7d4f9c-2xk8p", CPU: "12m", Memory: "466Mi"}},
+			})
+		},
+	}
+	for name, render := range pages {
+		t.Run(name, func(t *testing.T) {
+			out, err := render()
+			if err != nil {
+				t.Fatalf("render returned %v", err)
+			}
+			if !strings.Contains(string(out), `<link rel="icon" type="image/svg+xml"`) {
+				t.Error("page has no favicon link in its head")
+			}
+		})
 	}
 }
 

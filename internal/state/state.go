@@ -14,11 +14,18 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 )
 
-// Resource is one indexed row: the name kubectl reported and the kind it was
-// listed as.
+// Resource is one indexed row: the name kubectl reported, the kind it was
+// listed as, and the namespace it lives in.
+//
+// Namespace is carried per resource, not just per entry, because a listing can
+// span namespaces — `kx get -A` is exactly that — and an index has to resolve
+// to the one place its resource actually is. It is omitted for the ordinary
+// single-namespace listing, whose namespace the entry already records; see
+// Service.Fields for the fallback that makes both shapes resolve.
 type Resource struct {
-	Name string     `json:"name"`
-	Kind kinds.Kind `json:"kind"`
+	Name      string     `json:"name"`
+	Kind      kinds.Kind `json:"kind"`
+	Namespace string     `json:"namespace,omitempty"`
 }
 
 // Resources is an ordered name→kind mapping.
@@ -116,11 +123,31 @@ type Query struct {
 	Match    *string  `json:"match"`
 }
 
-// State is one history entry: an indexed listing and the namespace it came from.
+// State is one history entry: an indexed listing, the namespace it came from,
+// and the kubeconfig context it was taken against.
+//
+// Context is what stops an index counted in one cluster from being spent in
+// another: names repeat across clusters, so without it `kx get deploy` in
+// staging followed by a context switch leaves every index silently pointing at
+// a prod resource of the same name. Empty means unknown — a kubeconfig with no
+// current context — and is never treated as a mismatch.
 type State struct {
 	Resources Resources `json:"resources"`
 	Namespace string    `json:"namespace"`
 	Query     *Query    `json:"query"`
+	Context   string    `json:"context,omitempty"`
+	// AllNamespaces records that the listing was taken across every namespace,
+	// which is why Namespace is empty rather than unrecorded.
+	//
+	// The scope is a fact the caller knows when it saves — it passed -A, or it
+	// did not — so it is recorded rather than inferred. Inferring it from
+	// whether the resources carry namespaces was wrong in both directions: a
+	// `kx tree -n prod` walk stamps every resource with prod and read as
+	// spanning, while `kx get pods -A -o custom-columns=NAME:.metadata.name`
+	// has no NAMESPACE column, recorded no namespaces, and read as
+	// single-namespace — so an empty Namespace was "corrected" to "default" and
+	// every index resolved into the wrong namespace.
+	AllNamespaces bool `json:"allNamespaces,omitempty"`
 }
 
 // Names satisfies index.Resolver.
@@ -130,7 +157,13 @@ func (s State) Names() []string { return s.Resources.Names() }
 // increasing int — a version mismatch always means "reset", so there is no
 // partial-compatibility case for semver's major/minor/patch semantics to
 // express.
-const currentSchemaVersion = 1
+//
+// 2 added State.Context and Resource.Namespace. Both are additive, and a
+// version 1 file would decode without error, but it would decode wrong: an
+// absent context reads as "unknown", which is the value that waives the
+// cluster check, so every pre-upgrade entry would be trusted in whatever
+// context the user happens to be in now. Resetting once is the cheaper answer.
+const currentSchemaVersion = 2
 
 // History is the stack of listings with a cursor marking the current entry,
 // plus the per-kind slots that sit outside the stack.
@@ -148,6 +181,38 @@ type History struct {
 
 // ErrNoState is returned when no state file exists yet.
 var ErrNoState = errors.New("No state found. Run `kx get <resource>` first.")
+
+// ContextMismatchError reports that an index was counted in one kubeconfig
+// context and is being spent in another.
+//
+// This is not a stale listing — the resource it names may well exist here — and
+// that is exactly why it has to be refused rather than warned about: names
+// repeat across clusters, so resolving it succeeds and acts on a *different*
+// resource that happens to share a name.
+type ContextMismatchError struct {
+	Index   int
+	Listed  string
+	Current string
+	// Relist names the command that rebuilds what this index counted against,
+	// and is set only when kx cannot rebuild it itself.
+	//
+	// A history entry carries the `kx get` query that produced it, so the caller
+	// replays that and shows a fresh listing; there is nothing to advise. A slot
+	// carries no query, and the history stack's query relists something else
+	// entirely — replaying it for `kx ns 2` answers with a pods table. So the
+	// slot's error names its own relist command and is reported as-is.
+	Relist string
+}
+
+func (e ContextMismatchError) Error() string {
+	message := fmt.Sprintf(
+		"Index %d was listed in context '%s'; the current context is '%s'.",
+		e.Index, e.Listed, e.Current)
+	if e.Relist == "" {
+		return message
+	}
+	return message + fmt.Sprintf(" Run '%s' to relist here.", e.Relist)
+}
 
 // ErrSchemaChanged is returned when a state file's version doesn't match this
 // build's — including files with no version key at all, which is every file
@@ -167,6 +232,33 @@ type Service struct {
 	MaxHistory int
 	// Path is the state file. Empty means ~/.kx/state.json.
 	Path string
+	// Context reports the active kubeconfig context, stamped onto every entry
+	// this service writes.
+	//
+	// A hook rather than a value so it is read at save time, not at service
+	// construction: `kx context 2` switches contexts inside a single process,
+	// and the listing saved after that switch belongs to the new one.
+	//
+	// Nil leaves entries unstamped, which reads as "unknown" everywhere it is
+	// consumed — the shape a Service built literally in a test has.
+	Context func() string
+}
+
+// context reports the active context, or "" when no hook is wired.
+func (s *Service) context() string {
+	if s.Context == nil {
+		return ""
+	}
+	return s.Context()
+}
+
+// stamp records the context an entry was listed against, leaving one the
+// caller already set alone.
+func (s *Service) stamp(entry State) State {
+	if entry.Context == "" {
+		entry.Context = s.context()
+	}
+	return entry
 }
 
 // NewService builds a state service with the configured history depth.
@@ -267,7 +359,13 @@ func (s *Service) loadHistory() (History, error) {
 		// and a context slot's scope is a context, which is legitimately empty
 		// when the kubeconfig has no current one — defaulting it to "default"
 		// would caption the listing with a context that does not exist.
-		if state.Namespace == "" {
+		//
+		// Nor does a listing that spans namespaces: each resource records its
+		// own, so an empty entry namespace is the accurate answer rather than
+		// an unrecorded one, and "default" would caption an all-namespace
+		// listing with a namespace it never came from — then resolve every one
+		// of its indexes into that namespace.
+		if state.Namespace == "" && !state.AllNamespaces {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)
@@ -377,6 +475,7 @@ func (s *Service) Save(state State) error {
 	if maxHistory < 1 {
 		maxHistory = 1
 	}
+	state = s.stamp(state)
 
 	var states []State
 	var named map[kinds.Kind]State
@@ -491,10 +590,48 @@ func (s *Service) DropAll() error {
 	return s.saveHistory(History{})
 }
 
+// namespaceAt reports the namespace the resource at a 1-based index lives in.
+//
+// The resource's own namespace wins, falling back to the entry's. Both shapes
+// are legitimate and neither can be dropped: a listing that spans namespaces
+// (`kx get -A`) has no single entry namespace to fall back to, and an ordinary
+// single-namespace listing records nothing per resource, so a lookup that only
+// consulted the resource would resolve every index to the empty namespace.
+func namespaceAt(entry State, idx int) string {
+	if resource, ok := entry.Resources.At(idx); ok && resource.Namespace != "" {
+		return resource.Namespace
+	}
+	return entry.Namespace
+}
+
+// checkContext refuses an index counted against a listing from another cluster.
+//
+// Either side unknown waives the check rather than failing it: a kubeconfig
+// with no current-context is a legitimate setup, and treating "I don't know"
+// as "they differ" would break kx for it entirely.
+//
+// Checked before the index is resolved, so a listing from the wrong cluster is
+// reported as such even when the index is also out of range — the alternative
+// answers with the size of a listing the user is no longer looking at.
+// relist names the command that rebuilds what the index counted against, and is
+// empty for a history entry, which the caller replays from its own saved query.
+func (s *Service) checkContext(entry State, idx int, relist string) error {
+	current := s.context()
+	if entry.Context == "" || current == "" || entry.Context == current {
+		return nil
+	}
+	return ContextMismatchError{
+		Index: idx, Listed: entry.Context, Current: current, Relist: relist,
+	}
+}
+
 // Fields resolves an index to the resource it names, plus its namespace and kind.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
 	current, err := s.Load()
 	if err != nil {
+		return "", "", "", err
+	}
+	if err := s.checkContext(current, idx, ""); err != nil {
 		return "", "", "", err
 	}
 	name, err = index.Resolve(current, idx)
@@ -504,7 +641,7 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	return name, current.Namespace, kind, nil
+	return name, namespaceAt(current, idx), kind, nil
 }
 
 // Count returns how many resources are in the current listing — the same
@@ -579,6 +716,10 @@ func (s *Service) FieldsExpecting(
 		return "", "", err
 	}
 
+	if err := s.checkContext(current, idx, ""); err != nil {
+		return "", "", err
+	}
+
 	name, err = index.Resolve(current, idx)
 	if err != nil {
 		return "", "", fmt.Errorf(
@@ -593,7 +734,7 @@ func (s *Service) FieldsExpecting(
 	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
 		return "", "", err
 	}
-	return name, current.Namespace, nil
+	return name, namespaceAt(current, idx), nil
 }
 
 // backHint offers `kx back` when the entry one step back lists the kind asked
@@ -665,6 +806,7 @@ func (s *Service) SaveNamed(entry State) error {
 	if kind == "" {
 		return fmt.Errorf("state: a slot needs a single-kind listing")
 	}
+	entry = s.stamp(entry)
 	history, err := s.loadHistory()
 	if err != nil {
 		// No usable stack yet. The slot is independent of it, so it is still
@@ -700,6 +842,18 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 			"No %s listing yet — run '%s' to list them.", plural, relist)
 	}
 
+	// Contexts are the one listing that isn't cluster-bound: they live in
+	// kubeconfig, and this slot exists to switch between them. Guarding it would
+	// make `kx context 2` unusable the moment it had been used once, because the
+	// switch it performs is itself what creates the mismatch — you could switch
+	// away and never switch back. Every other slot is a server object and is
+	// checked; see checkContext.
+	if kind != kinds.Context {
+		if err := s.checkContext(entry, idx, relist); err != nil {
+			return "", "", err
+		}
+	}
+
 	name, err = index.Resolve(entry, idx)
 	if err != nil {
 		// index.Resolve says "current state", which would be wrong here: the
@@ -709,7 +863,7 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)
 	}
-	return name, entry.Namespace, nil
+	return name, namespaceAt(entry, idx), nil
 }
 
 // compile-time checks that the service satisfies the interfaces its consumers

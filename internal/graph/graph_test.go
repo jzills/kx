@@ -244,9 +244,9 @@ func TestIndexedResourceTreeNumbersInWalkOrder(t *testing.T) {
 		t.Errorf("root index = %d, want 1", node.Index)
 	}
 	want := []Resource{
-		{Name: "web", Kind: kinds.Deployment},
-		{Name: "web-abc", Kind: kinds.ReplicaSet},
-		{Name: "web-abc-1", Kind: kinds.Pod},
+		{Name: "web", Kind: kinds.Deployment, Namespace: ns},
+		{Name: "web-abc", Kind: kinds.ReplicaSet, Namespace: ns},
+		{Name: "web-abc-1", Kind: kinds.Pod, Namespace: ns},
 	}
 	if len(resources) != len(want) {
 		t.Fatalf("resources = %v, want %v", resources, want)

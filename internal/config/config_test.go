@@ -23,7 +23,7 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.NoColor || cfg.Engine != DefaultEngine {
+	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.ThemeDisable || cfg.Engine != DefaultEngine {
 		t.Errorf("defaults = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "bash" || cfg.Shells[1] != "sh" {
@@ -35,7 +35,7 @@ func TestLoadsFromFile(t *testing.T) {
 	loader := writeConfig(t, `
 max_history = 3
 shells = ["zsh", "bash"]
-no_color = true
+theme_disable = true
 theme = "solarized"
 engine = "trivy"
 `)
@@ -43,7 +43,7 @@ engine = "trivy"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 3 || !cfg.NoColor || cfg.Theme != "solarized" || cfg.Engine != "trivy" {
+	if cfg.MaxHistory != 3 || !cfg.ThemeDisable || cfg.Theme != "solarized" || cfg.Engine != "trivy" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "zsh" {
@@ -56,14 +56,14 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	t.Setenv("KX_MAX_HISTORY", "7")
 	t.Setenv("KX_THEME", "dracula")
 	t.Setenv("KX_SHELLS", "fish,sh")
-	t.Setenv("KX_NO_COLOR", "yes")
+	t.Setenv("KX_THEME_DISABLE", "yes")
 	t.Setenv("KX_ENGINE", "scout")
 
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.NoColor || cfg.Engine != "scout" {
+	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.ThemeDisable || cfg.Engine != "scout" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "fish" {
@@ -71,15 +71,30 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	}
 }
 
-func TestNoColorEnvOffValues(t *testing.T) {
-	loader := writeConfig(t, "no_color = true\n")
-	t.Setenv("KX_NO_COLOR", "0")
+func TestThemeDisableEnvOffValues(t *testing.T) {
+	loader := writeConfig(t, "theme_disable = true\n")
+	t.Setenv("KX_THEME_DISABLE", "0")
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.NoColor {
-		t.Error("KX_NO_COLOR=0 did not turn styling back on")
+	if cfg.ThemeDisable {
+		t.Error("KX_THEME_DISABLE=0 did not turn styling back on")
+	}
+}
+
+// The setting was called no_color / KX_NO_COLOR before it was grouped with
+// KX_THEME. Nothing reads the old spellings any more — a config file still
+// holding one is a file kx styles output against, silently.
+func TestOldNoColorSpellingsAreNotRead(t *testing.T) {
+	loader := writeConfig(t, "no_color = true\n")
+	t.Setenv("KX_NO_COLOR", "1")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ThemeDisable {
+		t.Error("Load still honours the old no_color spelling")
 	}
 }
 
@@ -297,5 +312,44 @@ func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
 		if !documented[lookup[1]] {
 			t.Errorf("Load reads %s, but Settings() does not document it", lookup[1])
 		}
+	}
+}
+
+// kx debug attaches a container of the user's choosing, and someone who
+// standardises on their own toolbox image should say so once rather than pass
+// --image every time — the same reason `shells` exists for kx exec.
+func TestDebugImageDefaults(t *testing.T) {
+	if got := Default().DebugImage; got != "busybox" {
+		t.Errorf("DebugImage default = %q, want busybox", got)
+	}
+}
+
+func TestDebugImageFromFile(t *testing.T) {
+	cfg, err := writeConfig(t, "debug_image = \"ghcr.io/me/toolbox:v1\"\n").Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.DebugImage != "ghcr.io/me/toolbox:v1" {
+		t.Errorf("DebugImage = %q, want the configured image", cfg.DebugImage)
+	}
+}
+
+func TestDebugImageEnvOverridesFile(t *testing.T) {
+	t.Setenv("KX_DEBUG_IMAGE", "alpine:3.20")
+
+	cfg, err := writeConfig(t, "debug_image = \"ghcr.io/me/toolbox:v1\"\n").Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.DebugImage != "alpine:3.20" {
+		t.Errorf("DebugImage = %q, want the environment override", cfg.DebugImage)
+	}
+}
+
+func TestDebugImageRejectsANonString(t *testing.T) {
+	if _, err := writeConfig(t, "debug_image = 3\n").Load(); err == nil {
+		t.Error("a numeric debug_image was accepted")
 	}
 }

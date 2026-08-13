@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
@@ -464,6 +465,112 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	)
 }
 
+// DebugCommand attaches an ephemeral debug container to an indexed pod.
+//
+// This is the answer to the dead end kx exec reaches on a distroless or
+// scratch image: exec needs a shell inside the target, and those images have
+// none, so it can only report that and stop. An ephemeral container brings its
+// own shell into the running pod instead, without restarting it or changing
+// what it runs.
+//
+// The container it adds stays on the pod's spec for as long as the pod lives —
+// Kubernetes offers no way to remove one. That is kubectl's behaviour, not
+// kx's, and the command's help says so rather than prompting: the change is
+// additive, and a confirmation in front of every debugging session would be
+// friction where kx delete's prompt guards actual loss.
+type DebugCommand struct {
+	Kubectl kubectl.Service
+	State   IndexResolver
+	// Image is the configured debug_image, used when the invocation names none.
+	Image string
+}
+
+func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Fields(index)
+	if err != nil {
+		return err
+	}
+	if kind != kinds.Pod {
+		return fmt.Errorf("debug is only supported for pods.")
+	}
+
+	args := []string{"debug", "-it", name, "-n", namespace}
+	// An explicit --image is the user overriding their own default for one
+	// run; passing the configured one as well would hand kubectl two.
+	//
+	// A malformed one is reported rather than dropped: with the error
+	// discarded, `kx debug 1 --image` (value omitted, which a shell expanding
+	// to nothing produces) read as "no image given", so kx appended its own
+	// --image=busybox and forwarded the bare --image alongside it, leaving
+	// kubectl to complain about a flag the user could see they had written.
+	image, _, err := extractString(extraArgs, "--image", "")
+	if err != nil {
+		return err
+	}
+	if image == "" {
+		args = append(args, "--image="+c.Image)
+	}
+	target, err := c.target(name, namespace, extraArgs)
+	if err != nil {
+		return err
+	}
+	if target != "" {
+		args = append(args, "--target="+target)
+	}
+	args = append(args, extraArgs...)
+	if len(command) > 0 {
+		args = append(args, "--")
+		args = append(args, command...)
+	}
+
+	code, err := c.Kubectl.RunInteractive(args, false)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		// kubectl already printed its own message; what is left is deciding
+		// whether this was a stale index worth refreshing, and forwarding the
+		// exit code either way — the same shape describe and exec use.
+		return forwardExit(c.Kubectl, kinds.Pod, name, namespace, code)
+	}
+	return nil
+}
+
+// target names the container the debug container should share a process
+// namespace with.
+//
+// Without it the debug container joins the pod but not the target's processes,
+// so /proc/1/root — the target's filesystem, which is most of the reason to be
+// here on an image with no shell — is out of reach. A pod with one container
+// has only one answer, so kx supplies it; a pod with several is ambiguous and
+// kubectl's own error names the candidates better than a guess would.
+//
+// Best-effort about the *lookup*: it costs one kubectl call, and a failure
+// means the flag is omitted rather than the command refused. kubectl still
+// runs, just without the process namespace shared. A malformed --target is a
+// different thing and is reported, the same as a malformed --image.
+func (c DebugCommand) target(name, namespace string, extraArgs []string) (string, error) {
+	explicit, _, err := extractString(extraArgs, "--target", "")
+	if err != nil {
+		return "", err
+	}
+	if explicit != "" {
+		return "", nil
+	}
+	output, err := c.Kubectl.Run([]string{
+		"get", "pod", name, "-n", namespace,
+		"-o", "jsonpath={range .spec.containers[*]}{.name}{\"\\n\"}{end}",
+	})
+	if err != nil {
+		return "", nil
+	}
+	containers := strings.Fields(output)
+	if len(containers) != 1 {
+		return "", nil
+	}
+	return containers[0], nil
+}
+
 // ContextsCommand lists kubeconfig contexts and indexes them.
 //
 // The listing goes to the context slot and nowhere else. A context is a
@@ -484,22 +591,48 @@ type ContextsCommand struct {
 // already, and `kubectl config current-context` is a subprocess worth spawning
 // once. Reading it back out of state is not an option either — the listing goes
 // to the slot, not the history the caller can Load().
-func (c ContextsCommand) Execute() (table, context string, err error) {
+func (c ContextsCommand) Execute() (table index.Table, context string, err error) {
 	output, err := c.Kubectl.Run([]string{"config", "get-contexts"})
 	if err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
 	current := c.Kubectl.CurrentContext()
-	indexed, names := c.Index.Add(output)
-	if len(names) > 0 {
+	// The CURRENT column is kept. It is blank on every row but the active one,
+	// and that blank used to be destroyed between here and the screen: Add
+	// prepended the index column, making the cell interior, and the renderer
+	// re-parsed the padded text, where an empty cell and column padding are the
+	// same run of spaces. Rows reach the renderer intact now, so the marker
+	// kubectl prints is the marker kx prints.
+	indexed := c.Index.Add(output)
+	if len(indexed.Entries) > 0 {
 		if err := c.State.SaveNamed(state.State{
-			Resources: state.NewResources(names, kinds.Context),
-			Namespace: current,
+			Resources: contextResources(indexed.Entries),
 		}); err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
 	return indexed, current, nil
+}
+
+// contextResources records the listed contexts, and nothing about namespaces.
+//
+// Not resourcesFrom: that carries each row's NAMESPACE cell onto the resource,
+// which is right for `kx get -A` and wrong here. get-contexts prints a NAMESPACE
+// column too, but it names the namespace a context *defaults to* rather than one
+// the context lives in — contexts are kubeconfig entries and are not namespaced
+// at all. Carried through, it made Resources.Spanning() true and captioned the
+// slot "all namespaces".
+//
+// The entry namespace is left empty for the same reason. The active context is
+// stamped onto State.Context by the state service, which is where every reader
+// already looks for it; recording it as the scope as well captioned the listing
+// with it twice.
+func contextResources(entries []index.Entry) state.Resources {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
+	return state.NewResources(names, kinds.Context)
 }
 
 // NamedResolver resolves an index against a kind's own slot rather than against

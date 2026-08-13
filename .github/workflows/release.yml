@@ -101,9 +101,11 @@ jobs:
       - name: Check the bundled version matches the release
         run: |
           # First line only: --version also reports commit, build date and
-          # toolchain below it, none of which the release name pins.
+          # toolchain below it, none of which the release name pins. The "v" is
+          # kx's, not the branch's — extract-version.sh strips it, and the
+          # version line puts it back the way a tag spells it.
           ACTUAL="$(./dist/binaries/kx_linux_amd64/kx --version | head -1)"
-          EXPECTED="kx ${{ steps.version.outputs.value }}"
+          EXPECTED="kx v${{ steps.version.outputs.value }}"
           test "$ACTUAL" = "$EXPECTED" || { echo "expected '$EXPECTED', got '$ACTUAL'"; exit 1; }
 
       - name: Build wheels

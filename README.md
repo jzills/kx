@@ -85,7 +85,7 @@ pipx run --spec kx-cli kx get pods
 
 ## Usage
 
-`kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Several can be given at once (`kx delete 3 5`), and a run of consecutive ones can be written as a range instead of listing them out (`kx delete 3..7`, walking either direction); either end can be left open (`kx delete ..5` from the start, `kx delete 5..` to the end of the current listing). Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are display-only — names aren't unique across namespaces.
+`kx get <resource>` fetches resources and assigns each row an index; every other command takes those indexes. Several can be given at once (`kx delete 3 5`), and a run of consecutive ones can be written as a range instead of listing them out (`kx delete 3..7`, walking either direction); either end can be left open (`kx delete ..5` from the start, `kx delete 5..` to the end of the current listing). Extra flags pass through to kubectl (`-n <namespace>`, selectors, ...), and `--match`/`-m` filters rows by name substring. All-namespace listings (`-A`) are indexed like any other: each row records the namespace it came from, so `kx describe 7` reaches a resource in a namespace you aren't in, and two pods sharing a name in different namespaces both keep their own number.
 
 `--watch` redraws the table live as resources are added, changed, or removed, instead of printing a table that never finishes. It's display-only — a watch never completes, so there's nothing to index. Non-tabular output (`-o json`/`yaml`/etc.) streams kubectl's own watch output directly instead.
 
@@ -104,6 +104,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
+| `kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
@@ -136,7 +137,8 @@ DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims, and Ingresses, plu
 nothing owns — and prints a ranked table of what's unhealthy. Findings also
 draw on live resource usage (`kx top`): a pod running hot against its memory
 limit is flagged as an OOMKill risk before it dies. The rows are indexed, so
-`kx diag 1` or `kx logs 2` drill straight in.
+`kx diag 1` or `kx logs 2` drill straight in. `-A` sweeps every namespace and
+indexes that too, adding a NAMESPACE column beside the numbers.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
@@ -227,6 +229,10 @@ listing.
 
 `kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx state back`/`kx state forward` step through it, and `kx state drop <position>` removes one (`kx state drop --all` clears everything, including the namespace/context slots below). The older `kx back`/`kx forward`/`kx drop` spellings still work too.
 
+Each entry records the kubeconfig context it was listed in, since a resource name means nothing without the cluster it was read from. `kx state` names it beside the namespace; `kx state --all` captions the table with it, or gives it a column when the history spans more than one.
+
+Switching contexts therefore retires the indexes you had. Rather than resolve them against the new cluster — where the same name is a different resource — `kx` refuses, names both contexts, and re-runs the listing here so there are usable numbers on screen: `kx get pods` in staging, `kx context 2`, then `kx delete 1` deletes nothing and relists. `kx ns <index>` is refused the same way and tells you to run `kx ns`, since a namespace listing is per-cluster too. `kx context <index>` is the one exception — contexts live in kubeconfig rather than in any cluster, so switching back always works.
+
 Namespaces and contexts are kept separately, outside that history. `kx ns` and `kx contexts` each save their listing to their own slot, so `kx ns 2` counts against the namespaces you last listed no matter what you have listed since — and switching namespaces, which is frequent, never pushes work out of the history. `kx state --all` summarizes those slots under the history table, and `kx state --targets` expands them to the indexed listings the switch commands read, so you can pick a number without re-listing.
 
 To operate on a namespace rather than switch to it, list it like any other resource with `kx get ns`; that puts it in the history too, so `kx describe <index>` and `kx label <index>` work as usual. It refreshes the slot as well, so the two spellings never disagree about what index 2 means. A narrowed listing counts, though: after `kx get ns -l team=platform`, `kx ns <index>` indexes into those namespaces rather than all of them. Run `kx ns` to list them all again.
@@ -239,8 +245,9 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | --- | --- | --- | --- |
 | `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
 | `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
-| `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
+| `debug_image` | `KX_DEBUG_IMAGE` | `"busybox"` | Image `kx debug` attaches to a pod; `--image` overrides it. |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
+| `theme_disable` | `KX_THEME_DISABLE` | `false` | Disable styled output (same as `--no-color`). |
 | `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`). |
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.

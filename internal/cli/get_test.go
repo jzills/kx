@@ -21,6 +21,15 @@ type fakeKubectl struct {
 	err       error
 	args      []string
 	namespace string
+	// outputs answers successive Run calls when set, so a test can drive a
+	// command that issues more than one — a relist whose indexes span
+	// namespaces has to make one call per namespace. Falls back to output once
+	// exhausted.
+	outputs []string
+	// calls records every Run, where args keeps only the last. Both exist
+	// because most tests assert on a single call and reading calls[len-1]
+	// everywhere would be noise.
+	calls [][]string
 	// watchLines is fed to onLine, one call per entry, when Watch runs.
 	watchLines []string
 	// watchArgs records the args Watch was called with.
@@ -31,6 +40,12 @@ type fakeKubectl struct {
 
 func (f *fakeKubectl) Run(args []string) (string, error) {
 	f.args = args
+	f.calls = append(f.calls, args)
+	if len(f.outputs) > 0 {
+		output := f.outputs[0]
+		f.outputs = f.outputs[1:]
+		return output, f.err
+	}
 	return f.output, f.err
 }
 func (f *fakeKubectl) RunInteractive([]string, bool) (int, error) { return 0, nil }
@@ -89,7 +104,7 @@ func TestGetIndexesOutputAndSavesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.HasPrefix(strings.Split(output, "\n")[0], "X") {
+	if !strings.HasPrefix(strings.Split(output.Text(), "\n")[0], "X") {
 		t.Errorf("output is not indexed:\n%s", output)
 	}
 	if len(states.saved) != 1 {
@@ -151,21 +166,154 @@ func TestGetRecordsExplicitNamespace(t *testing.T) {
 
 // Names aren't unique across namespaces, so -A results are never indexed —
 // dead X numbers would resolve to the wrong resource.
-func TestGetAllNamespacesIsNotIndexed(t *testing.T) {
+// Shaped like real `kubectl get pods -A` output: NAMESPACE leads, and the same
+// workload name recurs across namespaces.
+const allNamespacesPodsOutput = "NAMESPACE      NAME       READY   STATUS    RESTARTS   AGE\n" +
+	"default        api-7d8f   1/1     Running   0          5d\n" +
+	"staging        api-7d8f   1/1     Running   0          3d"
+
+// -A listings index like any other now that a resource carries its own
+// namespace. They went unindexed for as long as state had nowhere to record
+// which namespace a row came from.
+func TestGetAllNamespacesIsIndexed(t *testing.T) {
 	for _, flag := range []string{
 		"-A", "--all-namespaces", "--all-namespaces=true", "-A=true",
 	} {
 		states := &fakeState{}
-		kubectl := &fakeKubectl{output: podsOutput}
+		kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
 		output, _, err := newGet(kubectl, states).Execute("pods", "", []string{flag})
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if output != podsOutput {
-			t.Errorf("%s output was indexed:\n%s", flag, output)
+		if !strings.HasPrefix(output.Text(), "X") {
+			t.Errorf("%s output was not indexed:\n%s", flag, output)
 		}
-		if len(states.saved) != 0 {
-			t.Errorf("%s saved state, want none", flag)
+		if len(states.saved) != 1 {
+			t.Fatalf("%s saved %d entries, want 1", flag, len(states.saved))
+		}
+	}
+}
+
+// Each row's own namespace is what makes an -A index resolvable: two rows here
+// share a name, so the namespace is the only thing telling them apart.
+func TestGetAllNamespacesSavesEachRowsNamespace(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", []string{"-A"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	entries := states.saved[0].Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d resources, want 2 (same-named rows must not collapse)", len(entries))
+	}
+	if entries[0].Name != "api-7d8f" || entries[0].Namespace != "default" {
+		t.Errorf("entries[0] = %+v, want api-7d8f in default", entries[0])
+	}
+	if entries[1].Name != "api-7d8f" || entries[1].Namespace != "staging" {
+		t.Errorf("entries[1] = %+v, want api-7d8f in staging", entries[1])
+	}
+}
+
+// The entry-level namespace stays empty for -A: there is no single namespace the
+// listing came from, and filling one in would make Fields' fallback hand it to
+// every row that had none.
+func TestGetAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", []string{"-A"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := states.saved[0].Namespace; got != "" {
+		t.Errorf("entry namespace = %q, want empty for an -A listing", got)
+	}
+}
+
+// A non-tabular reply ends the stitching, not the fetching. Returning on the
+// first one answered `kx get pods 1 5 -o yaml` with one namespace's YAML and
+// exit 0, silently dropping a resource the request had named.
+func TestExecuteGroupsFetchesEveryGroupWhenTheReplyIsNotATable(t *testing.T) {
+	kubectl := &fakeKubectl{outputs: []string{
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n",
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: api\n",
+	}}
+	groups := []namespaceGroup{
+		{Namespace: "prod", Names: []string{"web"}},
+		{Namespace: "staging", Names: []string{"api"}},
+	}
+
+	table, err := newGet(kubectl, &fakeState{}).ExecuteGroups(
+		"pods", "", groups, []string{"-o", "yaml"})
+	if err != nil {
+		t.Fatalf("ExecuteGroups: %v", err)
+	}
+
+	if len(kubectl.calls) != 2 {
+		t.Fatalf("made %d kubectl calls, want one per namespace group", len(kubectl.calls))
+	}
+	for _, want := range []string{"name: web", "name: api"} {
+		if !strings.Contains(table.Raw, want) {
+			t.Errorf("output is missing %q:\n%s", want, table.Raw)
+		}
+	}
+}
+
+// An -A listing records the scope it was taken at, rather than leaving it to be
+// inferred from whether its resources carry namespaces — which a walk that
+// never left one namespace also does.
+func TestGetAllNamespacesRecordsTheScope(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", []string{"-A"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !states.saved[0].AllNamespaces {
+		t.Error("saved entry does not record that it spans namespaces")
+	}
+}
+
+// Asked for a shape with no NAMESPACE column, an -A listing cannot say where
+// any row lives. Numbering it anyway resolved every index into whatever
+// namespace the caller was standing in, and reported the misses as resources
+// that no longer exist — so it is printed unnumbered, the way `-o json` is, and
+// the listing already in state is left usable.
+func TestGetAllNamespacesWithoutANamespaceColumnIsNotIndexed(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: "NAME\nnginx-abc-xyz\nredis-def-uvw"}
+
+	table, _, err := newGet(kubectl, states).Execute(
+		"pods", "", []string{"-A", "-o", "custom-columns=NAME:.metadata.name"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if table.Indexable() {
+		t.Errorf("numbered a listing it cannot place:\n%s", table.Text())
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("saved %d entries, want none — the rows have no namespace", len(states.saved))
+	}
+}
+
+// A single-namespace listing has no NAMESPACE column, so its resources record
+// none and the entry's namespace answers for all of them — the shape every
+// existing state file already has.
+func TestGetSingleNamespaceRecordsNoPerResourceNamespace(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: podsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for _, entry := range states.saved[0].Resources.Entries() {
+		if entry.Namespace != "" {
+			t.Errorf("resource %q recorded namespace %q, want none", entry.Name, entry.Namespace)
 		}
 	}
 }
@@ -181,8 +329,11 @@ func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if output == podsOutput {
-			t.Errorf("%s output was not indexed:\n%s", flag, output)
+		// Asserted on the index column rather than on inequality with the raw
+		// input: a Table carries that input in Raw, so "not equal" would hold
+		// even for output that was never numbered.
+		if index.ColumnIndex(output.Headers, "X") < 0 {
+			t.Errorf("%s output was not indexed:\n%s", flag, output.Text())
 		}
 		if len(states.saved) != 1 {
 			t.Errorf("%s saved %d states, want 1", flag, len(states.saved))
@@ -211,7 +362,7 @@ func TestGetFiltersByMatchTerm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if strings.Contains(output, "redis") {
+	if strings.Contains(output.Text(), "redis") {
 		t.Errorf("filtered output still contains redis:\n%s", output)
 	}
 	if names := states.saved[0].Names(); len(names) != 1 || names[0] != "nginx-abc-xyz" {

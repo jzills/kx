@@ -38,6 +38,74 @@ func entryLabel(count int) string {
 // than a history entry means you can reach this without anything being wrong.
 const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
 
+// contextListing reports whether an entry holds nothing but kubeconfig
+// contexts — the one listing kx keeps that has no namespace scope of any kind.
+func contextListing(resources state.Resources) bool {
+	entries := resources.Entries()
+	if len(entries) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Kind != kinds.Context {
+			return false
+		}
+	}
+	return true
+}
+
+// scopeLabel names the scope an entry was listed in.
+//
+// A listing that spans namespaces records none on the entry, because there is
+// no single one to record — each resource carries its own. Left as the empty
+// string it would render as a blank column and drop out of the caption
+// entirely, which reads as missing data rather than as the scope it is.
+//
+// Contexts are the exception, and there the blank is the right answer: a context
+// is a kubeconfig entry rather than a server object, so it sits in no namespace
+// and the entry has no scope to name. The active context is already carried by
+// State.Context and captions the listing from there. Checked here as well as at
+// the source (see contextResources) because slots written before that fix still
+// hold get-contexts' NAMESPACE column on their resources, and a caption should
+// not stay wrong until the user happens to relist.
+//
+// Reads the scope the entry recorded rather than inferring it from whether its
+// resources carry namespaces. A `kx tree -n prod` walk stamps prod onto every
+// resource it returns, which inference read as spanning — captioning a walk
+// that never left one namespace "all namespaces".
+func scopeLabel(entry state.State) string {
+	if contextListing(entry.Resources) {
+		return ""
+	}
+	if entry.AllNamespaces {
+		return AllNamespaces
+	}
+	return entry.Namespace
+}
+
+// spansContexts reports whether the stack holds entries from more than one
+// context, which is the only shape where the context belongs in a column.
+//
+// Deliberately blind to whether the contexts are empty: a stack that records
+// none agrees with itself, and must not be mistaken for one that disagrees.
+func spansContexts(states []state.State) bool {
+	for _, entry := range states {
+		if entry.Context != states[0].Context {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedContext returns the one context every entry was listed in, or "" when
+// they disagree — that stack gets the column instead — or when none recorded
+// one, which has nothing to say either way.
+func sharedContext(states []state.State) string {
+	if len(states) == 0 || spansContexts(states) {
+		return ""
+	}
+	return states[0].Context
+}
+
 // StateHistory renders the history stack, marking the entry the cursor is on.
 func (r *Renderer) StateHistory(history state.History) {
 	if len(history.States) == 0 {
@@ -49,15 +117,26 @@ func (r *Renderer) StateHistory(history state.History) {
 		r.switchTargetSummary(history)
 		return
 	}
-	r.Caption("History", "", entryLabel(len(history.States)))
+	// The context decides whether an entry's indexes still mean anything, so it
+	// has to be visible — but where depends on the stack. One context shared by
+	// every entry is a property of the listing and captions it; entries from
+	// different clusters need it per row. A stack that records none (no current
+	// context in the kubeconfig) shows neither, since a column of empty values
+	// is worse than no column.
+	r.Caption("History", sharedContext(history.States), entryLabel(len(history.States)))
 
+	perRow := spansContexts(history.States)
 	columns := []Column{
 		{Header: "X", Right: true},
 		{Header: ""},
 		{Header: "KIND"},
 		{Header: "NAMESPACE"},
-		{Header: "ITEMS", Right: true},
 	}
+	if perRow {
+		columns = append(columns, Column{Header: "CONTEXT"})
+	}
+	columns = append(columns, Column{Header: "ITEMS", Right: true})
+
 	rows := make([][]Cell, 0, len(history.States))
 	for position, entry := range history.States {
 		rowStyle := theme.Muted
@@ -66,13 +145,16 @@ func (r *Renderer) StateHistory(history state.History) {
 			rowStyle = theme.Body
 			marker = "→"
 		}
-		rows = append(rows, []Cell{
+		row := []Cell{
 			Styled(strconv.Itoa(position+1), rowStyle),
 			Styled(marker, theme.Header),
 			Styled(kindLabel(entry.Resources), rowStyle),
-			Styled(entry.Namespace, rowStyle),
-			Styled(strconv.Itoa(entry.Resources.Len()), rowStyle),
-		})
+			Styled(scopeLabel(entry), rowStyle),
+		}
+		if perRow {
+			row = append(row, Styled(entry.Context, rowStyle))
+		}
+		rows = append(rows, append(row, Styled(strconv.Itoa(entry.Resources.Len()), rowStyle)))
 	}
 	r.Table(columns, rows)
 	r.switchTargetSummary(history)
@@ -123,13 +205,51 @@ func (r *Renderer) switchTargetSummary(history state.History) {
 	}, rows)
 }
 
+// Live is where the caller is right now, read from kubeconfig rather than from
+// saved state. The switch-target slots caption with it; see slotCaption.
+type Live struct {
+	Namespace string
+	Context   string
+}
+
+// slotCaption returns the scope and context a switch-target slot captions with.
+//
+// The field naming where the caller *is* comes from Live, not from the entry.
+// A slot records where the caller was standing when the listing was taken, and
+// switching never rewrites it — `kx ns 2` edits kubeconfig and leaves the slot
+// alone — so read from the entry, `kx state --targets` answered "where am I"
+// with the namespace you had just left.
+//
+// Which field that is depends on the slot, and the other one stays frozen:
+//
+//   - A namespace slot's live field is the scope. Its context is left alone
+//     because it names the cluster the listing was taken against, which is what
+//     decides whether the slot's indexes still resolve at all (see
+//     Service.checkContext) — a fact about the entry, not about the caller.
+//   - A context slot has no scope (contexts are kubeconfig entries, not server
+//     objects; see scopeLabel), so it is the context itself that goes live.
+//     Nothing else would catch a stale one: contexts are not cluster-bound, so
+//     FieldsNamed deliberately skips the context check for them.
+func slotCaption(kind kinds.Kind, entry state.State, live Live) (scope, context string) {
+	scope, context = scopeLabel(entry), entry.Context
+	switch kind {
+	case kinds.Namespace:
+		scope = live.Namespace
+	case kinds.Context:
+		context = live.Context
+	}
+	return scope, context
+}
+
 // SwitchTargets renders each slot as a full indexed listing, which is what
 // `kx state --targets` shows.
 //
 // The summary answers "is there a namespace slot, and from where"; this answers
-// "what does `kx ns 2` switch to", which is the question you have just before
-// switching. Reuses State so a slot listing looks like every other listing.
-func (r *Renderer) SwitchTargets(history state.History) {
+// "what does `kx ns 2` switch to, and where am I now", which is the question you
+// have just before switching. Reuses the listing State renders so a slot looks
+// like every other listing, and captions it against live rather than saved
+// scope — see slotCaption.
+func (r *Renderer) SwitchTargets(history state.History, live Live) {
 	rendered := 0
 	for _, kind := range slotOrder {
 		entry, ok := history.Named[kind]
@@ -139,7 +259,8 @@ func (r *Renderer) SwitchTargets(history state.History) {
 		if rendered > 0 {
 			r.Blank()
 		}
-		r.State(entry)
+		scope, context := slotCaption(kind, entry, live)
+		r.listing(entry, scope, context)
 		rendered++
 	}
 	if rendered == 0 {
@@ -149,18 +270,46 @@ func (r *Renderer) SwitchTargets(history state.History) {
 
 // State renders a single history entry as an indexed name/kind listing, which
 // is what `kx state` shows.
+//
+// A history entry captions with its own scope, unlike a slot: its namespace is
+// where the resources actually are rather than where the caller was standing,
+// so refreshing it would relabel a prod listing as dev the moment you switched.
 func (r *Renderer) State(entry state.State) {
-	count := entry.Resources.Len()
-	r.Caption(kindLabel(entry.Resources), entry.Namespace, itemLabel(count))
+	r.listing(entry, scopeLabel(entry), entry.Context)
+}
 
-	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"}}
+// listing draws an indexed name/kind table under a caption, taking the scope
+// and context already decided by the caller.
+//
+// A listing that spans namespaces gets a NAMESPACE column, because without one
+// its rows are not telling apart: `kx get sa -A` lists a "default"
+// ServiceAccount in every namespace, and eight identical KIND/NAME rows give
+// the reader no way to choose between indexes 1, 3, 4 and 6. Distinguishing
+// them is the whole reason each resource records a namespace; dropping it here
+// spent that on nothing. Single-namespace listings keep the narrower table —
+// the entry's caption already names the one namespace they are all in.
+func (r *Renderer) listing(entry state.State, scope, context string) {
+	count := entry.Resources.Len()
+	// The context sits beside the scope, and Caption drops either when empty.
+	r.Caption(kindLabel(entry.Resources), scope, context, itemLabel(count))
+
+	spanning := entry.AllNamespaces
+	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}}
+	if spanning {
+		columns = append(columns, Column{Header: "NAMESPACE"})
+	}
+	columns = append(columns, Column{Header: "NAME"})
+
 	rows := make([][]Cell, 0, count)
 	for position, resource := range entry.Resources.Entries() {
-		rows = append(rows, []Cell{
+		row := []Cell{
 			Plain(strconv.Itoa(position + 1)),
 			Plain(string(resource.Kind)),
-			Plain(resource.Name),
-		})
+		}
+		if spanning {
+			row = append(row, Plain(resource.Namespace))
+		}
+		rows = append(rows, append(row, Plain(resource.Name)))
 	}
 	r.Table(columns, rows)
 }

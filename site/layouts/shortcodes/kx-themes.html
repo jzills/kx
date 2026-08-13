@@ -58,6 +58,9 @@
       root.classList.remove("light", "dark");
       root.classList.add(mode);
       root.style.colorScheme = mode;
+      // The tab icon is part of the palette too. head-end.html owns the
+      // name → accent table and the painting; this only says when.
+      window.kxPaintFavicon(chosen);
       try {
         // Hextra's own core/theme.js reapplies a class from this key on
         // every load, unconditionally, falling back to the Hugo-configured

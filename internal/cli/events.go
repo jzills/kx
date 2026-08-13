@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -153,8 +154,8 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 			resourceLabel := "pods"
 			scopedAllNamespaces := false
-			note := ""
-			var output, namespace string
+			var output index.Table
+			var namespace string
 			if nodes {
 				resourceLabel = "nodes"
 				output, namespace, err = command.ExecuteNodes(match, rest)
@@ -165,20 +166,19 @@ func newTopCommand(services Services) *cobra.Command {
 					// Matches kx get -A's own caption override (getbody.go):
 					// many namespaces span the listing, so there is no
 					// single one to name.
-					namespace = "all namespaces"
-					note = render.AllNamespacesNote
+					namespace = render.AllNamespaces
 				}
 			}
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resourceLabel, namespace, note)
+			render.IndexedTable(output, resourceLabel, namespace)
 			if !htmlOpts.Enabled {
 				return nil
 			}
 
 			label := kinds.PluralDisplay(resourceLabel)
-			meta, err := pageMeta(services.Config.Theme, "kx top · "+label,
+			meta, err := pageMeta(services.Config.Theme, "top · "+label,
 				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), portFlag(port)))
 			if err != nil {
 				return err
@@ -202,6 +202,6 @@ func newTopCommand(services Services) *cobra.Command {
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
-	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
 	return cmd
 }

@@ -1,14 +1,33 @@
 package cli
 
 import (
+	"bytes"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+// rootHelpText renders the top-level help screen for a build at the given
+// version, which is the only way to see what the screen actually closes with:
+// the footer and the version line are composed on the way to the renderer.
+func rootHelpText(t *testing.T, version string) string {
+	t.Helper()
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, config.DefaultTheme)
+	t.Cleanup(func() { render.SetOutput(nil, nil, config.DefaultTheme) })
+
+	root := NewRoot(Services{}, version)
+	if err := root.Help(); err != nil {
+		t.Fatalf("root.Help(): %v", err)
+	}
+	return out.String()
+}
 
 // The theme listing numbers its rows, so typing the number is the obvious
 // thing to try.
@@ -89,6 +108,57 @@ func TestKindAliasLeavesFlagsAndUnknownWords(t *testing.T) {
 		got := rewriteKindAlias(testRoot(), args)
 		if strings.Join(got, " ") != strings.Join(args, " ") {
 			t.Errorf("rewrite(%v) = %v, want it unchanged", args, got)
+		}
+	}
+}
+
+// `kx po <TAB>` reaches kx as `kx __complete po ""`: the words being completed
+// are arguments to cobra's own command, so the alias has to be applied to them
+// too or completion answers for a command that does not exist.
+func TestCompletionRequestRewritesTheLineBeingCompleted(t *testing.T) {
+	for _, request := range []string{
+		cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd,
+	} {
+		for _, args := range [][]string{
+			{request, "po", ""},           // kx po <TAB>
+			{request, "po", "1", ""},      // kx po 1 <TAB>
+			{request, "deploy", "-n", ""}, // kx deploy -n <TAB>
+		} {
+			got := rewriteArgs(testRoot(), args)
+			want := append([]string{request, "get"}, args[1:]...)
+			if strings.Join(got, " ") != strings.Join(want, " ") {
+				t.Errorf("rewrite(%v) = %v, want %v", args, got, want)
+			}
+		}
+	}
+}
+
+// The last word of a completion request is the one being completed, so it is a
+// fragment rather than a spelling. `kx po<TAB>` is asking which commands start
+// with "po" and must keep answering port-forward.
+func TestCompletionRequestLeavesTheWordBeingCompleted(t *testing.T) {
+	for _, args := range [][]string{
+		{cobra.ShellCompRequestCmd, "po"},
+		{cobra.ShellCompRequestCmd, ""},
+		{cobra.ShellCompRequestCmd},
+		{cobra.ShellCompRequestCmd, "ns", "3", ""}, // a command still wins
+		{cobra.ShellCompRequestCmd, "get", "pods", ""},
+	} {
+		got := rewriteArgs(testRoot(), args)
+		if strings.Join(got, " ") != strings.Join(args, " ") {
+			t.Errorf("rewrite(%v) = %v, want it unchanged", args, got)
+		}
+	}
+}
+
+// A plain command line keeps being rewritten whole: the word at the end of one
+// is an argument, not something half-typed.
+func TestRewriteArgsLeavesPlainCommandLinesToTheAlias(t *testing.T) {
+	for _, args := range [][]string{{"pods"}, {"po", "-n", "prod"}, {"get", "pods"}} {
+		got := rewriteArgs(testRoot(), args)
+		want := rewriteKindAlias(testRoot(), args)
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("rewriteArgs(%v) = %v, want %v", args, got, want)
 		}
 	}
 }
@@ -293,14 +363,14 @@ func TestCompletionAppearsOnTheRootScreen(t *testing.T) {
 // The front page teaches the index workflow by example, so a renamed or
 // removed command would leave it demonstrating a spelling kx no longer
 // accepts.
-func TestSelectingBlockUsesRealSpellings(t *testing.T) {
+func TestExampleBlockUsesRealSpellings(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	ranges := false
 
-	for _, item := range selecting {
+	for _, item := range examples {
 		fields := strings.Fields(item.Name)
 		if len(fields) < 2 || fields[0] != "kx" {
-			t.Errorf("selecting example %q does not start with 'kx <something>'", item.Name)
+			t.Errorf("example %q does not start with 'kx <something>'", item.Name)
 			continue
 		}
 		// Whatever follows `kx` must resolve the way Execute resolves it:
@@ -308,7 +378,7 @@ func TestSelectingBlockUsesRealSpellings(t *testing.T) {
 		verb := fields[1]
 		cmd, _, err := root.Find([]string{verb})
 		if (err != nil || cmd == root) && !kinds.IsKindSpelling(verb) {
-			t.Errorf("selecting example %q: %q is neither a command nor a kind", item.Name, verb)
+			t.Errorf("example %q: %q is neither a command nor a kind", item.Name, verb)
 		}
 		// Only the spelling column counts: an ellipsis in a description ("rows
 		// 1, 2, 3...") contains ".." without demonstrating a range.
@@ -377,10 +447,58 @@ func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
 			t.Errorf("config override %s is missing from the Environment block", setting.Env)
 		}
 	}
-	// Honored by the renderer rather than the config loader, so it isn't in
-	// config.Settings() and would go undocumented if only that list drove this.
-	if !documented["NO_COLOR"] {
-		t.Error("Environment block omits NO_COLOR, which kx honors")
+	// The block is kx's own settings and nothing else. NO_COLOR was listed
+	// here once: kx honors it, but it is a terminal-wide convention rather
+	// than something kx defines, and a reader scanning this list for what kx
+	// can be told to do shouldn't have to sort the two apart.
+	for name := range documented {
+		if !strings.HasPrefix(name, "KX_") {
+			t.Errorf("Environment block lists %s, which is not a kx setting", name)
+		}
+	}
+}
+
+// TestHelpSectionCommandsAreAlphabetized applies the same rule to the command
+// sections, where the order is written down in helpSections. Here it isn't:
+// the Environment block is built from config.Settings(), whose order is
+// whatever the loader's author found convenient.
+func TestEnvironmentBlockIsAlphabetical(t *testing.T) {
+	names := []string{}
+	for _, item := range environment() {
+		names = append(names, item.Name)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("Environment block is out of order: %v", names)
+	}
+}
+
+// The help screen names the kx you are running, not the commit it was built
+// from. An untagged build's version carries a timestamp and a commit hash;
+// under --help that is a line of noise where a reader wanted one fact, and
+// `kx --version` reports the whole thing a keystroke away.
+func TestRootHelpSignsOffWithTheShortVersion(t *testing.T) {
+	text := rootHelpText(t, "0.3.4-0.20260813184656-8ec57390b220")
+
+	if !strings.Contains(text, "v0.3.4") {
+		t.Errorf("root help =\n%s\nmissing the version it was built at", text)
+	}
+	if strings.Contains(text, "20260813184656") || strings.Contains(text, "8ec57390b220") {
+		t.Errorf("root help =\n%s\nstill carries the pseudo-version's build tail", text)
+	}
+}
+
+// The docs URL closed this screen and appears under --version as well. One
+// copy is enough, and the footer's job is the next command to run.
+func TestRootHelpFooterCarriesNoURL(t *testing.T) {
+	text := rootHelpText(t, "0.3.2")
+
+	if !strings.Contains(text, "kx COMMAND --help") {
+		t.Errorf("root help =\n%s\nlost the footer's pointer at per-command help", text)
+	}
+	// The same const --version prints, so the two screens can't drift apart on
+	// which of them carries the link.
+	if strings.Contains(text, docsURL) {
+		t.Errorf("root help =\n%s\nstill prints %s; --version is where it lives", text, docsURL)
 	}
 }
 

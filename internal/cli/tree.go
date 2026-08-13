@@ -40,7 +40,7 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tre
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -48,53 +48,69 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tre
 
 // ExecuteNamespace graphs the whole ownership forest for a namespace.
 func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*tree.Node, error) {
-	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed)
+	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed, 0)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
 }
 
 // ExecuteAllNamespaces graphs the ownership forest for every namespace, one
-// root per namespace.
+// root per namespace, and returns the walked resources in index order.
 //
-// Results are never indexed or saved, matching kx get -A and kx diag -A:
-// names repeat across namespaces, so there is nothing stable to index.
-func (c TreeCommand) ExecuteAllNamespaces(ctx context.Context) ([]*tree.Node, error) {
+// Numbering runs continuously through the forest rather than restarting in each
+// namespace: two namespaces would otherwise both hold a node numbered 1, and an
+// index that names two rows names neither. Each resource records the namespace
+// it came from, which is what lets the saved indexes resolve afterwards.
+func (c TreeCommand) ExecuteAllNamespaces(
+	ctx context.Context, indexed bool,
+) ([]*tree.Node, []graph.Resource, error) {
 	namespaces, err := c.Builder.Namespaces(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	roots := make([]*tree.Node, 0, len(namespaces))
+	var resources []graph.Resource
 	for _, namespace := range namespaces {
-		node, _, err := c.Builder.BuildNamespace(ctx, namespace, false)
+		node, walked, err := c.Builder.BuildNamespace(ctx, namespace, indexed, len(resources))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		roots = append(roots, node)
+		resources = append(resources, walked...)
 	}
-	return roots, nil
+	return roots, resources, nil
 }
 
 // save records the tree's nodes as a state entry.
 //
 // A tree entry carries no Query: it wasn't produced by `kx get`, so there is
 // nothing to re-run if it goes stale.
-func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed bool) error {
+//
+// allNamespaces is passed rather than inferred from an empty namespace: a walk
+// records the namespace on every resource it returns, including a
+// single-namespace one, so nothing about the resources distinguishes the two
+// scopes afterwards.
+func (c TreeCommand) save(
+	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
+) error {
 	if !indexed || len(resources) == 0 {
 		return nil
 	}
 	// Order is the order the indexes were assigned during the walk.
 	entries := make([]state.Resource, 0, len(resources))
 	for _, resource := range resources {
-		entries = append(entries, state.Resource{Name: resource.Name, Kind: resource.Kind})
+		entries = append(entries, state.Resource{
+			Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
+		})
 	}
 	return c.Save(state.State{
-		Resources: state.NewOrderedResources(entries),
-		Namespace: namespace,
+		Resources:     state.NewOrderedResources(entries),
+		Namespace:     namespace,
+		AllNamespaces: allNamespaces,
 	})
 }
 
@@ -106,6 +122,17 @@ func indexFlag(indexed bool) string {
 		return "--no-index"
 	}
 	return ""
+}
+
+// treeInvocation renders the command line the page says it came from.
+//
+// One helper for all three of tree's pages — the -A forest, a namespace sweep,
+// and a single indexed resource — because they had drifted: the -A branch left
+// indexFlag out, so `kx tree -A --no-index --html` published a page claiming it
+// was produced by `kx tree -A`, and re-running that prints a numbered tree the
+// page does not have.
+func treeInvocation(scope string, indexed bool, port int) string {
+	return invocation("tree", scope, indexFlag(indexed), portFlag(port))
 }
 
 // scopeCaption joins non-empty parts with " · " for the page's muted caption
@@ -176,12 +203,17 @@ func newTreeCommand(services Services) *cobra.Command {
 			if len(args) == 0 {
 				if allNamespaces {
 					stop := render.Status("resolving ownership graphs")
-					roots, err := command.ExecuteAllNamespaces(ctx)
+					roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
 					stop()
 					if err != nil {
 						return err
 					}
-					render.ScopeBanner("Namespace", "all namespaces", "")
+					// Saved with no entry namespace: the forest spans them, and
+					// each resource records its own.
+					if err := command.save(resources, "", indexed, true); err != nil {
+						return err
+					}
+					render.ScopeBanner("Namespace", render.AllNamespaces, "")
 					for i, root := range roots {
 						if i > 0 {
 							render.Blank()
@@ -191,13 +223,13 @@ func newTreeCommand(services Services) *cobra.Command {
 					if !htmlOpts.Enabled {
 						return nil
 					}
-					meta, err := pageMeta(services.Config.Theme, "kx tree · all namespaces",
-						invocation("tree", scopeArgs("", true), portFlag(port)))
+					meta, err := pageMeta(services.Config.Theme, "tree · "+render.AllNamespaces,
+						treeInvocation(scopeArgs("", true), indexed, port))
 					if err != nil {
 						return err
 					}
 					page, err := web.RenderTree(web.TreePage{
-						Meta: meta, Scope: scopeCaption("Namespace", "all namespaces"),
+						Meta: meta, Scope: scopeCaption("Namespace", render.AllNamespaces),
 						AllNamespaces: true, Roots: roots,
 					})
 					if err != nil {
@@ -221,8 +253,8 @@ func newTreeCommand(services Services) *cobra.Command {
 				if !htmlOpts.Enabled {
 					return nil
 				}
-				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
-					invocation("tree", scopeArgs(namespace, false), indexFlag(indexed), portFlag(port)))
+				meta, err := pageMeta(services.Config.Theme, "tree · "+namespace,
+					treeInvocation(scopeArgs(namespace, false), indexed, port))
 				if err != nil {
 					return err
 				}
@@ -264,8 +296,8 @@ func newTreeCommand(services Services) *cobra.Command {
 			// node.Label is already "Kind/Name" or "Namespace/name" (graph.go
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
-			meta, err := pageMeta(services.Config.Theme, "kx tree · "+node.Label,
-				invocation("tree", args[0], indexFlag(indexed), portFlag(port)))
+			meta, err := pageMeta(services.Config.Theme, "tree · "+node.Label,
+				treeInvocation(args[0], indexed, port))
 			if err != nil {
 				return err
 			}
@@ -281,7 +313,7 @@ func newTreeCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"Sweep every namespace, as a forest of per-namespace trees; results are not indexed")
+		"Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it")
 	cmd.Flags().Bool("html", false,
 		"Render the tree as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,

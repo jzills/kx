@@ -3,17 +3,9 @@ package render
 import (
 	"strings"
 
+	"github.com/jzills/kx/internal/mark"
 	"github.com/jzills/kx/internal/theme"
 )
-
-var kxArt = []string{
-	"██╗  ██╗██╗  ██╗",
-	"██║ ██╔╝╚██╗██╔╝",
-	"█████╔╝  ╚███╔╝ ",
-	"██╔═██╗  ██╔██╗ ",
-	"██║  ██╗██╔╝ ██╗",
-	"╚═╝  ╚═╝╚═╝  ╚═╝",
-}
 
 // HelpItem is one named entry in a help listing: a command, argument or flag,
 // with its description.
@@ -28,6 +20,9 @@ type HelpSection struct {
 	Items []HelpItem
 }
 
+// gutter is the space between a help screen's columns, and its left margin.
+const gutter = "  "
+
 // pad right-aligns a help column so descriptions line up.
 func padName(name string, width int) string {
 	if len(name) >= width {
@@ -35,6 +30,37 @@ func padName(name string, width int) string {
 	}
 	return name + strings.Repeat(" ", width-len(name))
 }
+
+// Detail renders aligned label/value lines, which is the shape `kx --version`
+// prints its build detail in.
+//
+// Returns a string rather than writing, because cobra prints the version
+// through a template it owns rather than through the renderer. The styling
+// still lives here: every style kx applies is named by meaning in this package,
+// and a caller assembling escape codes itself would be the one place that
+// wasn't true.
+//
+// The value carries the prominent style and the label the muted one — the
+// inverse of itemBlock, whose Name leads and whose Doc explains. Here the label
+// is the question ("commit") and the value is the answer.
+func (r *Renderer) Detail(pairs [][2]string) string {
+	width := 0
+	for _, pair := range pairs {
+		if len(pair[0]) > width {
+			width = len(pair[0])
+		}
+	}
+	lines := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		lines = append(lines, gutter+
+			r.style(theme.Muted, padName(pair[0], width))+gutter+
+			r.style(theme.Body, pair[1]))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Detail renders label/value lines through the package-level renderer.
+func Detail(pairs [][2]string) string { return current.Detail(pairs) }
 
 // helpWidth is the width help text wraps to.
 //
@@ -100,12 +126,15 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 		}
 	}
 
-	const gutter = "  "
 	indent := len(gutter) + nameWidth + len(gutter)
 	docWidth := r.helpWidth() - indent
 
 	r.Blank()
-	r.line(r.style(theme.Header, title))
+	// An empty title is a block that continues the one above it — the examples
+	// under the Usage heading — rather than a heading rendered blank.
+	if title != "" {
+		r.line(r.style(theme.Header, title))
+	}
 	for _, item := range items {
 		name := gutter + r.style(theme.Body, padName(item.Name, nameWidth)) + gutter
 		wrapped := wrapText(item.Doc, docWidth)
@@ -127,16 +156,21 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 // config package that reads them. The hardcoded option list this replaced had
 // already drifted from the flag it documented.
 type RootHelp struct {
-	// Selecting introduces the index workflow: a spelling paired with what it
-	// does. Sized to the same column as the sections below it.
-	Selecting []HelpItem
-	Sections  []HelpSection
-	Options   []HelpItem
-	Files     []HelpItem
+	// Examples introduce the index workflow: a spelling paired with what it
+	// does. Sized to the same column as the sections below it, and printed
+	// under the same Usage heading as the argv line, since both answer "how do
+	// I spell this".
+	Examples []HelpItem
+	Sections []HelpSection
+	Options  []HelpItem
+	Files    []HelpItem
 	// Environment lists the variables that override the config file.
 	Environment []HelpItem
 	// Footer closes the screen — where to go next, in plain sentences.
-	Footer  []string
+	Footer []string
+	// Version signs the screen off, already spelled the way it should read.
+	// The renderer prints it verbatim: whether it carries a "v", and how much
+	// of an untagged build's version survives, is the caller's call.
 	Version string
 }
 
@@ -148,14 +182,17 @@ const rootNameWidth = 18
 // RootHelp renders the top-level help screen.
 func (r *Renderer) RootHelp(help RootHelp) {
 	r.Blank()
-	for _, line := range kxArt {
+	for _, line := range mark.Lines {
 		r.line(r.style(theme.Header, line))
 	}
 	r.line(r.style(theme.Muted, "kubectl, indexed."))
+	// The argv line and the examples share one heading. Titling the examples
+	// separately put the word "Usage" on the screen twice, three lines apart,
+	// naming the same thing both times.
 	r.Blank()
-	r.line(r.style(theme.Muted, "Usage") + "  kx [OPTIONS] COMMAND [ARGS]...")
-
-	r.itemBlock("Selecting resources", help.Selecting, rootNameWidth)
+	r.line(r.style(theme.Header, "Usage"))
+	r.line(gutter + r.style(theme.Body, "kx [OPTIONS] COMMAND [ARGS]..."))
+	r.itemBlock("", help.Examples, rootNameWidth)
 
 	for _, section := range help.Sections {
 		// The command list is the one block that truncates rather than wraps:
@@ -181,7 +218,7 @@ func (r *Renderer) RootHelp(help RootHelp) {
 
 	if help.Version != "" {
 		r.Blank()
-		r.line(r.style(theme.Muted, "v"+help.Version))
+		r.line(r.style(theme.Muted, help.Version))
 	}
 }
 

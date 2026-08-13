@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -54,6 +55,9 @@ type recordingKubectl struct {
 	// contextReads counts CurrentContext calls, each of which is a kubectl
 	// subprocess in the real service.
 	contextReads int
+	// namespace overrides what CurrentNamespace reports, so a test can move the
+	// caller after a listing was taken. Empty keeps the default.
+	namespace string
 }
 
 func (k *recordingKubectl) Run(args []string) (string, error) {
@@ -77,7 +81,12 @@ func (k *recordingKubectl) Watch(args []string, onLine func(string) error) error
 	return k.err
 }
 
-func (k *recordingKubectl) CurrentNamespace() string { return "prod" }
+func (k *recordingKubectl) CurrentNamespace() string {
+	if k.namespace != "" {
+		return k.namespace
+	}
+	return "prod"
+}
 
 func (k *recordingKubectl) CurrentContext() string {
 	k.contextReads++
@@ -831,5 +840,361 @@ func TestContextsReturnsTheActiveContext(t *testing.T) {
 	}
 	if current != "test" {
 		t.Errorf("context = %q, want the active context", current)
+	}
+}
+
+// kubectl marks the active context in a CURRENT column that is blank on every
+// other row. That blank is kept now: Add hands the renderer its parsed rows, so
+// nothing has to survive a second trip through padded text where an empty cell
+// and column padding are the same run of spaces.
+//
+// This column was dropped entirely while the renderer still re-parsed, because
+// Add prepends the index column and made the blank cell interior, which no
+// parser can recover. Its return is the proof that the round-trip is gone.
+func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	table, _, err := ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if index.ColumnIndex(table.Headers, "CURRENT") < 0 {
+		t.Fatalf("table lost the CURRENT column: %q", table.Headers)
+	}
+	if len(table.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %q", len(table.Rows), table.Rows)
+	}
+	// The blank marker on the non-current row is the cell that used to vanish,
+	// taking every value after it one column to the left.
+	nameIdx := index.ColumnIndex(table.Headers, "NAME")
+	currentIdx := index.ColumnIndex(table.Headers, "CURRENT")
+	if table.Rows[0][currentIdx] != "" || table.Rows[0][nameIdx] != "alt" {
+		t.Errorf("row 0 = %q, want a blank CURRENT and NAME alt", table.Rows[0])
+	}
+	if table.Rows[1][currentIdx] != "*" || table.Rows[1][nameIdx] != "docker-desktop" {
+		t.Errorf("row 1 = %q, want CURRENT '*' and NAME docker-desktop", table.Rows[1])
+	}
+}
+
+// Dropping a column must not lose the rest of the row.
+func TestContextsKeepsTheRemainingColumns(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+
+	table, _, err := ContextsCommand{
+		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
+	}.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Compared as parsed headers, not as substrings: `strings.Contains(table,
+	// "NAME")` is satisfied by "NAMESPACE", so a version that dropped NAME
+	// passed that check.
+	want := []string{"X", "CURRENT", "NAME", "CLUSTER", "NAMESPACE"}
+	if len(table.Headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", table.Headers, want)
+	}
+	for i := range want {
+		if table.Headers[i] != want[i] {
+			t.Errorf("headers[%d] = %q, want %q (full: %v)",
+				i, table.Headers[i], want[i], table.Headers)
+		}
+	}
+	if len(table.Rows) != 2 || table.Rows[0][4] != "default" || table.Rows[1][4] != "diagnostics" {
+		t.Errorf("rows lost their trailing values: %v", table.Rows)
+	}
+}
+
+// Both contexts must reach the slot, or `kx context <n>` cannot select the one
+// that isn't active — the failure that started this.
+func TestContextsIndexesEveryContext(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	names := states.named[0].Resources.Names()
+	if len(names) != 2 || names[0] != "alt" || names[1] != "docker-desktop" {
+		t.Errorf("slot names = %v, want [alt docker-desktop]", names)
+	}
+}
+
+// `kubectl config get-contexts` prints a NAMESPACE column, but it names the
+// namespace each context *defaults to* — not one the context lives in, because
+// contexts are kubeconfig entries and are not namespaced at all.
+//
+// Recorded as a resource namespace it was read as one, back when the scope was
+// inferred from whether resources carried namespaces — which captioned the
+// context slot in `kx state --targets` as "all namespaces".
+func TestContextsRecordsNoResourceNamespace(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	for _, resource := range states.named[0].Resources.Entries() {
+		if resource.Namespace != "" {
+			t.Errorf("context %q recorded namespace %q, want none",
+				resource.Name, resource.Namespace)
+		}
+	}
+	if states.named[0].AllNamespaces {
+		t.Error("context slot reports itself as spanning namespaces")
+	}
+}
+
+// The entry namespace is a scope, and a contexts listing has none. The active
+// context is already recorded in Context — stamped there by the state service —
+// so writing it here as well captioned `kx state --targets` with it twice.
+func TestContextsRecordsNoEntryNamespace(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	if ns := states.named[0].Namespace; ns != "" {
+		t.Errorf("slot namespace = %q, want none — a context is not a scope", ns)
+	}
+}
+
+// kx debug attaches a container that has a shell to a pod whose own image has
+// none — the case kx exec dead-ends on with "No shell found in container".
+func TestDebugAttachesAnEphemeralContainer(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "metrics-server", namespace: "kube-system", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug", "-it", "metrics-server", "-n kube-system", "--image=busybox"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+}
+
+// The same restriction kx exec carries, and for the same reason: an ephemeral
+// container attaches to a running pod, and nothing else is one.
+func TestDebugRejectsNonPods(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Deployment}
+
+	err := DebugCommand{
+		Kubectl: &recordingKubectl{}, State: resolver, Image: "busybox",
+	}.Execute(1, nil, nil)
+
+	if err == nil {
+		t.Fatal("debug on a Deployment succeeded")
+	}
+	if !strings.Contains(err.Error(), "pods") {
+		t.Errorf("err = %q, want it to name the restriction", err)
+	}
+}
+
+// An explicit --image is the user overriding their own default for one run, so
+// kx must not also pass the configured one and leave kubectl with two.
+func TestDebugExplicitImageWins(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--image=alpine:3.20"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	if strings.Contains(got, "busybox") {
+		t.Errorf("args = %q, want the configured image dropped", got)
+	}
+	if !strings.Contains(got, "--image=alpine:3.20") {
+		t.Errorf("args = %q, want the explicit image", got)
+	}
+}
+
+// Everything after -- is the command to run inside the debug container.
+func TestDebugPassesTheCommandThrough(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, []string{"ls", "/proc/1/root"}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); !strings.HasSuffix(got, "-- ls /proc/1/root") {
+		t.Errorf("args = %q, want the command last, after --", got)
+	}
+}
+
+// Without --target the debug container joins the pod but not the target's
+// process namespace, putting /proc/1/root — the filesystem you came for on an
+// image with no shell — out of reach. One container is unambiguous, so kx
+// supplies it.
+func TestDebugTargetsTheOnlyContainer(t *testing.T) {
+	kubectl := &recordingKubectl{output: "metrics-server\n"}
+	resolver := fakeResolver{name: "metrics-server", namespace: "kube-system", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); !strings.Contains(got, "--target=metrics-server") {
+		t.Errorf("args = %q, want the sole container targeted", got)
+	}
+}
+
+// Several containers have no single answer, and kubectl's own error names the
+// candidates better than a guess would.
+func TestDebugDoesNotGuessAmongSeveralContainers(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\nsidecar\n"}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no target guessed for a multi-container pod", got)
+	}
+}
+
+// An explicit --target is the user's answer; kx must not add a second.
+func TestDebugKeepsAnExplicitTarget(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\n"}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--target=sidecar"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	if strings.Count(got, "--target") != 1 {
+		t.Errorf("args = %q, want exactly one --target", got)
+	}
+	if !strings.Contains(got, "--target=sidecar") {
+		t.Errorf("args = %q, want the explicit target kept", got)
+	}
+}
+
+// The lookup is a convenience, not a precondition: a cluster that will not
+// answer it still gets a debug session, just without the shared namespace.
+//
+// The fake answers with output *and* an error, which is how kubectl actually
+// fails — it prints what it managed before reporting the failure. A fake that
+// returned an error with empty output would pass this test whether or not the
+// error was checked at all, since both paths end with no containers.
+func TestDebugRunsWhenTheContainerLookupFails(t *testing.T) {
+	kubectl := &recordingKubectl{output: "stale\n", err: errors.New("connection refused")}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(kubectl.interactive) != 1 {
+		t.Fatalf("debug did not run: %v", kubectl.interactive)
+	}
+	if got := joinArgs(kubectl.interactive[0]); strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no target read out of a failed lookup", got)
+	}
+}
+
+// A value-less --image is what a shell expanding to nothing produces. With
+// extractString's error discarded it read as "no image given", so kx appended
+// its own --image=busybox and forwarded the bare --image alongside it, leaving
+// kubectl to complain about a flag the user could see they had written.
+func TestDebugReportsAMalformedImageFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--image"})
+
+	if err == nil {
+		t.Fatal("a value-less --image was accepted")
+	}
+	if !strings.Contains(err.Error(), "--image") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
+
+// --target is read by hand for the same reason and was discarding the same
+// error, so a value-less one reached kubectl beside a --target kx had guessed.
+func TestDebugReportsAMalformedTargetFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--target"})
+
+	if err == nil {
+		t.Fatal("a value-less --target was accepted")
+	}
+	if !strings.Contains(err.Error(), "--target") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
 	}
 }

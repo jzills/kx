@@ -15,6 +15,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // StaleResourceError reports that a probe confirmed the indexed resource no
@@ -74,13 +75,41 @@ func forwardExit(
 }
 
 // isStale reports whether an error means the current state entry no longer
-// describes the cluster.
+// describes the cluster the user is talking to.
+//
+// A context mismatch qualifies for the same recovery even though the listing
+// itself is intact: it describes a different cluster, so the indexes in it are
+// no more usable here than vanished ones, and replaying the query is what puts
+// usable indexes back on screen. Crucially, recovery relists without ever
+// retrying the original command — which is the whole reason a mismatch can be
+// routed here rather than merely reported.
 func isStale(err error) bool {
 	var stale StaleResourceError
 	if errors.As(err, &stale) {
 		return true
 	}
+	var mismatch state.ContextMismatchError
+	if errors.As(err, &mismatch) {
+		// Only when kx can rebuild what the index counted against. A slot sets
+		// Relist because it has no query of its own, and replaying the history
+		// stack's query for it would answer `kx ns 2` with a pods table — a
+		// listing that is fresh, correct, and about something else. Those errors
+		// carry their own relist hint and are reported as they are.
+		return mismatch.Relist == ""
+	}
 	return IsNotFound(err)
+}
+
+// refreshLead introduces the relisted table, naming the reason it was relisted.
+// "State was stale" describes the wrong problem for a mismatch: nothing about
+// the listing has decayed, it simply belongs to another cluster.
+func refreshLead(err error) string {
+	var mismatch state.ContextMismatchError
+	if errors.As(err, &mismatch) {
+		return "Listing was from context '" + mismatch.Listed +
+			"' — refreshed against '" + mismatch.Current + "', pick a new index:"
+	}
+	return "State was stale — refreshed, pick a new index:"
 }
 
 // recoverOutcome is what a refresh attempt produced.
@@ -93,15 +122,18 @@ const (
 	// sweep — so there is nothing to replay, and running a `kx get` is
 	// genuinely the way forward.
 	noQuery
-	// replayFailed: the replay broke on its own terms. Whatever went wrong is
-	// already on screen, and pointing the user at the command that just failed
-	// would only add noise.
+	// replayFailed: the replay broke on its own terms — most often because the
+	// saved query names the very resource that went stale, which is what a
+	// relist's query does. Its reason does not reach the screen: Run captures
+	// stdout and returns stderr as the error, and that error is dropped here.
+	// So this is treated like noQuery, and the caller ends with the same
+	// instruction rather than with silence.
 	replayFailed
 )
 
 // recoverState re-runs the query behind the current state entry and renders the
-// fresh listing.
-func recoverState(services Services) recoverOutcome {
+// fresh listing under lead, which names why it was re-run.
+func recoverState(services Services, lead string) recoverOutcome {
 	current, err := services.State.Load()
 	if err != nil {
 		return replayFailed
@@ -121,8 +153,8 @@ func recoverState(services Services) recoverOutcome {
 		return replayFailed
 	}
 
-	render.Raw("State was stale — refreshed, pick a new index:")
-	render.IndexedTable(table, query.Resource, namespace, "")
+	render.Raw(lead)
+	render.IndexedTable(table, query.Resource, namespace)
 	return refreshed
 }
 
@@ -135,7 +167,11 @@ func recoverState(services Services) recoverOutcome {
 // doesn't print the same failure a second time.
 func handleStale(services Services, err error) {
 	render.Error(err.Error())
-	if recoverState(services) == noQuery {
+	// Anything but a rendered listing ends with the instruction. Only a
+	// successful refresh has an answer on screen already; a replay that failed
+	// leaves nothing behind, since Run captures both of kubectl's streams and
+	// recoverState discards the error with them.
+	if recoverState(services, refreshLead(err)) != refreshed {
 		render.Raw("Run 'kx get <resource>' to refresh the list.")
 	}
 }

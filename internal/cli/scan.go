@@ -48,7 +48,7 @@ func (s scanScope) selector() []string {
 // label is the banner's scope text, matching what kx get -A prints.
 func (s scanScope) label() string {
 	if s.All {
-		return "all namespaces"
+		return render.AllNamespaces
 	}
 	return s.Namespace
 }
@@ -405,8 +405,8 @@ func newScanCommand(services Services) *cobra.Command {
 			//
 			// pageTitle is the browser tab's name, which wants the bare
 			// subject and not the caption's "Mixed" kind label — a tab
-			// reading "kx scan · Mixed · prod" says less than "kx scan ·
-			// prod". kx diag titles itself the same way.
+			// reading "scan · Mixed · prod" says less than "scan · prod".
+			// kx diag titles itself the same way.
 			var pageScope, pageTitle string
 			var images []string
 			if len(indexArgs) == 0 {
@@ -473,7 +473,7 @@ func newScanCommand(services Services) *cobra.Command {
 			if len(indexArgs) > 0 {
 				indexArg = indexArgs[0]
 			}
-			meta, err := pageMeta(services.Config.Theme, "kx scan · "+pageTitle,
+			meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
 				invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
 			if err != nil {
 				return err

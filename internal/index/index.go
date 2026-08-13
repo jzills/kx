@@ -49,10 +49,30 @@ var columnSepRE = regexp.MustCompile(`\s{2,}`)
 // present when --output-watch-events was requested, NAMESPACE only when
 // -A/--all-namespaces was).
 type TableShape struct {
-	Headers      []string
-	NameIdx      int
+	Headers []string
+	NameIdx int
+	// ResourceIdx is the column naming the resource an index resolves to,
+	// which is not always NAME. See resourceIndex.
+	ResourceIdx  int
 	EventIdx     int
 	NamespaceIdx int
+}
+
+// resourceIndex locates the column naming the resource an index addresses.
+//
+// Usually that is NAME, but `kubectl top pod --containers` prints one row per
+// container: POD holds the pod and NAME holds the container inside it. An index
+// has to resolve to something kx can act on — `kx logs 3` needs a pod, and no
+// kubectl call takes a bare container name — so POD wins wherever both appear.
+//
+// Reading NAME there is what made `kx top --containers` save containers as
+// pods, so `kx logs 1` looked up a pod named "istio-proxy" and reported it
+// missing.
+func resourceIndex(headers []string, nameIdx int) int {
+	if pod := ColumnIndex(headers, "POD"); pod >= 0 {
+		return pod
+	}
+	return nameIdx
 }
 
 // ParseHeader splits a kubectl header line into column names, and locates
@@ -63,25 +83,38 @@ type TableShape struct {
 // parse the header once and split every following line the same way a
 // complete table would through ParseTable.
 func ParseHeader(header string) (TableShape, bool) {
-	headers := splitColumns(header, -1)
+	return shapeOf(splitColumns(header, -1))
+}
+
+// shapeOf locates the special columns in an already-split header.
+//
+// Split out from ParseHeader so a caller holding rows parsed further upstream
+// can describe them without a header *line* to re-split — which is what lets
+// the pipeline parse once and pass rows the rest of the way.
+func shapeOf(headers []string) (TableShape, bool) {
 	if len(headers) == 0 {
 		return TableShape{}, false
 	}
-
-	nameIdx := columnIndex(headers, "NAME")
+	nameIdx := ColumnIndex(headers, "NAME")
 	if nameIdx < 0 {
 		return TableShape{}, false
 	}
-
 	return TableShape{
 		Headers:      headers,
 		NameIdx:      nameIdx,
-		EventIdx:     columnIndex(headers, "EVENT"),
-		NamespaceIdx: columnIndex(headers, "NAMESPACE"),
+		ResourceIdx:  resourceIndex(headers, nameIdx),
+		EventIdx:     ColumnIndex(headers, "EVENT"),
+		NamespaceIdx: ColumnIndex(headers, "NAMESPACE"),
 	}, true
 }
 
-func columnIndex(headers []string, name string) int {
+// ColumnIndex reports the position of a named column, or -1 when the table has
+// none.
+//
+// Exported because kx builds columns of its own on top of kubectl's — top adds
+// CPU(%) and MEMORY(%) — and needs the same lookup for them. A local copy in
+// internal/cli was byte-for-byte this function.
+func ColumnIndex(headers []string, name string) int {
 	for i, h := range headers {
 		if h == name {
 			return i
@@ -104,29 +137,61 @@ func splitColumns(line string, n int) []string {
 	return columnSepRE.Split(trimmed, n)
 }
 
+// blankFirstColumn reports whether a data row leaves its first column empty,
+// which whitespace splitting cannot otherwise see.
+//
+// `kubectl config get-contexts` is the case this exists for: it marks the
+// active context in a leading CURRENT column that is blank on every other row.
+// Trimming the line first makes that empty cell vanish and shifts every value
+// one column left, so a non-current context's NAME reads as its CLUSTER — and
+// because both rows then claim the same NAME, Add's dedupe drops one entirely.
+//
+// Only the *leading* cell is inferred, and only from the row's own indentation.
+// That is deliberately narrower than reconstructing columns from the header's
+// byte offsets, which this parser tried once and reverted: kubectl recomputes
+// each --watch row's widths independently, so a value wider than the header saw
+// gets sliced at a stale offset. Nothing here depends on any column's width.
+// kubectl left-aligns, so a row that is blank where its first value belongs has
+// no other reading.
+func blankFirstColumn(line string) bool {
+	rest := strings.TrimLeft(line, " \t")
+	return rest != line && rest != ""
+}
+
 // Row splits one data line into exactly len(s.Headers) fields, padding with
 // "" for a line shorter than the header (Python's slicing did this; Go
 // indexing would panic without it).
 func (s TableShape) Row(line string) []string {
-	cols := splitColumns(line, len(s.Headers))
-	for len(cols) < len(s.Headers) {
+	count := len(s.Headers)
+	var cols []string
+	if count > 1 && blankFirstColumn(line) {
+		// The remainder holds one fewer field, so the cap shifts with it —
+		// otherwise the last column stops absorbing its own trailing spaces.
+		cols = append([]string{""}, splitColumns(line, count-1)...)
+	} else {
+		cols = splitColumns(line, count)
+	}
+	for len(cols) < count {
 		cols = append(cols, "")
 	}
 	return cols
 }
 
-// parseOutput splits kubectl table output into headers, rows and the position
-// of the NAME column. Returns a nil header slice when the output isn't a table
-// kx can index.
-func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
+// parseTable splits kubectl table output into the header shape and its rows.
+// Returns ok=false when the output isn't a table kx can index.
+//
+// Returns the whole TableShape rather than the three loose values the exported
+// wrapper hands back, because Add needs NamespaceIdx as well and rebuilding the
+// shape from a []string of headers would mean locating those columns twice.
+func parseTable(output string) (shape TableShape, rows [][]string, ok bool) {
 	lines := strings.Split(output, "\n")
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return nil, nil, 0
+		return TableShape{}, nil, false
 	}
 
-	shape, ok := ParseHeader(lines[0])
+	shape, ok = ParseHeader(lines[0])
 	if !ok {
-		return nil, nil, 0
+		return TableShape{}, nil, false
 	}
 
 	for _, line := range lines[1:] {
@@ -134,6 +199,17 @@ func parseOutput(output string) (headers []string, rows [][]string, nameIdx int)
 			continue
 		}
 		rows = append(rows, shape.Row(line))
+	}
+	return shape, rows, true
+}
+
+// parseOutput splits kubectl table output into headers, rows and the position
+// of the NAME column. Returns a nil header slice when the output isn't a table
+// kx can index.
+func parseOutput(output string) (headers []string, rows [][]string, nameIdx int) {
+	shape, rows, ok := parseTable(output)
+	if !ok {
+		return nil, nil, 0
 	}
 	return shape.Headers, rows, shape.NameIdx
 }
@@ -200,61 +276,173 @@ func CountRows(output string) (count int, tabular bool) {
 	return len(rows), true
 }
 
+// Entry is one indexed row: the resource's name, and the namespace it was
+// listed in when the table said so.
+//
+// Namespace is empty for the ordinary single-namespace listing, whose table has
+// no NAMESPACE column and whose namespace the caller already knows. It is
+// populated only for an all-namespace listing, where it is the sole thing
+// distinguishing two rows that share a name.
+type Entry struct {
+	Name      string
+	Namespace string
+}
+
+// rowKey is what makes one row distinct from the rows before it.
+//
+// Deliberately not the Entry: several rows can resolve to one resource —
+// `kubectl top pod --containers` prints a row per container, every one of them
+// naming the same pod — and they are distinct rows for all that. Keying the
+// dedupe on the Entry collapsed them.
+type rowKey struct {
+	Entry
+	// Label is the NAME cell when NAME names something *inside* the resource
+	// rather than the resource itself, and "" when the two are one column. It
+	// is what holds two containers of the same pod apart.
+	Label string
+}
+
+// Table is an indexed listing: the shape a renderer draws, the entries state
+// resolves indexes against, and — for output kx cannot number — the raw text to
+// print as it came.
+//
+// Rows are returned rather than only the padded text they would render as,
+// because that text is a lossy encoding: an empty cell and column padding are
+// the same run of spaces, so anything the parser recovered is destroyed the
+// moment a second parser has to read it back. `kubectl config get-contexts`
+// blanks its CURRENT column on every row but the active one, and that is
+// exactly the cell that used to disappear between here and the screen.
+type Table struct {
+	Headers []string
+	// Rows include the index column, so Headers[0] is "X" and Rows[n][0] is
+	// the number.
+	Rows    [][]string
+	Entries []Entry
+	// Raw is the untouched output, carried for the shapes kx cannot index —
+	// JSON, YAML, a table with no NAME column.
+	Raw string
+}
+
+// Indexable reports whether the output parsed as a table kx could number.
+func (t Table) Indexable() bool { return t.Headers != nil }
+
+// Placed reports whether the entries record where they live.
+//
+// Only meaningful for a listing that spans namespaces, where it is the
+// difference between an index that resolves to one resource and an index that
+// resolves to whichever namespace the caller is standing in. False for an
+// ordinary single-namespace listing too — its table has no NAMESPACE column
+// either — so callers ask this only when they know the scope is -A.
+func (t Table) Placed() bool {
+	for _, entry := range t.Entries {
+		if entry.Namespace != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Text renders the table back to padded text. Non-tabular output comes back
+// exactly as it arrived.
+//
+// Nothing in kx proper calls this — the pipeline hands rows all the way to the
+// renderer — and nothing should start: padded text cannot represent an empty
+// cell, so anything read back out of it has lost whatever the parser recovered.
+// That is the round trip the Table type exists to close, and `kubectl config
+// get-contexts` losing its blank CURRENT column is what it cost.
+//
+// It survives as a rendering of last resort for tests, which assert on the
+// table a user would see. A production caller wanting text wants Rows.
+func (t Table) Text() string {
+	if !t.Indexable() {
+		return t.Raw
+	}
+	return Format(append([][]string{t.Headers}, t.Rows...))
+}
+
 // Service prefixes kubectl output with an index column and filters it by name.
 type Service struct{}
 
-// Add prefixes an "X" index column to kubectl output and returns the indexed
-// table alongside the resource names, in index order.
-func (Service) Add(output string) (string, []string) {
-	headers, rows, nameIdx := parseOutput(output)
-	if headers == nil {
-		return output, nil
+// Add parses kubectl output and numbers it.
+//
+// A thin parse in front of AddRows, so the text and rows entry points cannot
+// disagree about numbering, deduplication or which column is which.
+func (s Service) Add(output string) Table {
+	shape, rows, ok := parseTable(output)
+	if !ok {
+		return Table{Raw: output}
 	}
-
-	// Index numbers must map 1:1 to saved state, which is keyed by name.
-	// Collapse any repeated NAME (first-seen wins) so the displayed indexes
-	// and the state entries can never desync.
-	seen := make(map[string]bool, len(rows))
-	unique := make([][]string, 0, len(rows))
-	for _, row := range rows {
-		if seen[row[nameIdx]] {
-			continue
-		}
-		seen[row[nameIdx]] = true
-		unique = append(unique, row)
-	}
-
-	names := make([]string, 0, len(unique))
-	allRows := make([][]string, 0, len(unique)+1)
-	allRows = append(allRows, append([]string{"X"}, headers...))
-	for i, row := range unique {
-		names = append(names, row[nameIdx])
-		allRows = append(allRows, append([]string{strconv.Itoa(i + 1)}, row...))
-	}
-
-	return Format(allRows), names
+	table := s.AddRows(shape.Headers, rows)
+	table.Raw = output
+	return table
 }
 
-// Filter drops rows whose NAME doesn't contain term, case-insensitively.
-func (Service) Filter(output, term string) string {
-	headers, rows, nameIdx := parseOutput(output)
-	if headers == nil {
-		return output
+// AddRows prefixes an "X" index column to rows parsed upstream and returns the
+// indexed table: its rows, and the entries it assigned in index order.
+//
+// Takes rows rather than text because the pipeline between kubectl and the
+// screen parses once. Handing the next stage padded text meant it had to parse
+// again, and padded text cannot represent an empty cell — its gap is
+// indistinguishable from column padding.
+func (Service) AddRows(headers []string, rows [][]string) Table {
+	shape, ok := shapeOf(headers)
+	if !ok {
+		return Table{}
 	}
 
-	lower := strings.ToLower(term)
-	allRows := [][]string{headers}
+	// Index numbers must map 1:1 to saved state, so a row that is
+	// indistinguishable from an earlier one is collapsed (first-seen wins) —
+	// otherwise the displayed indexes and the state entries desync.
+	//
+	// What "indistinguishable" means depends on the table, and it is a property
+	// of the row, not of the resource the row resolves to. Name alone is right
+	// for a single namespace, and wrong the moment a listing spans them: two
+	// namespaces running the same workload name hold two different resources.
+	// And a table can legitimately hold several rows for one resource —
+	// `kubectl top pod --containers` prints one per container — which are
+	// different rows however identical their Entry is. Collapsing on the Entry
+	// dropped every container after the first, rendering six rows as three.
+	seen := make(map[rowKey]bool, len(rows))
+	indexed := make([][]string, 0, len(rows))
+	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row[nameIdx]), lower) {
-			allRows = append(allRows, row)
+		entry := Entry{Name: row[shape.ResourceIdx]}
+		if shape.NamespaceIdx >= 0 {
+			entry.Namespace = row[shape.NamespaceIdx]
+		}
+		key := rowKey{Entry: entry}
+		if shape.ResourceIdx != shape.NameIdx {
+			key.Label = row[shape.NameIdx]
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		entries = append(entries, entry)
+		indexed = append(indexed, append([]string{strconv.Itoa(len(entries))}, row...))
+	}
+
+	return Table{
+		Headers: append([]string{"X"}, shape.Headers...),
+		Rows:    indexed,
+		Entries: entries,
+	}
+}
+
+// FilterRows keeps the rows whose NAME contains term, case-insensitively.
+func FilterRows(headers []string, rows [][]string, term string) [][]string {
+	shape, ok := shapeOf(headers)
+	if !ok {
+		return rows
+	}
+	lower := strings.ToLower(term)
+	kept := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		if strings.Contains(strings.ToLower(row[shape.NameIdx]), lower) {
+			kept = append(kept, row)
 		}
 	}
-	if len(allRows) == 1 {
-		// Nothing matched: show the original header line untouched rather than
-		// a re-padded one.
-		return strings.Split(output, "\n")[0]
-	}
-	return Format(allRows)
+	return kept
 }
 
 // Resolve maps a 1-based index onto a resource name in state.

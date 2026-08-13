@@ -188,13 +188,68 @@ func TestPluralDisplayUsesFallbackPlural(t *testing.T) {
 	}
 }
 
-// A fallback that resolves the kind but reports no plural text falls back to
-// the resource type passed through unchanged, matching today's behavior for
-// any other unrecognized spelling.
-func TestPluralDisplayFallsThroughWithoutAPlural(t *testing.T) {
+// A fallback that resolves the kind but reports no plural text still captions
+// with the kind. It used to pass the spelling through instead, on the grounds
+// that this matched every other unrecognized spelling — but an unrecognized
+// spelling is one kx knows nothing about, and this one it has a kind for. The
+// caption said "gw · prod · 3 items", echoing the shorthand the user typed
+// back at them rather than naming what they were looking at.
+//
+// Defensive either way: discovery records a kind and its plural together, so a
+// kind without one is a shape the real source does not produce.
+func TestPluralDisplayNamesTheKindWithoutAPlural(t *testing.T) {
 	SetShorthandSource(&fakeShorthandSource{kind: Kind("Gateway"), plural: "", ok: true})
 	defer SetShorthandSource(nil)
-	if got := PluralDisplay("gw"); got != "gw" {
-		t.Errorf("PluralDisplay(gw) = %q, want the raw resource type", got)
+	if got := PluralDisplay("gw"); got != "Gateways" {
+		t.Errorf("PluralDisplay(gw) = %q, want the kind's plural", got)
+	}
+}
+
+// Discovery reports a plural as the API resource *name* — a lowercase URL path
+// segment, not a display string — so captioning with it directly printed
+// "serviceaccounts · diagnostics · 1 item" beside "Pods" and "ConfigMaps".
+//
+// The kind supplies the register; the API supplies only the pluralising
+// suffix, which is the part worth taking because the API server knows the
+// irregulars.
+func TestDisplayPluralKeepsTheKindsCase(t *testing.T) {
+	for _, tc := range []struct {
+		kind      Kind
+		apiPlural string
+		want      string
+	}{
+		// Plain "s".
+		{"ServiceAccount", "serviceaccounts", "ServiceAccounts"},
+		// "es", which a bare +"s" rule would have got wrong.
+		{"Ingress", "ingresses", "Ingresses"},
+		{"ComponentStatus", "componentstatuses", "ComponentStatuses"},
+		// A kind that is already plural takes no suffix at all.
+		{"Endpoints", "endpoints", "Endpoints"},
+		// The stem changes, so there is no suffix to take.
+		{"NetworkPolicy", "networkpolicies", "NetworkPolicies"},
+		{"CSIStorageCapacity", "csistoragecapacities", "CSIStorageCapacities"},
+		// Initialisms survive, because the kind is never rebuilt from the
+		// lowercase name.
+		{"APIService", "apiservices", "APIServices"},
+		{"CSIDriver", "csidrivers", "CSIDrivers"},
+		// Nothing to go on: still captioned in the kind's register rather than
+		// a URL segment's.
+		{"Gateway", "", "Gateways"},
+	} {
+		if got := displayPlural(tc.kind, tc.apiPlural); got != tc.want {
+			t.Errorf("displayPlural(%q, %q) = %q, want %q", tc.kind, tc.apiPlural, got, tc.want)
+		}
+	}
+}
+
+// The whole point is what reaches a caption, so go through the exported entry
+// point with a source installed, the way a real unknown type does.
+func TestPluralDisplayCapitalisesADiscoveredType(t *testing.T) {
+	fake := &fakeShorthandSource{kind: Kind("ServiceAccount"), plural: "serviceaccounts", ok: true}
+	SetShorthandSource(fake)
+	defer SetShorthandSource(nil)
+
+	if got := PluralDisplay("sa"); got != "ServiceAccounts" {
+		t.Errorf("PluralDisplay(sa) = %q, want ServiceAccounts", got)
 	}
 }

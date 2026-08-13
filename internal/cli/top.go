@@ -43,22 +43,17 @@ func (c TopCommand) EnsureAvailable() error {
 // given, and the caller needs the same answer for the caption.
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
-) (table, namespace string, err error) {
+) (table index.Table, namespace string, err error) {
 	if err := c.EnsureAvailable(); err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
 	if err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
-	if filterTerm != "" {
-		output = c.Index.Filter(output, filterTerm)
-	}
-
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
-	// percentage columns — unlike -A, which does (see withUsagePercentages),
-	// even though it stays unindexed regardless.
+	// percentage columns — unlike -A, which does (see withUsagePercentages).
 	hasContainers := false
 	for _, arg := range extraArgs {
 		if arg == "--containers" {
@@ -71,19 +66,25 @@ func (c TopCommand) Execute(
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
+	// Parsed once here: the rows are narrowed by --match and widened with the
+	// percentage columns before anything numbers them, and none of that goes
+	// back through text on the way.
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return c.Index.Add(output), namespace, nil
+	}
+	if filterTerm != "" {
+		rows = index.FilterRows(headers, rows, filterTerm)
+	}
 	if !hasContainers && !noLimits {
-		output, err = c.withUsagePercentages(output, namespace, allNamespaces)
+		headers, rows, err = c.withUsagePercentages(headers, rows, namespace, allNamespaces)
 		if err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
-	if allNamespaces {
-		// Names aren't unique across namespaces — matches kx get's rule.
-		return output, namespace, nil
-	}
 
-	indexed, names := c.Index.Add(output)
-	if len(names) > 0 {
+	indexed := c.Index.AddRows(headers, rows)
+	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
 			match = &filterTerm
@@ -91,14 +92,22 @@ func (c TopCommand) Execute(
 		if extraArgs == nil {
 			extraArgs = []string{}
 		}
+		// An -A listing has no single namespace for the entry — each resource
+		// carries its own, read from the table's NAMESPACE column, exactly as
+		// `kx get -A` records them.
+		entryNamespace := namespace
+		if allNamespaces {
+			entryNamespace = ""
+		}
 		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, kinds.Pod),
-			Namespace: namespace,
+			Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
+			Namespace:     entryNamespace,
+			AllNamespaces: allNamespaces,
 			// Recorded as a `get pods` query so a stale entry refreshes into a
 			// listing, which is what the indexes were assigned against.
 			Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},
 		}); err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
 	return indexed, namespace, nil
@@ -111,26 +120,32 @@ func (c TopCommand) Execute(
 // only has to relabel those columns to kx's own CPU%/MEM% naming (values
 // untouched) — see relabelPercentColumns — so the existing IndexedTable
 // coloring, which keys off those exact header names, applies for free.
-func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, namespace string, err error) {
+func (c TopCommand) ExecuteNodes(
+	filterTerm string, extraArgs []string,
+) (table index.Table, namespace string, err error) {
 	if err := c.EnsureAvailable(); err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
 	if err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
-	if filterTerm != "" {
-		output = c.Index.Filter(output, filterTerm)
-	}
-	output = relabelPercentColumns(output)
-
 	namespace = extractNamespace(extraArgs)
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
 
-	indexed, names := c.Index.Add(output)
-	if len(names) > 0 {
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return c.Index.Add(output), namespace, nil
+	}
+	if filterTerm != "" {
+		rows = index.FilterRows(headers, rows, filterTerm)
+	}
+	headers = relabelPercentColumns(headers)
+
+	indexed := c.Index.AddRows(headers, rows)
+	if len(indexed.Entries) > 0 {
 		if extraArgs == nil {
 			extraArgs = []string{}
 		}
@@ -139,14 +154,14 @@ func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, 
 			match = &filterTerm
 		}
 		if err := c.State.Save(state.State{
-			Resources: state.NewResources(names, kinds.Node),
+			Resources: resourcesFrom(indexed.Entries, kinds.Node),
 			Namespace: namespace,
 			// Recorded as a `get nodes` query, matching kx get nodes' own
 			// convention, so a stale entry refreshes into the same listing
 			// shape the indexes were assigned against.
 			Query: &state.Query{Resource: "nodes", Args: extraArgs, Match: match},
 		}); err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
 	return indexed, namespace, nil
@@ -157,15 +172,11 @@ func (c TopCommand) ExecuteNodes(filterTerm string, extraArgs []string) (table, 
 // header rewrite only, so the existing render.UsageStyle-driven coloring in
 // IndexedTable (which looks up cells by the exact header names "CPU%"/
 // "MEM%") applies to nodes without any new coloring code.
-func relabelPercentColumns(output string) string {
-	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
-		return output
-	}
-	cpuCol := indexOfHeader(headers, "CPU(%)")
-	memCol := indexOfHeader(headers, "MEMORY(%)")
+func relabelPercentColumns(headers []string) []string {
+	cpuCol := index.ColumnIndex(headers, "CPU(%)")
+	memCol := index.ColumnIndex(headers, "MEMORY(%)")
 	if cpuCol < 0 && memCol < 0 {
-		return output
+		return headers
 	}
 	relabeled := append([]string{}, headers...)
 	if cpuCol >= 0 {
@@ -174,10 +185,7 @@ func relabelPercentColumns(output string) string {
 	if memCol >= 0 {
 		relabeled[memCol] = "MEM%"
 	}
-	table := make([][]string, 0, len(rows)+1)
-	table = append(table, relabeled)
-	table = append(table, rows...)
-	return index.Format(table)
+	return relabeled
 }
 
 // withUsagePercentages appends CPU%/MEM% columns computed against each
@@ -186,34 +194,35 @@ func relabelPercentColumns(output string) string {
 // single namespace passed in — pod names collide across namespaces, so a
 // bare-name key would silently give two different pods' rows the same
 // limit.
-func (c TopCommand) withUsagePercentages(output, namespace string, allNamespaces bool) (string, error) {
-	headers, rows, nameIdx := index.ParseTable(output)
-	cpuCol := indexOfHeader(headers, "CPU(cores)")
-	memCol := indexOfHeader(headers, "MEMORY(bytes)")
-	if headers == nil || cpuCol < 0 || memCol < 0 {
-		return output, nil
+func (c TopCommand) withUsagePercentages(
+	headers []string, rows [][]string, namespace string, allNamespaces bool,
+) ([]string, [][]string, error) {
+	nameIdx := index.ColumnIndex(headers, "NAME")
+	cpuCol := index.ColumnIndex(headers, "CPU(cores)")
+	memCol := index.ColumnIndex(headers, "MEMORY(bytes)")
+	if nameIdx < 0 || cpuCol < 0 || memCol < 0 {
+		return headers, rows, nil
 	}
-	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
+	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
 
 	limits, err := c.podLimits(namespace, allNamespaces)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
-	table := make([][]string, 0, len(rows)+1)
-	table = append(table, append(append([]string{}, headers...), "CPU%", "MEM%"))
+	widened := make([][]string, 0, len(rows))
 	for _, row := range rows {
 		rowNamespace := namespace
 		if namespaceIdx >= 0 {
 			rowNamespace = row[namespaceIdx]
 		}
 		limit := limits[rowNamespace+"/"+row[nameIdx]]
-		table = append(table, append(append([]string{}, row...),
+		widened = append(widened, append(append([]string{}, row...),
 			percentCell(row[cpuCol], limit.CPU),
 			percentCell(row[memCol], limit.Memory),
 		))
 	}
-	return index.Format(table), nil
+	return append(append([]string{}, headers...), "CPU%", "MEM%"), widened, nil
 }
 
 // podLimit is a pod's summed limits. A nil quantity means the limit is
@@ -327,21 +336,25 @@ func percentCell(usage string, limit *resource.Quantity) string {
 // behind a top listing the way diagnostics.Report/scanner.ImageScan back
 // diag/scan's pages — this table text already is the whole of the data —
 // so this builds web.TopRow directly rather than converting from some
-// intermediate type. Degrades gracefully when a column is absent (the -A
-// pods case has no X column, since -A stays unindexed): that column's
-// TopRow fields stay at their zero value, which the template/grid render
-// as blank/"—".
-func topPageRows(indexed string) []web.TopRow {
-	headers, rows, nameIdx := index.ParseTable(indexed)
-	if headers == nil {
+// intermediate type. Degrades gracefully when a column is absent (a
+// --no-limits listing has no CPU%/MEM% columns): that column's TopRow
+// fields stay at their zero value, which the template/grid render as
+// blank/"—".
+func topPageRows(indexed index.Table) []web.TopRow {
+	if !indexed.Indexable() {
 		return nil
 	}
-	indexIdx := indexOfHeader(headers, "X")
-	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
-	cpuIdx := indexOfHeader(headers, "CPU(cores)")
-	memIdx := indexOfHeader(headers, "MEMORY(bytes)")
-	cpuPctIdx := indexOfHeader(headers, "CPU%")
-	memPctIdx := indexOfHeader(headers, "MEM%")
+	headers, rows := indexed.Headers, indexed.Rows
+	nameIdx := index.ColumnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return nil
+	}
+	indexIdx := index.ColumnIndex(headers, "X")
+	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
+	cpuIdx := index.ColumnIndex(headers, "CPU(cores)")
+	memIdx := index.ColumnIndex(headers, "MEMORY(bytes)")
+	cpuPctIdx := index.ColumnIndex(headers, "CPU%")
+	memPctIdx := index.ColumnIndex(headers, "MEM%")
 
 	pageRows := make([]web.TopRow, len(rows))
 	for i, row := range rows {
@@ -380,13 +393,4 @@ func usageCell(cell, kind string) web.Usage {
 		return web.Usage{}
 	}
 	return web.NewUsage(pct, kind)
-}
-
-func indexOfHeader(headers []string, name string) int {
-	for i, header := range headers {
-		if header == name {
-			return i
-		}
-	}
-	return -1
 }

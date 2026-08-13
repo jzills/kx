@@ -2,46 +2,28 @@
 //
 //	go run ./tools/gen-marks
 //
-// The mark is ASCII art — the same six lines kx prints at the top of --help —
-// and every SVG of it used to be that art as <text> in a monospace font. That
-// only lines up when the reader has the font. Chromium without Courier New,
-// and GitHub's own renderer, both showed it as a jumble of offset blocks.
+// The mark is ASCII art, read from internal/mark — the same lines, and the
+// same variable, kx prints at the top of --help. Every SVG of it used to be
+// that art as <text> in a monospace font, which only lines up when the reader
+// has the font. Chromium without Courier New, and GitHub's own renderer, both
+// showed it as a jumble of offset blocks.
 //
 // Emitting rectangles removes the font from the picture: the same shapes
 // render on every machine, at every size, and stay crisp when scaled. Every
 // output below shares one grid of rects; only the wrapping markup differs, so
 // the marks can never drift out of shape with each other.
+//
+// Run it after editing mark.Lines — the SVGs are committed, so a change to
+// the art reaches the README, the site and the report only from here. The
+// pre-commit hook runs it for exactly that reason.
 package main
 
 import (
 	"fmt"
 	"os"
 	"strings"
-)
 
-// art is the mark, as kx draws it. Kept here rather than imported because
-// internal/render holds it unexported and as terminal output; this is the
-// same six lines, and a test would be the wrong tool for six string literals
-// that have not changed since the logo was designed.
-var art = []string{
-	`██╗  ██╗██╗  ██╗`,
-	`██║ ██╔╝╚██╗██╔╝`,
-	`█████╔╝  ╚███╔╝ `,
-	`██╔═██╗  ██╔██╗ `,
-	`██║  ██╗██╔╝ ██╗`,
-	`╚═╝  ╚═╝╚═╝  ╚═╝`,
-}
-
-// Cell geometry, in the proportions the original used: a monospace cell at
-// font-size 30 with 36 of line height is 18 wide and 36 tall.
-const (
-	cellWidth  = 18.0
-	cellHeight = 36.0
-	// stroke is how thick a box-drawing line is drawn. The source characters
-	// are double lines, which at the size this mark is displayed would be two
-	// sub-pixel strokes; one solid stroke of the same visual weight reads far
-	// better and is what a reader perceives anyway.
-	stroke = 5.0
+	"github.com/jzills/kx/internal/mark"
 )
 
 // The README banner is embedded via <img width="800">, wide of the mark's own
@@ -104,8 +86,13 @@ var outputs = []struct {
 }
 
 func main() {
-	shapes, columns := render()
-	w, h := float64(columns)*cellWidth, float64(len(art))*cellHeight
+	shapes, w, h := mark.Shapes()
+
+	var drawn strings.Builder
+	for _, shape := range shapes {
+		fmt.Fprintf(&drawn, "  <rect x=\"%g\" y=\"%g\" width=\"%g\" height=\"%g\"/>\n",
+			shape.X, shape.Y, shape.Width, shape.Height)
+	}
 
 	for _, output := range outputs {
 		var out strings.Builder
@@ -115,77 +102,17 @@ func main() {
 				"     lines up where the reader has a monospace font carrying the box-drawing\n" +
 				"     glyphs, and falls apart into offset blocks where they don't. -->\n")
 		out.WriteString(output.open(w, h))
-		out.WriteString(shapes)
+		out.WriteString(drawn.String())
 		out.WriteString(output.close(w, h))
 
-		if err := os.WriteFile(output.path, []byte(out.String()), 0o644); err != nil {
+		if err := write(output.path, []byte(out.String())); err != nil {
 			fmt.Fprintln(os.Stderr, "gen-marks:", err)
 			os.Exit(2)
 		}
-		fmt.Println("updated", output.path)
 	}
-}
 
-// render walks the grid and emits a rect for every filled region.
-func render() (shapes string, columns int) {
-	var out strings.Builder
-	for row, line := range art {
-		column := 0
-		for _, glyph := range line {
-			x := float64(column) * cellWidth
-			y := float64(row) * cellHeight
-			for _, r := range rects(glyph, x, y) {
-				fmt.Fprintf(&out, "  <rect x=\"%g\" y=\"%g\" width=\"%g\" height=\"%g\"/>\n",
-					r.x, r.y, r.width, r.height)
-			}
-			column++
-		}
-		if column > columns {
-			columns = column
-		}
-	}
-	return out.String(), columns
-}
-
-type rect struct{ x, y, width, height float64 }
-
-// rects returns the shapes one character contributes, positioned at x,y.
-//
-// The box-drawing characters are drawn as the lines they represent: a corner is
-// a half-width arm meeting a half-height one, so adjacent cells join seamlessly
-// into the continuous outline the art draws around the letterforms.
-func rects(glyph rune, x, y float64) []rect {
-	var (
-		midX = x + (cellWidth-stroke)/2
-		midY = y + (cellHeight-stroke)/2
-		// Arms run from the cell edge to the centre of the stroke, so two
-		// neighbouring cells overlap by nothing and leave no gap.
-		leftArm  = rect{x, midY, (cellWidth-stroke)/2 + stroke, stroke}
-		rightArm = rect{midX, midY, (cellWidth-stroke)/2 + stroke, stroke}
-		upArm    = rect{midX, y, stroke, (cellHeight-stroke)/2 + stroke}
-		downArm  = rect{midX, midY, stroke, (cellHeight-stroke)/2 + stroke}
-	)
-
-	switch glyph {
-	case '█':
-		return []rect{{x, y, cellWidth, cellHeight}}
-	case '║':
-		return []rect{{midX, y, stroke, cellHeight}}
-	case '═':
-		return []rect{{x, midY, cellWidth, stroke}}
-	case '╗':
-		return []rect{leftArm, downArm}
-	case '╔':
-		return []rect{rightArm, downArm}
-	case '╝':
-		return []rect{leftArm, upArm}
-	case '╚':
-		return []rect{rightArm, upArm}
-	case ' ':
-		return nil
-	default:
-		fmt.Fprintf(os.Stderr, "gen-marks: no shape for %q\n", glyph)
+	if err := writeFavicons(); err != nil {
+		fmt.Fprintln(os.Stderr, "gen-marks:", err)
 		os.Exit(2)
-		return nil
 	}
 }

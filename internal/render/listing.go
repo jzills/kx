@@ -12,6 +12,16 @@ import (
 	"github.com/jzills/kx/internal/theme"
 )
 
+// AllNamespaces is how kx names a listing that spans them, wherever a single
+// namespace would otherwise be shown: the caption on `kx get -A`, the sweep
+// banner, an HTML page's scope, and the state views.
+//
+// One spelling, because these all answer the same question and a reader moving
+// between them should not have to work out whether "all namespaces" and
+// "All Namespaces" mean the same scope. Its wording is pinned by a test rather
+// than only by the callers that print it.
+const AllNamespaces = "all namespaces"
+
 // Pod and workload phases worth coloring. Anything unlisted renders neutral
 // rather than guessing, so an unfamiliar status is never miscolored as healthy.
 var (
@@ -147,34 +157,32 @@ func itemLabel(count int) string {
 
 // IndexedTable renders an indexed listing with its caption.
 //
-// Takes the text produced by the index service and re-parses it rather than
-// taking structured rows, so the caller stays a thin pass-through of whatever
-// columns kubectl chose to emit.
-func (r *Renderer) IndexedTable(text, resourceType, namespace, note string) {
-	headers, rows, _ := index.ParseTable(text)
-	if headers == nil {
+// Takes the parsed table rather than the text it would render as. The index
+// service already parsed kubectl's output to number it, and re-parsing the
+// padded text it produced lost anything that text cannot represent — an empty
+// cell reads as column padding, so a blank the parser had recovered vanished
+// again on the way here. Rows carry it intact.
+func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace string) {
+	if !table.Indexable() {
 		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
 		// stderr) shows the zero-count caption instead of silence.
-		if strings.TrimSpace(text) != "" {
-			r.Raw(text)
+		if strings.TrimSpace(table.Raw) != "" {
+			r.Raw(table.Raw)
 			return
 		}
 		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
 		return
 	}
-	if len(rows) == 0 {
+	if len(table.Rows) == 0 {
 		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
 		return
 	}
 
-	columns, cells := styledColumnsAndCells(headers, rows)
+	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
 
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(rows)))
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.Table(columns, cells)
-	if note != "" {
-		r.Caption(note)
-	}
 }
 
 // styledColumnsAndCells applies status/usage-percentage styling and
@@ -237,14 +245,25 @@ func enableNameFlex(headers []string, columns []Column) {
 // the next call. A no-op off-terminal — nothing is written and 0 is
 // returned — the same way Status's spinner never runs off a terminal, so
 // piped output and tests never receive cursor codes.
-func (r *Renderer) RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
-	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), captionParts...)
+//
+// footer, when set, is drawn under the table and redrawn with it. It is where
+// the standing note about the live view goes: the redraw clears its whole
+// frame each time, so anything printed under the table once would be erased on
+// the next event, and anything printed above it before the loop drifts away
+// from the thing it describes.
+func (r *Renderer) RedrawTable(
+	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
+) int {
+	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), footer, captionParts...)
 }
 
 // redrawTable is RedrawTable with the terminal check injected, the same seam
 // status() uses (internal/render/status.go:45) so this is testable without a
 // real terminal.
-func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines int, enabled bool, captionParts ...string) int {
+func (r *Renderer) redrawTable(
+	headers []string, rows [][]string, previousLines int, enabled bool,
+	footer string, captionParts ...string,
+) int {
 	if !enabled {
 		return 0
 	}
@@ -255,13 +274,28 @@ func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines 
 	enableNameFlex(headers, columns)
 	r.Caption(captionParts...)
 	r.Table(columns, cells)
-	return 2 + len(cells) // caption line + header line + one per body row
+	lines := 2 + len(cells) // caption line + header line + one per body row
+	if footer != "" {
+		r.Caption(footer)
+		lines++
+	}
+	return lines
 }
 
 // RedrawTable is the package-level wrapper, matching every other render entry point.
-func RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
-	return current.RedrawTable(headers, rows, previousLines, captionParts...)
+func RedrawTable(
+	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
+) int {
+	return current.RedrawTable(headers, rows, previousLines, footer, captionParts...)
 }
+
+// Redrawing reports whether an in-place redraw actually draws, which it only
+// does on a terminal.
+//
+// Exported for callers whose whole output is a redrawn frame: off-terminal
+// RedrawTable writes nothing at all, so a note that would have sat under the
+// table has to be printed on its own or the piped output explains nothing.
+func Redrawing() bool { return isTerminal(current.out) }
 
 // KeyValueTable renders a two-column listing, used for labels and annotations.
 func (r *Renderer) KeyValueTable(header string, keys []string, values map[string]string) {

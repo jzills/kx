@@ -103,13 +103,17 @@ func removeString(list []string, s string) []string {
 // context's namespace otherwise.
 func watchNamespace(extra []string, kube kubectl.Service) string {
 	if allNamespaces(extra) {
-		return "all namespaces"
+		return render.AllNamespaces
 	}
 	if namespace := extractNamespace(extra); namespace != "" {
 		return namespace
 	}
 	return kube.CurrentNamespace()
 }
+
+// watchNote is the standing explanation of the live view, drawn under the
+// table for as long as the watch runs.
+const watchNote = "watches can't be indexed — showing a live view; press Ctrl-C to stop"
 
 // runWatch streams a live-redrawing table for `kx get <resource> --watch`.
 // Only reached for the default/wide table shape; runGet routes non-tabular
@@ -125,7 +129,18 @@ func runWatch(services Services, resource string, extra []string) error {
 		args = append(args, "--output-watch-events")
 	}
 
-	render.Caption("watches can't be indexed — showing a live view; press Ctrl-C to stop")
+	// Standing notes sit under the block they describe — the way --html's
+	// "serving at ..." sits under the listing it served — so this is drawn as
+	// the redraw's footer rather than printed ahead of the table. Above, it
+	// scrolled away from the thing it was explaining; the refresh lead in
+	// handleStale is the deliberate other case, where the text introduces a
+	// listing that is not there yet.
+	//
+	// Off-terminal there is no redraw at all, so the note is the only output
+	// there would be, and it is printed on its own instead.
+	if !render.Redrawing() {
+		render.Caption(watchNote)
+	}
 
 	var shape index.TableShape
 	var displayHeaders []string
@@ -139,7 +154,7 @@ func runWatch(services Services, resource string, extra []string) error {
 	// initial ADDED burst only shows one row" turned out to be.
 	redraw := func() {
 		lines = render.RedrawTable(displayHeaders, rows.Snapshot(), lines,
-			kinds.PluralDisplay(resource), namespace, "watching")
+			watchNote, kinds.PluralDisplay(resource), namespace, "watching")
 	}
 
 	err := services.Kubectl.Watch(args, func(line string) error {

@@ -6,6 +6,20 @@
  * without anyone editing it.
  */
 
+html {
+  /* Every item in the navbar is a fragment on this one page — Install,
+     Commands, Features, Themes, Reports, and the mark itself, which goes to
+     the top. Without this the browser teleports, and a reader who clicks
+     "Themes" arrives with no idea whether the page moved a screen or ten;
+     the animation is what says how far. .kx-section's scroll-margin-top is
+     the other half, keeping the landing point clear of the sticky navbar.
+
+     No reduced-motion guard here: Hextra's reset already forces
+     scroll-behavior: auto on everything under that query, so a reader who
+     asks for less motion gets the jump back. */
+  scroll-behavior: smooth;
+}
+
 body {
   background-color: var(--kx-background);
   color: var(--kx-body);

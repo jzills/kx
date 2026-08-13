@@ -19,6 +19,12 @@ const singleRowOutput = "NAME             READY   STATUS    RESTARTS   AGE\n" +
 const contextsOutput = "CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE\n" +
 	"*         docker-desktop   docker-desktop   docker-desktop   diagnostics"
 
+// The same command with more than one context, which is where the marker column
+// shows its real shape: it is blank on every row but the active one.
+const twoContextsOutput = "CURRENT   NAME             CLUSTER          AUTHINFO         NAMESPACE\n" +
+	"          alt              docker-desktop   docker-desktop   default\n" +
+	"*         docker-desktop   docker-desktop   docker-desktop   diagnostics"
+
 func TestParseOutputHeaders(t *testing.T) {
 	headers, rows, nameIdx := parseOutput(podsOutput)
 	want := []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
@@ -212,7 +218,8 @@ func TestTableShapeRowLastColumnNotTruncated(t *testing.T) {
 }
 
 func TestAddPrependsIndexColumn(t *testing.T) {
-	output, names := Service{}.Add(podsOutput)
+	namesTable := Service{}.Add(podsOutput)
+	output, names := namesTable.Text(), namesTable.Entries
 	lines := strings.Split(output, "\n")
 	if !strings.HasPrefix(lines[0], "X") {
 		t.Errorf("header = %q, want it to start with X", lines[0])
@@ -221,20 +228,22 @@ func TestAddPrependsIndexColumn(t *testing.T) {
 		t.Errorf("indexes are not 1-based: %q, %q", lines[1], lines[2])
 	}
 	want := []string{"nginx-abc-xyz", "redis-def-uvw"}
-	if len(names) != 2 || names[0] != want[0] || names[1] != want[1] {
-		t.Errorf("names = %v, want %v", names, want)
+	if len(names) != 2 || names[0].Name != want[0] || names[1].Name != want[1] {
+		t.Errorf("names = %+v, want %v", names, want)
 	}
 }
 
 func TestAddSingleRow(t *testing.T) {
-	_, names := Service{}.Add(singleRowOutput)
-	if len(names) != 1 || names[0] != "only-pod-abc" {
+	namesTable := Service{}.Add(singleRowOutput)
+	_, names := namesTable.Text(), namesTable.Entries
+	if len(names) != 1 || names[0].Name != "only-pod-abc" {
 		t.Errorf("names = %v, want [only-pod-abc]", names)
 	}
 }
 
 func TestAddEmptyOutputReturnsOriginal(t *testing.T) {
-	output, names := Service{}.Add("")
+	namesTable := Service{}.Add("")
+	output, names := namesTable.Text(), namesTable.Entries
 	if output != "" || names != nil {
 		t.Errorf("Add(\"\") = %q, %v; want \"\", nil", output, names)
 	}
@@ -247,7 +256,8 @@ func TestAddNonTabularOutputReturnsRaw(t *testing.T) {
 		`{"apiVersion": "v1", "kind": "List"}`,
 		"apiVersion: v1\nkind: List\n",
 	} {
-		output, names := Service{}.Add(raw)
+		namesTable := Service{}.Add(raw)
+		output, names := namesTable.Text(), namesTable.Entries
 		if output != raw || names != nil {
 			t.Errorf("Add(%q) = %q, %v; want unchanged", raw, output, names)
 		}
@@ -255,7 +265,8 @@ func TestAddNonTabularOutputReturnsRaw(t *testing.T) {
 }
 
 func TestAddLastColumnNotTruncated(t *testing.T) {
-	output, _ := Service{}.Add(contextsOutput)
+	_Table := Service{}.Add(contextsOutput)
+	output, _ := _Table.Text(), _Table.Entries
 	if !strings.Contains(output, "diagnostics") {
 		t.Errorf("indexed output dropped the wide last column:\n%s", output)
 	}
@@ -268,8 +279,9 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 		"pod-a     1/1     Running\n" +
 		"pod-a     0/1     Pending\n" +
 		"pod-b     1/1     Running"
-	output, names := Service{}.Add(duplicated)
-	if len(names) != 2 || names[0] != "pod-a" || names[1] != "pod-b" {
+	namesTable := Service{}.Add(duplicated)
+	output, names := namesTable.Text(), namesTable.Entries
+	if len(names) != 2 || names[0].Name != "pod-a" || names[1].Name != "pod-b" {
 		t.Fatalf("names = %v, want [pod-a pod-b]", names)
 	}
 	if strings.Contains(output, "Pending") {
@@ -277,37 +289,57 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 	}
 }
 
-func TestFilterMatching(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "nginx")
-	if !strings.Contains(output, "nginx-abc-xyz") {
-		t.Errorf("filter dropped the matching row:\n%s", output)
+// `kubectl top pod --containers` prints one row per container: POD holds the
+// pod, NAME holds the container. Two pods in one namespace running the same
+// container name is ordinary (a Deployment's replicas always do), and keying
+// the dedupe on NAME collapsed them — six rows rendered as three.
+func TestAddKeepsEveryContainerRow(t *testing.T) {
+	containers := "POD        NAME      CPU(cores)   MEMORY(bytes)\n" +
+		"web-a      nginx     1m           12Mi\n" +
+		"web-b      nginx     0m           13Mi\n" +
+		"web-a      sidecar   2m           4Mi"
+	table := Service{}.Add(containers)
+
+	if len(table.Rows) != 3 {
+		t.Fatalf("len(Rows) = %d, want 3:\n%s", len(table.Rows), table.Text())
 	}
-	if strings.Contains(output, "redis-def-uvw") {
-		t.Errorf("filter kept a non-matching row:\n%s", output)
-	}
-	if !strings.HasPrefix(output, "NAME") {
-		t.Errorf("filter dropped the header:\n%s", output)
+	if !strings.Contains(table.Text(), "web-b") {
+		t.Errorf("dropped the second pod's container row:\n%s", table.Text())
 	}
 }
 
-func TestFilterCaseInsensitive(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "NGINX")
-	if !strings.Contains(output, "nginx-abc-xyz") {
-		t.Errorf("filter is case-sensitive:\n%s", output)
+// An index has to name something kx can act on. No kubectl call takes a bare
+// container name, so a `--containers` row resolves to the pod holding it —
+// otherwise `kx logs 1` looks up a pod named "nginx" and reports it missing.
+func TestAddResolvesContainerRowsToTheirPod(t *testing.T) {
+	containers := "POD        NAME      CPU(cores)   MEMORY(bytes)\n" +
+		"web-a      nginx     1m           12Mi\n" +
+		"web-a      sidecar   2m           4Mi"
+	entries := Service{}.Add(containers).Entries
+
+	if len(entries) != 2 {
+		t.Fatalf("len(Entries) = %d, want 2", len(entries))
+	}
+	for i, entry := range entries {
+		if entry.Name != "web-a" {
+			t.Errorf("Entries[%d].Name = %q, want the pod %q", i, entry.Name, "web-a")
+		}
 	}
 }
 
-func TestFilterNoMatchReturnsHeaderOnly(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "nothing-matches")
-	if output != strings.Split(podsOutput, "\n")[0] {
-		t.Errorf("no-match filter = %q, want the original header line", output)
-	}
-}
+// The namespace still separates same-named pods, and now has to do it while
+// POD rather than NAME is supplying the name.
+func TestAddSeparatesContainerRowsByNamespace(t *testing.T) {
+	containers := "NAMESPACE   POD     NAME    CPU(cores)   MEMORY(bytes)\n" +
+		"prod        web     nginx   1m           12Mi\n" +
+		"staging     web     nginx   0m           13Mi"
+	entries := Service{}.Add(containers).Entries
 
-func TestFilterLastColumnNotTruncated(t *testing.T) {
-	output := Service{}.Filter(contextsOutput, "docker")
-	if !strings.Contains(output, "diagnostics") {
-		t.Errorf("filter truncated the wide last column:\n%s", output)
+	if len(entries) != 2 {
+		t.Fatalf("len(Entries) = %d, want 2 — collapsed two namespaces", len(entries))
+	}
+	if entries[0].Namespace != "prod" || entries[1].Namespace != "staging" {
+		t.Errorf("Entries = %v, want one per namespace", entries)
 	}
 }
 
@@ -431,9 +463,10 @@ func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
 		"alpha                日本語      ConfigMap\n" +
 		"beta                 abcdef   ConfigMap"
 
-	indexed, names := Service{}.Add(output)
-	if strings.Join(names, "|") != "alpha|beta" {
-		t.Fatalf("names = %v", names)
+	entriesTable := Service{}.Add(output)
+	indexed, entries := entriesTable.Text(), entriesTable.Entries
+	if len(entries) != 2 || entries[0].Name != "alpha" || entries[1].Name != "beta" {
+		t.Fatalf("entries = %+v, want alpha then beta", entries)
 	}
 	headers, rows, _ := ParseTable(indexed)
 	if got := strings.Join(headers, "|"); got != "X|NAME|NOTE|KIND" {
@@ -441,5 +474,283 @@ func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
 	}
 	if got := strings.Join(rows[0], "|"); got != "1|alpha|日本語|ConfigMap" {
 		t.Errorf("re-parsed row = %q, want 1|alpha|日本語|ConfigMap\n%s", got, indexed)
+	}
+}
+
+// `kubectl config get-contexts` marks the active context in a leading CURRENT
+// column that is blank on every other row. Trimming a line before splitting it
+// on runs of 2+ spaces makes that blank cell disappear, shifting every value one
+// column left — a non-current context's NAME then reads as its CLUSTER, and
+// since both rows end up claiming the same NAME, Add's dedupe drops one of them
+// outright.
+func TestParseTableKeepsABlankFirstColumn(t *testing.T) {
+	headers, rows, nameIdx := ParseTable(twoContextsOutput)
+
+	if len(headers) != 5 || nameIdx != 1 {
+		t.Fatalf("headers = %v, nameIdx = %d; want 5 headers with NAME at 1", headers, nameIdx)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0][0] != "" || rows[0][1] != "alt" {
+		t.Errorf("non-current row = %q, want an empty CURRENT and NAME 'alt'", rows[0])
+	}
+	if rows[1][0] != "*" || rows[1][1] != "docker-desktop" {
+		t.Errorf("current row = %q, want CURRENT '*' and NAME 'docker-desktop'", rows[1])
+	}
+}
+
+// The consequence users actually hit: a context that isn't the active one has
+// no index, so `kx context <n>` cannot reach it and the number it does offer
+// points at a different context than the row shows.
+func TestAddIndexesEveryContextIncludingNonCurrent(t *testing.T) {
+	entriesTable := Service{}.Add(twoContextsOutput)
+	_, entries := entriesTable.Text(), entriesTable.Entries
+
+	if len(entries) != 2 {
+		t.Fatalf("names = %v, want both contexts indexed", entries)
+	}
+	if entries[0].Name != "alt" || entries[1].Name != "docker-desktop" {
+		t.Errorf("names = %v, want [alt docker-desktop]", entries)
+	}
+}
+
+// The streaming path parses the header once and each row separately, so it needs
+// the same treatment as ParseTable or `--watch` disagrees with a plain listing.
+func TestTableShapeRowKeepsABlankFirstColumn(t *testing.T) {
+	shape, ok := ParseHeader(strings.Split(twoContextsOutput, "\n")[0])
+	if !ok {
+		t.Fatal("ParseHeader returned ok=false")
+	}
+
+	row := shape.Row(strings.Split(twoContextsOutput, "\n")[1])
+
+	if len(row) != 5 {
+		t.Fatalf("row = %q, want 5 fields", row)
+	}
+	if row[0] != "" || row[1] != "alt" {
+		t.Errorf("row = %q, want an empty CURRENT and NAME 'alt'", row)
+	}
+}
+
+// The split cap has to shrink along with the row when a blank first column is
+// inferred, or the last column stops being the unsplit remainder: a value
+// carrying its own 2+-space run gets cut in two and the row grows a field it
+// should not have. Same guarantee ParseTable already makes for an ordinary row
+// (TestParseOutputLastColumnNotTruncated), held for the shifted shape too.
+func TestBlankFirstColumnKeepsTheLastColumnWhole(t *testing.T) {
+	output := "CURRENT   NAME   CLUSTER   NOTE\n" +
+		"          alt    local     restarted  twice"
+
+	_, rows, _ := ParseTable(output)
+
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if len(rows[0]) != 4 {
+		t.Fatalf("row = %q, want 4 fields", rows[0])
+	}
+	if rows[0][3] != "restarted  twice" {
+		t.Errorf("last column = %q, want %q kept whole", rows[0][3], "restarted  twice")
+	}
+}
+
+// Captured from `kubectl get pods -A`: NAMESPACE leads, and the same workload
+// name recurs across namespaces — which is the whole reason -A went unindexed
+// until now.
+const allNamespacesOutput = "NAMESPACE      NAME                            READY   STATUS    RESTARTS   AGE\n" +
+	"default        api-7d8f                        1/1     Running   0          5d\n" +
+	"staging        api-7d8f                        1/1     Running   0          3d\n" +
+	"staging        web-1                           1/1     Running   0          3d"
+
+// An -A listing carries each row's namespace, so an index can resolve to the
+// one place its resource actually lives.
+func TestAddCarriesTheNamespaceOfEachRow(t *testing.T) {
+	entriesTable := Service{}.Add(allNamespacesOutput)
+	_, entries := entriesTable.Text(), entriesTable.Entries
+
+	if len(entries) != 3 {
+		t.Fatalf("entries = %+v, want 3", entries)
+	}
+	if entries[0].Name != "api-7d8f" || entries[0].Namespace != "default" {
+		t.Errorf("entries[0] = %+v, want api-7d8f in default", entries[0])
+	}
+	if entries[1].Name != "api-7d8f" || entries[1].Namespace != "staging" {
+		t.Errorf("entries[1] = %+v, want api-7d8f in staging", entries[1])
+	}
+}
+
+// The dedupe that keeps displayed indexes in step with saved state keys on NAME
+// alone, which is right for a single namespace and wrong the moment a listing
+// spans them: two namespaces running the same workload name are two resources,
+// and collapsing them drops one from the table entirely.
+func TestAddKeepsSameNamedRowsFromDifferentNamespaces(t *testing.T) {
+	entriesTable := Service{}.Add(allNamespacesOutput)
+	table, entries := entriesTable.Text(), entriesTable.Entries
+
+	if len(entries) != 3 {
+		t.Fatalf("entries = %+v, want all three rows indexed", entries)
+	}
+	if strings.Count(table, "api-7d8f") != 2 {
+		t.Errorf("table dropped a same-named row:\n%s", table)
+	}
+}
+
+// Without a NAMESPACE column there is nothing to disambiguate by, so the
+// name-only collapse has to stay — it is what stops a displayed index from
+// pointing at a different resource than the saved one.
+func TestAddStillCollapsesDuplicateNamesWithoutANamespaceColumn(t *testing.T) {
+	duplicated := "NAME    READY   STATUS\n" +
+		"api     1/1     Running\n" +
+		"api     1/1     Running"
+
+	entriesTable := Service{}.Add(duplicated)
+	_, entries := entriesTable.Text(), entriesTable.Entries
+
+	if len(entries) != 1 {
+		t.Errorf("entries = %+v, want the duplicate name collapsed", entries)
+	}
+}
+
+// Add already has the rows parsed; handing back only text makes the renderer
+// parse them a second time, and a padded table cannot represent an empty cell —
+// its gap is indistinguishable from column padding. Returning the rows is what
+// lets a blank survive the journey from kubectl to the screen.
+func TestAddReturnsTheRowsItParsed(t *testing.T) {
+	table := Service{}.Add(twoContextsOutput)
+
+	if !table.Indexable() {
+		t.Fatal("Add reported a table it could not index")
+	}
+	want := []string{"X", "CURRENT", "NAME", "CLUSTER", "AUTHINFO", "NAMESPACE"}
+	if len(table.Headers) != len(want) {
+		t.Fatalf("Headers = %q, want %q", table.Headers, want)
+	}
+	for i := range want {
+		if table.Headers[i] != want[i] {
+			t.Errorf("Headers[%d] = %q, want %q", i, table.Headers[i], want[i])
+		}
+	}
+	if len(table.Rows) != 2 {
+		t.Fatalf("Rows = %q, want 2", table.Rows)
+	}
+	// The non-current row: index, then a blank CURRENT, then its name. Text
+	// could not carry that middle cell; rows can.
+	if got := table.Rows[0]; got[0] != "1" || got[1] != "" || got[2] != "alt" {
+		t.Errorf("Rows[0] = %q, want index 1, an empty CURRENT and NAME alt", got)
+	}
+	if got := table.Rows[1]; got[1] != "*" || got[2] != "docker-desktop" {
+		t.Errorf("Rows[1] = %q, want CURRENT '*' and NAME docker-desktop", got)
+	}
+}
+
+// Output kx cannot index — JSON, YAML, a table with no NAME column — is carried
+// through untouched for the caller to print as it came.
+func TestAddCarriesNonTabularOutputThrough(t *testing.T) {
+	raw := `{"kind":"PodList","items":[]}`
+
+	table := Service{}.Add(raw)
+
+	if table.Indexable() {
+		t.Errorf("Add indexed non-tabular output: %+v", table)
+	}
+	if table.Text() != raw {
+		t.Errorf("Text() = %q, want the input unchanged", table.Text())
+	}
+	if len(table.Entries) != 0 {
+		t.Errorf("Entries = %+v, want none", table.Entries)
+	}
+}
+
+// Text still renders the padded table, for the callers that genuinely need a
+// string — and it round-trips through the parser, which is the property the
+// old contract rested on entirely.
+func TestTableTextRoundTrips(t *testing.T) {
+	table := Service{}.Add(podsOutput)
+
+	headers, rows, _ := ParseTable(table.Text())
+
+	if len(headers) != len(table.Headers) || len(rows) != len(table.Rows) {
+		t.Errorf("Text() re-parsed to %d headers/%d rows, want %d/%d",
+			len(headers), len(rows), len(table.Headers), len(table.Rows))
+	}
+}
+
+// AddRows numbers rows that were parsed once, upstream. Everything between
+// kubectl and the screen works on rows now; serialising back to padded text so
+// the next stage could parse it again is what lost a blank cell.
+func TestAddRowsNumbersAlreadyParsedRows(t *testing.T) {
+	headers, rows, _ := ParseTable(twoContextsOutput)
+
+	table := Service{}.AddRows(headers, rows)
+
+	if !table.Indexable() {
+		t.Fatal("AddRows produced a table it could not index")
+	}
+	if table.Headers[0] != "X" || table.Headers[1] != "CURRENT" {
+		t.Errorf("Headers = %q, want X then the original columns", table.Headers)
+	}
+	if len(table.Rows) != 2 {
+		t.Fatalf("Rows = %q, want 2", table.Rows)
+	}
+	// The blank CURRENT is intact, which is the whole reason rows travel.
+	if got := table.Rows[0]; got[0] != "1" || got[1] != "" || got[2] != "alt" {
+		t.Errorf("Rows[0] = %q, want index 1, blank CURRENT, NAME alt", got)
+	}
+}
+
+// Add is AddRows with a parse in front, so the two cannot disagree about
+// numbering, deduplication or which column is which.
+func TestAddAgreesWithAddRows(t *testing.T) {
+	headers, rows, _ := ParseTable(allNamespacesOutput)
+
+	fromText := Service{}.Add(allNamespacesOutput)
+	fromRows := Service{}.AddRows(headers, rows)
+
+	if len(fromText.Entries) != len(fromRows.Entries) {
+		t.Fatalf("Add gave %d entries, AddRows %d", len(fromText.Entries), len(fromRows.Entries))
+	}
+	for i := range fromText.Entries {
+		if fromText.Entries[i] != fromRows.Entries[i] {
+			t.Errorf("entry %d: Add %+v, AddRows %+v", i, fromText.Entries[i], fromRows.Entries[i])
+		}
+	}
+	if fromText.Text() != fromRows.Text() {
+		t.Errorf("Add and AddRows rendered differently:\n%s\n---\n%s",
+			fromText.Text(), fromRows.Text())
+	}
+}
+
+// Rows without a NAME column cannot be numbered — an index has to name
+// something. Reported as not indexable rather than numbered anyway.
+func TestAddRowsRejectsRowsWithoutANameColumn(t *testing.T) {
+	table := Service{}.AddRows([]string{"FOO", "BAR"}, [][]string{{"baz", "qux"}})
+
+	if table.Indexable() {
+		t.Errorf("AddRows numbered a table with no NAME column: %+v", table)
+	}
+}
+
+// FilterRows narrows by NAME on the rows themselves. Filtering used to parse
+// the text, re-format the survivors and hand that back for Add to parse a third
+// time.
+func TestFilterRowsNarrowsByName(t *testing.T) {
+	headers, rows, _ := ParseTable(podsOutput)
+
+	kept := FilterRows(headers, rows, "NGINX")
+
+	if len(kept) != 1 {
+		t.Fatalf("kept %d rows, want 1: %q", len(kept), kept)
+	}
+	if kept[0][0] != "nginx-abc-xyz" {
+		t.Errorf("kept %q, want the nginx row", kept[0])
+	}
+}
+
+func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
+	headers, rows, _ := ParseTable(podsOutput)
+
+	if kept := FilterRows(headers, rows, "absent"); len(kept) != 0 {
+		t.Errorf("kept %q, want none", kept)
 	}
 }

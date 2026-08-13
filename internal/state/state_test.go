@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,7 @@ func TestResourceOrderIsStableAcrossLoads(t *testing.T) {
 // version's shape rather than promising it never changes.
 func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 	service := newTestService(t, 10)
+	service.Context = func() string { return "docker-desktop" }
 	match := "web"
 	save(t, service, State{
 		Resources: pods("nginx"),
@@ -95,8 +97,9 @@ func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 		Version int `json:"version"`
 		States  []struct {
 			Resources []struct {
-				Name string `json:"name"`
-				Kind string `json:"kind"`
+				Name      string `json:"name"`
+				Kind      string `json:"kind"`
+				Namespace string `json:"namespace"`
 			} `json:"resources"`
 			Namespace string `json:"namespace"`
 			Query     *struct {
@@ -104,6 +107,7 @@ func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 				Args     []string `json:"args"`
 				Match    *string  `json:"match"`
 			} `json:"query"`
+			Context string `json:"context"`
 		} `json:"states"`
 		Cursor int `json:"cursor"`
 	}
@@ -125,6 +129,9 @@ func TestSavedJSONMatchesOnDiskSchema(t *testing.T) {
 	}
 	if raw.States[0].Query.Match == nil || *raw.States[0].Query.Match != "web" {
 		t.Errorf("query match did not round-trip")
+	}
+	if raw.States[0].Context != "docker-desktop" {
+		t.Errorf("context = %q, want %q", raw.States[0].Context, "docker-desktop")
 	}
 }
 
@@ -154,7 +161,7 @@ func TestLoadMissingFileReturnsErrNoState(t *testing.T) {
 // an ordinary empty state, not another error.
 func TestVersionMismatchResetsFile(t *testing.T) {
 	service := newTestService(t, 10)
-	stale := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	stale := `{"version":99,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
 	if err := os.WriteFile(service.Path, []byte(stale), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -227,7 +234,7 @@ func TestLegacySingleStateFormatResetsFile(t *testing.T) {
 // `kx get <resource>` rebuilds state without surfacing the reset to the user.
 func TestSaveHealsVersionMismatchedFile(t *testing.T) {
 	service := newTestService(t, 10)
-	stale := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	stale := `{"version":99,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
 	if err := os.WriteFile(service.Path, []byte(stale), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -246,7 +253,7 @@ func TestSaveHealsVersionMismatchedFile(t *testing.T) {
 func TestCorruptFileReturnsActionableError(t *testing.T) {
 	for name, contents := range map[string]string{
 		"invalid json": "{not json",
-		"missing keys": `{"version": 1, "states": [{"namespace": "prod"}], "cursor": 0}`,
+		"missing keys": `{"version": 2, "states": [{"namespace": "prod"}], "cursor": 0}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			service := newTestService(t, 10)
@@ -945,7 +952,7 @@ func TestFieldsNamedReturnsTheSlotNamespace(t *testing.T) {
 // loading and resolving exactly as it did.
 func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
 	service := newTestService(t, 10)
-	legacy := `{"version":1,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],"cursor":0}`
+	legacy := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],"cursor":0}`
 	if err := os.WriteFile(service.Path, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -969,7 +976,7 @@ func TestStateFileWithoutNamedKeyStillLoads(t *testing.T) {
 // refills the stack and not the slot.
 func TestSlotWithoutResourcesDropsAndKeepsTheHistory(t *testing.T) {
 	service := newTestService(t, 10)
-	raw := `{"version":1,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
 		`"cursor":0,"named":{"Namespace":{"namespace":"prod"}}}`
 	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -1000,7 +1007,7 @@ func TestSlotWithoutResourcesDropsAndKeepsTheHistory(t *testing.T) {
 // names `kx get <resource>`, which is exactly what rebuilds it.
 func TestStackEntryWithoutResourcesIsStillFatal(t *testing.T) {
 	service := newTestService(t, 10)
-	raw := `{"version":1,"states":[{"namespace":"prod","query":null}],"cursor":0,` +
+	raw := `{"version":2,"states":[{"namespace":"prod","query":null}],"cursor":0,` +
 		`"named":{"Namespace":{"resources":[{"name":"prod","kind":"Namespace"}],"namespace":"prod"}}}`
 	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -1043,5 +1050,394 @@ func TestNamedSlotIsAnAdditiveKey(t *testing.T) {
 	}
 	if _, ok := named["Namespace"]; !ok {
 		t.Errorf("named = %v, want a 'Namespace' slot", named)
+	}
+}
+
+// Version 1 files predate both the per-resource namespace and the recorded
+// context, so they reset rather than being read as entries that happen to
+// carry neither — an unstamped context would read as "unknown" and wave every
+// index through the cluster check it now exists to make.
+func TestPreviousSchemaVersionResetsFile(t *testing.T) {
+	service := newTestService(t, 10)
+	v1 := `{"version":1,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod"}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(v1), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := service.Load(); err != ErrSchemaChanged {
+		t.Fatalf("Load on a version 1 file = %v, want ErrSchemaChanged", err)
+	}
+	if _, err := service.Load(); err != ErrNoState {
+		t.Errorf("Load after reset = %v, want ErrNoState", err)
+	}
+}
+
+// A resource carries its own namespace so that a listing spanning several —
+// which is what `kx get -A` produces — can still resolve an index to the one
+// place the resource actually lives.
+func TestPerResourceNamespaceRoundTrips(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewOrderedResources([]Resource{
+		{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+		{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
+	})})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	first, ok := loaded.Resources.At(1)
+	if !ok || first.Namespace != "prod" {
+		t.Errorf("At(1).Namespace = %q, want %q", first.Namespace, "prod")
+	}
+	second, ok := loaded.Resources.At(2)
+	if !ok || second.Namespace != "staging" {
+		t.Errorf("At(2).Namespace = %q, want %q", second.Namespace, "staging")
+	}
+}
+
+// The entry-level namespace stays the answer for every listing that has one,
+// so a single-namespace entry writes no per-resource namespace at all and its
+// on-disk shape is unchanged.
+func TestSingleNamespaceListingWritesNoPerResourceNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	data, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), `"resources":[{"name":"nginx","kind":"Pod","namespace"`) {
+		t.Errorf("a listing with no per-resource namespace wrote one anyway:\n%s", data)
+	}
+}
+
+func TestFieldsPrefersThePerResourceNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewOrderedResources([]Resource{
+			{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+			{Name: "web", Kind: kinds.Pod, Namespace: "staging"},
+		}),
+		Namespace: "",
+	})
+
+	name, namespace, kind, err := service.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if name != "web" || namespace != "staging" || kind != kinds.Pod {
+		t.Errorf("Fields(2) = %q, %q, %q; want web, staging, Pod", name, namespace, kind)
+	}
+}
+
+// A resource with no namespace of its own falls back to the entry's, which is
+// every listing kx saved before per-resource namespaces existed.
+func TestFieldsFallsBackToTheEntryNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	if _, namespace, _, err := service.Fields(1); err != nil || namespace != "prod" {
+		t.Errorf("Fields(1) namespace = %q (err %v), want prod", namespace, err)
+	}
+}
+
+func TestFieldsExpectingPrefersThePerResourceNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: NewOrderedResources([]Resource{
+		{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	})})
+
+	name, namespace, err := service.FieldsExpecting(1, kinds.Pod)
+	if err != nil {
+		t.Fatalf("FieldsExpecting: %v", err)
+	}
+	if name != "api" || namespace != "prod" {
+		t.Errorf("FieldsExpecting(1, Pod) = %q, %q; want api, prod", name, namespace)
+	}
+}
+
+func TestFieldsNamedPrefersThePerResourceNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{Resources: NewOrderedResources([]Resource{
+		{Name: "kube-system", Kind: kinds.Namespace, Namespace: "kube-system"},
+	})}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	_, namespace, err := service.FieldsNamed(1, kinds.Namespace)
+	if err != nil {
+		t.Fatalf("FieldsNamed: %v", err)
+	}
+	if namespace != "kube-system" {
+		t.Errorf("namespace = %q, want %q", namespace, "kube-system")
+	}
+}
+
+// Every save stamps the context the listing was taken against, so that an
+// index can later be checked against the cluster it was counted in. Stamped
+// centrally rather than passed in by callers: the tree walk and the triage
+// sweep both save state without holding a kubectl service.
+func TestSaveStampsTheCurrentContext(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Context != "staging" {
+		t.Errorf("Context = %q, want %q", loaded.Context, "staging")
+	}
+}
+
+func TestSaveNamedStampsTheCurrentContext(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	if err := service.SaveNamed(State{Resources: namespaces("default")}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if got := history.Named[kinds.Namespace].Context; got != "staging" {
+		t.Errorf("slot Context = %q, want %q", got, "staging")
+	}
+}
+
+// A context the caller set explicitly wins over the hook, so a replayed or
+// reconstructed entry keeps the context it was actually listed in.
+func TestSaveKeepsAnAlreadyRecordedContext(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	save(t, service, State{Resources: pods("nginx"), Context: "prod"})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Context != "prod" {
+		t.Errorf("Context = %q, want %q (the caller's, not the hook's)", loaded.Context, "prod")
+	}
+}
+
+// No hook — every test that builds a Service literally, and any build where
+// the kubeconfig names no current context — stamps nothing rather than
+// panicking or inventing one.
+func TestSaveWithNoContextHookStampsNothing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Context != "" {
+		t.Errorf("Context = %q, want empty", loaded.Context)
+	}
+}
+
+// listedIn seeds an entry recorded against one context, then leaves the service
+// reporting another — the shape of `kx get pods` followed by `kx context 2`.
+func listedIn(t *testing.T, listed, current string, entry State) *Service {
+	t.Helper()
+	service := newTestService(t, 10)
+	service.Context = func() string { return listed }
+	if err := service.Save(entry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	service.Context = func() string { return current }
+	return service
+}
+
+// An index counted in one cluster must not be spent in another: names repeat
+// across clusters, so the resource it resolves to is a different resource that
+// happens to share a name.
+func TestFieldsRefusesAnIndexFromAnotherContext(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Fields(1)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Fields = %v, want a ContextMismatchError", err)
+	}
+	if mismatch.Listed != "staging" || mismatch.Current != "production" {
+		t.Errorf("mismatch = %+v, want listed staging, current production", mismatch)
+	}
+}
+
+func TestContextMismatchErrorNamesBothContexts(t *testing.T) {
+	err := ContextMismatchError{Index: 3, Listed: "staging", Current: "production"}
+
+	for _, want := range []string{"3", "staging", "production"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Error() = %q, want it to name %q", err.Error(), want)
+		}
+	}
+}
+
+func TestFieldsAllowsAMatchingContext(t *testing.T) {
+	service := listedIn(t, "staging", "staging",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields on a matching context = %v, want nil", err)
+	}
+}
+
+// An entry with no recorded context is from a kubeconfig that names no current
+// one. Unknown is not a mismatch — blocking on it would break kx for anyone
+// whose kubeconfig has no current-context set.
+func TestFieldsAllowsAnEntryWithNoRecordedContext(t *testing.T) {
+	service := listedIn(t, "", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields on an unrecorded context = %v, want nil", err)
+	}
+}
+
+func TestFieldsAllowsAnUnknownCurrentContext(t *testing.T) {
+	service := listedIn(t, "staging", "",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	if _, _, _, err := service.Fields(1); err != nil {
+		t.Errorf("Fields with no current context = %v, want nil", err)
+	}
+}
+
+func TestFieldsExpectingRefusesAnIndexFromAnotherContext(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, err := service.FieldsExpecting(1, kinds.Pod)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("FieldsExpecting = %v, want a ContextMismatchError", err)
+	}
+}
+
+// The namespace slot is as cluster-bound as any listing: namespaces are server
+// objects, and the ones in another cluster are different namespaces.
+func TestFieldsNamedRefusesForTheNamespaceSlot(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	if err := service.SaveNamed(State{Resources: namespaces("default", "kube-system")}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	service.Context = func() string { return "production" }
+
+	_, _, err := service.FieldsNamed(2, kinds.Namespace)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("FieldsNamed on the namespace slot = %v, want a ContextMismatchError", err)
+	}
+	// A slot has no query to replay, so it must carry its own relist command —
+	// without it the caller falls back to replaying the history stack, which
+	// answers a namespace question with whatever was last listed.
+	if mismatch.Relist != "kx ns" {
+		t.Errorf("Relist = %q, want %q", mismatch.Relist, "kx ns")
+	}
+}
+
+// A history entry carries the query that built it, so the caller replays that
+// rather than advising a command. An entry that advised one would be telling
+// the user to do what kx is about to do for them.
+func TestStackMismatchCarriesNoRelistHint(t *testing.T) {
+	service := listedIn(t, "staging", "production",
+		State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Fields(1)
+
+	var mismatch ContextMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Fields = %v, want a ContextMismatchError", err)
+	}
+	if mismatch.Relist != "" {
+		t.Errorf("Relist = %q, want empty so the caller replays the saved query", mismatch.Relist)
+	}
+}
+
+// The context slot is the one exemption, and it is not a special case so much
+// as the point: contexts live in kubeconfig, not in a cluster, and the slot
+// exists to switch between them. Guarding it would make `kx context 2`
+// unusable the moment it had been used once — the switch it performs is what
+// creates the mismatch that would then block the next switch.
+func TestFieldsNamedAllowsTheContextSlot(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "staging" }
+	if err := service.SaveNamed(State{
+		Resources: NewResources([]string{"staging", "production"}, kinds.Context),
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	service.Context = func() string { return "production" }
+
+	name, _, err := service.FieldsNamed(1, kinds.Context)
+	if err != nil {
+		t.Fatalf("FieldsNamed on the context slot = %v, want it to resolve", err)
+	}
+	if name != "staging" {
+		t.Errorf("name = %q, want %q — switching back must stay possible", name, "staging")
+	}
+}
+
+// An all-namespace listing has no entry-level namespace by design. Defaulting
+// that empty value to "default" — which every stack entry used to get, back
+// when an empty namespace could only mean "unrecorded" — captions an
+// all-namespace listing with a namespace it never came from, and then resolves
+// every one of its indexes into that namespace.
+func TestSpanningEntryKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{AllNamespaces: true, Resources: NewOrderedResources([]Resource{
+		{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+		{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
+	})})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — the listing spans namespaces", loaded.Namespace)
+	}
+}
+
+// An all-namespace listing whose table carried no NAMESPACE column records no
+// namespaces at all — `kx get pods -A -o custom-columns=NAME:.metadata.name`
+// is the shape. Read back as "default" it looked like an ordinary listing from
+// that namespace, so every index resolved into it.
+func TestAllNamespacesEntryWithNoRecordedNamespacesKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{AllNamespaces: true, Resources: pods("nginx", "api")})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — the listing spans namespaces", loaded.Namespace)
+	}
+}
+
+// An entry recording no namespace anywhere is genuinely unscoped, and still
+// reads back as "default" so nothing downstream has to handle an empty one.
+func TestUnscopedEntryStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx")})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default", loaded.Namespace)
 	}
 }

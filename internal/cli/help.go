@@ -26,7 +26,7 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"annotate", "annotations", "context", "cp", "delete", "describe",
+		"annotate", "annotations", "context", "cp", "debug", "delete", "describe",
 		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
 		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
 		"secret", "top", "tree", "yaml",
@@ -36,24 +36,26 @@ var helpSections = []struct {
 	{"Shell", []string{"completion"}},
 }
 
-// selecting is the index workflow, on the screen people reach for first.
+// examples are the index workflow, on the screen people reach for first.
 //
 // Every line here is a feature that existed only in the README: the numbering
 // itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
 // has none. A per-command --help can't teach any of it, because none of it
 // belongs to one command.
-var selecting = []render.HelpItem{
+var examples = []render.HelpItem{
 	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
 	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
 	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
 	{Name: "kx delete 3 5", Doc: "Several indexes at once"},
 	{Name: "kx delete 3..7", Doc: "A range; '..5' and '5..' leave an end open"},
-	{Name: "kx get pods -A", Doc: "Every namespace, unindexed — names aren't unique"},
+	{Name: "kx get pods -A", Doc: "Every namespace; indexes carry their namespace"},
 }
 
+// The docs URL used to close this screen too. It is one line under `kx
+// --version`, next to the commit and the config path a reader who wants the
+// project page is already looking for — repeating it here bought nothing.
 var footer = []string{
 	"Run 'kx COMMAND --help' for a command's options and examples.",
-	"https://github.com/jzills/kx",
 }
 
 // files names the two paths kx reads and writes. Resolved from the packages
@@ -90,16 +92,20 @@ func homeRelative(path string) string {
 	return "~" + string(filepath.Separator) + rest
 }
 
-// environment lists the config overrides, plus the one convention kx honors
-// that isn't its own.
+// environment lists the config overrides — kx's own keys, and only those,
+// alphabetically, the way every other block on this screen is ordered.
+//
+// NO_COLOR is still honored (see render.New), but it is a terminal-wide
+// convention rather than a kx setting, and listing it beside KX_THEME and
+// KX_THEME_DISABLE implied kx owned it. The README documents it where it
+// belongs, with the rest of the styling behavior.
 func environment() []render.HelpItem {
 	var items []render.HelpItem
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
-	return append(items, render.HelpItem{
-		Name: "NO_COLOR", Doc: "Disable styled output, per no-color.org",
-	})
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items
 }
 
 // rootOptions renders the root command's own flags, plus the help flag cobra
@@ -175,11 +181,15 @@ func argDoc(cmd *cobra.Command, name string) string {
 
 // installHelp replaces cobra's help output with the themed help screens, for
 // the root command and every subcommand.
+//
+// version is taken already spelled — the screen prints it as given rather than
+// composing it, so what a version looks like stays a question for the package
+// that owns the version string.
 func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {
 			render.ShowRootHelp(render.RootHelp{
-				Selecting:   selecting,
+				Examples:    examples,
 				Sections:    rootSections(root),
 				Options:     rootOptions(root),
 				Files:       files(),
@@ -395,19 +405,61 @@ func CommandOrder() []string {
 // keeps its namespace-switch meaning rather than listing namespaces — only a
 // spelling that matches no command reaches the alias.
 func Execute(root *cobra.Command, args []string) error {
-	root.SetArgs(rewriteKindAlias(root, args))
+	root.SetArgs(rewriteArgs(root, args))
 	return root.Execute()
+}
+
+// completionRequests are cobra's own completion entry points, which carry the
+// line being completed as their arguments rather than being one.
+var completionRequests = map[string]bool{
+	cobra.ShellCompRequestCmd:       true,
+	cobra.ShellCompNoDescRequestCmd: true,
+}
+
+// rewriteArgs applies the kind alias to a command line, and to the line carried
+// inside a completion request.
+//
+// `kx po <TAB>` reaches kx as `kx __complete po ""`. The alias applied to that
+// outer line stops at __complete, which is a command, leaving cobra to resolve
+// `po` on its own — it finds no such command and answers with
+// ShellCompDirectiveDefault, the shell's *filename* completion. So the shorthand
+// completed to the working directory while `kx get po <TAB>` completed to the
+// listing. Rewriting the inner line is what makes the two agree, for indexes and
+// flag values alike.
+//
+// The last word is excluded: it is the one being completed, so it is a fragment
+// rather than a spelling. Rewriting `kx po<TAB>` to `kx get po` would answer
+// with resource types where the shell asked which commands start with "po",
+// dropping port-forward from what that offers today.
+func rewriteArgs(root *cobra.Command, args []string) []string {
+	if len(args) < 2 || !completionRequests[args[0]] {
+		return rewriteKindAlias(root, args)
+	}
+	line := rewriteKindAlias(root, args[1:len(args)-1])
+	rewritten := make([]string, 0, len(line)+2)
+	rewritten = append(rewritten, args[0])
+	rewritten = append(rewritten, line...)
+	return append(rewritten, args[len(args)-1])
 }
 
 func rewriteKindAlias(root *cobra.Command, args []string) []string {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return args
 	}
-	if cmd, _, err := root.Find(args[:1]); err == nil && cmd != root {
+	if shadowedByCommand(root, args[0]) {
 		return args
 	}
 	if !kinds.IsKindSpelling(args[0]) {
 		return args
 	}
 	return append([]string{"get"}, args...)
+}
+
+// shadowedByCommand reports whether a word names a registered command, aliases
+// included — which always wins over the kind alias. Shared with the root
+// completer, so what completion offers cannot promise what running it will not
+// do.
+func shadowedByCommand(root *cobra.Command, word string) bool {
+	cmd, _, err := root.Find([]string{word})
+	return err == nil && cmd != root
 }

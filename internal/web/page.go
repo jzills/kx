@@ -11,6 +11,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -21,8 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/mark"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/theme"
 	"github.com/jzills/kx/internal/tree"
 )
 
@@ -96,16 +99,15 @@ type TopPage struct {
 	Rows  []TopRow
 }
 
-// TopRow is one pod's or node's usage. Index is 0 for the -A pods listing,
-// which stays unindexed — the same "unset" convention DiagRow.Index uses
-// for -A mode.
+// TopRow is one pod's or node's usage.
 type TopRow struct {
 	Index int
 	Name  string
 	// Namespace is empty in single-namespace mode (no NAMESPACE column to
 	// read it from) — the grid only shows this column when at least one
 	// row actually has one, matching the -A-only NAMESPACE column
-	// kubectl top pods -A's own terminal output already has.
+	// kubectl top pods -A's own terminal output already has. An -A listing
+	// carries both this and an Index now.
 	Namespace      string
 	CPU, Memory    string
 	CPUPct, MemPct Usage
@@ -235,6 +237,31 @@ func cssVars(styles map[string]string) template.CSS {
 	return template.CSS(out.String())
 }
 
+// faviconURI draws the mark as the page's tab icon, in the palette's accent,
+// as a data: URI rather than a file — a report is one self-contained document,
+// served from a loopback port or saved to disk, with nowhere to link a second
+// asset from.
+//
+// template.URL, not a string: html/template rewrites any URL whose scheme
+// isn't http, https or mailto to "#ZgotmplZ", which would leave every page
+// with a broken icon. Safe here for the same reason cssVars is — the only
+// value interpolated is theme.WebStyles' accent, never page data — and base64
+// leaves nothing to quote inside the attribute either way.
+func faviconURI(styles map[string]string) template.URL {
+	accent := styles[theme.Accent]
+	if accent == "" {
+		// A Meta built without Styles — several tests do — still gets a
+		// visible icon, matching how an empty theme name resolves in
+		// cli.pageMeta rather than rendering an unfilled black tile.
+		if fallback, err := theme.WebStyles(theme.Default); err == nil {
+			accent = fallback[theme.Accent]
+		}
+	}
+	svg := mark.Favicon(accent)
+	return template.URL("data:image/svg+xml;base64," +
+		base64.StdEncoding.EncodeToString([]byte(svg)))
+}
+
 func sortedKeys(styles map[string]string) []string {
 	names := make([]string, 0, len(styles))
 	for name := range styles {
@@ -255,7 +282,7 @@ func sortedKeys(styles map[string]string) []string {
 // rather than reimplemented in JS from JSON.
 type DiagRow struct {
 	Row       int
-	Index     int // 1-based, matches the sweep's index column; unset in -A mode
+	Index     int // 1-based, matches the sweep's index column
 	Kind      string
 	Name      string
 	Namespace string
@@ -401,6 +428,7 @@ func marshalJS(v any) template.JS {
 // funcs are the derivations templates cannot express.
 var funcs = template.FuncMap{
 	"cssVars":    cssVars,
+	"favicon":    faviconURI,
 	"stylesheet": func() template.CSS { return template.CSS(stylesheet) },
 	// wordmark is safe to mark pre-escaped for the same reason stylesheet is:
 	// it is a compiled-in asset, never page data, guarded by

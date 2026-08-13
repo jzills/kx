@@ -323,7 +323,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
-	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; results are not indexed")
+	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
 	registerWatchFlag(cmd)
 	return cmd
 }

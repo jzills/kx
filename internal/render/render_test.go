@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -391,5 +392,80 @@ func TestEngineListPlainWhenNotStyled(t *testing.T) {
 	New(&buf, &buf, "github-dark", false).EngineList("scout")
 	if strings.Contains(buf.String(), esc) {
 		t.Errorf("engine list leaked color into unstyled output: %q", buf.String())
+	}
+}
+
+// Detail is the label/value block `kx --version` prints. The value is what a
+// reader is after — a commit, a path — so it takes the prominent style and the
+// label is muted, the inverse of a help item where the name leads.
+func TestDetailStylesValuesOverLabels(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := newWithProfile(&buf, &buf, "github-dark", termenv.TrueColor)
+
+	out := renderer.Detail([][2]string{{"commit", "8d3e8a4"}})
+
+	if !strings.Contains(out, esc) {
+		t.Fatalf("Detail emitted no styling: %q", out)
+	}
+	// Compare the actual escape sequences, not merely that one exists between
+	// them: two *identical* styles applied separately also put a reset and a
+	// re-open in the gap, so "there is an escape here" proves nothing.
+	labelStyle, valueStyle := styleBefore(t, out, "commit"), styleBefore(t, out, "8d3e8a4")
+	if labelStyle == valueStyle {
+		t.Errorf("label and value share the style %q; the value should lead", labelStyle)
+	}
+}
+
+// styleBefore returns the SGR sequence opened immediately before token.
+func styleBefore(t *testing.T, out, token string) string {
+	t.Helper()
+	at := strings.Index(out, token)
+	if at < 0 {
+		t.Fatalf("output %q does not contain %q", out, token)
+	}
+	opened := sgrRE.FindAllString(out[:at], -1)
+	if len(opened) == 0 {
+		t.Fatalf("nothing styled %q in %q", token, out)
+	}
+	return opened[len(opened)-1]
+}
+
+var sgrRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// Labels are padded to a common width so the values line up in a column.
+func TestDetailAlignsValues(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := newWithProfile(&buf, &buf, "github-dark", termenv.Ascii)
+
+	out := renderer.Detail([][2]string{{"go", "go1.26.5"}, {"commit", "8d3e8a4"}})
+
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Detail = %q, want one line per pair", out)
+	}
+	if strings.Index(lines[0], "go1.26.5") != strings.Index(lines[1], "8d3e8a4") {
+		t.Errorf("values are not aligned:\n%s", out)
+	}
+}
+
+// No trailing newline: the caller decides how the block joins what surrounds it.
+func TestDetailHasNoTrailingNewline(t *testing.T) {
+	var buf bytes.Buffer
+	renderer := newWithProfile(&buf, &buf, "github-dark", termenv.Ascii)
+
+	out := renderer.Detail([][2]string{{"go", "go1.26.5"}})
+
+	if strings.HasSuffix(out, "\n") {
+		t.Errorf("Detail = %q, want no trailing newline", out)
+	}
+}
+
+// Every caller now names this scope through the constant rather than spelling
+// it, so nothing else pins the words themselves. A test that asserted
+// AllNamespaces against AllNamespaces would pass whatever it said.
+func TestAllNamespacesWording(t *testing.T) {
+	if AllNamespaces != "all namespaces" {
+		t.Errorf("AllNamespaces = %q, want %q — this string is user-visible in "+
+			"every -A caption, banner and page scope", AllNamespaces, "all namespaces")
 	}
 }

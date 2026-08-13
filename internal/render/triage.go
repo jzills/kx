@@ -7,17 +7,12 @@ import (
 	"github.com/jzills/kx/internal/theme"
 )
 
-// AllNamespacesNote explains why an -A listing has no indexes, since the
-// absence is otherwise indistinguishable from a bug.
-const AllNamespacesNote = "indexes not saved for all-namespace listings — " +
-	"scope to a namespace (-n or kx ns) to select"
-
 // TriageResult is a namespace sweep, ready to render.
 type TriageResult struct {
 	Namespace string
-	// AllNamespaces swaps the index column for a namespace one. A cluster-wide
-	// sweep saves no state, because names are unique only within a namespace,
-	// so an X column here would print numbers that resolve to nothing.
+	// AllNamespaces adds a namespace column beside the index one. A
+	// cluster-wide sweep is indexed like any other; the namespace is what
+	// separates two rows whose names are unique only within their own.
 	AllNamespaces bool
 	// Checked is the number of resources swept, most of which are healthy and
 	// never appear as a row unless Full is set.
@@ -48,7 +43,7 @@ func (r *Renderer) Triage(result TriageResult) {
 	scope := result.Namespace
 	if result.AllNamespaces {
 		// The same words kx get -A captions itself with.
-		scope = "all namespaces"
+		scope = AllNamespaces
 	}
 	if result.Checked == 0 {
 		r.Caption("Mixed", scope, "0 checked")
@@ -70,20 +65,17 @@ func (r *Renderer) Triage(result TriageResult) {
 	// to `kx diag <index>` exactly as `kx get`'s are, so they are labelled the
 	// same way.
 	//
-	// A cluster-wide sweep has no indexes to print, so NAMESPACE takes the
-	// column instead — without it two rows called web-abc are indistinguishable.
-	var columns []Column
+	// A cluster-wide sweep carries NAMESPACE as well, not instead: the index is
+	// what `kx diag <n>` acts on, and the namespace is what tells two rows
+	// called web-abc apart. It used to swap one for the other, back when an -A
+	// sweep had no indexes to print.
+	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}}
 	if result.AllNamespaces {
-		columns = []Column{
-			{Header: "KIND"}, {Header: "NAMESPACE"}, {Header: "NAME"},
-			{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
-		}
-	} else {
-		columns = []Column{
-			{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"},
-			{Header: "VERDICT"}, {Header: "TOP FINDING", Flex: true},
-		}
+		columns = append(columns, Column{Header: "NAMESPACE"})
 	}
+	columns = append(columns,
+		Column{Header: "NAME"}, Column{Header: "VERDICT"},
+		Column{Header: "TOP FINDING", Flex: true})
 	nameBudget := triageNameBudget(r.width(), result)
 
 	rows := make([][]Cell, 0, len(result.Reports))
@@ -94,20 +86,14 @@ func (r *Renderer) Triage(result TriageResult) {
 			// `kx diag <index>` away.
 			top = report.Findings[0].Summary
 		}
-		// The shapes share their last three cells and differ only in what
-		// leads: an index and a kind, or a kind and the namespace standing in
-		// for the index that a cluster-wide sweep has none of.
-		var lead []Cell
+		// The shapes share their last three cells; a cluster-wide sweep adds
+		// the namespace between the kind and the name.
+		lead := []Cell{
+			Styled(strconv.Itoa(position+1), theme.Muted),
+			Plain(string(report.Kind)),
+		}
 		if result.AllNamespaces {
-			lead = []Cell{
-				Plain(string(report.Kind)),
-				Styled(report.Namespace, theme.Muted),
-			}
-		} else {
-			lead = []Cell{
-				Styled(strconv.Itoa(position+1), theme.Muted),
-				Plain(string(report.Kind)),
-			}
+			lead = append(lead, Styled(report.Namespace, theme.Muted))
 		}
 		rows = append(rows, append(lead,
 			Plain(ellipsize(report.Name, nameBudget)),
@@ -118,9 +104,6 @@ func (r *Renderer) Triage(result TriageResult) {
 
 	r.Blank()
 	hint := "kx diag <index> for detail"
-	if result.AllNamespaces {
-		hint = AllNamespacesNote
-	}
 	footer := hint
 	if !result.Full {
 		label := "resources"

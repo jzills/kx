@@ -18,7 +18,7 @@ var templateFS embed.FS
 //go:embed style.css
 var stylesheet string
 
-// wordmarkSVG is the same "KX" glyphs as kxArt (internal/render/help.go) and
+// wordmarkSVG is the same "KX" glyphs as mark.Lines (internal/mark) and
 // assets/banner.svg, kept as its own small copy rather than shared: the
 // README's asset is rendered standalone by GitHub with a fixed fill and
 // can't reach a Go embed directive outside this package's directory. It is
