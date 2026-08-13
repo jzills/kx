@@ -25,6 +25,17 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: gen-marks
+        name: Regenerate the SVG marks
+        language: system
+        # Redraws the committed SVGs from internal/mark, the same lines kx
+        # prints above --help. Writes identical bytes when they are in step,
+        # so this only reports a change when the art moved and the README
+        # banner, the site mark and the report masthead hadn't followed.
+        entry: go run ./tools/gen-marks
+        pass_filenames: false
+        always_run: true
+
       - id: gen-site-theme
         name: Regenerate site palette stylesheet
         language: system

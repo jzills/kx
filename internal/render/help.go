@@ -3,17 +3,9 @@ package render
 import (
 	"strings"
 
+	"github.com/jzills/kx/internal/mark"
 	"github.com/jzills/kx/internal/theme"
 )
-
-var kxArt = []string{
-	"██╗  ██╗██╗  ██╗",
-	"██║ ██╔╝╚██╗██╔╝",
-	"█████╔╝  ╚███╔╝ ",
-	"██╔═██╗  ██╔██╗ ",
-	"██║  ██╗██╔╝ ██╗",
-	"╚═╝  ╚═╝╚═╝  ╚═╝",
-}
 
 // HelpItem is one named entry in a help listing: a command, argument or flag,
 // with its description.
@@ -190,7 +182,7 @@ const rootNameWidth = 18
 // RootHelp renders the top-level help screen.
 func (r *Renderer) RootHelp(help RootHelp) {
 	r.Blank()
-	for _, line := range kxArt {
+	for _, line := range mark.Lines {
 		r.line(r.style(theme.Header, line))
 	}
 	r.line(r.style(theme.Muted, "kubectl, indexed."))
