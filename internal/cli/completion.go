@@ -57,6 +57,11 @@ func completePath(Services, string) []string { return nil }
 
 // installCompletions gives every command in the tree an argument completer.
 func installCompletions(root *cobra.Command, services Services) {
+	// The first word is nobody's argument — cobra completes command names there
+	// — but `kx pods` is `kx get pods`, so the kinds belong beside them. Set
+	// ahead of the walk, which fills in only what is still nil.
+	root.ValidArgsFunction = rootCompletion(root, services)
+
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
 		// ValidArgs is deliberately not consulted: cobra stops completing
@@ -72,6 +77,37 @@ func installCompletions(root *cobra.Command, services Services) {
 	walk(root)
 
 	registerFlagCompletions(root, services)
+}
+
+// rootCompletion offers the kind spellings at the first word.
+//
+// Cobra adds its own subcommand names to what this returns rather than choosing
+// between the two — "Let the logic continue so as to add any ValidArgsFunction
+// completions, even if we already found sub-commands" — so `kx po<TAB>` offers
+// pods beside port-forward.
+//
+// A spelling a command shadows is dropped. `kx secret` runs the secret command,
+// the precedence rewriteKindAlias applies, so offering the spelling as well
+// would list one word twice and describe it as a listing it will not produce.
+func rootCompletion(root *cobra.Command, services Services) func(
+	*cobra.Command, []string, string,
+) ([]string, cobra.ShellCompDirective) {
+	return func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			// Past the first word, which named no command: kx has nothing to say
+			// about the rest of that line, and files are still the wrong answer.
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		var candidates []string
+		for _, candidate := range completeKind(services, toComplete) {
+			spelling, _, _ := strings.Cut(candidate, "\t")
+			if shadowedByCommand(root, spelling) {
+				continue
+			}
+			candidates = append(candidates, candidate)
+		}
+		return candidates, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // argCompletion completes whichever positional argument the cursor is on.

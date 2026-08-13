@@ -446,11 +446,20 @@ func rewriteKindAlias(root *cobra.Command, args []string) []string {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return args
 	}
-	if cmd, _, err := root.Find(args[:1]); err == nil && cmd != root {
+	if shadowedByCommand(root, args[0]) {
 		return args
 	}
 	if !kinds.IsKindSpelling(args[0]) {
 		return args
 	}
 	return append([]string{"get"}, args...)
+}
+
+// shadowedByCommand reports whether a word names a registered command, aliases
+// included — which always wins over the kind alias. Shared with the root
+// completer, so what completion offers cannot promise what running it will not
+// do.
+func shadowedByCommand(root *cobra.Command, word string) bool {
+	cmd, _, err := root.Find([]string{word})
+	return err == nil && cmd != root
 }

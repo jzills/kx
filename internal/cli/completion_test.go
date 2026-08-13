@@ -273,6 +273,92 @@ func TestCompletionFollowsTheKindShorthand(t *testing.T) {
 	}
 }
 
+// `kx pods` is `kx get pods`, so the first word completes to the resource types
+// as well as to the command names cobra offers there on its own. Without this
+// the shorthand could only be completed by someone who had already typed it out
+// in full.
+func TestRootCompletionOffersKindSpellings(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+	candidates, directive := complete(t, root, "")
+
+	found := false
+	for _, candidate := range candidates {
+		if candidate == "pods\tPod" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("kx <TAB> = %v..., want the resource types among the commands",
+			candidates[:min(5, len(candidates))])
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("directive = %v, want NoFileComp", directive)
+	}
+}
+
+// A spelling a command shadows is not offered as a kind: `kx secret` runs the
+// secret command, so completing it as "list Secrets through get" describes
+// something that will not happen.
+func TestRootCompletionOmitsSpellingsCommandsShadow(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+	candidates, _ := complete(t, root, "")
+
+	for _, candidate := range candidates {
+		spelling, _, _ := strings.Cut(candidate, "\t")
+		switch spelling {
+		case "secret", "secrets", "namespace", "ns":
+			t.Errorf("kx <TAB> offered %q as a kind, but a command owns that word", candidate)
+		}
+	}
+}
+
+// Past the first word the line belongs to whichever command was named. If none
+// was, kx has nothing to say about it — and files are still the wrong answer.
+func TestRootCompletionStopsAfterTheFirstWord(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+
+	candidates, directive := root.ValidArgsFunction(root, []string{"nonsense"}, "")
+	if len(candidates) != 0 {
+		t.Errorf("candidates = %v, want none past the first word", candidates)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Errorf("directive = %v, want NoFileComp", directive)
+	}
+}
+
+// The commands and the kinds arrive as one list, and no word may appear in it
+// twice — cobra adds its subcommand names to whatever the completer returns
+// rather than choosing between them.
+func TestRootCompletionMergesCommandsAndKindsWithoutDuplicates(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+	var out bytes.Buffer
+	root.SetOut(&out)
+
+	if err := Execute(root, []string{cobra.ShellCompRequestCmd, ""}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	offered := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		spelling, _, _ := strings.Cut(line, "\t")
+		offered[spelling]++
+	}
+
+	for _, want := range []string{"get", "port-forward", "secret", "pods", "po", "deploy"} {
+		if offered[want] == 0 {
+			t.Errorf("kx <TAB> did not offer %q", want)
+		}
+	}
+	for spelling, count := range offered {
+		if count > 1 {
+			t.Errorf("kx <TAB> offered %q %d times, want once", spelling, count)
+		}
+	}
+}
+
 // Completion runs on every keystroke of a Tab, so it must survive a machine
 // with no state file at all rather than erroring into the shell.
 func TestCompletionWithoutSavedState(t *testing.T) {
