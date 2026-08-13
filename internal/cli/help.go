@@ -51,9 +51,11 @@ var selecting = []render.HelpItem{
 	{Name: "kx get pods -A", Doc: "Every namespace; indexes carry their namespace"},
 }
 
+// The docs URL used to close this screen too. It is one line under `kx
+// --version`, next to the commit and the config path a reader who wants the
+// project page is already looking for — repeating it here bought nothing.
 var footer = []string{
 	"Run 'kx COMMAND --help' for a command's options and examples.",
-	"https://github.com/jzills/kx",
 }
 
 // files names the two paths kx reads and writes. Resolved from the packages
@@ -90,16 +92,18 @@ func homeRelative(path string) string {
 	return "~" + string(filepath.Separator) + rest
 }
 
-// environment lists the config overrides, plus the one convention kx honors
-// that isn't its own.
+// environment lists the config overrides — kx's own keys, and only those.
+//
+// NO_COLOR is still honored (see render.New), but it is a terminal-wide
+// convention rather than a kx setting, and listing it beside KX_THEME and
+// KX_NO_COLOR implied kx owned it. The README documents it where it belongs,
+// with the rest of the styling behavior.
 func environment() []render.HelpItem {
 	var items []render.HelpItem
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
-	return append(items, render.HelpItem{
-		Name: "NO_COLOR", Doc: "Disable styled output, per no-color.org",
-	})
+	return items
 }
 
 // rootOptions renders the root command's own flags, plus the help flag cobra
@@ -175,6 +179,10 @@ func argDoc(cmd *cobra.Command, name string) string {
 
 // installHelp replaces cobra's help output with the themed help screens, for
 // the root command and every subcommand.
+//
+// version is taken already spelled — the screen prints it as given rather than
+// composing it, so what a version looks like stays a question for the package
+// that owns the version string.
 func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {

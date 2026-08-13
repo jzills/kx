@@ -168,7 +168,10 @@ type RootHelp struct {
 	// Environment lists the variables that override the config file.
 	Environment []HelpItem
 	// Footer closes the screen — where to go next, in plain sentences.
-	Footer  []string
+	Footer []string
+	// Version signs the screen off, already spelled the way it should read.
+	// The renderer prints it verbatim: whether it carries a "v", and how much
+	// of an untagged build's version survives, is the caller's call.
 	Version string
 }
 
@@ -213,7 +216,7 @@ func (r *Renderer) RootHelp(help RootHelp) {
 
 	if help.Version != "" {
 		r.Blank()
-		r.line(r.style(theme.Muted, "v"+help.Version))
+		r.line(r.style(theme.Muted, help.Version))
 	}
 }
 

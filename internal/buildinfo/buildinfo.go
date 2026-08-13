@@ -7,6 +7,7 @@
 package buildinfo
 
 import (
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -35,6 +36,37 @@ type Info struct {
 	Go string
 	// Platform is the GOOS/GOARCH it was compiled for.
 	Platform string
+}
+
+// pseudoTail matches what the toolchain appends when it has to name a commit
+// no tag does: a 14-digit UTC timestamp and a 12-character commit, behind the
+// base version and any prerelease segment it carries.
+//
+//	0.3.4-0.20260813184656-8ec57390b220
+//
+// Anchored and shaped tightly enough that a real prerelease — 0.4.0-rc.1 — is
+// left whole, where cutting at the first dash would report an unreleased
+// 0.4.0 as shipped.
+var pseudoTail = regexp.MustCompile(`-(?:[0-9A-Za-z.-]+\.)?[0-9]{14}-[0-9a-f]{12}$`)
+
+// Tag spells the version the way its tag and its release do, with the leading
+// "v". Version is stored bare because that is what the release stamps and what
+// the wheel metadata carries, so the "v" belongs at the point of display.
+func (i Info) Tag() string { return tag(i.Version) }
+
+// ShortTag is Tag with a pseudo-version's tail cut off — the version alone.
+// The help screen signs off with this: there, the question is which kx this is,
+// and the timestamp and commit answering "built from what" belong under
+// `kx --version`, which reports them as their own labelled lines anyway.
+func (i Info) ShortTag() string { return tag(pseudoTail.ReplaceAllString(i.Version, "")) }
+
+// tag adds the "v", except to a version that isn't one: an unstamped build
+// reports "dev", and "vdev" names nothing anybody could look up.
+func tag(version string) string {
+	if version == "" || version[0] < '0' || version[0] > '9' {
+		return version
+	}
+	return "v" + version
 }
 
 // Resolve fills in everything the build didn't stamp.

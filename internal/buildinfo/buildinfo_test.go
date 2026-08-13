@@ -92,6 +92,49 @@ func TestResolveWithoutBuildInfo(t *testing.T) {
 	}
 }
 
+// Version is stored bare because that is what a release stamps, so every
+// display of it adds the "v" back. "dev" is the one value that must not get
+// one, since "vdev" names nothing anybody could look up.
+func TestTagSpellsTheVersionAsATag(t *testing.T) {
+	cases := map[string]string{
+		"0.3.4":                               "v0.3.4",
+		"0.3.4-0.20260813184656-8ec57390b220": "v0.3.4-0.20260813184656-8ec57390b220",
+		"0.4.0-rc.1":                          "v0.4.0-rc.1",
+		"dev":                                 "dev",
+		"":                                    "",
+	}
+	for version, want := range cases {
+		if got := (Info{Version: version}).Tag(); got != want {
+			t.Errorf("Info{Version: %q}.Tag() = %q, want %q", version, got, want)
+		}
+	}
+}
+
+// The help screen signs off with the version alone. An untagged build's
+// version carries a timestamp and a commit the toolchain appended, which is
+// what `kx --version` is for; on the help screen it is a line of noise under
+// the one fact the reader wanted.
+func TestShortTagDropsThePseudoVersionTail(t *testing.T) {
+	cases := map[string]string{
+		"0.3.4-0.20260813184656-8ec57390b220": "v0.3.4",
+		// No tag anywhere behind it: the toolchain bases the pseudo-version on
+		// 0.0.0 and appends the tail with no prerelease segment in front.
+		"0.0.0-20260813184656-8ec57390b220": "v0.0.0",
+		// A release build has no tail to drop.
+		"0.3.4": "v0.3.4",
+		// A real prerelease is the version, not a tail. Cutting at the first
+		// dash would report an unreleased 0.4.0 as shipped.
+		"0.4.0-rc.1": "v0.4.0-rc.1",
+		"dev":        "dev",
+		"":           "",
+	}
+	for version, want := range cases {
+		if got := (Info{Version: version}).ShortTag(); got != want {
+			t.Errorf("Info{Version: %q}.ShortTag() = %q, want %q", version, got, want)
+		}
+	}
+}
+
 func TestShortCommitAbbreviates(t *testing.T) {
 	cases := map[string]string{
 		"f80aeb8c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a": "f80aeb8",

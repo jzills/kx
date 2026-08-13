@@ -100,7 +100,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// from it means the resource type doesn't exist — refreshing the listing
 	// would be beside the point. Every other command resolves an index, where a
 	// NotFound usually means the saved listing has gone stale.
-	installHelp(root, info.Version)
+	installHelp(root, info.ShortTag())
 
 	root.AddCommand(withoutRefresh(newGetCommand(services)))
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))

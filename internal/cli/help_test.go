@@ -1,14 +1,32 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+// rootHelpText renders the top-level help screen for a build at the given
+// version, which is the only way to see what the screen actually closes with:
+// the footer and the version line are composed on the way to the renderer.
+func rootHelpText(t *testing.T, version string) string {
+	t.Helper()
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, config.DefaultTheme)
+	t.Cleanup(func() { render.SetOutput(nil, nil, config.DefaultTheme) })
+
+	root := NewRoot(Services{}, version)
+	if err := root.Help(); err != nil {
+		t.Fatalf("root.Help(): %v", err)
+	}
+	return out.String()
+}
 
 // The theme listing numbers its rows, so typing the number is the obvious
 // thing to try.
@@ -377,10 +395,44 @@ func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
 			t.Errorf("config override %s is missing from the Environment block", setting.Env)
 		}
 	}
-	// Honored by the renderer rather than the config loader, so it isn't in
-	// config.Settings() and would go undocumented if only that list drove this.
-	if !documented["NO_COLOR"] {
-		t.Error("Environment block omits NO_COLOR, which kx honors")
+	// The block is kx's own settings and nothing else. NO_COLOR was listed
+	// here once: kx honors it, but it is a terminal-wide convention rather
+	// than something kx defines, and a reader scanning this list for what kx
+	// can be told to do shouldn't have to sort the two apart.
+	for name := range documented {
+		if !strings.HasPrefix(name, "KX_") {
+			t.Errorf("Environment block lists %s, which is not a kx setting", name)
+		}
+	}
+}
+
+// The help screen names the kx you are running, not the commit it was built
+// from. An untagged build's version carries a timestamp and a commit hash;
+// under --help that is a line of noise where a reader wanted one fact, and
+// `kx --version` reports the whole thing a keystroke away.
+func TestRootHelpSignsOffWithTheShortVersion(t *testing.T) {
+	text := rootHelpText(t, "0.3.4-0.20260813184656-8ec57390b220")
+
+	if !strings.Contains(text, "v0.3.4") {
+		t.Errorf("root help =\n%s\nmissing the version it was built at", text)
+	}
+	if strings.Contains(text, "20260813184656") || strings.Contains(text, "8ec57390b220") {
+		t.Errorf("root help =\n%s\nstill carries the pseudo-version's build tail", text)
+	}
+}
+
+// The docs URL closed this screen and appears under --version as well. One
+// copy is enough, and the footer's job is the next command to run.
+func TestRootHelpFooterCarriesNoURL(t *testing.T) {
+	text := rootHelpText(t, "0.3.2")
+
+	if !strings.Contains(text, "kx COMMAND --help") {
+		t.Errorf("root help =\n%s\nlost the footer's pointer at per-command help", text)
+	}
+	// The same const --version prints, so the two screens can't drift apart on
+	// which of them carries the link.
+	if strings.Contains(text, docsURL) {
+		t.Errorf("root help =\n%s\nstill prints %s; --version is where it lives", text, docsURL)
 	}
 }
 
