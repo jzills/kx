@@ -933,6 +933,64 @@ func TestContextsIndexesEveryContext(t *testing.T) {
 	}
 }
 
+// `kubectl config get-contexts` prints a NAMESPACE column, but it names the
+// namespace each context *defaults to* — not one the context lives in, because
+// contexts are kubeconfig entries and are not namespaced at all.
+//
+// Recorded as a resource namespace it was read as one: Resources.Spanning()
+// treats any per-resource namespace as "this listing spans namespaces", which
+// captioned the context slot in `kx state --targets` as "all namespaces".
+func TestContextsRecordsNoResourceNamespace(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
+			"          alt              docker-desktop   default\n" +
+			"*         docker-desktop   docker-desktop   diagnostics",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	for _, resource := range states.named[0].Resources.Entries() {
+		if resource.Namespace != "" {
+			t.Errorf("context %q recorded namespace %q, want none",
+				resource.Name, resource.Namespace)
+		}
+	}
+	if states.named[0].Resources.Spanning() {
+		t.Error("context slot reports itself as spanning namespaces")
+	}
+}
+
+// The entry namespace is a scope, and a contexts listing has none. The active
+// context is already recorded in Context — stamped there by the state service —
+// so writing it here as well captioned `kx state --targets` with it twice.
+func TestContextsRecordsNoEntryNamespace(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: "CURRENT   NAME             CLUSTER\n*         docker-desktop   docker-desktop",
+	}
+	states := &fakeState{}
+
+	if _, _, err := (ContextsCommand{
+		Kubectl: kubectl, State: states, Index: indexService(),
+	}).Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(states.named) != 1 {
+		t.Fatalf("saved %d slot entries, want 1", len(states.named))
+	}
+	if ns := states.named[0].Namespace; ns != "" {
+		t.Errorf("slot namespace = %q, want none — a context is not a scope", ns)
+	}
+}
+
 // kx debug attaches a container that has a shell to a pod whose own image has
 // none — the case kx exec dead-ends on with "No shell found in container".
 func TestDebugAttachesAnEphemeralContainer(t *testing.T) {

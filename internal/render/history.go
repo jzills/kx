@@ -38,13 +38,39 @@ func entryLabel(count int) string {
 // than a history entry means you can reach this without anything being wrong.
 const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
 
+// contextListing reports whether an entry holds nothing but kubeconfig
+// contexts — the one listing kx keeps that has no namespace scope of any kind.
+func contextListing(resources state.Resources) bool {
+	entries := resources.Entries()
+	if len(entries) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Kind != kinds.Context {
+			return false
+		}
+	}
+	return true
+}
+
 // scopeLabel names the scope an entry was listed in.
 //
 // A listing that spans namespaces records none on the entry, because there is
 // no single one to record — each resource carries its own. Left as the empty
 // string it would render as a blank column and drop out of the caption
 // entirely, which reads as missing data rather than as the scope it is.
+//
+// Contexts are the exception, and there the blank is the right answer: a context
+// is a kubeconfig entry rather than a server object, so it sits in no namespace
+// and the entry has no scope to name. The active context is already carried by
+// State.Context and captions the listing from there. Checked here as well as at
+// the source (see contextResources) because slots written before that fix still
+// hold get-contexts' NAMESPACE column on their resources, and a caption should
+// not stay wrong until the user happens to relist.
 func scopeLabel(entry state.State) string {
+	if contextListing(entry.Resources) {
+		return ""
+	}
 	if entry.Resources.Spanning() {
 		return AllNamespaces
 	}
