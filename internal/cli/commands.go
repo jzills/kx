@@ -798,7 +798,7 @@ func listSwitchTargets(services Services, isContext bool) error {
 		if err != nil {
 			return err
 		}
-		render.IndexedTable(output, "Contexts", current, "")
+		render.IndexedTable(output, "Contexts", current)
 		return nil
 	}
 
@@ -814,7 +814,7 @@ func listSwitchTargets(services Services, isContext bool) error {
 	if err != nil {
 		return err
 	}
-	render.IndexedTable(output, "namespaces", namespace, "")
+	render.IndexedTable(output, "namespaces", namespace)
 	return nil
 }
 

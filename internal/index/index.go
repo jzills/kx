@@ -69,7 +69,7 @@ type TableShape struct {
 // pods, so `kx logs 1` looked up a pod named "istio-proxy" and reported it
 // missing.
 func resourceIndex(headers []string, nameIdx int) int {
-	if pod := columnIndex(headers, "POD"); pod >= 0 {
+	if pod := ColumnIndex(headers, "POD"); pod >= 0 {
 		return pod
 	}
 	return nameIdx
@@ -95,7 +95,7 @@ func shapeOf(headers []string) (TableShape, bool) {
 	if len(headers) == 0 {
 		return TableShape{}, false
 	}
-	nameIdx := columnIndex(headers, "NAME")
+	nameIdx := ColumnIndex(headers, "NAME")
 	if nameIdx < 0 {
 		return TableShape{}, false
 	}
@@ -103,12 +103,18 @@ func shapeOf(headers []string) (TableShape, bool) {
 		Headers:      headers,
 		NameIdx:      nameIdx,
 		ResourceIdx:  resourceIndex(headers, nameIdx),
-		EventIdx:     columnIndex(headers, "EVENT"),
-		NamespaceIdx: columnIndex(headers, "NAMESPACE"),
+		EventIdx:     ColumnIndex(headers, "EVENT"),
+		NamespaceIdx: ColumnIndex(headers, "NAMESPACE"),
 	}, true
 }
 
-func columnIndex(headers []string, name string) int {
+// ColumnIndex reports the position of a named column, or -1 when the table has
+// none.
+//
+// Exported because kx builds columns of its own on top of kubectl's — top adds
+// CPU(%) and MEMORY(%) — and needs the same lookup for them. A local copy in
+// internal/cli was byte-for-byte this function.
+func ColumnIndex(headers []string, name string) int {
 	for i, h := range headers {
 		if h == name {
 			return i
@@ -336,8 +342,17 @@ func (t Table) Placed() bool {
 	return false
 }
 
-// Text renders the table back to padded text, for the callers that still need a
-// string. Non-tabular output comes back exactly as it arrived.
+// Text renders the table back to padded text. Non-tabular output comes back
+// exactly as it arrived.
+//
+// Nothing in kx proper calls this — the pipeline hands rows all the way to the
+// renderer — and nothing should start: padded text cannot represent an empty
+// cell, so anything read back out of it has lost whatever the parser recovered.
+// That is the round trip the Table type exists to close, and `kubectl config
+// get-contexts` losing its blank CURRENT column is what it cost.
+//
+// It survives as a rendering of last resort for tests, which assert on the
+// table a user would see. A production caller wanting text wants Rows.
 func (t Table) Text() string {
 	if !t.Indexable() {
 		return t.Raw

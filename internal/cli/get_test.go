@@ -332,7 +332,7 @@ func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
 		// Asserted on the index column rather than on inequality with the raw
 		// input: a Table carries that input in Raw, so "not equal" would hold
 		// even for output that was never numbered.
-		if indexOfHeader(output.Headers, "X") < 0 {
+		if index.ColumnIndex(output.Headers, "X") < 0 {
 			t.Errorf("%s output was not indexed:\n%s", flag, output.Text())
 		}
 		if len(states.saved) != 1 {

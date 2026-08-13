@@ -173,8 +173,8 @@ func (c TopCommand) ExecuteNodes(
 // IndexedTable (which looks up cells by the exact header names "CPU%"/
 // "MEM%") applies to nodes without any new coloring code.
 func relabelPercentColumns(headers []string) []string {
-	cpuCol := indexOfHeader(headers, "CPU(%)")
-	memCol := indexOfHeader(headers, "MEMORY(%)")
+	cpuCol := index.ColumnIndex(headers, "CPU(%)")
+	memCol := index.ColumnIndex(headers, "MEMORY(%)")
 	if cpuCol < 0 && memCol < 0 {
 		return headers
 	}
@@ -197,13 +197,13 @@ func relabelPercentColumns(headers []string) []string {
 func (c TopCommand) withUsagePercentages(
 	headers []string, rows [][]string, namespace string, allNamespaces bool,
 ) ([]string, [][]string, error) {
-	nameIdx := indexOfHeader(headers, "NAME")
-	cpuCol := indexOfHeader(headers, "CPU(cores)")
-	memCol := indexOfHeader(headers, "MEMORY(bytes)")
+	nameIdx := index.ColumnIndex(headers, "NAME")
+	cpuCol := index.ColumnIndex(headers, "CPU(cores)")
+	memCol := index.ColumnIndex(headers, "MEMORY(bytes)")
 	if nameIdx < 0 || cpuCol < 0 || memCol < 0 {
 		return headers, rows, nil
 	}
-	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
+	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
 
 	limits, err := c.podLimits(namespace, allNamespaces)
 	if err != nil {
@@ -345,16 +345,16 @@ func topPageRows(indexed index.Table) []web.TopRow {
 		return nil
 	}
 	headers, rows := indexed.Headers, indexed.Rows
-	nameIdx := indexOfHeader(headers, "NAME")
+	nameIdx := index.ColumnIndex(headers, "NAME")
 	if nameIdx < 0 {
 		return nil
 	}
-	indexIdx := indexOfHeader(headers, "X")
-	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
-	cpuIdx := indexOfHeader(headers, "CPU(cores)")
-	memIdx := indexOfHeader(headers, "MEMORY(bytes)")
-	cpuPctIdx := indexOfHeader(headers, "CPU%")
-	memPctIdx := indexOfHeader(headers, "MEM%")
+	indexIdx := index.ColumnIndex(headers, "X")
+	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
+	cpuIdx := index.ColumnIndex(headers, "CPU(cores)")
+	memIdx := index.ColumnIndex(headers, "MEMORY(bytes)")
+	cpuPctIdx := index.ColumnIndex(headers, "CPU%")
+	memPctIdx := index.ColumnIndex(headers, "MEM%")
 
 	pageRows := make([]web.TopRow, len(rows))
 	for i, row := range rows {
@@ -393,13 +393,4 @@ func usageCell(cell, kind string) web.Usage {
 		return web.Usage{}
 	}
 	return web.NewUsage(pct, kind)
-}
-
-func indexOfHeader(headers []string, name string) int {
-	for i, header := range headers {
-		if header == name {
-			return i
-		}
-	}
-	return -1
 }

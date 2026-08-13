@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -865,7 +866,7 @@ func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if indexOfHeader(table.Headers, "CURRENT") < 0 {
+	if index.ColumnIndex(table.Headers, "CURRENT") < 0 {
 		t.Fatalf("table lost the CURRENT column: %q", table.Headers)
 	}
 	if len(table.Rows) != 2 {
@@ -873,8 +874,8 @@ func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
 	}
 	// The blank marker on the non-current row is the cell that used to vanish,
 	// taking every value after it one column to the left.
-	nameIdx := indexOfHeader(table.Headers, "NAME")
-	currentIdx := indexOfHeader(table.Headers, "CURRENT")
+	nameIdx := index.ColumnIndex(table.Headers, "NAME")
+	currentIdx := index.ColumnIndex(table.Headers, "CURRENT")
 	if table.Rows[0][currentIdx] != "" || table.Rows[0][nameIdx] != "alt" {
 		t.Errorf("row 0 = %q, want a blank CURRENT and NAME alt", table.Rows[0])
 	}

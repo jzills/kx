@@ -127,7 +127,7 @@ func runGet(services Services, resource string, args []string, options getOption
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resource, render.AllNamespaces, "")
+			render.IndexedTable(output, resource, render.AllNamespaces)
 			return nil
 		}
 
@@ -170,7 +170,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	if allNamespaces(extra) {
 		namespace = render.AllNamespaces
 	}
-	render.IndexedTable(output, resource, namespace, "")
+	render.IndexedTable(output, resource, namespace)
 	return nil
 }
 

@@ -517,7 +517,7 @@ func TestTopAllNamespacesIsIndexed(t *testing.T) {
 	}
 
 	headers, _, _ := index.ParseTable(output.Text())
-	if indexOfHeader(headers, "X") < 0 {
+	if index.ColumnIndex(headers, "X") < 0 {
 		t.Errorf("-A output was not indexed:\n%s", output)
 	}
 	if len(states.saved) != 1 {
@@ -583,7 +583,7 @@ func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
 	// subject here is the absence of the percentage columns and of the lookup
 	// that fills them.
 	headers, _, _ := index.ParseTable(output.Text())
-	if indexOfHeader(headers, "CPU%") >= 0 || indexOfHeader(headers, "MEM%") >= 0 {
+	if index.ColumnIndex(headers, "CPU%") >= 0 || index.ColumnIndex(headers, "MEM%") >= 0 {
 		t.Errorf("--no-limits -A gained percentage columns:\n%s", output)
 	}
 	if len(kubectl.calls) != 1 {

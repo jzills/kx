@@ -162,7 +162,7 @@ func itemLabel(count int) string {
 // padded text it produced lost anything that text cannot represent — an empty
 // cell reads as column padding, so a blank the parser had recovered vanished
 // again on the way here. Rows carry it intact.
-func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace, note string) {
+func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace string) {
 	if !table.Indexable() {
 		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
@@ -183,9 +183,6 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace, note
 
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.Table(columns, cells)
-	if note != "" {
-		r.Caption(note)
-	}
 }
 
 // styledColumnsAndCells applies status/usage-percentage styling and

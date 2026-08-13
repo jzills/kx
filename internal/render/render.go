@@ -168,8 +168,8 @@ func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }
 func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
 
-func IndexedTable(table index.Table, resourceType, namespace, note string) {
-	current.IndexedTable(table, resourceType, namespace, note)
+func IndexedTable(table index.Table, resourceType, namespace string) {
+	current.IndexedTable(table, resourceType, namespace)
 }
 
 func KeyValueTable(header string, keys []string, values map[string]string) {
