@@ -54,6 +54,9 @@ type recordingKubectl struct {
 	// contextReads counts CurrentContext calls, each of which is a kubectl
 	// subprocess in the real service.
 	contextReads int
+	// namespace overrides what CurrentNamespace reports, so a test can move the
+	// caller after a listing was taken. Empty keeps the default.
+	namespace string
 }
 
 func (k *recordingKubectl) Run(args []string) (string, error) {
@@ -77,7 +80,12 @@ func (k *recordingKubectl) Watch(args []string, onLine func(string) error) error
 	return k.err
 }
 
-func (k *recordingKubectl) CurrentNamespace() string { return "prod" }
+func (k *recordingKubectl) CurrentNamespace() string {
+	if k.namespace != "" {
+		return k.namespace
+	}
+	return "prod"
+}
 
 func (k *recordingKubectl) CurrentContext() string {
 	k.contextReads++
