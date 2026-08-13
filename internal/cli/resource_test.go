@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -865,7 +866,7 @@ func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if indexOfHeader(table.Headers, "CURRENT") < 0 {
+	if index.ColumnIndex(table.Headers, "CURRENT") < 0 {
 		t.Fatalf("table lost the CURRENT column: %q", table.Headers)
 	}
 	if len(table.Rows) != 2 {
@@ -873,8 +874,8 @@ func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
 	}
 	// The blank marker on the non-current row is the cell that used to vanish,
 	// taking every value after it one column to the left.
-	nameIdx := indexOfHeader(table.Headers, "NAME")
-	currentIdx := indexOfHeader(table.Headers, "CURRENT")
+	nameIdx := index.ColumnIndex(table.Headers, "NAME")
+	currentIdx := index.ColumnIndex(table.Headers, "CURRENT")
 	if table.Rows[0][currentIdx] != "" || table.Rows[0][nameIdx] != "alt" {
 		t.Errorf("row 0 = %q, want a blank CURRENT and NAME alt", table.Rows[0])
 	}
@@ -945,9 +946,9 @@ func TestContextsIndexesEveryContext(t *testing.T) {
 // namespace each context *defaults to* — not one the context lives in, because
 // contexts are kubeconfig entries and are not namespaced at all.
 //
-// Recorded as a resource namespace it was read as one: Resources.Spanning()
-// treats any per-resource namespace as "this listing spans namespaces", which
-// captioned the context slot in `kx state --targets` as "all namespaces".
+// Recorded as a resource namespace it was read as one, back when the scope was
+// inferred from whether resources carried namespaces — which captioned the
+// context slot in `kx state --targets` as "all namespaces".
 func TestContextsRecordsNoResourceNamespace(t *testing.T) {
 	kubectl := &recordingKubectl{
 		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
@@ -971,7 +972,7 @@ func TestContextsRecordsNoResourceNamespace(t *testing.T) {
 				resource.Name, resource.Namespace)
 		}
 	}
-	if states.named[0].Resources.Spanning() {
+	if states.named[0].AllNamespaces {
 		t.Error("context slot reports itself as spanning namespaces")
 	}
 }
@@ -1151,5 +1152,49 @@ func TestDebugRunsWhenTheContainerLookupFails(t *testing.T) {
 	}
 	if got := joinArgs(kubectl.interactive[0]); strings.Contains(got, "--target") {
 		t.Errorf("args = %q, want no target read out of a failed lookup", got)
+	}
+}
+
+// A value-less --image is what a shell expanding to nothing produces. With
+// extractString's error discarded it read as "no image given", so kx appended
+// its own --image=busybox and forwarded the bare --image alongside it, leaving
+// kubectl to complain about a flag the user could see they had written.
+func TestDebugReportsAMalformedImageFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--image"})
+
+	if err == nil {
+		t.Fatal("a value-less --image was accepted")
+	}
+	if !strings.Contains(err.Error(), "--image") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
+
+// --target is read by hand for the same reason and was discarding the same
+// error, so a value-less one reached kubectl beside a --target kx had guessed.
+func TestDebugReportsAMalformedTargetFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--target"})
+
+	if err == nil {
+		t.Fatal("a value-less --target was accepted")
+	}
+	if !strings.Contains(err.Error(), "--target") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
 	}
 }

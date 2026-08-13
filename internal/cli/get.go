@@ -115,6 +115,16 @@ func (c GetCommand) Execute(
 	}
 
 	indexed := c.index(output, filterTerm)
+	// An index into a spanning listing is only usable if it resolves to a
+	// namespace, and the table is the only place that comes from. Asked for a
+	// shape that omits the NAMESPACE column — `-o custom-columns=NAME:...` — kx
+	// numbered rows it could not place, then resolved every one of them into
+	// whatever namespace the caller happened to be standing in and reported the
+	// misses as resources that no longer exist. Printing it unnumbered says the
+	// same thing kx already says about `-o json`: this is output it cannot index.
+	if allNamespaces(extraArgs) && !indexed.Placed() {
+		return index.Table{Raw: output}, namespace, nil
+	}
 	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
@@ -124,8 +134,9 @@ func (c GetCommand) Execute(
 			extraArgs = []string{}
 		}
 		entry := state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
-			Namespace: namespace,
+			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			Namespace:     namespace,
+			AllNamespaces: allNamespaces(extraArgs),
 			Query: &state.Query{
 				Resource: resource,
 				Args:     extraArgs,
@@ -159,6 +170,12 @@ func (c GetCommand) ExecuteGroups(
 	var headers []string
 	var merged [][]string
 	var raw []string
+	// Whether the replies are tables kx can stitch. A non-tabular reply ends
+	// the stitching, not the fetching: every namespace the user named still has
+	// to be asked for. Returning on the first one answered `kx get pods 1 5 -o
+	// yaml` with one namespace's YAML and exit 0, so the resource in the second
+	// namespace was silently dropped from a request that named it.
+	tabular := true
 
 	for _, group := range groups {
 		args := append([]string{"get", resource}, group.Names...)
@@ -169,16 +186,20 @@ func (c GetCommand) ExecuteGroups(
 			return index.Table{}, err
 		}
 		raw = append(raw, output)
+		if !tabular {
+			continue
+		}
 
 		groupHeaders, rows, _ := index.ParseTable(output)
-		if groupHeaders != nil && filterTerm != "" {
-			rows = index.FilterRows(groupHeaders, rows, filterTerm)
-		}
 		if groupHeaders == nil {
-			// Non-tabular (-o json/yaml/name). Nothing to index or stitch;
-			// the raw replies are printed as they came, the same degradation
-			// a non-tabular single-namespace listing already gets.
-			return index.Table{Raw: strings.Join(raw, "\n")}, nil
+			// Non-tabular (-o json/yaml/name). Nothing to index or stitch; the
+			// raw replies are printed as they came, the same degradation a
+			// non-tabular single-namespace listing already gets.
+			tabular = false
+			continue
+		}
+		if filterTerm != "" {
+			rows = index.FilterRows(groupHeaders, rows, filterTerm)
 		}
 		if headers == nil {
 			headers = append([]string{"NAMESPACE"}, groupHeaders...)
@@ -187,14 +208,17 @@ func (c GetCommand) ExecuteGroups(
 			merged = append(merged, append([]string{group.Namespace}, row...))
 		}
 	}
-	if len(merged) == 0 {
+	if !tabular || len(merged) == 0 {
 		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 
 	indexed := c.Index.AddRows(headers, merged)
 	if len(indexed.Entries) > 0 {
 		if err := c.State.Save(state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			// Groups are fetched one namespace at a time and stitched back
+			// together, so the merged listing spans them by construction.
+			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			AllNamespaces: true,
 		}); err != nil {
 			return index.Table{}, err
 		}

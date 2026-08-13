@@ -1389,17 +1389,34 @@ func TestFieldsNamedAllowsTheContextSlot(t *testing.T) {
 	}
 }
 
-// An entry whose resources carry their own namespaces spans several, so it has
-// no entry-level namespace by design. Defaulting that empty value to "default"
-// — which every stack entry used to get, back when an empty namespace could
-// only mean "unrecorded" — captions an all-namespace listing with a namespace
-// it never came from.
+// An all-namespace listing has no entry-level namespace by design. Defaulting
+// that empty value to "default" — which every stack entry used to get, back
+// when an empty namespace could only mean "unrecorded" — captions an
+// all-namespace listing with a namespace it never came from, and then resolves
+// every one of its indexes into that namespace.
 func TestSpanningEntryKeepsItsEmptyNamespace(t *testing.T) {
 	service := newTestService(t, 10)
-	save(t, service, State{Resources: NewOrderedResources([]Resource{
+	save(t, service, State{AllNamespaces: true, Resources: NewOrderedResources([]Resource{
 		{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
 		{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
 	})})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — the listing spans namespaces", loaded.Namespace)
+	}
+}
+
+// An all-namespace listing whose table carried no NAMESPACE column records no
+// namespaces at all — `kx get pods -A -o custom-columns=NAME:.metadata.name`
+// is the shape. Read back as "default" it looked like an ordinary listing from
+// that namespace, so every index resolved into it.
+func TestAllNamespacesEntryWithNoRecordedNamespacesKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{AllNamespaces: true, Resources: pods("nginx", "api")})
 
 	loaded, err := service.Load()
 	if err != nil {

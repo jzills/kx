@@ -232,6 +232,74 @@ func TestGetAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
 	}
 }
 
+// A non-tabular reply ends the stitching, not the fetching. Returning on the
+// first one answered `kx get pods 1 5 -o yaml` with one namespace's YAML and
+// exit 0, silently dropping a resource the request had named.
+func TestExecuteGroupsFetchesEveryGroupWhenTheReplyIsNotATable(t *testing.T) {
+	kubectl := &fakeKubectl{outputs: []string{
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n",
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: api\n",
+	}}
+	groups := []namespaceGroup{
+		{Namespace: "prod", Names: []string{"web"}},
+		{Namespace: "staging", Names: []string{"api"}},
+	}
+
+	table, err := newGet(kubectl, &fakeState{}).ExecuteGroups(
+		"pods", "", groups, []string{"-o", "yaml"})
+	if err != nil {
+		t.Fatalf("ExecuteGroups: %v", err)
+	}
+
+	if len(kubectl.calls) != 2 {
+		t.Fatalf("made %d kubectl calls, want one per namespace group", len(kubectl.calls))
+	}
+	for _, want := range []string{"name: web", "name: api"} {
+		if !strings.Contains(table.Raw, want) {
+			t.Errorf("output is missing %q:\n%s", want, table.Raw)
+		}
+	}
+}
+
+// An -A listing records the scope it was taken at, rather than leaving it to be
+// inferred from whether its resources carry namespaces — which a walk that
+// never left one namespace also does.
+func TestGetAllNamespacesRecordsTheScope(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", []string{"-A"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !states.saved[0].AllNamespaces {
+		t.Error("saved entry does not record that it spans namespaces")
+	}
+}
+
+// Asked for a shape with no NAMESPACE column, an -A listing cannot say where
+// any row lives. Numbering it anyway resolved every index into whatever
+// namespace the caller was standing in, and reported the misses as resources
+// that no longer exist — so it is printed unnumbered, the way `-o json` is, and
+// the listing already in state is left usable.
+func TestGetAllNamespacesWithoutANamespaceColumnIsNotIndexed(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: "NAME\nnginx-abc-xyz\nredis-def-uvw"}
+
+	table, _, err := newGet(kubectl, states).Execute(
+		"pods", "", []string{"-A", "-o", "custom-columns=NAME:.metadata.name"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if table.Indexable() {
+		t.Errorf("numbered a listing it cannot place:\n%s", table.Text())
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("saved %d entries, want none — the rows have no namespace", len(states.saved))
+	}
+}
+
 // A single-namespace listing has no NAMESPACE column, so its resources record
 // none and the entry's namespace answers for all of them — the shape every
 // existing state file already has.
@@ -264,7 +332,7 @@ func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
 		// Asserted on the index column rather than on inequality with the raw
 		// input: a Table carries that input in Raw, so "not equal" would hold
 		// even for output that was never numbered.
-		if indexOfHeader(output.Headers, "X") < 0 {
+		if index.ColumnIndex(output.Headers, "X") < 0 {
 			t.Errorf("%s output was not indexed:\n%s", flag, output.Text())
 		}
 		if len(states.saved) != 1 {

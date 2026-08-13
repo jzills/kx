@@ -497,10 +497,24 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 	args := []string{"debug", "-it", name, "-n", namespace}
 	// An explicit --image is the user overriding their own default for one
 	// run; passing the configured one as well would hand kubectl two.
-	if image, _, _ := extractString(extraArgs, "--image", ""); image == "" {
+	//
+	// A malformed one is reported rather than dropped: with the error
+	// discarded, `kx debug 1 --image` (value omitted, which a shell expanding
+	// to nothing produces) read as "no image given", so kx appended its own
+	// --image=busybox and forwarded the bare --image alongside it, leaving
+	// kubectl to complain about a flag the user could see they had written.
+	image, _, err := extractString(extraArgs, "--image", "")
+	if err != nil {
+		return err
+	}
+	if image == "" {
 		args = append(args, "--image="+c.Image)
 	}
-	if target := c.target(name, namespace, extraArgs); target != "" {
+	target, err := c.target(name, namespace, extraArgs)
+	if err != nil {
+		return err
+	}
+	if target != "" {
 		args = append(args, "--target="+target)
 	}
 	args = append(args, extraArgs...)
@@ -531,25 +545,30 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 // has only one answer, so kx supplies it; a pod with several is ambiguous and
 // kubectl's own error names the candidates better than a guess would.
 //
-// Best-effort: the lookup costs one kubectl call, and a failure means the
-// flag is omitted rather than the command refused. kubectl still runs, just
-// without the process namespace shared.
-func (c DebugCommand) target(name, namespace string, extraArgs []string) string {
-	if explicit, _, _ := extractString(extraArgs, "--target", ""); explicit != "" {
-		return ""
+// Best-effort about the *lookup*: it costs one kubectl call, and a failure
+// means the flag is omitted rather than the command refused. kubectl still
+// runs, just without the process namespace shared. A malformed --target is a
+// different thing and is reported, the same as a malformed --image.
+func (c DebugCommand) target(name, namespace string, extraArgs []string) (string, error) {
+	explicit, _, err := extractString(extraArgs, "--target", "")
+	if err != nil {
+		return "", err
+	}
+	if explicit != "" {
+		return "", nil
 	}
 	output, err := c.Kubectl.Run([]string{
 		"get", "pod", name, "-n", namespace,
 		"-o", "jsonpath={range .spec.containers[*]}{.name}{\"\\n\"}{end}",
 	})
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	containers := strings.Fields(output)
 	if len(containers) != 1 {
-		return ""
+		return "", nil
 	}
-	return containers[0]
+	return containers[0], nil
 }
 
 // ContextsCommand lists kubeconfig contexts and indexes them.

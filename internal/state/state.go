@@ -65,18 +65,6 @@ func NewOrderedResources(entries []Resource) Resources {
 // Entries returns the resources in index order.
 func (r Resources) Entries() []Resource { return r.entries }
 
-// Spanning reports whether the listing records namespaces per resource, which
-// is what an all-namespace listing produces and what distinguishes "this entry
-// has no single namespace" from "this entry's namespace went unrecorded".
-func (r Resources) Spanning() bool {
-	for _, e := range r.entries {
-		if e.Namespace != "" {
-			return true
-		}
-	}
-	return false
-}
-
 // Len returns the number of indexed resources.
 func (r Resources) Len() int { return len(r.entries) }
 
@@ -148,6 +136,18 @@ type State struct {
 	Namespace string    `json:"namespace"`
 	Query     *Query    `json:"query"`
 	Context   string    `json:"context,omitempty"`
+	// AllNamespaces records that the listing was taken across every namespace,
+	// which is why Namespace is empty rather than unrecorded.
+	//
+	// The scope is a fact the caller knows when it saves — it passed -A, or it
+	// did not — so it is recorded rather than inferred. Inferring it from
+	// whether the resources carry namespaces was wrong in both directions: a
+	// `kx tree -n prod` walk stamps every resource with prod and read as
+	// spanning, while `kx get pods -A -o custom-columns=NAME:.metadata.name`
+	// has no NAMESPACE column, recorded no namespaces, and read as
+	// single-namespace — so an empty Namespace was "corrected" to "default" and
+	// every index resolved into the wrong namespace.
+	AllNamespaces bool `json:"allNamespaces,omitempty"`
 }
 
 // Names satisfies index.Resolver.
@@ -360,11 +360,12 @@ func (s *Service) loadHistory() (History, error) {
 		// when the kubeconfig has no current one — defaulting it to "default"
 		// would caption the listing with a context that does not exist.
 		//
-		// Nor does a listing that spans namespaces: its resources each record
-		// their own, so an empty entry namespace is the accurate answer rather
-		// than an unrecorded one, and "default" would caption an all-namespace
-		// listing with a namespace it never came from.
-		if state.Namespace == "" && !state.Resources.Spanning() {
+		// Nor does a listing that spans namespaces: each resource records its
+		// own, so an empty entry namespace is the accurate answer rather than
+		// an unrecorded one, and "default" would caption an all-namespace
+		// listing with a namespace it never came from — then resolve every one
+		// of its indexes into that namespace.
+		if state.Namespace == "" && !state.AllNamespaces {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)

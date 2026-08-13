@@ -154,7 +154,7 @@ func recoverState(services Services, lead string) recoverOutcome {
 	}
 
 	render.Raw(lead)
-	render.IndexedTable(table, query.Resource, namespace, "")
+	render.IndexedTable(table, query.Resource, namespace)
 	return refreshed
 }
 

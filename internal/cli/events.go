@@ -154,7 +154,6 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 			resourceLabel := "pods"
 			scopedAllNamespaces := false
-			note := ""
 			var output index.Table
 			var namespace string
 			if nodes {
@@ -173,7 +172,7 @@ func newTopCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resourceLabel, namespace, note)
+			render.IndexedTable(output, resourceLabel, namespace)
 			if !htmlOpts.Enabled {
 				return nil
 			}

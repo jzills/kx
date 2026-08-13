@@ -25,7 +25,7 @@ func TestIndexedTableKeepsColumnsAlignedAroundABlankCell(t *testing.T) {
 			"          alt              local\n" +
 			"*         docker-desktop   local")
 
-	out := capture(func(r *Renderer) { r.IndexedTable(table, "contexts", "", "") })
+	out := capture(func(r *Renderer) { r.IndexedTable(table, "contexts", "") })
 
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 4 {
@@ -57,7 +57,7 @@ func TestIndexedTablePrintsNonTabularOutputVerbatim(t *testing.T) {
 	raw := `{"kind":"PodList","items":[]}`
 	table := index.Service{}.Add(raw)
 
-	out := capture(func(r *Renderer) { r.IndexedTable(table, "pods", "prod", "") })
+	out := capture(func(r *Renderer) { r.IndexedTable(table, "pods", "prod") })
 
 	if !strings.Contains(out, raw) {
 		t.Errorf("output = %q, want the raw document unchanged", out)
@@ -67,7 +67,7 @@ func TestIndexedTablePrintsNonTabularOutputVerbatim(t *testing.T) {
 // Genuinely empty stdout is not an error — kubectl sends "No resources found"
 // to stderr — so the caption reports a count rather than printing nothing.
 func TestIndexedTableCaptionsAnEmptyListing(t *testing.T) {
-	out := capture(func(r *Renderer) { r.IndexedTable(index.Table{}, "pods", "prod", "") })
+	out := capture(func(r *Renderer) { r.IndexedTable(index.Table{}, "pods", "prod") })
 
 	if !strings.Contains(out, "0 items") {
 		t.Errorf("output = %q, want a zero-count caption", out)

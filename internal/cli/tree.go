@@ -40,7 +40,7 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tre
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -52,7 +52,7 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -89,7 +89,14 @@ func (c TreeCommand) ExecuteAllNamespaces(
 //
 // A tree entry carries no Query: it wasn't produced by `kx get`, so there is
 // nothing to re-run if it goes stale.
-func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed bool) error {
+//
+// allNamespaces is passed rather than inferred from an empty namespace: a walk
+// records the namespace on every resource it returns, including a
+// single-namespace one, so nothing about the resources distinguishes the two
+// scopes afterwards.
+func (c TreeCommand) save(
+	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
+) error {
 	if !indexed || len(resources) == 0 {
 		return nil
 	}
@@ -101,8 +108,9 @@ func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed 
 		})
 	}
 	return c.Save(state.State{
-		Resources: state.NewOrderedResources(entries),
-		Namespace: namespace,
+		Resources:     state.NewOrderedResources(entries),
+		Namespace:     namespace,
+		AllNamespaces: allNamespaces,
 	})
 }
 
@@ -114,6 +122,17 @@ func indexFlag(indexed bool) string {
 		return "--no-index"
 	}
 	return ""
+}
+
+// treeInvocation renders the command line the page says it came from.
+//
+// One helper for all three of tree's pages — the -A forest, a namespace sweep,
+// and a single indexed resource — because they had drifted: the -A branch left
+// indexFlag out, so `kx tree -A --no-index --html` published a page claiming it
+// was produced by `kx tree -A`, and re-running that prints a numbered tree the
+// page does not have.
+func treeInvocation(scope string, indexed bool, port int) string {
+	return invocation("tree", scope, indexFlag(indexed), portFlag(port))
 }
 
 // scopeCaption joins non-empty parts with " · " for the page's muted caption
@@ -191,7 +210,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					}
 					// Saved with no entry namespace: the forest spans them, and
 					// each resource records its own.
-					if err := command.save(resources, "", indexed); err != nil {
+					if err := command.save(resources, "", indexed, true); err != nil {
 						return err
 					}
 					render.ScopeBanner("Namespace", render.AllNamespaces, "")
@@ -204,8 +223,8 @@ func newTreeCommand(services Services) *cobra.Command {
 					if !htmlOpts.Enabled {
 						return nil
 					}
-					meta, err := pageMeta(services.Config.Theme, "kx tree · all namespaces",
-						invocation("tree", scopeArgs("", true), portFlag(port)))
+					meta, err := pageMeta(services.Config.Theme, "kx tree · "+render.AllNamespaces,
+						treeInvocation(scopeArgs("", true), indexed, port))
 					if err != nil {
 						return err
 					}
@@ -235,7 +254,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					return nil
 				}
 				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
-					invocation("tree", scopeArgs(namespace, false), indexFlag(indexed), portFlag(port)))
+					treeInvocation(scopeArgs(namespace, false), indexed, port))
 				if err != nil {
 					return err
 				}
@@ -278,7 +297,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
 			meta, err := pageMeta(services.Config.Theme, "kx tree · "+node.Label,
-				invocation("tree", args[0], indexFlag(indexed), portFlag(port)))
+				treeInvocation(args[0], indexed, port))
 			if err != nil {
 				return err
 			}
