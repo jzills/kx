@@ -112,6 +112,57 @@ func TestKindAliasLeavesFlagsAndUnknownWords(t *testing.T) {
 	}
 }
 
+// `kx po <TAB>` reaches kx as `kx __complete po ""`: the words being completed
+// are arguments to cobra's own command, so the alias has to be applied to them
+// too or completion answers for a command that does not exist.
+func TestCompletionRequestRewritesTheLineBeingCompleted(t *testing.T) {
+	for _, request := range []string{
+		cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd,
+	} {
+		for _, args := range [][]string{
+			{request, "po", ""},           // kx po <TAB>
+			{request, "po", "1", ""},      // kx po 1 <TAB>
+			{request, "deploy", "-n", ""}, // kx deploy -n <TAB>
+		} {
+			got := rewriteArgs(testRoot(), args)
+			want := append([]string{request, "get"}, args[1:]...)
+			if strings.Join(got, " ") != strings.Join(want, " ") {
+				t.Errorf("rewrite(%v) = %v, want %v", args, got, want)
+			}
+		}
+	}
+}
+
+// The last word of a completion request is the one being completed, so it is a
+// fragment rather than a spelling. `kx po<TAB>` is asking which commands start
+// with "po" and must keep answering port-forward.
+func TestCompletionRequestLeavesTheWordBeingCompleted(t *testing.T) {
+	for _, args := range [][]string{
+		{cobra.ShellCompRequestCmd, "po"},
+		{cobra.ShellCompRequestCmd, ""},
+		{cobra.ShellCompRequestCmd},
+		{cobra.ShellCompRequestCmd, "ns", "3", ""}, // a command still wins
+		{cobra.ShellCompRequestCmd, "get", "pods", ""},
+	} {
+		got := rewriteArgs(testRoot(), args)
+		if strings.Join(got, " ") != strings.Join(args, " ") {
+			t.Errorf("rewrite(%v) = %v, want it unchanged", args, got)
+		}
+	}
+}
+
+// A plain command line keeps being rewritten whole: the word at the end of one
+// is an argument, not something half-typed.
+func TestRewriteArgsLeavesPlainCommandLinesToTheAlias(t *testing.T) {
+	for _, args := range [][]string{{"pods"}, {"po", "-n", "prod"}, {"get", "pods"}} {
+		got := rewriteArgs(testRoot(), args)
+		want := rewriteKindAlias(testRoot(), args)
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("rewriteArgs(%v) = %v, want %v", args, got, want)
+		}
+	}
+}
+
 // Every command on the root help screen must be listed in a section, or it is
 // invisible to anyone reading `kx --help`.
 // The Use string is the only description of a command's positional arguments

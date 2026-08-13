@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -228,6 +230,46 @@ func TestResourceCompletionDescribesTheKinds(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("kx get <TAB> = %v..., want shorthands described by their kind", candidates[:min(5, len(candidates))])
+	}
+}
+
+// `kx po <TAB>` completes the same as `kx get po <TAB>`, because `kx po` runs
+// the same command.
+//
+// Driven through Execute and cobra's own dispatch rather than the complete()
+// helper above, because that is where this failed: the helper resolves the
+// command itself, so it cannot see cobra resolving a bare kind spelling to no
+// command at all — which answered with the shell's *filename* completion.
+func TestCompletionFollowsTheKindShorthand(t *testing.T) {
+	for _, line := range [][]string{
+		{"po", ""},        // kx po <TAB>
+		{"pods", "1", ""}, // kx pods 1 <TAB>
+		{"po", "-n", ""},  // kx po -n <TAB>
+		{"get", "po", ""}, // and the spelled-out form still works
+	} {
+		root := NewRoot(completionServices(t), "test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+
+		args := append([]string{cobra.ShellCompRequestCmd}, line...)
+		if err := Execute(root, args); err != nil {
+			t.Fatalf("Execute(%v): %v", args, err)
+		}
+
+		want := "1\tapi-7d8f (Pod)"
+		if line[len(line)-2] == "-n" {
+			want = "prod"
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("kx %s<TAB> completed with %q, want %q",
+				strings.Join(line, " "), out.String(), want)
+		}
+		// Without this the shell falls back to offering filenames, which is
+		// what the missing rewrite actually produced.
+		if !strings.Contains(out.String(), ":"+strconv.Itoa(int(cobra.ShellCompDirectiveNoFileComp))) {
+			t.Errorf("kx %s<TAB> directive in %q, want NoFileComp",
+				strings.Join(line, " "), out.String())
+		}
 	}
 }
 

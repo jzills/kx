@@ -405,8 +405,41 @@ func CommandOrder() []string {
 // keeps its namespace-switch meaning rather than listing namespaces — only a
 // spelling that matches no command reaches the alias.
 func Execute(root *cobra.Command, args []string) error {
-	root.SetArgs(rewriteKindAlias(root, args))
+	root.SetArgs(rewriteArgs(root, args))
 	return root.Execute()
+}
+
+// completionRequests are cobra's own completion entry points, which carry the
+// line being completed as their arguments rather than being one.
+var completionRequests = map[string]bool{
+	cobra.ShellCompRequestCmd:       true,
+	cobra.ShellCompNoDescRequestCmd: true,
+}
+
+// rewriteArgs applies the kind alias to a command line, and to the line carried
+// inside a completion request.
+//
+// `kx po <TAB>` reaches kx as `kx __complete po ""`. The alias applied to that
+// outer line stops at __complete, which is a command, leaving cobra to resolve
+// `po` on its own — it finds no such command and answers with
+// ShellCompDirectiveDefault, the shell's *filename* completion. So the shorthand
+// completed to the working directory while `kx get po <TAB>` completed to the
+// listing. Rewriting the inner line is what makes the two agree, for indexes and
+// flag values alike.
+//
+// The last word is excluded: it is the one being completed, so it is a fragment
+// rather than a spelling. Rewriting `kx po<TAB>` to `kx get po` would answer
+// with resource types where the shell asked which commands start with "po",
+// dropping port-forward from what that offers today.
+func rewriteArgs(root *cobra.Command, args []string) []string {
+	if len(args) < 2 || !completionRequests[args[0]] {
+		return rewriteKindAlias(root, args)
+	}
+	line := rewriteKindAlias(root, args[1:len(args)-1])
+	rewritten := make([]string, 0, len(line)+2)
+	rewritten = append(rewritten, args[0])
+	rewritten = append(rewritten, line...)
+	return append(rewritten, args[len(args)-1])
 }
 
 func rewriteKindAlias(root *cobra.Command, args []string) []string {
