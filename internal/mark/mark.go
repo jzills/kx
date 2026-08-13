@@ -133,8 +133,24 @@ func cell(glyph rune, x, y float64) []Rect {
 // edge of the tile at large sizes without spending pixels that matter at 16.
 const faviconPadding = cellWidth / 2
 
+// opticalDrop is how far below the tile's centre the mark sits in an icon that
+// is drawn beside text.
+//
+// A browser centres the icon's box against the title's line box, and a line
+// box is taller than the letters in it — it reserves room for descenders below
+// the baseline. Type set in it therefore carries its visual weight above the
+// box's centre, and a mark centred in its own box next to that reads as
+// floating high, which is what a tab actually looked like.
+//
+// Half a cell: at 288 units to a tile that is one sixteenth, so it lands as
+// exactly one pixel at the sixteen a tab gives an icon — the smallest move
+// there is at that size — and stays that one pixel on a high-density screen
+// drawing the same icon at 32.
+const opticalDrop = cellHeight / 2
+
 // FaviconShapes returns the blocks centred in a square tile, with the tile's
-// side.
+// side. What an icon standing on its own — a home screen, a launcher — is
+// drawn from; TabIconShapes is the same tile for one drawn beside a title.
 //
 // Square because every consumer of a favicon is: the mark's own 15:5 block
 // grid is centred in the tile rather than stretched to it, and the tile is
@@ -175,11 +191,26 @@ func FaviconShapes() (shapes []Rect, side float64) {
 	return shapes, side
 }
 
+// TabIconShapes returns the tile with the mark dropped by opticalDrop, for an
+// icon a browser draws beside a page title.
+func TabIconShapes() (shapes []Rect, side float64) {
+	shapes, side = FaviconShapes()
+	dropped := make([]Rect, 0, len(shapes))
+	for _, shape := range shapes {
+		shape.Y += opticalDrop
+		dropped = append(dropped, shape)
+	}
+	return dropped, side
+}
+
 // Favicon returns the mark as a square SVG document filled with fill, which is
 // a CSS color the caller is responsible for: the reports pass their palette's
 // accent, so the tab icon carries the theme the page was rendered with.
+//
+// Drawn from TabIconShapes: this is the icon a tab shows, in the reports and
+// on the site alike.
 func Favicon(fill string) string {
-	shapes, side := FaviconShapes()
+	shapes, side := TabIconShapes()
 
 	var out strings.Builder
 	fmt.Fprintf(&out,

@@ -7,7 +7,8 @@ package main
 // showed before, a stock theme logo on a kx page. The names are Hextra's
 // because its head partial is what links them.
 //
-// The mark is drawn without its shadow (mark.FaviconShapes) and coloured from
+// The mark is drawn without its shadow (mark.FaviconShapes, or
+// mark.TabIconShapes where the icon sits beside a title) and coloured from
 // the palette registry rather than a literal, so the icons a browser caches
 // are the same green the site paints itself with. The site repaints the SVG
 // from the reader's chosen palette at runtime; these files are what shows
@@ -31,15 +32,17 @@ import (
 
 // rasters is every PNG the icon set needs, at the size its consumer asks for.
 //
-// The tab sizes are transparent so the mark sits on whatever the browser draws
-// behind it. The home-screen sizes are not: iOS composites a transparent
+// standalone is the difference between an icon that stands on its own and one
+// drawn beside a title, and it decides two things at once. A home-screen icon
+// is painted on the palette's background — iOS composites a transparent
 // apple-touch-icon onto black, and Android draws the manifest icons on a
-// launcher background, so both get the palette's own background painted in
-// rather than borrowing one.
+// launcher background — and it is centred in its tile, with no line of text to
+// centre against. A tab icon is transparent, so it sits on whatever the
+// browser draws behind it, and takes mark.TabIconShapes' drop.
 var rasters = []struct {
-	path   string
-	size   int
-	opaque bool
+	path       string
+	size       int
+	standalone bool
 }{
 	{"site/static/favicon-16x16.png", 16, false},
 	{"site/static/favicon-32x32.png", 32, false},
@@ -78,7 +81,7 @@ func writeFavicons() error {
 	}
 
 	for _, raster := range rasters {
-		encoded, err := encodePNG(raster.size, accent, background, raster.opaque)
+		encoded, err := encodePNG(raster.size, accent, background, raster.standalone)
 		if err != nil {
 			return fmt.Errorf("%s: %w", raster.path, err)
 		}
@@ -118,12 +121,15 @@ func write(path string, content []byte) error {
 //
 // Rounding both edges of a block the same way keeps neighbours touching, so
 // the letterforms stay solid rather than growing seams.
-func draw(size int, fg, bg color.RGBA, opaque bool) *image.RGBA {
-	shapes, side := mark.FaviconShapes()
+func draw(size int, fg, bg color.RGBA, standalone bool) *image.RGBA {
+	shapes, side := mark.TabIconShapes()
+	if standalone {
+		shapes, side = mark.FaviconShapes()
+	}
 	scale := float64(size) / side
 
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	if opaque {
+	if standalone {
 		for i := 0; i < len(img.Pix); i += 4 {
 			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = bg.R, bg.G, bg.B, 0xff
 		}
@@ -153,10 +159,10 @@ func draw(size int, fg, bg color.RGBA, opaque bool) *image.RGBA {
 	return img
 }
 
-func encodePNG(size int, fg, bg color.RGBA, opaque bool) ([]byte, error) {
+func encodePNG(size int, fg, bg color.RGBA, standalone bool) ([]byte, error) {
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestCompression}
-	if err := encoder.Encode(&out, draw(size, fg, bg, opaque)); err != nil {
+	if err := encoder.Encode(&out, draw(size, fg, bg, standalone)); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
@@ -169,8 +175,8 @@ func encodePNG(size int, fg, bg color.RGBA, opaque bool) ([]byte, error) {
 func encodeICO(fg, bg color.RGBA) ([]byte, error) {
 	images := make([][]byte, 0, len(icoSizes))
 	for _, size := range icoSizes {
-		// Transparent, like the other tab-sized icons: a .ico is drawn in the
-		// same places favicon-16x16.png is.
+		// A tab icon like favicon-16x16.png, drawn in the same places: it is
+		// transparent, and takes the same drop against a title.
 		encoded, err := encodePNG(size, fg, bg, false)
 		if err != nil {
 			return nil, err
