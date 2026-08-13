@@ -58,7 +58,14 @@ func (i Info) Tag() string { return tag(i.Version) }
 // The help screen signs off with this: there, the question is which kx this is,
 // and the timestamp and commit answering "built from what" belong under
 // `kx --version`, which reports them as their own labelled lines anyway.
-func (i Info) ShortTag() string { return tag(pseudoTail.ReplaceAllString(i.Version, "")) }
+//
+// Semver build metadata goes first, and not only so pseudoTail's anchor still
+// reaches the commit it matches on: installing from a modified tree appends
+// "+dirty", which is provenance rather than a different version of kx.
+func (i Info) ShortTag() string {
+	version, _, _ := strings.Cut(i.Version, "+")
+	return tag(pseudoTail.ReplaceAllString(version, ""))
+}
 
 // tag adds the "v", except to a version that isn't one: an unstamped build
 // reports "dev", and "vdev" names nothing anybody could look up.

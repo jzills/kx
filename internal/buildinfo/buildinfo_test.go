@@ -99,9 +99,12 @@ func TestTagSpellsTheVersionAsATag(t *testing.T) {
 	cases := map[string]string{
 		"0.3.4":                               "v0.3.4",
 		"0.3.4-0.20260813184656-8ec57390b220": "v0.3.4-0.20260813184656-8ec57390b220",
-		"0.4.0-rc.1":                          "v0.4.0-rc.1",
-		"dev":                                 "dev",
-		"":                                    "",
+		// --version reports provenance, and "+dirty" is provenance: this
+		// binary is not the commit it names.
+		"0.3.4-0.20260813185938-a74541b3738e+dirty": "v0.3.4-0.20260813185938-a74541b3738e+dirty",
+		"0.4.0-rc.1": "v0.4.0-rc.1",
+		"dev":        "dev",
+		"":           "",
 	}
 	for version, want := range cases {
 		if got := (Info{Version: version}).Tag(); got != want {
@@ -120,8 +123,15 @@ func TestShortTagDropsThePseudoVersionTail(t *testing.T) {
 		// No tag anywhere behind it: the toolchain bases the pseudo-version on
 		// 0.0.0 and appends the tail with no prerelease segment in front.
 		"0.0.0-20260813184656-8ec57390b220": "v0.0.0",
-		// A release build has no tail to drop.
-		"0.3.4": "v0.3.4",
+		// Installing from a modified tree appends semver build metadata after
+		// the commit, which the tail alone does not account for: the hash is
+		// no longer the end of the string.
+		"0.3.4-0.20260813185938-a74541b3738e+dirty": "v0.3.4",
+		// A release build has no tail to drop. Build metadata is not part of
+		// which version this is, so it goes either way.
+		"0.3.4":              "v0.3.4",
+		"0.3.4+incompatible": "v0.3.4",
+		"0.4.0-rc.1+dirty":   "v0.4.0-rc.1",
 		// A real prerelease is the version, not a tail. Cutting at the first
 		// dash would report an unreleased 0.4.0 as shipped.
 		"0.4.0-rc.1": "v0.4.0-rc.1",
