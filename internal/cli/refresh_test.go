@@ -130,10 +130,17 @@ func TestStaleRefreshReportsTheErrorOnlyOnce(t *testing.T) {
 	}
 }
 
-// A replay that fails on its own terms has already put its reason on screen.
-// Telling the user to run `kx get` on top of that points at the thing that just
-// failed.
-func TestStaleRefreshStaysQuietWhenTheReplayFails(t *testing.T) {
+// A failed replay still ends with the instruction, because its own reason never
+// reaches the screen: kubectl.Run captures both streams, so recoverState
+// discards the error rather than printing it.
+//
+// This used to stay silent, on the theory that the replay had already explained
+// itself and a hint would point at the command that just failed. That theory
+// held for an interactive command, not for this one — and the silence made this
+// the only stale path ending with neither a listing nor an instruction. A
+// relist whose saved query names the very resource that went stale (`kx get
+// pods 1 2`, then that pod dies) lands here every time.
+func TestStaleRefreshStillHintsWhenTheReplayFails(t *testing.T) {
 	out := captureRender(t)
 	services := staleServices(t, &fakeKubectl{err: errors.New("connection refused")},
 		&state.Query{Resource: "pods", Args: []string{}})
@@ -142,8 +149,24 @@ func TestStaleRefreshStaysQuietWhenTheReplayFails(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("stale command returned no error")
 	}
+	if !strings.Contains(out.String(), "Run 'kx get <resource>' to refresh the list.") {
+		t.Errorf("a failed replay left the user with no instruction:\n%s", out.String())
+	}
+}
+
+// A replay that worked needs no instruction — the fresh listing is the answer,
+// and telling the user to fetch what is already on screen is noise.
+func TestStaleRefreshDoesNotHintWhenTheReplaySucceeds(t *testing.T) {
+	out := captureRender(t)
+	services := staleServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Resource: "pods", Args: []string{}})
+
+	cmd := staleCommand(services)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("stale command returned no error")
+	}
 	if strings.Contains(out.String(), "to refresh the list") {
-		t.Errorf("hinted at a refresh that had just failed:\n%s", out.String())
+		t.Errorf("hinted at a refresh that had just succeeded:\n%s", out.String())
 	}
 }
 
