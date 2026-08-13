@@ -122,9 +122,12 @@ const (
 	// sweep — so there is nothing to replay, and running a `kx get` is
 	// genuinely the way forward.
 	noQuery
-	// replayFailed: the replay broke on its own terms. Whatever went wrong is
-	// already on screen, and pointing the user at the command that just failed
-	// would only add noise.
+	// replayFailed: the replay broke on its own terms — most often because the
+	// saved query names the very resource that went stale, which is what a
+	// relist's query does. Its reason does not reach the screen: Run captures
+	// stdout and returns stderr as the error, and that error is dropped here.
+	// So this is treated like noQuery, and the caller ends with the same
+	// instruction rather than with silence.
 	replayFailed
 )
 
@@ -164,7 +167,11 @@ func recoverState(services Services, lead string) recoverOutcome {
 // doesn't print the same failure a second time.
 func handleStale(services Services, err error) {
 	render.Error(err.Error())
-	if recoverState(services, refreshLead(err)) == noQuery {
+	// Anything but a rendered listing ends with the instruction. Only a
+	// successful refresh has an answer on screen already; a replay that failed
+	// leaves nothing behind, since Run captures both of kubectl's streams and
+	// recoverState discards the error with them.
+	if recoverState(services, refreshLead(err)) != refreshed {
 		render.Raw("Run 'kx get <resource>' to refresh the list.")
 	}
 }
