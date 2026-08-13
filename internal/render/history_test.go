@@ -143,6 +143,13 @@ func slotHistory() state.History {
 	}
 }
 
+// slotLive is where the caller currently is, agreeing with what slotHistory's
+// entries recorded — the shape where nothing has been switched since, so tests
+// about anything other than staleness see no movement.
+func slotLive() Live {
+	return Live{Namespace: "istio-system", Context: "docker-desktop"}
+}
+
 // The slots are what `kx ns <n>` resolves against, so `kx state --all` has to
 // show they exist — otherwise half the state kx keeps is invisible.
 func TestStateHistoryListsSwitchTargets(t *testing.T) {
@@ -185,7 +192,7 @@ func TestStateHistoryOmitsSwitchTargetsWhenThereAreNone(t *testing.T) {
 // The expanded view is the one you read an index off before switching, so it
 // has to carry the numbers.
 func TestSwitchTargetsRendersIndexedListings(t *testing.T) {
-	out := capture(func(r *Renderer) { r.SwitchTargets(slotHistory()) })
+	out := capture(func(r *Renderer) { r.SwitchTargets(slotHistory(), slotLive()) })
 
 	for _, want := range []string{
 		"Namespaces", "istio-system", "diagnostics", "Contexts", "docker-desktop",
@@ -203,8 +210,96 @@ func TestSwitchTargetsRendersIndexedListings(t *testing.T) {
 	}
 }
 
+// --targets answers "what does `kx ns <n>` switch to, and where am I now". The
+// entry can only answer the first: its namespace is where the caller was when
+// the listing was taken, and `kx ns 2` switches without touching the slot. Read
+// from the entry, the caption showed the namespace the caller had already left.
+func TestSwitchTargetsCaptionsTheLiveNamespace(t *testing.T) {
+	history := slotHistory()
+	out := capture(func(r *Renderer) {
+		r.SwitchTargets(history, Live{Namespace: "diagnostics", Context: "docker-desktop"})
+	})
+
+	caption := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(caption, "diagnostics") {
+		t.Errorf("caption = %q, want the namespace the caller is in now", caption)
+	}
+	// istio-system is what the entry recorded, and it is still a row in the
+	// table — only the caption must have moved on.
+	if strings.Contains(caption, "istio-system") {
+		t.Errorf("caption = %q, want the entry's stale namespace out of it", caption)
+	}
+}
+
+// The slot's own context stays frozen: it names the cluster the listing was
+// taken against, which is what decides whether its indexes still resolve — an
+// index counted in another cluster is refused, not silently reused.
+func TestSwitchTargetsKeepsTheNamespaceSlotContext(t *testing.T) {
+	history := state.History{
+		Named: map[kinds.Kind]state.State{
+			kinds.Namespace: {
+				Resources: state.NewResources([]string{"default"}, kinds.Namespace),
+				Namespace: "default",
+				Context:   "staging",
+			},
+		},
+	}
+	out := capture(func(r *Renderer) {
+		r.SwitchTargets(history, Live{Namespace: "default", Context: "production"})
+	})
+
+	caption := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(caption, "staging") {
+		t.Errorf("caption = %q, want the context the slot was listed against", caption)
+	}
+}
+
+// A context slot has no namespace scope (contexts are kubeconfig entries), so
+// the field that says where the caller is now is the context itself — and it
+// goes stale for the same reason. Nothing catches a stale one either: contexts
+// are not cluster-bound, so FieldsNamed deliberately skips the context check.
+func TestSwitchTargetsCaptionsTheLiveContext(t *testing.T) {
+	history := state.History{
+		Named: map[kinds.Kind]state.State{
+			kinds.Context: {
+				Resources: state.NewResources([]string{"staging", "production"}, kinds.Context),
+				Context:   "staging",
+			},
+		},
+	}
+	out := capture(func(r *Renderer) {
+		r.SwitchTargets(history, Live{Namespace: "default", Context: "production"})
+	})
+
+	caption := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(caption, "production") {
+		t.Errorf("caption = %q, want the context the caller is in now", caption)
+	}
+	if strings.Contains(caption, "staging") {
+		t.Errorf("caption = %q, want the context the slot was listed in out of it", caption)
+	}
+}
+
+// `kx state` and `kx state --all` read history entries, whose namespace is
+// where the resources actually are rather than where the caller was standing.
+// That must stay frozen — refreshing it would relabel a prod listing as dev the
+// moment you switched.
+func TestStateKeepsAHistoryEntryNamespace(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+			Context:   "docker-desktop",
+		})
+	})
+
+	if !strings.Contains(out, "prod") {
+		t.Errorf("output = %q, want the entry's own namespace", out)
+	}
+}
+
 func TestSwitchTargetsWithNoSlotsSaysHowToFillThem(t *testing.T) {
-	out := capture(func(r *Renderer) { r.SwitchTargets(state.History{}) })
+	out := capture(func(r *Renderer) { r.SwitchTargets(state.History{}, Live{}) })
 
 	if !strings.Contains(out, "No switch targets yet") {
 		t.Errorf("output = %q, want it to report empty slots", out)

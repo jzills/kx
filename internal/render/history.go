@@ -200,13 +200,51 @@ func (r *Renderer) switchTargetSummary(history state.History) {
 	}, rows)
 }
 
+// Live is where the caller is right now, read from kubeconfig rather than from
+// saved state. The switch-target slots caption with it; see slotCaption.
+type Live struct {
+	Namespace string
+	Context   string
+}
+
+// slotCaption returns the scope and context a switch-target slot captions with.
+//
+// The field naming where the caller *is* comes from Live, not from the entry.
+// A slot records where the caller was standing when the listing was taken, and
+// switching never rewrites it — `kx ns 2` edits kubeconfig and leaves the slot
+// alone — so read from the entry, `kx state --targets` answered "where am I"
+// with the namespace you had just left.
+//
+// Which field that is depends on the slot, and the other one stays frozen:
+//
+//   - A namespace slot's live field is the scope. Its context is left alone
+//     because it names the cluster the listing was taken against, which is what
+//     decides whether the slot's indexes still resolve at all (see
+//     Service.checkContext) — a fact about the entry, not about the caller.
+//   - A context slot has no scope (contexts are kubeconfig entries, not server
+//     objects; see scopeLabel), so it is the context itself that goes live.
+//     Nothing else would catch a stale one: contexts are not cluster-bound, so
+//     FieldsNamed deliberately skips the context check for them.
+func slotCaption(kind kinds.Kind, entry state.State, live Live) (scope, context string) {
+	scope, context = scopeLabel(entry), entry.Context
+	switch kind {
+	case kinds.Namespace:
+		scope = live.Namespace
+	case kinds.Context:
+		context = live.Context
+	}
+	return scope, context
+}
+
 // SwitchTargets renders each slot as a full indexed listing, which is what
 // `kx state --targets` shows.
 //
 // The summary answers "is there a namespace slot, and from where"; this answers
-// "what does `kx ns 2` switch to", which is the question you have just before
-// switching. Reuses State so a slot listing looks like every other listing.
-func (r *Renderer) SwitchTargets(history state.History) {
+// "what does `kx ns 2` switch to, and where am I now", which is the question you
+// have just before switching. Reuses the listing State renders so a slot looks
+// like every other listing, and captions it against live rather than saved
+// scope — see slotCaption.
+func (r *Renderer) SwitchTargets(history state.History, live Live) {
 	rendered := 0
 	for _, kind := range slotOrder {
 		entry, ok := history.Named[kind]
@@ -216,7 +254,8 @@ func (r *Renderer) SwitchTargets(history state.History) {
 		if rendered > 0 {
 			r.Blank()
 		}
-		r.State(entry)
+		scope, context := slotCaption(kind, entry, live)
+		r.listing(entry, scope, context)
 		rendered++
 	}
 	if rendered == 0 {
@@ -226,11 +265,20 @@ func (r *Renderer) SwitchTargets(history state.History) {
 
 // State renders a single history entry as an indexed name/kind listing, which
 // is what `kx state` shows.
+//
+// A history entry captions with its own scope, unlike a slot: its namespace is
+// where the resources actually are rather than where the caller was standing,
+// so refreshing it would relabel a prod listing as dev the moment you switched.
 func (r *Renderer) State(entry state.State) {
+	r.listing(entry, scopeLabel(entry), entry.Context)
+}
+
+// listing draws an indexed name/kind table under a caption, taking the scope
+// and context already decided by the caller.
+func (r *Renderer) listing(entry state.State, scope, context string) {
 	count := entry.Resources.Len()
-	// The context sits beside the namespace: both say where the listing was
-	// taken, and Caption drops either when it is empty.
-	r.Caption(kindLabel(entry.Resources), scopeLabel(entry), entry.Context, itemLabel(count))
+	// The context sits beside the scope, and Caption drops either when empty.
+	r.Caption(kindLabel(entry.Resources), scope, context, itemLabel(count))
 
 	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"}}
 	rows := make([][]Cell, 0, count)

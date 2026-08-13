@@ -850,7 +850,15 @@ func newStateCommand(services Services) *cobra.Command {
 					return err
 				}
 				if targets {
-					render.SwitchTargets(history)
+					// Where the caller is now, read from kubeconfig rather than
+					// from the slots: switching never rewrites them, so a saved
+					// scope is where they were when they last listed. Only this
+					// view needs it — `kx state` and `--all` read history
+					// entries, whose scope is a fact about the resources.
+					render.SwitchTargets(history, render.Live{
+						Namespace: services.Kubectl.CurrentNamespace(),
+						Context:   services.Kubectl.CurrentContext(),
+					})
 					return nil
 				}
 				render.StateHistory(history)

@@ -612,6 +612,38 @@ func TestStateTargetsRendersSlotsWithoutHistory(t *testing.T) {
 	}
 }
 
+// Switching does not rewrite the slot, so the namespace saved with it is where
+// the caller was when they last listed. `kx state --targets` is read after a
+// switch as often as before one, and it was answering "where am I" with the
+// namespace already left behind.
+func TestStateTargetsCaptionsTheLiveNamespace(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable}
+	services := switchServices(t, kube)
+	// List the slot standing in prod, which is what recordingKubectl reports
+	// until it is moved.
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+	// Then switch. `kx ns <n>` edits kubeconfig and leaves the slot alone.
+	kube.namespace = "diagnostics"
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newStateCommand(services)
+	cmd.SetArgs([]string{"--targets"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state --targets: %v", err)
+	}
+
+	caption := strings.SplitN(out.String(), "\n", 2)[0]
+	if !strings.Contains(caption, "diagnostics") {
+		t.Errorf("caption = %q, want the namespace the caller is in now", caption)
+	}
+	if strings.Contains(caption, "prod") {
+		t.Errorf("caption = %q, want the namespace the slot was listed in out of it", caption)
+	}
+}
+
 // The flag is registered, so it shows up in --help rather than working silently.
 func TestStateTargetsFlagIsRegistered(t *testing.T) {
 	cmd := newStateCommand(Services{})
