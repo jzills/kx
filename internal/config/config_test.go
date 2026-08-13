@@ -23,7 +23,7 @@ func TestDefaultsWhenNoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.NoColor || cfg.Engine != DefaultEngine {
+	if cfg.MaxHistory != 10 || cfg.Theme != DefaultTheme || cfg.ThemeDisable || cfg.Engine != DefaultEngine {
 		t.Errorf("defaults = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "bash" || cfg.Shells[1] != "sh" {
@@ -35,7 +35,7 @@ func TestLoadsFromFile(t *testing.T) {
 	loader := writeConfig(t, `
 max_history = 3
 shells = ["zsh", "bash"]
-no_color = true
+theme_disable = true
 theme = "solarized"
 engine = "trivy"
 `)
@@ -43,7 +43,7 @@ engine = "trivy"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 3 || !cfg.NoColor || cfg.Theme != "solarized" || cfg.Engine != "trivy" {
+	if cfg.MaxHistory != 3 || !cfg.ThemeDisable || cfg.Theme != "solarized" || cfg.Engine != "trivy" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "zsh" {
@@ -56,14 +56,14 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	t.Setenv("KX_MAX_HISTORY", "7")
 	t.Setenv("KX_THEME", "dracula")
 	t.Setenv("KX_SHELLS", "fish,sh")
-	t.Setenv("KX_NO_COLOR", "yes")
+	t.Setenv("KX_THEME_DISABLE", "yes")
 	t.Setenv("KX_ENGINE", "scout")
 
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.NoColor || cfg.Engine != "scout" {
+	if cfg.MaxHistory != 7 || cfg.Theme != "dracula" || !cfg.ThemeDisable || cfg.Engine != "scout" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 	if len(cfg.Shells) != 2 || cfg.Shells[0] != "fish" {
@@ -71,15 +71,30 @@ func TestEnvironmentOverridesFile(t *testing.T) {
 	}
 }
 
-func TestNoColorEnvOffValues(t *testing.T) {
-	loader := writeConfig(t, "no_color = true\n")
-	t.Setenv("KX_NO_COLOR", "0")
+func TestThemeDisableEnvOffValues(t *testing.T) {
+	loader := writeConfig(t, "theme_disable = true\n")
+	t.Setenv("KX_THEME_DISABLE", "0")
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.NoColor {
-		t.Error("KX_NO_COLOR=0 did not turn styling back on")
+	if cfg.ThemeDisable {
+		t.Error("KX_THEME_DISABLE=0 did not turn styling back on")
+	}
+}
+
+// The setting was called no_color / KX_NO_COLOR before it was grouped with
+// KX_THEME. Nothing reads the old spellings any more — a config file still
+// holding one is a file kx styles output against, silently.
+func TestOldNoColorSpellingsAreNotRead(t *testing.T) {
+	loader := writeConfig(t, "no_color = true\n")
+	t.Setenv("KX_NO_COLOR", "1")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ThemeDisable {
+		t.Error("Load still honours the old no_color spelling")
 	}
 }
 

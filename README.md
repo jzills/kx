@@ -246,8 +246,8 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
 | `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
 | `debug_image` | `KX_DEBUG_IMAGE` | `"busybox"` | Image `kx debug` attaches to a pod; `--image` overrides it. |
-| `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
+| `theme_disable` | `KX_THEME_DISABLE` | `false` | Disable styled output (same as `--no-color`). |
 | `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`). |
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.

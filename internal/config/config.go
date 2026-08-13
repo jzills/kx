@@ -28,23 +28,23 @@ const DefaultDebugImage = "busybox"
 // Config is the resolved configuration. Defaults match the Python
 // implementation's dataclass defaults.
 type Config struct {
-	MaxHistory int
-	Shells     []string
-	NoColor    bool
-	Theme      string
-	Engine     string
-	DebugImage string
+	MaxHistory   int
+	Shells       []string
+	ThemeDisable bool
+	Theme        string
+	Engine       string
+	DebugImage   string
 }
 
 // Default returns the configuration used when nothing is set.
 func Default() Config {
 	return Config{
-		MaxHistory: 10,
-		Shells:     []string{"bash", "sh"},
-		NoColor:    false,
-		Theme:      DefaultTheme,
-		Engine:     DefaultEngine,
-		DebugImage: DefaultDebugImage,
+		MaxHistory:   10,
+		Shells:       []string{"bash", "sh"},
+		ThemeDisable: false,
+		Theme:        DefaultTheme,
+		Engine:       DefaultEngine,
+		DebugImage:   DefaultDebugImage,
 	}
 }
 
@@ -60,7 +60,8 @@ type Setting struct {
 	Doc string
 }
 
-// Settings is every key kx reads, in the order the help screen lists them.
+// Settings is every key kx reads. Order here is not significant — the help
+// screen sorts the block it builds from this.
 //
 // TestSettingsDocumentsEveryEnvOverride keeps this in step with Load: an
 // override the loader honours but this list omits is one a user can only find
@@ -72,7 +73,7 @@ func Settings() []Setting {
 		{"max_history", "KX_MAX_HISTORY", "Number of kx get results kept in history"},
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
-		{"no_color", "KX_NO_COLOR", "Disable styled output, like --no-color"},
+		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
 	}
 }
 
@@ -135,12 +136,12 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.Shells = shells
 		}
-		if value, ok := raw["no_color"]; ok {
+		if value, ok := raw["theme_disable"]; ok {
 			flag, ok := value.(bool)
 			if !ok {
-				return cfg, errors.New("kx: no_color must be a boolean")
+				return cfg, errors.New("kx: theme_disable must be a boolean")
 			}
-			cfg.NoColor = flag
+			cfg.ThemeDisable = flag
 		}
 		if value, ok := raw["theme"]; ok {
 			name, ok := value.(string)
@@ -180,12 +181,12 @@ func (l Loader) Load() (Config, error) {
 	if value, ok := os.LookupEnv("KX_SHELLS"); ok {
 		cfg.Shells = strings.Split(value, ",")
 	}
-	if value, ok := os.LookupEnv("KX_NO_COLOR"); ok {
+	if value, ok := os.LookupEnv("KX_THEME_DISABLE"); ok {
 		switch strings.ToLower(value) {
 		case "1", "true", "yes", "on":
-			cfg.NoColor = true
+			cfg.ThemeDisable = true
 		default:
-			cfg.NoColor = false
+			cfg.ThemeDisable = false
 		}
 	}
 	if value, ok := os.LookupEnv("KX_THEME"); ok {

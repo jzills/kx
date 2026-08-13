@@ -36,13 +36,13 @@ var helpSections = []struct {
 	{"Shell", []string{"completion"}},
 }
 
-// selecting is the index workflow, on the screen people reach for first.
+// examples are the index workflow, on the screen people reach for first.
 //
 // Every line here is a feature that existed only in the README: the numbering
 // itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
 // has none. A per-command --help can't teach any of it, because none of it
 // belongs to one command.
-var selecting = []render.HelpItem{
+var examples = []render.HelpItem{
 	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
 	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
 	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
@@ -51,9 +51,11 @@ var selecting = []render.HelpItem{
 	{Name: "kx get pods -A", Doc: "Every namespace; indexes carry their namespace"},
 }
 
+// The docs URL used to close this screen too. It is one line under `kx
+// --version`, next to the commit and the config path a reader who wants the
+// project page is already looking for — repeating it here bought nothing.
 var footer = []string{
 	"Run 'kx COMMAND --help' for a command's options and examples.",
-	"https://github.com/jzills/kx",
 }
 
 // files names the two paths kx reads and writes. Resolved from the packages
@@ -90,16 +92,20 @@ func homeRelative(path string) string {
 	return "~" + string(filepath.Separator) + rest
 }
 
-// environment lists the config overrides, plus the one convention kx honors
-// that isn't its own.
+// environment lists the config overrides — kx's own keys, and only those,
+// alphabetically, the way every other block on this screen is ordered.
+//
+// NO_COLOR is still honored (see render.New), but it is a terminal-wide
+// convention rather than a kx setting, and listing it beside KX_THEME and
+// KX_THEME_DISABLE implied kx owned it. The README documents it where it
+// belongs, with the rest of the styling behavior.
 func environment() []render.HelpItem {
 	var items []render.HelpItem
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
-	return append(items, render.HelpItem{
-		Name: "NO_COLOR", Doc: "Disable styled output, per no-color.org",
-	})
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items
 }
 
 // rootOptions renders the root command's own flags, plus the help flag cobra
@@ -175,11 +181,15 @@ func argDoc(cmd *cobra.Command, name string) string {
 
 // installHelp replaces cobra's help output with the themed help screens, for
 // the root command and every subcommand.
+//
+// version is taken already spelled — the screen prints it as given rather than
+// composing it, so what a version looks like stays a question for the package
+// that owns the version string.
 func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {
 			render.ShowRootHelp(render.RootHelp{
-				Selecting:   selecting,
+				Examples:    examples,
 				Sections:    rootSections(root),
 				Options:     rootOptions(root),
 				Files:       files(),

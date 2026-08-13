@@ -13,10 +13,11 @@ const docsURL = "https://github.com/jzills/kx"
 
 // versionText is what `kx --version` prints.
 //
-// The first line is exactly "kx <version>" and nothing else, because that is
-// what the release workflow asserts against and what any script parsing this
-// output would have been written against. Everything below it is detail for a
-// bug report: which build, from which source, against which config.
+// The first line is exactly "kx v<version>" and nothing else, because that is
+// what the release workflow asserts against. It carries the whole version,
+// pseudo-version tail and all — this is where "which build am I running" gets
+// answered, so nothing is abbreviated away. Everything below it is detail for
+// a bug report: which build, from which source, against which config.
 // The version line itself is deliberately unstyled: it is the compatibility
 // surface above, and escape codes around it would reach anything that captures
 // this output on a terminal. Everything below is kx's own reading matter and
@@ -42,5 +43,5 @@ func versionText(info buildinfo.Info) string {
 	}
 	detail = append(detail, [2]string{"docs", docsURL})
 
-	return "kx " + info.Version + "\n" + render.Detail(detail) + "\n"
+	return "kx " + info.Tag() + "\n" + render.Detail(detail) + "\n"
 }
