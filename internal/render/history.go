@@ -280,19 +280,36 @@ func (r *Renderer) State(entry state.State) {
 
 // listing draws an indexed name/kind table under a caption, taking the scope
 // and context already decided by the caller.
+//
+// A listing that spans namespaces gets a NAMESPACE column, because without one
+// its rows are not telling apart: `kx get sa -A` lists a "default"
+// ServiceAccount in every namespace, and eight identical KIND/NAME rows give
+// the reader no way to choose between indexes 1, 3, 4 and 6. Distinguishing
+// them is the whole reason each resource records a namespace; dropping it here
+// spent that on nothing. Single-namespace listings keep the narrower table —
+// the entry's caption already names the one namespace they are all in.
 func (r *Renderer) listing(entry state.State, scope, context string) {
 	count := entry.Resources.Len()
 	// The context sits beside the scope, and Caption drops either when empty.
 	r.Caption(kindLabel(entry.Resources), scope, context, itemLabel(count))
 
-	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"}}
+	spanning := entry.AllNamespaces
+	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}}
+	if spanning {
+		columns = append(columns, Column{Header: "NAMESPACE"})
+	}
+	columns = append(columns, Column{Header: "NAME"})
+
 	rows := make([][]Cell, 0, count)
 	for position, resource := range entry.Resources.Entries() {
-		rows = append(rows, []Cell{
+		row := []Cell{
 			Plain(strconv.Itoa(position + 1)),
 			Plain(string(resource.Kind)),
-			Plain(resource.Name),
-		})
+		}
+		if spanning {
+			row = append(row, Plain(resource.Namespace))
+		}
+		rows = append(rows, append(row, Plain(resource.Name)))
 	}
 	r.Table(columns, rows)
 }

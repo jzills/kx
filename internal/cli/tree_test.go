@@ -576,3 +576,23 @@ func TestTreeAllNamespacesCommandSavesTheWalk(t *testing.T) {
 		t.Errorf("entry namespace = %q, want empty for a forest", current.Namespace)
 	}
 }
+
+// The -A page's provenance line left --no-index out, so `kx tree -A --no-index
+// --html` published a page claiming it came from `kx tree -A` — re-running
+// which prints a numbered tree the page does not have. One helper now renders
+// all three of tree's invocation lines, so they cannot drift again.
+func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
+	for _, scope := range []string{scopeArgs("", true), scopeArgs("prod", false), "1"} {
+		line := treeInvocation(scope, false, 0)
+		if !strings.Contains(line, "--no-index") {
+			t.Errorf("invocation for scope %q = %q, want it to name --no-index", scope, line)
+		}
+	}
+}
+
+// Indexing is the default, so the common case renders no flag at all.
+func TestTreeInvocationOmitsTheFlagWhenIndexing(t *testing.T) {
+	if line := treeInvocation(scopeArgs("", true), true, 0); strings.Contains(line, "--no-index") {
+		t.Errorf("invocation = %q, want no --no-index when indexing", line)
+	}
+}

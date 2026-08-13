@@ -464,3 +464,40 @@ func TestStateNamesAContextOnlyOnce(t *testing.T) {
 		t.Errorf("caption = %q, names the context %d times, want 1", caption, got)
 	}
 }
+
+// `kx get cm -A` lists a "kube-root-ca.crt" ConfigMap in every namespace.
+// Without a NAMESPACE column those rows are identical, so the listing that
+// exists to let you pick an index gives you no way to choose between them —
+// and telling them apart is the whole reason each resource records a namespace.
+func TestStateShowsTheNamespaceOfASpanningListing(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			AllNamespaces: true,
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "kube-root-ca.crt", Kind: kinds.ConfigMap, Namespace: "prod"},
+				{Name: "kube-root-ca.crt", Kind: kinds.ConfigMap, Namespace: "staging"},
+			}),
+		})
+	})
+
+	for _, want := range []string{"NAMESPACE", "prod", "staging"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q, so the two rows cannot be told apart:\n%s", want, out)
+		}
+	}
+}
+
+// A single-namespace listing keeps the narrower table: every row is in the one
+// namespace the caption already names, so a column repeating it is noise.
+func TestStateOmitsTheNamespaceColumnForOneNamespace(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Namespace: "prod",
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		})
+	})
+
+	if strings.Contains(out, "NAMESPACE") {
+		t.Errorf("single-namespace listing grew a NAMESPACE column:\n%s", out)
+	}
+}

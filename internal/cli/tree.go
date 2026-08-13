@@ -124,6 +124,17 @@ func indexFlag(indexed bool) string {
 	return ""
 }
 
+// treeInvocation renders the command line the page says it came from.
+//
+// One helper for all three of tree's pages — the -A forest, a namespace sweep,
+// and a single indexed resource — because they had drifted: the -A branch left
+// indexFlag out, so `kx tree -A --no-index --html` published a page claiming it
+// was produced by `kx tree -A`, and re-running that prints a numbered tree the
+// page does not have.
+func treeInvocation(scope string, indexed bool, port int) string {
+	return invocation("tree", scope, indexFlag(indexed), portFlag(port))
+}
+
 // scopeCaption joins non-empty parts with " · " for the page's muted caption
 // line, matching the text render.Banner/render.ScopeBanner already printed
 // to the terminal just above render.Tree, so the two must not read
@@ -212,8 +223,8 @@ func newTreeCommand(services Services) *cobra.Command {
 					if !htmlOpts.Enabled {
 						return nil
 					}
-					meta, err := pageMeta(services.Config.Theme, "kx tree · all namespaces",
-						invocation("tree", scopeArgs("", true), portFlag(port)))
+					meta, err := pageMeta(services.Config.Theme, "kx tree · "+render.AllNamespaces,
+						treeInvocation(scopeArgs("", true), indexed, port))
 					if err != nil {
 						return err
 					}
@@ -243,7 +254,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					return nil
 				}
 				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
-					invocation("tree", scopeArgs(namespace, false), indexFlag(indexed), portFlag(port)))
+					treeInvocation(scopeArgs(namespace, false), indexed, port))
 				if err != nil {
 					return err
 				}
@@ -286,7 +297,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
 			meta, err := pageMeta(services.Config.Theme, "kx tree · "+node.Label,
-				invocation("tree", args[0], indexFlag(indexed), portFlag(port)))
+				treeInvocation(args[0], indexed, port))
 			if err != nil {
 				return err
 			}
