@@ -63,7 +63,8 @@ func TestHandParsedFlagsAppearInHelp(t *testing.T) {
 			"--engine", "--full", "--namespace", "--all-namespaces",
 			"--html", "--port", "--no-open",
 		},
-		"top": {"--match", "--no-limits"},
+		"top":   {"--match", "--no-limits"},
+		"debug": {"--image", "--target"},
 	}
 	byName := map[string]*cobra.Command{}
 	for _, cmd := range NewRoot(argvServices(t), "test").Commands() {

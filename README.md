@@ -104,7 +104,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
-| `kx debug <index> [<command>...] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
+| `kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |

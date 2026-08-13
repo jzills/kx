@@ -375,7 +375,7 @@ func newExecCommand(services Services) *cobra.Command {
 }
 
 func newDebugCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:        "debug <index> [kubectl flags] [-- command...]",
 		SuggestFor: []string{"ephemeral", "troubleshoot", "inspect"},
 		Short:      "Attach an ephemeral debug container to an indexed pod, for images with no shell.",
@@ -417,6 +417,14 @@ func newDebugCommand(services Services) *cobra.Command {
 			}.Execute(index, command, rest[1:])
 		},
 	}
+	// Read by hand out of the passthrough args — kx acts on both, rather than
+	// only forwarding them — so they have to be registered too, or they work
+	// and are invisible to `kx debug --help`.
+	cmd.Flags().String("image", "",
+		"Image for the debug container (default: the debug_image config key)")
+	cmd.Flags().String("target", "",
+		"Container to share a process namespace with, for a pod with several")
+	return cmd
 }
 
 func newDeleteCommand(services Services) *cobra.Command {

@@ -1153,3 +1153,47 @@ func TestDebugRunsWhenTheContainerLookupFails(t *testing.T) {
 		t.Errorf("args = %q, want no target read out of a failed lookup", got)
 	}
 }
+
+// A value-less --image is what a shell expanding to nothing produces. With
+// extractString's error discarded it read as "no image given", so kx appended
+// its own --image=busybox and forwarded the bare --image alongside it, leaving
+// kubectl to complain about a flag the user could see they had written.
+func TestDebugReportsAMalformedImageFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--image"})
+
+	if err == nil {
+		t.Fatal("a value-less --image was accepted")
+	}
+	if !strings.Contains(err.Error(), "--image") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
+
+// --target is read by hand for the same reason and was discarding the same
+// error, so a value-less one reached kubectl beside a --target kx had guessed.
+func TestDebugReportsAMalformedTargetFlag(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--target"})
+
+	if err == nil {
+		t.Fatal("a value-less --target was accepted")
+	}
+	if !strings.Contains(err.Error(), "--target") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
