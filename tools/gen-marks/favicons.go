@@ -67,15 +67,13 @@ func writeFavicons() error {
 		return fmt.Errorf("background: %w", err)
 	}
 
+	// One file, read two ways: published verbatim as the /favicon.svg the head
+	// links, and read by resources.Get so head-end.html can inline the same
+	// shapes into the script that repaints them in the reader's palette. That
+	// second reading is why site/hugo.toml mounts static/ into assets/ as
+	// well — a copy under assets/ would be a copy that can go stale.
 	icon := []byte(mark.Favicon(styles[theme.Accent]) + "\n")
-	// Twice, because Hugo reaches the two directories differently: static/ is
-	// published verbatim as the /favicon.svg the head links, and assets/ is
-	// what resources.Get can read, which is how head-end.html inlines the
-	// same shapes into the script that repaints them in the reader's palette.
 	if err := write("site/static/favicon.svg", icon); err != nil {
-		return err
-	}
-	if err := write("site/assets/kx-favicon.svg", icon); err != nil {
 		return err
 	}
 
