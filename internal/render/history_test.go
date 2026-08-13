@@ -298,3 +298,50 @@ func TestStateNamesAllNamespacesForASpanningEntry(t *testing.T) {
 		t.Errorf("output = %q, want the scope before the context", out)
 	}
 }
+
+// A context is a kubeconfig entry, not a server object, so a contexts listing
+// has no namespace scope to name — least of all "all namespaces", which claims
+// a span across something contexts do not sit in.
+//
+// The shape here is what `kubectl config get-contexts` produced: its NAMESPACE
+// column names the namespace each context *defaults to*, and carrying that onto
+// the resource made Spanning() true. Slots written before that was fixed still
+// hold it, so the caption has to be right without waiting for a relist.
+func TestStateGivesAContextsListingNoNamespaceScope(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "docker-desktop", Kind: kinds.Context, Namespace: "diagnostics"},
+			}),
+			Context: "docker-desktop",
+		})
+	})
+
+	if strings.Contains(out, AllNamespaces) {
+		t.Errorf("output = %q, want no %q scope on a contexts listing", out, AllNamespaces)
+	}
+	if strings.Contains(out, "diagnostics") {
+		t.Errorf("output = %q, want kubeconfig's default namespace left out of the scope", out)
+	}
+	if !strings.Contains(out, "docker-desktop") {
+		t.Errorf("output = %q, want the context still named", out)
+	}
+}
+
+// The entry namespace is the other way a contexts listing acquired a scope:
+// the slot recorded the active context there as well as in Context, which
+// captioned it twice.
+func TestStateNamesAContextOnlyOnce(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewResources([]string{"docker-desktop"}, kinds.Context),
+			Namespace: "docker-desktop",
+			Context:   "docker-desktop",
+		})
+	})
+
+	caption := strings.SplitN(out, "\n", 2)[0]
+	if got := strings.Count(caption, "docker-desktop"); got != 1 {
+		t.Errorf("caption = %q, names the context %d times, want 1", caption, got)
+	}
+}

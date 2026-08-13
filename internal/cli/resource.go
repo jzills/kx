@@ -587,13 +587,33 @@ func (c ContextsCommand) Execute() (table index.Table, context string, err error
 	indexed := c.Index.Add(output)
 	if len(indexed.Entries) > 0 {
 		if err := c.State.SaveNamed(state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Context),
-			Namespace: current,
+			Resources: contextResources(indexed.Entries),
 		}); err != nil {
 			return index.Table{}, "", err
 		}
 	}
 	return indexed, current, nil
+}
+
+// contextResources records the listed contexts, and nothing about namespaces.
+//
+// Not resourcesFrom: that carries each row's NAMESPACE cell onto the resource,
+// which is right for `kx get -A` and wrong here. get-contexts prints a NAMESPACE
+// column too, but it names the namespace a context *defaults to* rather than one
+// the context lives in — contexts are kubeconfig entries and are not namespaced
+// at all. Carried through, it made Resources.Spanning() true and captioned the
+// slot "all namespaces".
+//
+// The entry namespace is left empty for the same reason. The active context is
+// stamped onto State.Context by the state service, which is where every reader
+// already looks for it; recording it as the scope as well captioned the listing
+// with it twice.
+func contextResources(entries []index.Entry) state.Resources {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
+	return state.NewResources(names, kinds.Context)
 }
 
 // NamedResolver resolves an index against a kind's own slot rather than against
