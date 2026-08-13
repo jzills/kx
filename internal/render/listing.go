@@ -157,30 +157,31 @@ func itemLabel(count int) string {
 
 // IndexedTable renders an indexed listing with its caption.
 //
-// Takes the text produced by the index service and re-parses it rather than
-// taking structured rows, so the caller stays a thin pass-through of whatever
-// columns kubectl chose to emit.
-func (r *Renderer) IndexedTable(text, resourceType, namespace, note string) {
-	headers, rows, _ := index.ParseTable(text)
-	if headers == nil {
+// Takes the parsed table rather than the text it would render as. The index
+// service already parsed kubectl's output to number it, and re-parsing the
+// padded text it produced lost anything that text cannot represent — an empty
+// cell reads as column padding, so a blank the parser had recovered vanished
+// again on the way here. Rows carry it intact.
+func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace, note string) {
+	if !table.Indexable() {
 		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
 		// stderr) shows the zero-count caption instead of silence.
-		if strings.TrimSpace(text) != "" {
-			r.Raw(text)
+		if strings.TrimSpace(table.Raw) != "" {
+			r.Raw(table.Raw)
 			return
 		}
 		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
 		return
 	}
-	if len(rows) == 0 {
+	if len(table.Rows) == 0 {
 		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
 		return
 	}
 
-	columns, cells := styledColumnsAndCells(headers, rows)
+	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
 
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(rows)))
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.Table(columns, cells)
 	if note != "" {
 		r.Caption(note)

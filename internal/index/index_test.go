@@ -218,7 +218,8 @@ func TestTableShapeRowLastColumnNotTruncated(t *testing.T) {
 }
 
 func TestAddPrependsIndexColumn(t *testing.T) {
-	output, names := Service{}.Add(podsOutput)
+	namesTable := Service{}.Add(podsOutput)
+	output, names := namesTable.Text(), namesTable.Entries
 	lines := strings.Split(output, "\n")
 	if !strings.HasPrefix(lines[0], "X") {
 		t.Errorf("header = %q, want it to start with X", lines[0])
@@ -233,14 +234,16 @@ func TestAddPrependsIndexColumn(t *testing.T) {
 }
 
 func TestAddSingleRow(t *testing.T) {
-	_, names := Service{}.Add(singleRowOutput)
+	namesTable := Service{}.Add(singleRowOutput)
+	_, names := namesTable.Text(), namesTable.Entries
 	if len(names) != 1 || names[0].Name != "only-pod-abc" {
 		t.Errorf("names = %v, want [only-pod-abc]", names)
 	}
 }
 
 func TestAddEmptyOutputReturnsOriginal(t *testing.T) {
-	output, names := Service{}.Add("")
+	namesTable := Service{}.Add("")
+	output, names := namesTable.Text(), namesTable.Entries
 	if output != "" || names != nil {
 		t.Errorf("Add(\"\") = %q, %v; want \"\", nil", output, names)
 	}
@@ -253,7 +256,8 @@ func TestAddNonTabularOutputReturnsRaw(t *testing.T) {
 		`{"apiVersion": "v1", "kind": "List"}`,
 		"apiVersion: v1\nkind: List\n",
 	} {
-		output, names := Service{}.Add(raw)
+		namesTable := Service{}.Add(raw)
+		output, names := namesTable.Text(), namesTable.Entries
 		if output != raw || names != nil {
 			t.Errorf("Add(%q) = %q, %v; want unchanged", raw, output, names)
 		}
@@ -261,7 +265,8 @@ func TestAddNonTabularOutputReturnsRaw(t *testing.T) {
 }
 
 func TestAddLastColumnNotTruncated(t *testing.T) {
-	output, _ := Service{}.Add(contextsOutput)
+	_Table := Service{}.Add(contextsOutput)
+	output, _ := _Table.Text(), _Table.Entries
 	if !strings.Contains(output, "diagnostics") {
 		t.Errorf("indexed output dropped the wide last column:\n%s", output)
 	}
@@ -274,7 +279,8 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 		"pod-a     1/1     Running\n" +
 		"pod-a     0/1     Pending\n" +
 		"pod-b     1/1     Running"
-	output, names := Service{}.Add(duplicated)
+	namesTable := Service{}.Add(duplicated)
+	output, names := namesTable.Text(), namesTable.Entries
 	if len(names) != 2 || names[0].Name != "pod-a" || names[1].Name != "pod-b" {
 		t.Fatalf("names = %v, want [pod-a pod-b]", names)
 	}
@@ -437,7 +443,8 @@ func TestIndexedMultiByteTableRoundTrips(t *testing.T) {
 		"alpha                日本語      ConfigMap\n" +
 		"beta                 abcdef   ConfigMap"
 
-	indexed, entries := Service{}.Add(output)
+	entriesTable := Service{}.Add(output)
+	indexed, entries := entriesTable.Text(), entriesTable.Entries
 	if len(entries) != 2 || entries[0].Name != "alpha" || entries[1].Name != "beta" {
 		t.Fatalf("entries = %+v, want alpha then beta", entries)
 	}
@@ -477,7 +484,8 @@ func TestParseTableKeepsABlankFirstColumn(t *testing.T) {
 // no index, so `kx context <n>` cannot reach it and the number it does offer
 // points at a different context than the row shows.
 func TestAddIndexesEveryContextIncludingNonCurrent(t *testing.T) {
-	_, entries := Service{}.Add(twoContextsOutput)
+	entriesTable := Service{}.Add(twoContextsOutput)
+	_, entries := entriesTable.Text(), entriesTable.Entries
 
 	if len(entries) != 2 {
 		t.Fatalf("names = %v, want both contexts indexed", entries)
@@ -538,7 +546,8 @@ const allNamespacesOutput = "NAMESPACE      NAME                            READ
 // An -A listing carries each row's namespace, so an index can resolve to the
 // one place its resource actually lives.
 func TestAddCarriesTheNamespaceOfEachRow(t *testing.T) {
-	_, entries := Service{}.Add(allNamespacesOutput)
+	entriesTable := Service{}.Add(allNamespacesOutput)
+	_, entries := entriesTable.Text(), entriesTable.Entries
 
 	if len(entries) != 3 {
 		t.Fatalf("entries = %+v, want 3", entries)
@@ -556,7 +565,8 @@ func TestAddCarriesTheNamespaceOfEachRow(t *testing.T) {
 // spans them: two namespaces running the same workload name are two resources,
 // and collapsing them drops one from the table entirely.
 func TestAddKeepsSameNamedRowsFromDifferentNamespaces(t *testing.T) {
-	table, entries := Service{}.Add(allNamespacesOutput)
+	entriesTable := Service{}.Add(allNamespacesOutput)
+	table, entries := entriesTable.Text(), entriesTable.Entries
 
 	if len(entries) != 3 {
 		t.Fatalf("entries = %+v, want all three rows indexed", entries)
@@ -574,9 +584,74 @@ func TestAddStillCollapsesDuplicateNamesWithoutANamespaceColumn(t *testing.T) {
 		"api     1/1     Running\n" +
 		"api     1/1     Running"
 
-	_, entries := Service{}.Add(duplicated)
+	entriesTable := Service{}.Add(duplicated)
+	_, entries := entriesTable.Text(), entriesTable.Entries
 
 	if len(entries) != 1 {
 		t.Errorf("entries = %+v, want the duplicate name collapsed", entries)
+	}
+}
+
+// Add already has the rows parsed; handing back only text makes the renderer
+// parse them a second time, and a padded table cannot represent an empty cell —
+// its gap is indistinguishable from column padding. Returning the rows is what
+// lets a blank survive the journey from kubectl to the screen.
+func TestAddReturnsTheRowsItParsed(t *testing.T) {
+	table := Service{}.Add(twoContextsOutput)
+
+	if !table.Indexable() {
+		t.Fatal("Add reported a table it could not index")
+	}
+	want := []string{"X", "CURRENT", "NAME", "CLUSTER", "AUTHINFO", "NAMESPACE"}
+	if len(table.Headers) != len(want) {
+		t.Fatalf("Headers = %q, want %q", table.Headers, want)
+	}
+	for i := range want {
+		if table.Headers[i] != want[i] {
+			t.Errorf("Headers[%d] = %q, want %q", i, table.Headers[i], want[i])
+		}
+	}
+	if len(table.Rows) != 2 {
+		t.Fatalf("Rows = %q, want 2", table.Rows)
+	}
+	// The non-current row: index, then a blank CURRENT, then its name. Text
+	// could not carry that middle cell; rows can.
+	if got := table.Rows[0]; got[0] != "1" || got[1] != "" || got[2] != "alt" {
+		t.Errorf("Rows[0] = %q, want index 1, an empty CURRENT and NAME alt", got)
+	}
+	if got := table.Rows[1]; got[1] != "*" || got[2] != "docker-desktop" {
+		t.Errorf("Rows[1] = %q, want CURRENT '*' and NAME docker-desktop", got)
+	}
+}
+
+// Output kx cannot index — JSON, YAML, a table with no NAME column — is carried
+// through untouched for the caller to print as it came.
+func TestAddCarriesNonTabularOutputThrough(t *testing.T) {
+	raw := `{"kind":"PodList","items":[]}`
+
+	table := Service{}.Add(raw)
+
+	if table.Indexable() {
+		t.Errorf("Add indexed non-tabular output: %+v", table)
+	}
+	if table.Text() != raw {
+		t.Errorf("Text() = %q, want the input unchanged", table.Text())
+	}
+	if len(table.Entries) != 0 {
+		t.Errorf("Entries = %+v, want none", table.Entries)
+	}
+}
+
+// Text still renders the padded table, for the callers that genuinely need a
+// string — and it round-trips through the parser, which is the property the
+// old contract rested on entirely.
+func TestTableTextRoundTrips(t *testing.T) {
+	table := Service{}.Add(podsOutput)
+
+	headers, rows, _ := ParseTable(table.Text())
+
+	if len(headers) != len(table.Headers) || len(rows) != len(table.Rows) {
+		t.Errorf("Text() re-parsed to %d headers/%d rows, want %d/%d",
+			len(headers), len(rows), len(table.Headers), len(table.Rows))
 	}
 }

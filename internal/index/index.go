@@ -255,15 +255,48 @@ type Entry struct {
 	Namespace string
 }
 
+// Table is an indexed listing: the shape a renderer draws, the entries state
+// resolves indexes against, and — for output kx cannot number — the raw text to
+// print as it came.
+//
+// Rows are returned rather than only the padded text they would render as,
+// because that text is a lossy encoding: an empty cell and column padding are
+// the same run of spaces, so anything the parser recovered is destroyed the
+// moment a second parser has to read it back. `kubectl config get-contexts`
+// blanks its CURRENT column on every row but the active one, and that is
+// exactly the cell that used to disappear between here and the screen.
+type Table struct {
+	Headers []string
+	// Rows include the index column, so Headers[0] is "X" and Rows[n][0] is
+	// the number.
+	Rows    [][]string
+	Entries []Entry
+	// Raw is the untouched output, carried for the shapes kx cannot index —
+	// JSON, YAML, a table with no NAME column.
+	Raw string
+}
+
+// Indexable reports whether the output parsed as a table kx could number.
+func (t Table) Indexable() bool { return t.Headers != nil }
+
+// Text renders the table back to padded text, for the callers that still need a
+// string. Non-tabular output comes back exactly as it arrived.
+func (t Table) Text() string {
+	if !t.Indexable() {
+		return t.Raw
+	}
+	return Format(append([][]string{t.Headers}, t.Rows...))
+}
+
 // Service prefixes kubectl output with an index column and filters it by name.
 type Service struct{}
 
 // Add prefixes an "X" index column to kubectl output and returns the indexed
-// table alongside the entries it assigned, in index order.
-func (Service) Add(output string) (string, []Entry) {
+// table: its rows, and the entries it assigned in index order.
+func (Service) Add(output string) Table {
 	shape, rows, ok := parseTable(output)
 	if !ok {
-		return output, nil
+		return Table{Raw: output}
 	}
 
 	// Index numbers must map 1:1 to saved state, so a row that is
@@ -291,13 +324,17 @@ func (Service) Add(output string) (string, []Entry) {
 		entries = append(entries, entry)
 	}
 
-	allRows := make([][]string, 0, len(unique)+1)
-	allRows = append(allRows, append([]string{"X"}, shape.Headers...))
+	indexed := make([][]string, 0, len(unique))
 	for i, row := range unique {
-		allRows = append(allRows, append([]string{strconv.Itoa(i + 1)}, row...))
+		indexed = append(indexed, append([]string{strconv.Itoa(i + 1)}, row...))
 	}
 
-	return Format(allRows), entries
+	return Table{
+		Headers: append([]string{"X"}, shape.Headers...),
+		Rows:    indexed,
+		Entries: entries,
+		Raw:     output,
+	}
 }
 
 // Filter drops rows whose NAME doesn't contain term, case-insensitively.

@@ -147,10 +147,10 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	if namespace != "prod" {
 		t.Errorf("namespace = %q, want prod", namespace)
 	}
-	if !strings.Contains(output, "CPU%") || !strings.Contains(output, "MEM%") {
+	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
 		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
 	}
-	if strings.Contains(output, "CPU(%)") || strings.Contains(output, "MEMORY(%)") {
+	if strings.Contains(output.Text(), "CPU(%)") || strings.Contains(output.Text(), "MEMORY(%)") {
 		t.Errorf("output = %q, want kubectl's native (%%) headers gone", output)
 	}
 	if len(states.saved) != 1 {
@@ -173,10 +173,10 @@ func TestExecuteNodesFiltersByMatchTerm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
-	if !strings.Contains(output, "node-a") {
+	if !strings.Contains(output.Text(), "node-a") {
 		t.Errorf("output = %q, want node-a", output)
 	}
-	if strings.Contains(output, "node-b") {
+	if strings.Contains(output.Text(), "node-b") {
 		t.Errorf("output = %q, want node-b filtered out", output)
 	}
 	if len(states.saved) != 1 {
@@ -292,10 +292,9 @@ func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
 // was the *rendered* shape — indented two spaces, columns spread four apart —
 // which nothing ever feeds back into the parser, and which quietly disagreed
 // with Format's real output (no indent, gaps of exactly two).
-func topRow(t *testing.T, table string) string {
+func topRow(t *testing.T, table string) index.Table {
 	t.Helper()
-	indexed, _ := index.Service{}.Add(table)
-	return indexed
+	return index.Service{}.Add(table)
 }
 
 func TestTopPageRowsParsesIndexedTable(t *testing.T) {
@@ -317,21 +316,29 @@ func TestTopPageRowsParsesIndexedTable(t *testing.T) {
 	}
 }
 
-// The -A pods table has no X or CPU%/MEM% columns (top.go's Execute skips
-// both for -A); topPageRows must degrade gracefully rather than panic or
-// misread columns, matching how IndexedTable itself already handles -A.
-func TestTopPageRowsHandlesTableWithNoIndexOrPercentColumns(t *testing.T) {
-	unindexed := "NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
-		"prod          web-1    5m           64Mi\n"
-	rows := topPageRows(unindexed)
+// --no-limits skips the limits lookup, so its table has no CPU%/MEM% columns
+// and those fields must stay at their zero value rather than misreading a
+// neighbouring column.
+//
+// This used to also assert Index stayed 0, back when an -A table reached here
+// unindexed. Every table topPageRows sees now comes from index.Add, which
+// prepends the column, so there is no unindexed shape left to degrade from.
+func TestTopPageRowsHandlesTableWithNoPercentColumns(t *testing.T) {
+	table := index.Service{}.Add("NAMESPACE     NAME     CPU(cores)   MEMORY(bytes)\n" +
+		"prod          web-1    5m           64Mi\n")
+
+	rows := topPageRows(table)
+
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
-	if rows[0].Index != 0 {
-		t.Errorf("Index = %d, want 0 (unindexed)", rows[0].Index)
-	}
 	if rows[0].CPUPct.Known || rows[0].MemPct.Known {
 		t.Errorf("CPUPct/MemPct = %+v/%+v, want both unknown", rows[0].CPUPct, rows[0].MemPct)
+	}
+	// The columns that are present still have to be read correctly, or
+	// "unknown percentages" would pass against a row read one column over.
+	if rows[0].Name != "web-1" || rows[0].CPU != "5m" || rows[0].Memory != "64Mi" {
+		t.Errorf("row = %+v, want web-1 / 5m / 64Mi", rows[0])
 	}
 }
 
@@ -339,9 +346,9 @@ func TestTopPageRowsHandlesTableWithNoIndexOrPercentColumns(t *testing.T) {
 // pods across namespaces — the same reason podLimits/withUsagePercentages
 // key by namespace/name instead of bare name.
 func TestTopPageRowsPopulatesNamespaceFromTheNamespaceColumn(t *testing.T) {
-	indexed := "NAMESPACE     NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
+	indexed := index.Service{}.Add("NAMESPACE     NAME     CPU(cores)   CPU%    MEMORY(bytes)   MEM%  \n" +
 		"prod          web-1    5m           1%      64Mi             50%   \n" +
-		"staging       web-1    3m           0%      32Mi             12%   \n"
+		"staging       web-1    3m           0%      32Mi             12%   \n")
 	rows := topPageRows(indexed)
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))
@@ -429,11 +436,11 @@ func TestTopAppendsUsagePercentages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(output, "CPU%") || !strings.Contains(output, "MEM%") {
+	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
 		t.Fatalf("output has no percentage columns:\n%s", output)
 	}
 	// web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
-	if !strings.Contains(output, "1%") || !strings.Contains(output, "50%") {
+	if !strings.Contains(output.Text(), "1%") || !strings.Contains(output.Text(), "50%") {
 		t.Errorf("web-1 percentages are wrong:\n%s", output)
 	}
 }
@@ -450,7 +457,7 @@ func TestTopMarksPartialLimitsUndefined(t *testing.T) {
 	// web-2's CPU limit sums to 1000m across both containers (250m = 25%), but
 	// its memory limit is undefined because the second container has none.
 	var row string
-	for _, line := range strings.Split(output, "\n") {
+	for _, line := range strings.Split(output.Text(), "\n") {
 		if strings.HasPrefix(line, "2 ") || strings.Contains(line, "web-2") {
 			row = line
 		}
@@ -471,7 +478,7 @@ func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if strings.Contains(output, "CPU%") {
+	if strings.Contains(output.Text(), "CPU%") {
 		t.Errorf("--no-limits still added percentage columns:\n%s", output)
 	}
 	if len(kubectl.calls) != 1 {
@@ -487,7 +494,7 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if strings.Contains(output, "CPU%") {
+	if strings.Contains(output.Text(), "CPU%") {
 		t.Errorf("--containers still added percentage columns:\n%s", output)
 	}
 }
@@ -509,7 +516,7 @@ func TestTopAllNamespacesIsIndexed(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	headers, _, _ := index.ParseTable(output)
+	headers, _, _ := index.ParseTable(output.Text())
 	if indexOfHeader(headers, "X") < 0 {
 		t.Errorf("-A output was not indexed:\n%s", output)
 	}
@@ -549,14 +556,14 @@ func TestTopAllNamespacesGetsPercentagesKeyedByNamespace(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	// prod/web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
-	if !strings.Contains(output, "1%") || !strings.Contains(output, "50%") {
+	if !strings.Contains(output.Text(), "1%") || !strings.Contains(output.Text(), "50%") {
 		t.Errorf("output missing prod/web-1's percentages:\n%s", output)
 	}
 	// staging/web-1: 3m of 500m = 0%, 32Mi of 256Mi = 12%. Same pod name,
 	// different namespace, different limits — proves the lookup is keyed
 	// by namespace, not just name (bare-name keying would give both rows
 	// whichever limit was inserted into the map last).
-	if !strings.Contains(output, "12%") {
+	if !strings.Contains(output.Text(), "12%") {
 		t.Errorf("output missing staging/web-1's own percentage (12%%), got same as prod's — composite key not applied:\n%s", output)
 	}
 	if joinArgs(kubectl.calls[1]) != "get pods -A -o json" {
@@ -575,7 +582,7 @@ func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
 	// indexed now, so it is no longer byte-identical to kubectl's, and the
 	// subject here is the absence of the percentage columns and of the lookup
 	// that fills them.
-	headers, _, _ := index.ParseTable(output)
+	headers, _, _ := index.ParseTable(output.Text())
 	if indexOfHeader(headers, "CPU%") >= 0 || indexOfHeader(headers, "MEM%") >= 0 {
 		t.Errorf("--no-limits -A gained percentage columns:\n%s", output)
 	}

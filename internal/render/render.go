@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
 	"github.com/mattn/go-isatty"
@@ -167,8 +168,8 @@ func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }
 func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
 
-func IndexedTable(text, resourceType, namespace, note string) {
-	current.IndexedTable(text, resourceType, namespace, note)
+func IndexedTable(table index.Table, resourceType, namespace, note string) {
+	current.IndexedTable(table, resourceType, namespace, note)
 }
 
 func KeyValueTable(header string, keys []string, values map[string]string) {

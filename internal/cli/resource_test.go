@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -836,16 +835,14 @@ func TestContextsReturnsTheActiveContext(t *testing.T) {
 }
 
 // kubectl marks the active context in a CURRENT column that is blank on every
-// other row. kx can recover that blank while parsing kubectl's own output, but
-// not afterwards: Add prepends the X column, which makes the blank cell
-// *interior*, and Format's two-space padding then renders it
-// indistinguishable from a column separator. IndexedTable re-parses that text
-// to draw the table, so every value on a non-current row shifted one column
-// left and each context's CLUSTER appeared under its NAME.
+// other row. That blank is kept now: Add hands the renderer its parsed rows, so
+// nothing has to survive a second trip through padded text where an empty cell
+// and column padding are the same run of spaces.
 //
-// The column is dropped rather than defended, because it was already redundant:
-// Execute returns the active context and it captions the table.
-func TestContextsDropsTheCurrentMarkerColumn(t *testing.T) {
+// This column was dropped entirely while the renderer still re-parsed, because
+// Add prepends the index column and made the blank cell interior, which no
+// parser can recover. Its return is the proof that the round-trip is gone.
+func TestContextsKeepsTheCurrentMarkerColumn(t *testing.T) {
 	kubectl := &recordingKubectl{
 		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
 			"          alt              docker-desktop   default\n" +
@@ -860,18 +857,21 @@ func TestContextsDropsTheCurrentMarkerColumn(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if strings.Contains(table, "CURRENT") {
-		t.Errorf("table still carries the CURRENT column:\n%s", table)
+	if indexOfHeader(table.Headers, "CURRENT") < 0 {
+		t.Fatalf("table lost the CURRENT column: %q", table.Headers)
 	}
-	// The table has to survive the re-parse IndexedTable performs on it, which
-	// is the whole point of dropping the column.
-	headers, rows, nameIdx := index.ParseTable(table)
-	if len(rows) != 2 {
-		t.Fatalf("re-parsed rows = %d, want 2:\n%s", len(rows), table)
+	if len(table.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %q", len(table.Rows), table.Rows)
 	}
-	if rows[0][nameIdx] != "alt" || rows[1][nameIdx] != "docker-desktop" {
-		t.Errorf("re-parsed names = %q, %q; want alt, docker-desktop (headers %v)",
-			rows[0][nameIdx], rows[1][nameIdx], headers)
+	// The blank marker on the non-current row is the cell that used to vanish,
+	// taking every value after it one column to the left.
+	nameIdx := indexOfHeader(table.Headers, "NAME")
+	currentIdx := indexOfHeader(table.Headers, "CURRENT")
+	if table.Rows[0][currentIdx] != "" || table.Rows[0][nameIdx] != "alt" {
+		t.Errorf("row 0 = %q, want a blank CURRENT and NAME alt", table.Rows[0])
+	}
+	if table.Rows[1][currentIdx] != "*" || table.Rows[1][nameIdx] != "docker-desktop" {
+		t.Errorf("row 1 = %q, want CURRENT '*' and NAME docker-desktop", table.Rows[1])
 	}
 }
 
@@ -891,20 +891,20 @@ func TestContextsKeepsTheRemainingColumns(t *testing.T) {
 	}
 
 	// Compared as parsed headers, not as substrings: `strings.Contains(table,
-	// "NAME")` is satisfied by "NAMESPACE", so a version that dropped NAME as
-	// well as CURRENT passed that check.
-	headers, rows, _ := index.ParseTable(table)
-	want := []string{"X", "NAME", "CLUSTER", "NAMESPACE"}
-	if len(headers) != len(want) {
-		t.Fatalf("headers = %v, want %v", headers, want)
+	// "NAME")` is satisfied by "NAMESPACE", so a version that dropped NAME
+	// passed that check.
+	want := []string{"X", "CURRENT", "NAME", "CLUSTER", "NAMESPACE"}
+	if len(table.Headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", table.Headers, want)
 	}
 	for i := range want {
-		if headers[i] != want[i] {
-			t.Errorf("headers[%d] = %q, want %q (full: %v)", i, headers[i], want[i], headers)
+		if table.Headers[i] != want[i] {
+			t.Errorf("headers[%d] = %q, want %q (full: %v)",
+				i, table.Headers[i], want[i], table.Headers)
 		}
 	}
-	if len(rows) != 2 || rows[0][3] != "default" || rows[1][3] != "diagnostics" {
-		t.Errorf("rows lost their trailing values: %v", rows)
+	if len(table.Rows) != 2 || table.Rows[0][4] != "default" || table.Rows[1][4] != "diagnostics" {
+		t.Errorf("rows lost their trailing values: %v", table.Rows)
 	}
 }
 

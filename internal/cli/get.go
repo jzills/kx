@@ -11,7 +11,7 @@ import (
 
 // Indexer prefixes kubectl output with an index column and filters it by name.
 type Indexer interface {
-	Add(output string) (string, []index.Entry)
+	Add(output string) index.Table
 	Filter(output, term string) string
 }
 
@@ -96,10 +96,10 @@ func wantsLiveTable(extraArgs []string) bool {
 // empty namespace and running `kx get pods` reported the namespace you left.
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
-) (table, namespace string, err error) {
+) (table index.Table, namespace string, err error) {
 	output, err := c.Kubectl.Run(append([]string{"get", resource}, extraArgs...))
 	if err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
 	if filterTerm != "" {
 		output = c.Index.Filter(output, filterTerm)
@@ -114,8 +114,8 @@ func (c GetCommand) Execute(
 		}
 	}
 
-	indexed, entries := c.Index.Add(output)
-	if len(entries) > 0 {
+	indexed := c.Index.Add(output)
+	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
 			match = &filterTerm
@@ -124,7 +124,7 @@ func (c GetCommand) Execute(
 			extraArgs = []string{}
 		}
 		entry := state.State{
-			Resources: resourcesFrom(entries, kinds.Normalize(resource)),
+			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
 			Namespace: namespace,
 			Query: &state.Query{
 				Resource: resource,
@@ -133,7 +133,7 @@ func (c GetCommand) Execute(
 			},
 		}
 		if err := c.State.Save(entry); err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
 	return indexed, namespace, nil
@@ -155,7 +155,7 @@ func (c GetCommand) Execute(
 // replay something other than what the entry holds.
 func (c GetCommand) ExecuteGroups(
 	resource, filterTerm string, groups []namespaceGroup, extraArgs []string,
-) (table string, err error) {
+) (table index.Table, err error) {
 	var headers []string
 	var merged [][]string
 	var raw []string
@@ -166,7 +166,7 @@ func (c GetCommand) ExecuteGroups(
 		args = append(args, extraArgs...)
 		output, err := c.Kubectl.Run(args)
 		if err != nil {
-			return "", err
+			return index.Table{}, err
 		}
 		if filterTerm != "" {
 			output = c.Index.Filter(output, filterTerm)
@@ -178,7 +178,7 @@ func (c GetCommand) ExecuteGroups(
 			// Non-tabular (-o json/yaml/name). Nothing to index or stitch;
 			// the raw replies are printed as they came, the same degradation
 			// a non-tabular single-namespace listing already gets.
-			return strings.Join(raw, "\n"), nil
+			return index.Table{Raw: strings.Join(raw, "\n")}, nil
 		}
 		if headers == nil {
 			headers = append([]string{"NAMESPACE"}, groupHeaders...)
@@ -188,15 +188,15 @@ func (c GetCommand) ExecuteGroups(
 		}
 	}
 	if len(merged) == 0 {
-		return strings.Join(raw, "\n"), nil
+		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 
-	indexed, entries := c.Index.Add(index.Format(append([][]string{headers}, merged...)))
-	if len(entries) > 0 {
+	indexed := c.Index.Add(index.Format(append([][]string{headers}, merged...)))
+	if len(indexed.Entries) > 0 {
 		if err := c.State.Save(state.State{
-			Resources: resourcesFrom(entries, kinds.Normalize(resource)),
+			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
 		}); err != nil {
-			return "", err
+			return index.Table{}, err
 		}
 	}
 	return indexed, nil
