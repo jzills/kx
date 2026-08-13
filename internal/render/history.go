@@ -38,10 +38,6 @@ func entryLabel(count int) string {
 // than a history entry means you can reach this without anything being wrong.
 const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
 
-// AllNamespaces is how kx names a listing that spans them, wherever a single
-// namespace would otherwise be shown.
-const AllNamespaces = "all namespaces"
-
 // scopeLabel names the scope an entry was listed in.
 //
 // A listing that spans namespaces records none on the entry, because there is

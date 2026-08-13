@@ -459,3 +459,13 @@ func TestDetailHasNoTrailingNewline(t *testing.T) {
 		t.Errorf("Detail = %q, want no trailing newline", out)
 	}
 }
+
+// Every caller now names this scope through the constant rather than spelling
+// it, so nothing else pins the words themselves. A test that asserted
+// AllNamespaces against AllNamespaces would pass whatever it said.
+func TestAllNamespacesWording(t *testing.T) {
+	if AllNamespaces != "all namespaces" {
+		t.Errorf("AllNamespaces = %q, want %q — this string is user-visible in "+
+			"every -A caption, banner and page scope", AllNamespaces, "all namespaces")
+	}
+}

@@ -48,7 +48,7 @@ func (s scanScope) selector() []string {
 // label is the banner's scope text, matching what kx get -A prints.
 func (s scanScope) label() string {
 	if s.All {
-		return "all namespaces"
+		return render.AllNamespaces
 	}
 	return s.Namespace
 }

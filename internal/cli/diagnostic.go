@@ -139,7 +139,7 @@ func (c TriageCommand) Execute(
 func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 	scope := result.Namespace
 	if result.AllNamespaces {
-		scope = "all namespaces"
+		scope = render.AllNamespaces
 	}
 	return web.DiagPage{
 		Meta:          meta,
@@ -238,7 +238,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				scope := namespace
 				if allNamespaces {
-					scope = "all namespaces"
+					scope = render.AllNamespaces
 				}
 				meta, err := pageMeta(services.Config.Theme, "kx diag · "+scope,
 					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))

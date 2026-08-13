@@ -165,7 +165,7 @@ func newTopCommand(services Services) *cobra.Command {
 					// Matches kx get -A's own caption override (getbody.go):
 					// many namespaces span the listing, so there is no
 					// single one to name.
-					namespace = "all namespaces"
+					namespace = render.AllNamespaces
 				}
 			}
 			if err != nil {

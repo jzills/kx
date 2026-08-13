@@ -12,6 +12,16 @@ import (
 	"github.com/jzills/kx/internal/theme"
 )
 
+// AllNamespaces is how kx names a listing that spans them, wherever a single
+// namespace would otherwise be shown: the caption on `kx get -A`, the sweep
+// banner, an HTML page's scope, and the state views.
+//
+// One spelling, because these all answer the same question and a reader moving
+// between them should not have to work out whether "all namespaces" and
+// "All Namespaces" mean the same scope. Its wording is pinned by a test rather
+// than only by the callers that print it.
+const AllNamespaces = "all namespaces"
+
 // Pod and workload phases worth coloring. Anything unlisted renders neutral
 // rather than guessing, so an unfamiliar status is never miscolored as healthy.
 var (
