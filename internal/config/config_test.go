@@ -299,3 +299,42 @@ func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
 		}
 	}
 }
+
+// kx debug attaches a container of the user's choosing, and someone who
+// standardises on their own toolbox image should say so once rather than pass
+// --image every time — the same reason `shells` exists for kx exec.
+func TestDebugImageDefaults(t *testing.T) {
+	if got := Default().DebugImage; got != "busybox" {
+		t.Errorf("DebugImage default = %q, want busybox", got)
+	}
+}
+
+func TestDebugImageFromFile(t *testing.T) {
+	cfg, err := writeConfig(t, "debug_image = \"ghcr.io/me/toolbox:v1\"\n").Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.DebugImage != "ghcr.io/me/toolbox:v1" {
+		t.Errorf("DebugImage = %q, want the configured image", cfg.DebugImage)
+	}
+}
+
+func TestDebugImageEnvOverridesFile(t *testing.T) {
+	t.Setenv("KX_DEBUG_IMAGE", "alpine:3.20")
+
+	cfg, err := writeConfig(t, "debug_image = \"ghcr.io/me/toolbox:v1\"\n").Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.DebugImage != "alpine:3.20" {
+		t.Errorf("DebugImage = %q, want the environment override", cfg.DebugImage)
+	}
+}
+
+func TestDebugImageRejectsANonString(t *testing.T) {
+	if _, err := writeConfig(t, "debug_image = 3\n").Load(); err == nil {
+		t.Error("a numeric debug_image was accepted")
+	}
+}

@@ -104,6 +104,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
+| `kx debug <index> [<command>...] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
 | `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
@@ -244,6 +245,7 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | --- | --- | --- | --- |
 | `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
 | `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
+| `debug_image` | `KX_DEBUG_IMAGE` | `"busybox"` | Image `kx debug` attaches to a pod; `--image` overrides it. |
 | `no_color` | `KX_NO_COLOR` | `false` | Disable styled output (same as `--no-color`). |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
 | `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`). |

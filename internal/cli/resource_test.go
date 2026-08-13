@@ -932,3 +932,158 @@ func TestContextsIndexesEveryContext(t *testing.T) {
 		t.Errorf("slot names = %v, want [alt docker-desktop]", names)
 	}
 }
+
+// kx debug attaches a container that has a shell to a pod whose own image has
+// none — the case kx exec dead-ends on with "No shell found in container".
+func TestDebugAttachesAnEphemeralContainer(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "metrics-server", namespace: "kube-system", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug", "-it", "metrics-server", "-n kube-system", "--image=busybox"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+}
+
+// The same restriction kx exec carries, and for the same reason: an ephemeral
+// container attaches to a running pod, and nothing else is one.
+func TestDebugRejectsNonPods(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Deployment}
+
+	err := DebugCommand{
+		Kubectl: &recordingKubectl{}, State: resolver, Image: "busybox",
+	}.Execute(1, nil, nil)
+
+	if err == nil {
+		t.Fatal("debug on a Deployment succeeded")
+	}
+	if !strings.Contains(err.Error(), "pods") {
+		t.Errorf("err = %q, want it to name the restriction", err)
+	}
+}
+
+// An explicit --image is the user overriding their own default for one run, so
+// kx must not also pass the configured one and leave kubectl with two.
+func TestDebugExplicitImageWins(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--image=alpine:3.20"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	if strings.Contains(got, "busybox") {
+		t.Errorf("args = %q, want the configured image dropped", got)
+	}
+	if !strings.Contains(got, "--image=alpine:3.20") {
+		t.Errorf("args = %q, want the explicit image", got)
+	}
+}
+
+// Everything after -- is the command to run inside the debug container.
+func TestDebugPassesTheCommandThrough(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, []string{"ls", "/proc/1/root"}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); !strings.HasSuffix(got, "-- ls /proc/1/root") {
+		t.Errorf("args = %q, want the command last, after --", got)
+	}
+}
+
+// Without --target the debug container joins the pod but not the target's
+// process namespace, putting /proc/1/root — the filesystem you came for on an
+// image with no shell — out of reach. One container is unambiguous, so kx
+// supplies it.
+func TestDebugTargetsTheOnlyContainer(t *testing.T) {
+	kubectl := &recordingKubectl{output: "metrics-server\n"}
+	resolver := fakeResolver{name: "metrics-server", namespace: "kube-system", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); !strings.Contains(got, "--target=metrics-server") {
+		t.Errorf("args = %q, want the sole container targeted", got)
+	}
+}
+
+// Several containers have no single answer, and kubectl's own error names the
+// candidates better than a guess would.
+func TestDebugDoesNotGuessAmongSeveralContainers(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\nsidecar\n"}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := joinArgs(kubectl.interactive[0]); strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no target guessed for a multi-container pod", got)
+	}
+}
+
+// An explicit --target is the user's answer; kx must not add a second.
+func TestDebugKeepsAnExplicitTarget(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\n"}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, []string{"--target=sidecar"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	if strings.Count(got, "--target") != 1 {
+		t.Errorf("args = %q, want exactly one --target", got)
+	}
+	if !strings.Contains(got, "--target=sidecar") {
+		t.Errorf("args = %q, want the explicit target kept", got)
+	}
+}
+
+// The lookup is a convenience, not a precondition: a cluster that will not
+// answer it still gets a debug session, just without the shared namespace.
+//
+// The fake answers with output *and* an error, which is how kubectl actually
+// fails — it prints what it managed before reporting the failure. A fake that
+// returned an error with empty output would pass this test whether or not the
+// error was checked at all, since both paths end with no containers.
+func TestDebugRunsWhenTheContainerLookupFails(t *testing.T) {
+	kubectl := &recordingKubectl{output: "stale\n", err: errors.New("connection refused")}
+	resolver := fakeResolver{name: "api", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(kubectl.interactive) != 1 {
+		t.Fatalf("debug did not run: %v", kubectl.interactive)
+	}
+	if got := joinArgs(kubectl.interactive[0]); strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no target read out of a failed lookup", got)
+	}
+}

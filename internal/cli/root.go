@@ -132,6 +132,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newLogsCommand(services),
 		newEditCommand(services),
 		newExecCommand(services),
+		newDebugCommand(services),
 		newDeleteCommand(services),
 		newScaleCommand(services),
 		newRolloutCommand(services),

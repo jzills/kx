@@ -756,3 +756,19 @@ func TestPortForwardHelpDoesNotTriggerAnArityError(t *testing.T) {
 		t.Errorf("Execute with --help = %v, want nil (help handled, not an arity error)", err)
 	}
 }
+
+// `kx debug --` clears the arity check on the unstripped argv and leaves
+// nothing behind once the command is split off, so the guard has to name what
+// is missing rather than let an empty index reach the resolver.
+func TestDebugWithoutAnIndexSaysSo(t *testing.T) {
+	cmd := newDebugCommand(Services{})
+
+	err := cmd.RunE(cmd, []string{"--"})
+
+	if err == nil {
+		t.Fatal("debug with no index succeeded")
+	}
+	if !strings.Contains(err.Error(), "requires an index") {
+		t.Errorf("err = %q, want it to name the missing index", err)
+	}
+}

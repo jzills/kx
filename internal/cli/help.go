@@ -26,7 +26,7 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"annotate", "annotations", "context", "cp", "delete", "describe",
+		"annotate", "annotations", "context", "cp", "debug", "delete", "describe",
 		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
 		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
 		"secret", "top", "tree", "yaml",
