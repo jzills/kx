@@ -178,7 +178,7 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 
 			label := kinds.PluralDisplay(resourceLabel)
-			meta, err := pageMeta(services.Config.Theme, "kx top · "+label,
+			meta, err := pageMeta(services.Config.Theme, "top · "+label,
 				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), portFlag(port)))
 			if err != nil {
 				return err

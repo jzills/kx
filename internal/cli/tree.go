@@ -223,7 +223,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					if !htmlOpts.Enabled {
 						return nil
 					}
-					meta, err := pageMeta(services.Config.Theme, "kx tree · "+render.AllNamespaces,
+					meta, err := pageMeta(services.Config.Theme, "tree · "+render.AllNamespaces,
 						treeInvocation(scopeArgs("", true), indexed, port))
 					if err != nil {
 						return err
@@ -253,7 +253,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				if !htmlOpts.Enabled {
 					return nil
 				}
-				meta, err := pageMeta(services.Config.Theme, "kx tree · "+namespace,
+				meta, err := pageMeta(services.Config.Theme, "tree · "+namespace,
 					treeInvocation(scopeArgs(namespace, false), indexed, port))
 				if err != nil {
 					return err
@@ -296,7 +296,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// node.Label is already "Kind/Name" or "Namespace/name" (graph.go
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
-			meta, err := pageMeta(services.Config.Theme, "kx tree · "+node.Label,
+			meta, err := pageMeta(services.Config.Theme, "tree · "+node.Label,
 				treeInvocation(args[0], indexed, port))
 			if err != nil {
 				return err

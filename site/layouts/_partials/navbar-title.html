@@ -22,7 +22,9 @@
 <a
   class="kx-navbar-mark hx:flex hx:items-center hx:hover:opacity-75 hx:ltr:mr-auto hx:rtl:ml-auto"
   href="{{ if .IsHome }}#{{ else }}{{ .Site.Home.RelPermalink }}{{ end }}"
-  aria-label="{{ .Site.Title }}"
+  {{- /* The name, not .Site.Title: that is the tagline, which reads as a
+         description of the link rather than as where it goes. */ -}}
+  aria-label="kx"
 >
   {{- with resources.Get "kx-mark.svg" }}
     {{- .Content | safeHTML }}

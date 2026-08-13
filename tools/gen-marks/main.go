@@ -26,18 +26,6 @@ import (
 	"github.com/jzills/kx/internal/mark"
 )
 
-// Cell geometry, in the proportions the original used: a monospace cell at
-// font-size 30 with 36 of line height is 18 wide and 36 tall.
-const (
-	cellWidth  = 18.0
-	cellHeight = 36.0
-	// stroke is how thick a box-drawing line is drawn. Thicker than the
-	// hairline a font would set it at: at the size this mark is displayed a
-	// true one-pixel line disappears, and this is the weight the shadow reads
-	// at beside 18-wide blocks.
-	stroke = 5.0
-)
-
 // The README banner is embedded via <img width="800">, wide of the mark's own
 // 4:3 shape, so its canvas keeps the original text version's proportions —
 // the mark centred with letterbox padding — rather than cropping to it.
@@ -98,8 +86,13 @@ var outputs = []struct {
 }
 
 func main() {
-	shapes, columns := render()
-	w, h := float64(columns)*cellWidth, float64(len(mark.Lines))*cellHeight
+	shapes, w, h := mark.Shapes()
+
+	var drawn strings.Builder
+	for _, shape := range shapes {
+		fmt.Fprintf(&drawn, "  <rect x=\"%g\" y=\"%g\" width=\"%g\" height=\"%g\"/>\n",
+			shape.X, shape.Y, shape.Width, shape.Height)
+	}
 
 	for _, output := range outputs {
 		var out strings.Builder
@@ -109,77 +102,17 @@ func main() {
 				"     lines up where the reader has a monospace font carrying the box-drawing\n" +
 				"     glyphs, and falls apart into offset blocks where they don't. -->\n")
 		out.WriteString(output.open(w, h))
-		out.WriteString(shapes)
+		out.WriteString(drawn.String())
 		out.WriteString(output.close(w, h))
 
-		if err := os.WriteFile(output.path, []byte(out.String()), 0o644); err != nil {
+		if err := write(output.path, []byte(out.String())); err != nil {
 			fmt.Fprintln(os.Stderr, "gen-marks:", err)
 			os.Exit(2)
 		}
-		fmt.Println("updated", output.path)
 	}
-}
 
-// render walks the grid and emits a rect for every filled region.
-func render() (shapes string, columns int) {
-	var out strings.Builder
-	for row, line := range mark.Lines {
-		column := 0
-		for _, glyph := range line {
-			x := float64(column) * cellWidth
-			y := float64(row) * cellHeight
-			for _, r := range rects(glyph, x, y) {
-				fmt.Fprintf(&out, "  <rect x=\"%g\" y=\"%g\" width=\"%g\" height=\"%g\"/>\n",
-					r.x, r.y, r.width, r.height)
-			}
-			column++
-		}
-		if column > columns {
-			columns = column
-		}
-	}
-	return out.String(), columns
-}
-
-type rect struct{ x, y, width, height float64 }
-
-// rects returns the shapes one character contributes, positioned at x,y.
-//
-// The box-drawing characters are drawn as the lines they represent: a corner is
-// a half-width arm meeting a half-height one, so adjacent cells join seamlessly
-// into the continuous outline the art draws around the letterforms.
-func rects(glyph rune, x, y float64) []rect {
-	var (
-		midX = x + (cellWidth-stroke)/2
-		midY = y + (cellHeight-stroke)/2
-		// Arms run from the cell edge to the centre of the stroke, so two
-		// neighbouring cells overlap by nothing and leave no gap.
-		leftArm  = rect{x, midY, (cellWidth-stroke)/2 + stroke, stroke}
-		rightArm = rect{midX, midY, (cellWidth-stroke)/2 + stroke, stroke}
-		upArm    = rect{midX, y, stroke, (cellHeight-stroke)/2 + stroke}
-		downArm  = rect{midX, midY, stroke, (cellHeight-stroke)/2 + stroke}
-	)
-
-	switch glyph {
-	case '█':
-		return []rect{{x, y, cellWidth, cellHeight}}
-	case '│':
-		return []rect{{midX, y, stroke, cellHeight}}
-	case '─':
-		return []rect{{x, midY, cellWidth, stroke}}
-	case '┐':
-		return []rect{leftArm, downArm}
-	case '┌':
-		return []rect{rightArm, downArm}
-	case '┘':
-		return []rect{leftArm, upArm}
-	case '└':
-		return []rect{rightArm, upArm}
-	case ' ':
-		return nil
-	default:
-		fmt.Fprintf(os.Stderr, "gen-marks: no shape for %q\n", glyph)
+	if err := writeFavicons(); err != nil {
+		fmt.Fprintln(os.Stderr, "gen-marks:", err)
 		os.Exit(2)
-		return nil
 	}
 }
