@@ -43,7 +43,7 @@ func (r *Renderer) Triage(result TriageResult) {
 	scope := result.Namespace
 	if result.AllNamespaces {
 		// The same words kx get -A captions itself with.
-		scope = "all namespaces"
+		scope = AllNamespaces
 	}
 	if result.Checked == 0 {
 		r.Caption("Mixed", scope, "0 checked")

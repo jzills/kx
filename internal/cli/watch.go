@@ -103,7 +103,7 @@ func removeString(list []string, s string) []string {
 // context's namespace otherwise.
 func watchNamespace(extra []string, kube kubectl.Service) string {
 	if allNamespaces(extra) {
-		return "all namespaces"
+		return render.AllNamespaces
 	}
 	if namespace := extractNamespace(extra); namespace != "" {
 		return namespace
