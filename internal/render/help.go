@@ -36,6 +36,38 @@ func padName(name string, width int) string {
 	return name + strings.Repeat(" ", width-len(name))
 }
 
+// Detail renders aligned label/value lines, which is the shape `kx --version`
+// prints its build detail in.
+//
+// Returns a string rather than writing, because cobra prints the version
+// through a template it owns rather than through the renderer. The styling
+// still lives here: every style kx applies is named by meaning in this package,
+// and a caller assembling escape codes itself would be the one place that
+// wasn't true.
+//
+// The value carries the prominent style and the label the muted one — the
+// inverse of itemBlock, whose Name leads and whose Doc explains. Here the label
+// is the question ("commit") and the value is the answer.
+func (r *Renderer) Detail(pairs [][2]string) string {
+	width := 0
+	for _, pair := range pairs {
+		if len(pair[0]) > width {
+			width = len(pair[0])
+		}
+	}
+	const gutter = "  "
+	lines := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		lines = append(lines, gutter+
+			r.style(theme.Muted, padName(pair[0], width))+gutter+
+			r.style(theme.Body, pair[1]))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Detail renders label/value lines through the package-level renderer.
+func Detail(pairs [][2]string) string { return current.Detail(pairs) }
+
 // helpWidth is the width help text wraps to.
 //
 // Capped rather than taken straight from the terminal: prose set to the full

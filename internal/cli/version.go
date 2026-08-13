@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"strings"
-
 	"github.com/jzills/kx/internal/buildinfo"
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // docsURL is where the long-form documentation lives. Printed by --version so
@@ -17,9 +17,11 @@ const docsURL = "https://github.com/jzills/kx"
 // what the release workflow asserts against and what any script parsing this
 // output would have been written against. Everything below it is detail for a
 // bug report: which build, from which source, against which config.
+// The version line itself is deliberately unstyled: it is the compatibility
+// surface above, and escape codes around it would reach anything that captures
+// this output on a terminal. Everything below is kx's own reading matter and
+// goes through the renderer like the rest of the CLI.
 func versionText(info buildinfo.Info) string {
-	lines := []string{"kx " + info.Version}
-
 	detail := [][2]string{}
 	if info.Commit != "" {
 		detail = append(detail, [2]string{"commit", info.Commit})
@@ -28,19 +30,17 @@ func versionText(info buildinfo.Info) string {
 		detail = append(detail, [2]string{"built", info.Date})
 	}
 	detail = append(detail, [2]string{"go", info.Go + " " + info.Platform})
+	// Both paths are resolved from the packages that own them, so this can
+	// never name a file kx does not use — and a home directory kx cannot
+	// locate drops the line rather than guessing at it. Same rule, and the
+	// same pairing, as the help screen's Files block.
 	if path, err := config.File(); err == nil {
 		detail = append(detail, [2]string{"config", homeRelative(path)})
 	}
+	if path, err := state.File(); err == nil {
+		detail = append(detail, [2]string{"state", homeRelative(path)})
+	}
 	detail = append(detail, [2]string{"docs", docsURL})
 
-	width := 0
-	for _, row := range detail {
-		if len(row[0]) > width {
-			width = len(row[0])
-		}
-	}
-	for _, row := range detail {
-		lines = append(lines, "  "+row[0]+strings.Repeat(" ", width-len(row[0]))+"  "+row[1])
-	}
-	return strings.Join(lines, "\n") + "\n"
+	return "kx " + info.Version + "\n" + render.Detail(detail) + "\n"
 }
