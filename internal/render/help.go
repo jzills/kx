@@ -6,13 +6,21 @@ import (
 	"github.com/jzills/kx/internal/theme"
 )
 
+// kxArt is the mark kx prints above the root help screen, and the source the
+// SVG marks are drawn from — tools/gen-marks turns these same six lines into
+// the README banner, the site's mark and the --html report's masthead.
+//
+// The shadow is single-line box drawing rather than double. The vectors draw
+// each of these lines as one stroke, so a double-lined source was the one
+// place the terminal and the web marks read differently: a doubled hairline
+// outline here against a single clean one everywhere else.
 var kxArt = []string{
-	"██╗  ██╗██╗  ██╗",
-	"██║ ██╔╝╚██╗██╔╝",
-	"█████╔╝  ╚███╔╝ ",
-	"██╔═██╗  ██╔██╗ ",
-	"██║  ██╗██╔╝ ██╗",
-	"╚═╝  ╚═╝╚═╝  ╚═╝",
+	"██┐  ██┐██┐  ██┐",
+	"██│ ██┌┘└██┐██┌┘",
+	"█████┌┘  └███┌┘ ",
+	"██┌─██┐  ██┌██┐ ",
+	"██│  ██┐██┌┘ ██┐",
+	"└─┘  └─┘└─┘  └─┘",
 }
 
 // HelpItem is one named entry in a help listing: a command, argument or flag,

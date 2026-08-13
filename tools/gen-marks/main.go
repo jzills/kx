@@ -20,16 +20,16 @@ import (
 )
 
 // art is the mark, as kx draws it. Kept here rather than imported because
-// internal/render holds it unexported and as terminal output; this is the
-// same six lines, and a test would be the wrong tool for six string literals
-// that have not changed since the logo was designed.
+// internal/render holds it unexported and as terminal output; this is a copy
+// of that package's kxArt, character for character, and the marks are only
+// the same mark for as long as it stays one.
 var art = []string{
-	`██╗  ██╗██╗  ██╗`,
-	`██║ ██╔╝╚██╗██╔╝`,
-	`█████╔╝  ╚███╔╝ `,
-	`██╔═██╗  ██╔██╗ `,
-	`██║  ██╗██╔╝ ██╗`,
-	`╚═╝  ╚═╝╚═╝  ╚═╝`,
+	`██┐  ██┐██┐  ██┐`,
+	`██│ ██┌┘└██┐██┌┘`,
+	`█████┌┘  └███┌┘ `,
+	`██┌─██┐  ██┌██┐ `,
+	`██│  ██┐██┌┘ ██┐`,
+	`└─┘  └─┘└─┘  └─┘`,
 }
 
 // Cell geometry, in the proportions the original used: a monospace cell at
@@ -37,10 +37,10 @@ var art = []string{
 const (
 	cellWidth  = 18.0
 	cellHeight = 36.0
-	// stroke is how thick a box-drawing line is drawn. The source characters
-	// are double lines, which at the size this mark is displayed would be two
-	// sub-pixel strokes; one solid stroke of the same visual weight reads far
-	// better and is what a reader perceives anyway.
+	// stroke is how thick a box-drawing line is drawn. Thicker than the
+	// hairline a font would set it at: at the size this mark is displayed a
+	// true one-pixel line disappears, and this is the weight the shadow reads
+	// at beside 18-wide blocks.
 	stroke = 5.0
 )
 
@@ -169,17 +169,17 @@ func rects(glyph rune, x, y float64) []rect {
 	switch glyph {
 	case '█':
 		return []rect{{x, y, cellWidth, cellHeight}}
-	case '║':
+	case '│':
 		return []rect{{midX, y, stroke, cellHeight}}
-	case '═':
+	case '─':
 		return []rect{{x, midY, cellWidth, stroke}}
-	case '╗':
+	case '┐':
 		return []rect{leftArm, downArm}
-	case '╔':
+	case '┌':
 		return []rect{rightArm, downArm}
-	case '╝':
+	case '┘':
 		return []rect{leftArm, upArm}
-	case '╚':
+	case '└':
 		return []rect{rightArm, upArm}
 	case ' ':
 		return nil
