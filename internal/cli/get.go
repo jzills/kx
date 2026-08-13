@@ -170,6 +170,12 @@ func (c GetCommand) ExecuteGroups(
 	var headers []string
 	var merged [][]string
 	var raw []string
+	// Whether the replies are tables kx can stitch. A non-tabular reply ends
+	// the stitching, not the fetching: every namespace the user named still has
+	// to be asked for. Returning on the first one answered `kx get pods 1 5 -o
+	// yaml` with one namespace's YAML and exit 0, so the resource in the second
+	// namespace was silently dropped from a request that named it.
+	tabular := true
 
 	for _, group := range groups {
 		args := append([]string{"get", resource}, group.Names...)
@@ -180,16 +186,20 @@ func (c GetCommand) ExecuteGroups(
 			return index.Table{}, err
 		}
 		raw = append(raw, output)
+		if !tabular {
+			continue
+		}
 
 		groupHeaders, rows, _ := index.ParseTable(output)
-		if groupHeaders != nil && filterTerm != "" {
-			rows = index.FilterRows(groupHeaders, rows, filterTerm)
-		}
 		if groupHeaders == nil {
-			// Non-tabular (-o json/yaml/name). Nothing to index or stitch;
-			// the raw replies are printed as they came, the same degradation
-			// a non-tabular single-namespace listing already gets.
-			return index.Table{Raw: strings.Join(raw, "\n")}, nil
+			// Non-tabular (-o json/yaml/name). Nothing to index or stitch; the
+			// raw replies are printed as they came, the same degradation a
+			// non-tabular single-namespace listing already gets.
+			tabular = false
+			continue
+		}
+		if filterTerm != "" {
+			rows = index.FilterRows(groupHeaders, rows, filterTerm)
 		}
 		if headers == nil {
 			headers = append([]string{"NAMESPACE"}, groupHeaders...)
@@ -198,7 +208,7 @@ func (c GetCommand) ExecuteGroups(
 			merged = append(merged, append([]string{group.Namespace}, row...))
 		}
 	}
-	if len(merged) == 0 {
+	if !tabular || len(merged) == 0 {
 		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 

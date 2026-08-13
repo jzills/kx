@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/jzills/kx/internal/index"
@@ -99,11 +100,26 @@ func runGet(services Services, resource string, args []string, options getOption
 		}
 		groups := groupByNamespace(resolved)
 
+		// kubectl watches one named resource at a time — "you may only watch a
+		// single resource or type of resource at a time" — and a watch is one
+		// long-lived stream, so it cannot be split per namespace the way a
+		// fetch can. Reported here because forwarding it produced an answer
+		// about the wrong thing: the fallback below scopes every name to the
+		// first group's namespace, so a selection spanning namespaces came
+		// back as "pods ... not found", which reads as a resource that is
+		// gone rather than a request kubectl will not serve.
+		if len(indexes) > 1 && isWatch(extra) {
+			return fmt.Errorf(
+				"--watch takes a single resource; %d indexes were given. "+
+					"Watch one of them, or drop --watch to fetch them all.",
+				len(indexes))
+		}
+
 		// Indexes from an -A listing can land in different namespaces, and
 		// kubectl cannot fetch named resources across namespaces in one call.
 		// One call per namespace, stitched back together. An explicit -n means
 		// the user overrode the scope, so there is nothing to span.
-		if len(groups) > 1 && extractNamespace(extra) == "" && !isWatch(extra) {
+		if len(groups) > 1 && extractNamespace(extra) == "" {
 			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)

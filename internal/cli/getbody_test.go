@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
@@ -331,5 +332,57 @@ func TestGetRelistWithinOneNamespaceStaysASingleCall(t *testing.T) {
 			t.Errorf("resource %q gained namespace %q from the stitching path",
 				entry.Name, entry.Namespace)
 		}
+	}
+}
+
+// kubectl watches one named resource at a time. Forwarding a multi-index watch
+// produced an answer about the wrong thing: names were scoped to the first
+// group's namespace, so a selection spanning namespaces came back as
+// "pods ... not found" — a resource that is gone, rather than a request kubectl
+// will not serve.
+func TestGetWatchRefusesSeveralIndexes(t *testing.T) {
+	kube := &fakeKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		AllNamespaces: true,
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "web", Kind: kinds.Pod, Namespace: "prod"},
+			{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
+		}),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	quietRender(t)
+
+	err := runGet(services, "pods", []string{"1", "2", "--watch"}, getOptions{})
+	if err == nil {
+		t.Fatal("multi-index watch was accepted; want it refused")
+	}
+	if !strings.Contains(err.Error(), "--watch takes a single resource") {
+		t.Errorf("error = %q, want it to name the single-resource rule", err)
+	}
+	if len(kube.watchArgs) != 0 {
+		t.Errorf("opened a watch anyway: %v", kube.watchArgs)
+	}
+}
+
+// One index still watches — the guard is about the number of resources, not
+// about watching being unavailable to indexed resources.
+func TestGetWatchStillAcceptsOneIndex(t *testing.T) {
+	kube := &fakeKubectl{watchLines: []string{watchPodsHeader, watchPodsAdded}}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Namespace: "prod",
+		Resources: state.NewResources([]string{"nginx-abc-xyz"}, kinds.Pod),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	quietRender(t)
+
+	if err := runGet(services, "pods", []string{"1", "--watch"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+	if len(kube.watchArgs) == 0 {
+		t.Error("no watch was opened for a single index")
 	}
 }

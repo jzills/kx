@@ -232,6 +232,35 @@ func TestGetAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
 	}
 }
 
+// A non-tabular reply ends the stitching, not the fetching. Returning on the
+// first one answered `kx get pods 1 5 -o yaml` with one namespace's YAML and
+// exit 0, silently dropping a resource the request had named.
+func TestExecuteGroupsFetchesEveryGroupWhenTheReplyIsNotATable(t *testing.T) {
+	kubectl := &fakeKubectl{outputs: []string{
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n",
+		"apiVersion: v1\nkind: Pod\nmetadata:\n  name: api\n",
+	}}
+	groups := []namespaceGroup{
+		{Namespace: "prod", Names: []string{"web"}},
+		{Namespace: "staging", Names: []string{"api"}},
+	}
+
+	table, err := newGet(kubectl, &fakeState{}).ExecuteGroups(
+		"pods", "", groups, []string{"-o", "yaml"})
+	if err != nil {
+		t.Fatalf("ExecuteGroups: %v", err)
+	}
+
+	if len(kubectl.calls) != 2 {
+		t.Fatalf("made %d kubectl calls, want one per namespace group", len(kubectl.calls))
+	}
+	for _, want := range []string{"name: web", "name: api"} {
+		if !strings.Contains(table.Raw, want) {
+			t.Errorf("output is missing %q:\n%s", want, table.Raw)
+		}
+	}
+}
+
 // An -A listing records the scope it was taken at, rather than leaving it to be
 // inferred from whether its resources carry namespaces — which a walk that
 // never left one namespace also does.
