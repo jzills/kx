@@ -40,6 +40,46 @@
   The name → mode lookup is generated from the same data the picker reads
   (kx-themes.html), so a palette can't go missing from one and not the other.
 */ -}}
+{{- /*
+  The tab icon, painted from the chosen palette.
+
+  Hextra's favicons.html has already linked /favicon.svg by the time this
+  runs — it is partial 10 of that head, this is partial 80 — so there is an
+  element to repaint rather than one to invent.
+
+  The shapes are the generated mark, inlined here rather than redrawn in
+  JavaScript: a second copy of the letterforms is the drift internal/mark
+  exists to prevent. Only the fill changes, which is the one thing a palette
+  has an opinion about. The accents come from the same generated data the
+  picker and the stylesheet read, so a palette cannot colour the page one way
+  and the tab another.
+*/ -}}
+{{- $favicon := "" }}
+{{- with resources.Get "kx-favicon.svg" }}
+  {{- $favicon = .Content }}
+{{- end }}
+<script>
+  (function () {
+    var ACCENTS = {};
+    {{- range hugo.Data.kx_themes }}
+    ACCENTS[{{ .name | jsonify | safeJS }}] = {{ .accent | jsonify | safeJS }};
+    {{- end }}
+    var FAVICON = {{ $favicon | jsonify | safeJS }};
+
+    // Exposed so the picker repaints through this table rather than keeping a
+    // second one; it is defined before the palette is applied below, so the
+    // first paint goes through the same path every later switch does.
+    window.kxPaintFavicon = function (name) {
+      var link = document.getElementById("favicon-svg");
+      var accent = ACCENTS[name];
+      if (!link || !FAVICON || !accent) {
+        return;
+      }
+      var painted = FAVICON.replace(/fill="[^"]*"/, 'fill="' + accent + '"');
+      link.setAttribute("href", "data:image/svg+xml," + encodeURIComponent(painted));
+    };
+  })();
+</script>
 <script>
   (function () {
     var MODES = {};
@@ -66,6 +106,7 @@
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(mode);
     document.documentElement.style.colorScheme = mode;
+    window.kxPaintFavicon(name);
     try {
       localStorage.setItem("color-theme", mode);
     } catch (e) {
