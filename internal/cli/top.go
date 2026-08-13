@@ -51,10 +51,6 @@ func (c TopCommand) Execute(
 	if err != nil {
 		return index.Table{}, "", err
 	}
-	if filterTerm != "" {
-		output = c.Index.Filter(output, filterTerm)
-	}
-
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
 	// percentage columns — unlike -A, which does (see withUsagePercentages).
@@ -70,14 +66,24 @@ func (c TopCommand) Execute(
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
+	// Parsed once here: the rows are narrowed by --match and widened with the
+	// percentage columns before anything numbers them, and none of that goes
+	// back through text on the way.
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return c.Index.Add(output), namespace, nil
+	}
+	if filterTerm != "" {
+		rows = index.FilterRows(headers, rows, filterTerm)
+	}
 	if !hasContainers && !noLimits {
-		output, err = c.withUsagePercentages(output, namespace, allNamespaces)
+		headers, rows, err = c.withUsagePercentages(headers, rows, namespace, allNamespaces)
 		if err != nil {
 			return index.Table{}, "", err
 		}
 	}
 
-	indexed := c.Index.Add(output)
+	indexed := c.Index.AddRows(headers, rows)
 	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
@@ -123,17 +129,21 @@ func (c TopCommand) ExecuteNodes(
 	if err != nil {
 		return index.Table{}, "", err
 	}
-	if filterTerm != "" {
-		output = c.Index.Filter(output, filterTerm)
-	}
-	output = relabelPercentColumns(output)
-
 	namespace = extractNamespace(extraArgs)
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
 
-	indexed := c.Index.Add(output)
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return c.Index.Add(output), namespace, nil
+	}
+	if filterTerm != "" {
+		rows = index.FilterRows(headers, rows, filterTerm)
+	}
+	headers = relabelPercentColumns(headers)
+
+	indexed := c.Index.AddRows(headers, rows)
 	if len(indexed.Entries) > 0 {
 		if extraArgs == nil {
 			extraArgs = []string{}
@@ -161,15 +171,11 @@ func (c TopCommand) ExecuteNodes(
 // header rewrite only, so the existing render.UsageStyle-driven coloring in
 // IndexedTable (which looks up cells by the exact header names "CPU%"/
 // "MEM%") applies to nodes without any new coloring code.
-func relabelPercentColumns(output string) string {
-	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
-		return output
-	}
+func relabelPercentColumns(headers []string) []string {
 	cpuCol := indexOfHeader(headers, "CPU(%)")
 	memCol := indexOfHeader(headers, "MEMORY(%)")
 	if cpuCol < 0 && memCol < 0 {
-		return output
+		return headers
 	}
 	relabeled := append([]string{}, headers...)
 	if cpuCol >= 0 {
@@ -178,10 +184,7 @@ func relabelPercentColumns(output string) string {
 	if memCol >= 0 {
 		relabeled[memCol] = "MEM%"
 	}
-	table := make([][]string, 0, len(rows)+1)
-	table = append(table, relabeled)
-	table = append(table, rows...)
-	return index.Format(table)
+	return relabeled
 }
 
 // withUsagePercentages appends CPU%/MEM% columns computed against each
@@ -190,34 +193,35 @@ func relabelPercentColumns(output string) string {
 // single namespace passed in — pod names collide across namespaces, so a
 // bare-name key would silently give two different pods' rows the same
 // limit.
-func (c TopCommand) withUsagePercentages(output, namespace string, allNamespaces bool) (string, error) {
-	headers, rows, nameIdx := index.ParseTable(output)
+func (c TopCommand) withUsagePercentages(
+	headers []string, rows [][]string, namespace string, allNamespaces bool,
+) ([]string, [][]string, error) {
+	nameIdx := indexOfHeader(headers, "NAME")
 	cpuCol := indexOfHeader(headers, "CPU(cores)")
 	memCol := indexOfHeader(headers, "MEMORY(bytes)")
-	if headers == nil || cpuCol < 0 || memCol < 0 {
-		return output, nil
+	if nameIdx < 0 || cpuCol < 0 || memCol < 0 {
+		return headers, rows, nil
 	}
 	namespaceIdx := indexOfHeader(headers, "NAMESPACE")
 
 	limits, err := c.podLimits(namespace, allNamespaces)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
-	table := make([][]string, 0, len(rows)+1)
-	table = append(table, append(append([]string{}, headers...), "CPU%", "MEM%"))
+	widened := make([][]string, 0, len(rows))
 	for _, row := range rows {
 		rowNamespace := namespace
 		if namespaceIdx >= 0 {
 			rowNamespace = row[namespaceIdx]
 		}
 		limit := limits[rowNamespace+"/"+row[nameIdx]]
-		table = append(table, append(append([]string{}, row...),
+		widened = append(widened, append(append([]string{}, row...),
 			percentCell(row[cpuCol], limit.CPU),
 			percentCell(row[memCol], limit.Memory),
 		))
 	}
-	return index.Format(table), nil
+	return append(append([]string{}, headers...), "CPU%", "MEM%"), widened, nil
 }
 
 // podLimit is a pod's summed limits. A nil quantity means the limit is

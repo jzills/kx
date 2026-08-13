@@ -289,40 +289,6 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 	}
 }
 
-func TestFilterMatching(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "nginx")
-	if !strings.Contains(output, "nginx-abc-xyz") {
-		t.Errorf("filter dropped the matching row:\n%s", output)
-	}
-	if strings.Contains(output, "redis-def-uvw") {
-		t.Errorf("filter kept a non-matching row:\n%s", output)
-	}
-	if !strings.HasPrefix(output, "NAME") {
-		t.Errorf("filter dropped the header:\n%s", output)
-	}
-}
-
-func TestFilterCaseInsensitive(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "NGINX")
-	if !strings.Contains(output, "nginx-abc-xyz") {
-		t.Errorf("filter is case-sensitive:\n%s", output)
-	}
-}
-
-func TestFilterNoMatchReturnsHeaderOnly(t *testing.T) {
-	output := Service{}.Filter(podsOutput, "nothing-matches")
-	if output != strings.Split(podsOutput, "\n")[0] {
-		t.Errorf("no-match filter = %q, want the original header line", output)
-	}
-}
-
-func TestFilterLastColumnNotTruncated(t *testing.T) {
-	output := Service{}.Filter(contextsOutput, "docker")
-	if !strings.Contains(output, "diagnostics") {
-		t.Errorf("filter truncated the wide last column:\n%s", output)
-	}
-}
-
 type fakeResolver struct{ names []string }
 
 func (f fakeResolver) Names() []string { return f.names }
@@ -653,5 +619,84 @@ func TestTableTextRoundTrips(t *testing.T) {
 	if len(headers) != len(table.Headers) || len(rows) != len(table.Rows) {
 		t.Errorf("Text() re-parsed to %d headers/%d rows, want %d/%d",
 			len(headers), len(rows), len(table.Headers), len(table.Rows))
+	}
+}
+
+// AddRows numbers rows that were parsed once, upstream. Everything between
+// kubectl and the screen works on rows now; serialising back to padded text so
+// the next stage could parse it again is what lost a blank cell.
+func TestAddRowsNumbersAlreadyParsedRows(t *testing.T) {
+	headers, rows, _ := ParseTable(twoContextsOutput)
+
+	table := Service{}.AddRows(headers, rows)
+
+	if !table.Indexable() {
+		t.Fatal("AddRows produced a table it could not index")
+	}
+	if table.Headers[0] != "X" || table.Headers[1] != "CURRENT" {
+		t.Errorf("Headers = %q, want X then the original columns", table.Headers)
+	}
+	if len(table.Rows) != 2 {
+		t.Fatalf("Rows = %q, want 2", table.Rows)
+	}
+	// The blank CURRENT is intact, which is the whole reason rows travel.
+	if got := table.Rows[0]; got[0] != "1" || got[1] != "" || got[2] != "alt" {
+		t.Errorf("Rows[0] = %q, want index 1, blank CURRENT, NAME alt", got)
+	}
+}
+
+// Add is AddRows with a parse in front, so the two cannot disagree about
+// numbering, deduplication or which column is which.
+func TestAddAgreesWithAddRows(t *testing.T) {
+	headers, rows, _ := ParseTable(allNamespacesOutput)
+
+	fromText := Service{}.Add(allNamespacesOutput)
+	fromRows := Service{}.AddRows(headers, rows)
+
+	if len(fromText.Entries) != len(fromRows.Entries) {
+		t.Fatalf("Add gave %d entries, AddRows %d", len(fromText.Entries), len(fromRows.Entries))
+	}
+	for i := range fromText.Entries {
+		if fromText.Entries[i] != fromRows.Entries[i] {
+			t.Errorf("entry %d: Add %+v, AddRows %+v", i, fromText.Entries[i], fromRows.Entries[i])
+		}
+	}
+	if fromText.Text() != fromRows.Text() {
+		t.Errorf("Add and AddRows rendered differently:\n%s\n---\n%s",
+			fromText.Text(), fromRows.Text())
+	}
+}
+
+// Rows without a NAME column cannot be numbered — an index has to name
+// something. Reported as not indexable rather than numbered anyway.
+func TestAddRowsRejectsRowsWithoutANameColumn(t *testing.T) {
+	table := Service{}.AddRows([]string{"FOO", "BAR"}, [][]string{{"baz", "qux"}})
+
+	if table.Indexable() {
+		t.Errorf("AddRows numbered a table with no NAME column: %+v", table)
+	}
+}
+
+// FilterRows narrows by NAME on the rows themselves. Filtering used to parse
+// the text, re-format the survivors and hand that back for Add to parse a third
+// time.
+func TestFilterRowsNarrowsByName(t *testing.T) {
+	headers, rows, _ := ParseTable(podsOutput)
+
+	kept := FilterRows(headers, rows, "NGINX")
+
+	if len(kept) != 1 {
+		t.Fatalf("kept %d rows, want 1: %q", len(kept), kept)
+	}
+	if kept[0][0] != "nginx-abc-xyz" {
+		t.Errorf("kept %q, want the nginx row", kept[0])
+	}
+}
+
+func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
+	headers, rows, _ := ParseTable(podsOutput)
+
+	if kept := FilterRows(headers, rows, "absent"); len(kept) != 0 {
+		t.Errorf("kept %q, want none", kept)
 	}
 }

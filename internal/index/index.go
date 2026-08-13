@@ -63,16 +63,22 @@ type TableShape struct {
 // parse the header once and split every following line the same way a
 // complete table would through ParseTable.
 func ParseHeader(header string) (TableShape, bool) {
-	headers := splitColumns(header, -1)
+	return shapeOf(splitColumns(header, -1))
+}
+
+// shapeOf locates the special columns in an already-split header.
+//
+// Split out from ParseHeader so a caller holding rows parsed further upstream
+// can describe them without a header *line* to re-split — which is what lets
+// the pipeline parse once and pass rows the rest of the way.
+func shapeOf(headers []string) (TableShape, bool) {
 	if len(headers) == 0 {
 		return TableShape{}, false
 	}
-
 	nameIdx := columnIndex(headers, "NAME")
 	if nameIdx < 0 {
 		return TableShape{}, false
 	}
-
 	return TableShape{
 		Headers:      headers,
 		NameIdx:      nameIdx,
@@ -291,12 +297,31 @@ func (t Table) Text() string {
 // Service prefixes kubectl output with an index column and filters it by name.
 type Service struct{}
 
-// Add prefixes an "X" index column to kubectl output and returns the indexed
-// table: its rows, and the entries it assigned in index order.
-func (Service) Add(output string) Table {
+// Add parses kubectl output and numbers it.
+//
+// A thin parse in front of AddRows, so the text and rows entry points cannot
+// disagree about numbering, deduplication or which column is which.
+func (s Service) Add(output string) Table {
 	shape, rows, ok := parseTable(output)
 	if !ok {
 		return Table{Raw: output}
+	}
+	table := s.AddRows(shape.Headers, rows)
+	table.Raw = output
+	return table
+}
+
+// AddRows prefixes an "X" index column to rows parsed upstream and returns the
+// indexed table: its rows, and the entries it assigned in index order.
+//
+// Takes rows rather than text because the pipeline between kubectl and the
+// screen parses once. Handing the next stage padded text meant it had to parse
+// again, and padded text cannot represent an empty cell — its gap is
+// indistinguishable from column padding.
+func (Service) AddRows(headers []string, rows [][]string) Table {
+	shape, ok := shapeOf(headers)
+	if !ok {
+		return Table{}
 	}
 
 	// Index numbers must map 1:1 to saved state, so a row that is
@@ -309,7 +334,7 @@ func (Service) Add(output string) Table {
 	// and collapsing them drops one from the table entirely. So the key takes
 	// in the namespace whenever the table reports one.
 	seen := make(map[Entry]bool, len(rows))
-	unique := make([][]string, 0, len(rows))
+	indexed := make([][]string, 0, len(rows))
 	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
 		entry := Entry{Name: row[shape.NameIdx]}
@@ -320,43 +345,31 @@ func (Service) Add(output string) Table {
 			continue
 		}
 		seen[entry] = true
-		unique = append(unique, row)
 		entries = append(entries, entry)
-	}
-
-	indexed := make([][]string, 0, len(unique))
-	for i, row := range unique {
-		indexed = append(indexed, append([]string{strconv.Itoa(i + 1)}, row...))
+		indexed = append(indexed, append([]string{strconv.Itoa(len(entries))}, row...))
 	}
 
 	return Table{
 		Headers: append([]string{"X"}, shape.Headers...),
 		Rows:    indexed,
 		Entries: entries,
-		Raw:     output,
 	}
 }
 
-// Filter drops rows whose NAME doesn't contain term, case-insensitively.
-func (Service) Filter(output, term string) string {
-	headers, rows, nameIdx := parseOutput(output)
-	if headers == nil {
-		return output
+// FilterRows keeps the rows whose NAME contains term, case-insensitively.
+func FilterRows(headers []string, rows [][]string, term string) [][]string {
+	shape, ok := shapeOf(headers)
+	if !ok {
+		return rows
 	}
-
 	lower := strings.ToLower(term)
-	allRows := [][]string{headers}
+	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row[nameIdx]), lower) {
-			allRows = append(allRows, row)
+		if strings.Contains(strings.ToLower(row[shape.NameIdx]), lower) {
+			kept = append(kept, row)
 		}
 	}
-	if len(allRows) == 1 {
-		// Nothing matched: show the original header line untouched rather than
-		// a re-padded one.
-		return strings.Split(output, "\n")[0]
-	}
-	return Format(allRows)
+	return kept
 }
 
 // Resolve maps a 1-based index onto a resource name in state.
