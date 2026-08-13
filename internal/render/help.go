@@ -3,25 +3,9 @@ package render
 import (
 	"strings"
 
+	"github.com/jzills/kx/internal/mark"
 	"github.com/jzills/kx/internal/theme"
 )
-
-// kxArt is the mark kx prints above the root help screen, and the source the
-// SVG marks are drawn from — tools/gen-marks turns these same six lines into
-// the README banner, the site's mark and the --html report's masthead.
-//
-// The shadow is single-line box drawing rather than double. The vectors draw
-// each of these lines as one stroke, so a double-lined source was the one
-// place the terminal and the web marks read differently: a doubled hairline
-// outline here against a single clean one everywhere else.
-var kxArt = []string{
-	"██┐  ██┐██┐  ██┐",
-	"██│ ██┌┘└██┐██┌┘",
-	"█████┌┘  └███┌┘ ",
-	"██┌─██┐  ██┌██┐ ",
-	"██│  ██┐██┌┘ ██┐",
-	"└─┘  └─┘└─┘  └─┘",
-}
 
 // HelpItem is one named entry in a help listing: a command, argument or flag,
 // with its description.
@@ -198,7 +182,7 @@ const rootNameWidth = 18
 // RootHelp renders the top-level help screen.
 func (r *Renderer) RootHelp(help RootHelp) {
 	r.Blank()
-	for _, line := range kxArt {
+	for _, line := range mark.Lines {
 		r.line(r.style(theme.Header, line))
 	}
 	r.line(r.style(theme.Muted, "kubectl, indexed."))
