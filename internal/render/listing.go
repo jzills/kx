@@ -245,14 +245,25 @@ func enableNameFlex(headers []string, columns []Column) {
 // the next call. A no-op off-terminal — nothing is written and 0 is
 // returned — the same way Status's spinner never runs off a terminal, so
 // piped output and tests never receive cursor codes.
-func (r *Renderer) RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
-	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), captionParts...)
+//
+// footer, when set, is drawn under the table and redrawn with it. It is where
+// the standing note about the live view goes: the redraw clears its whole
+// frame each time, so anything printed under the table once would be erased on
+// the next event, and anything printed above it before the loop drifts away
+// from the thing it describes.
+func (r *Renderer) RedrawTable(
+	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
+) int {
+	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), footer, captionParts...)
 }
 
 // redrawTable is RedrawTable with the terminal check injected, the same seam
 // status() uses (internal/render/status.go:45) so this is testable without a
 // real terminal.
-func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines int, enabled bool, captionParts ...string) int {
+func (r *Renderer) redrawTable(
+	headers []string, rows [][]string, previousLines int, enabled bool,
+	footer string, captionParts ...string,
+) int {
 	if !enabled {
 		return 0
 	}
@@ -263,13 +274,28 @@ func (r *Renderer) redrawTable(headers []string, rows [][]string, previousLines 
 	enableNameFlex(headers, columns)
 	r.Caption(captionParts...)
 	r.Table(columns, cells)
-	return 2 + len(cells) // caption line + header line + one per body row
+	lines := 2 + len(cells) // caption line + header line + one per body row
+	if footer != "" {
+		r.Caption(footer)
+		lines++
+	}
+	return lines
 }
 
 // RedrawTable is the package-level wrapper, matching every other render entry point.
-func RedrawTable(headers []string, rows [][]string, previousLines int, captionParts ...string) int {
-	return current.RedrawTable(headers, rows, previousLines, captionParts...)
+func RedrawTable(
+	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
+) int {
+	return current.RedrawTable(headers, rows, previousLines, footer, captionParts...)
 }
+
+// Redrawing reports whether an in-place redraw actually draws, which it only
+// does on a terminal.
+//
+// Exported for callers whose whole output is a redrawn frame: off-terminal
+// RedrawTable writes nothing at all, so a note that would have sat under the
+// table has to be printed on its own or the piped output explains nothing.
+func Redrawing() bool { return isTerminal(current.out) }
 
 // KeyValueTable renders a two-column listing, used for labels and annotations.
 func (r *Renderer) KeyValueTable(header string, keys []string, values map[string]string) {
