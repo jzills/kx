@@ -4,7 +4,12 @@
 # Hextra ships both, so adding content/docs/ turns on the sidebar, the
 # right-hand table of contents and search without restructuring anything here.
 baseURL = "https://jzills.github.io/kx/"
-title = "kx"
+# The tagline rather than the name, because this is the browser tab's text and
+# the tab already carries the mark as its favicon: "kx" beside a kx logo says
+# the same thing twice, where the tagline says what kx is. Hextra titles the
+# home page with this alone and every other page as "Page – this", so the
+# tagline closes both.
+title = "kubectl, indexed."
 [languages.en]
   label = "English"
 

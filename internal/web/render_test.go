@@ -26,7 +26,9 @@ func testMeta(t *testing.T) Meta {
 		t.Fatalf("WebStyles returned %v", err)
 	}
 	return Meta{
-		Title:      "kx diag",
+		// The title starts at the command, the way pageMeta's callers spell
+		// it; the invocation is the command line itself, so it keeps its "kx".
+		Title:      "diag · diagnostics",
 		Invocation: "kx diag 1",
 		Captured:   time.Date(2026, 8, 1, 9, 41, 22, 0, time.UTC),
 		URL:        "http://127.0.0.1:41287",

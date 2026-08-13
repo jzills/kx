@@ -241,7 +241,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if allNamespaces {
 					scope = render.AllNamespaces
 				}
-				meta, err := pageMeta(services.Config.Theme, "kx diag · "+scope,
+				meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
 				if err != nil {
 					return err
@@ -270,7 +270,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return nil
 			}
 			meta, err := pageMeta(services.Config.Theme,
-				"kx diag · "+string(report.Kind)+"/"+report.Name,
+				"diag · "+string(report.Kind)+"/"+report.Name,
 				invocation(use, args[0], portFlag(port)))
 			if err != nil {
 				return err

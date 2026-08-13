@@ -21,6 +21,12 @@ type htmlOptions struct {
 
 // pageMeta builds the provenance block every page carries.
 //
+// title is the browser tab's, and starts at the command rather than at "kx" —
+// "diag · prod", not "kx diag · prod". A tab shows the favicon first and then
+// as much of the title as it has room for, and the favicon is already the kx
+// mark; spending the first three characters saying so again pushed the part
+// that tells two tabs apart out of view.
+//
 // An empty theme name falls back to the default rather than erroring: Services
 // is constructed literally in several tests, and a zero Config there should
 // not turn into a failed render.
