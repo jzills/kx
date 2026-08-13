@@ -14,7 +14,7 @@ func TestRedrawTableWritesCaptionAndTable(t *testing.T) {
 
 	headers := []string{"NAME", "STATUS"}
 	rows := [][]string{{"nginx", "Running"}}
-	lines := r.redrawTable(headers, rows, 0, true, "Pods", "prod", "watching")
+	lines := r.redrawTable(headers, rows, 0, true, "", "Pods", "prod", "watching")
 
 	got := out.String()
 	if !strings.Contains(got, "Pods · prod · watching") {
@@ -33,9 +33,9 @@ func TestRedrawTableClearsPreviousFrame(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true)
+	r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, "")
 	out.Reset()
-	r.redrawTable([]string{"NAME"}, [][]string{{"b"}}, 2, true)
+	r.redrawTable([]string{"NAME"}, [][]string{{"b"}}, 2, true, "")
 
 	got := out.String()
 	if !strings.HasPrefix(got, "\x1b[2A\x1b[J") {
@@ -47,7 +47,7 @@ func TestRedrawTableNoopOffTerminal(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, false)
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, false, "")
 
 	if out.Len() != 0 {
 		t.Errorf("output = %q, want nothing written when disabled", out.String())
@@ -80,5 +80,45 @@ func TestRedrawTableFlexNoNameColumnIsNoop(t *testing.T) {
 	enableNameFlex([]string{"FOO"}, columns) // must not panic
 	if columns[0].Flex {
 		t.Error("no NAME column present, nothing should be flexed")
+	}
+}
+
+// A standing note about the live view belongs under the table it describes,
+// and has to be redrawn with it: the redraw clears its whole frame, so a note
+// printed under the table once is erased on the next event, and one printed
+// above the loop scrolls away from the thing it explains.
+func TestRedrawTableDrawsTheFooterUnderTheTable(t *testing.T) {
+	var out bytes.Buffer
+	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
+
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true,
+		"press Ctrl-C to stop", "Pods", "prod", "watching")
+
+	got := out.String()
+	note := strings.Index(got, "Ctrl-C")
+	row := strings.Index(got, "nginx")
+	if note < 0 {
+		t.Fatalf("output = %q, want the footer drawn", got)
+	}
+	if row < 0 || note < row {
+		t.Errorf("output = %q, want the footer below the table", got)
+	}
+	// caption + header + one row + footer. A footer left out of the count is
+	// scrolled off by the next frame's cursor-up rather than overwritten.
+	if lines != 4 {
+		t.Errorf("lines = %d, want 4 — the footer has to be in the count", lines)
+	}
+}
+
+// No footer, no line: the count has to stay exact or every later frame is
+// misaligned by one.
+func TestRedrawTableWithoutAFooterCountsOnlyTheTable(t *testing.T) {
+	var out bytes.Buffer
+	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
+
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true, "", "Pods", "prod")
+
+	if lines != 3 {
+		t.Errorf("lines = %d, want 3 (caption + header + row)", lines)
 	}
 }
