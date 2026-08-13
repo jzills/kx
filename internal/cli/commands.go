@@ -374,6 +374,51 @@ func newExecCommand(services Services) *cobra.Command {
 	}
 }
 
+func newDebugCommand(services Services) *cobra.Command {
+	return &cobra.Command{
+		Use:        "debug <index> [kubectl flags] [-- command...]",
+		SuggestFor: []string{"ephemeral", "troubleshoot", "inspect"},
+		Short:      "Attach an ephemeral debug container to an indexed pod, for images with no shell.",
+		Long: "Attaches a container carrying its own shell to a running pod, which is how " +
+			"to get inside an image that has none — distroless or scratch, where kx exec " +
+			"can only report that it found no shell. The pod is not restarted and what it " +
+			"runs is unchanged.\n\n" +
+			"The image comes from the debug_image config key (busybox unless set); --image " +
+			"overrides it for one run. The container shares the process namespace of the " +
+			"pod's container when there is only one, so its filesystem is reachable at " +
+			"/proc/1/root; name one with --target when the pod has several.\n\n" +
+			"Kubernetes keeps an ephemeral container on the pod's spec for as long as the " +
+			"pod lives — there is no removing one, only replacing the pod.",
+		Example:            "  kx debug 1\n  kx debug 1 --image alpine\n  kx debug 1 -- ls /proc/1/root",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			before, command := splitAtDoubleDash(args)
+			rest, handled, err := passthrough(cmd, before, nil)
+			if err != nil || handled {
+				return err
+			}
+			// `kx debug --` satisfies the arity check on the unstripped argv
+			// and leaves nothing once the command is split off. A leading flag
+			// does not land here — passthrough keeps unknown flags for kubectl,
+			// so `kx debug --image=x` reaches parseIndex with the flag as its
+			// candidate, and reports it as one. That is exec's behaviour too,
+			// and the two should not diverge on the same mistake.
+			if len(rest) == 0 {
+				return fmt.Errorf("debug requires an index")
+			}
+			index, err := parseIndex("index", rest[0])
+			if err != nil {
+				return err
+			}
+			return DebugCommand{
+				Kubectl: services.Kubectl, State: services.State,
+				Image: services.Config.DebugImage,
+			}.Execute(index, command, rest[1:])
+		},
+	}
+}
+
 func newDeleteCommand(services Services) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{

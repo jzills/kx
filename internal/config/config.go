@@ -20,6 +20,11 @@ const DefaultTheme = "github-dark"
 // stopgap as DefaultTheme not importing theme.
 const DefaultEngine = "scout"
 
+// DefaultDebugImage is the image kx debug attaches when none is configured.
+// Small, ubiquitous, and carries a shell — which is the whole point, since the
+// pod being debugged is one whose own image has none.
+const DefaultDebugImage = "busybox"
+
 // Config is the resolved configuration. Defaults match the Python
 // implementation's dataclass defaults.
 type Config struct {
@@ -28,6 +33,7 @@ type Config struct {
 	NoColor    bool
 	Theme      string
 	Engine     string
+	DebugImage string
 }
 
 // Default returns the configuration used when nothing is set.
@@ -38,6 +44,7 @@ func Default() Config {
 		NoColor:    false,
 		Theme:      DefaultTheme,
 		Engine:     DefaultEngine,
+		DebugImage: DefaultDebugImage,
 	}
 }
 
@@ -64,6 +71,7 @@ func Settings() []Setting {
 		{"engine", "KX_ENGINE", "Default scan engine for kx scan; see kx engine"},
 		{"max_history", "KX_MAX_HISTORY", "Number of kx get results kept in history"},
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
+		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
 		{"no_color", "KX_NO_COLOR", "Disable styled output, like --no-color"},
 	}
 }
@@ -148,6 +156,13 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.Engine = name
 		}
+		if value, ok := raw["debug_image"]; ok {
+			name, ok := value.(string)
+			if !ok {
+				return cfg, errors.New("kx: debug_image must be a string")
+			}
+			cfg.DebugImage = name
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
 	}
@@ -178,6 +193,9 @@ func (l Loader) Load() (Config, error) {
 	}
 	if value, ok := os.LookupEnv("KX_ENGINE"); ok {
 		cfg.Engine = value
+	}
+	if value, ok := os.LookupEnv("KX_DEBUG_IMAGE"); ok {
+		cfg.DebugImage = value
 	}
 
 	if l.ThemeKnown != nil && !l.ThemeKnown(cfg.Theme) {

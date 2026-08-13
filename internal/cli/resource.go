@@ -465,6 +465,93 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	)
 }
 
+// DebugCommand attaches an ephemeral debug container to an indexed pod.
+//
+// This is the answer to the dead end kx exec reaches on a distroless or
+// scratch image: exec needs a shell inside the target, and those images have
+// none, so it can only report that and stop. An ephemeral container brings its
+// own shell into the running pod instead, without restarting it or changing
+// what it runs.
+//
+// The container it adds stays on the pod's spec for as long as the pod lives —
+// Kubernetes offers no way to remove one. That is kubectl's behaviour, not
+// kx's, and the command's help says so rather than prompting: the change is
+// additive, and a confirmation in front of every debugging session would be
+// friction where kx delete's prompt guards actual loss.
+type DebugCommand struct {
+	Kubectl kubectl.Service
+	State   IndexResolver
+	// Image is the configured debug_image, used when the invocation names none.
+	Image string
+}
+
+func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Fields(index)
+	if err != nil {
+		return err
+	}
+	if kind != kinds.Pod {
+		return fmt.Errorf("debug is only supported for pods.")
+	}
+
+	args := []string{"debug", "-it", name, "-n", namespace}
+	// An explicit --image is the user overriding their own default for one
+	// run; passing the configured one as well would hand kubectl two.
+	if image, _, _ := extractString(extraArgs, "--image", ""); image == "" {
+		args = append(args, "--image="+c.Image)
+	}
+	if target := c.target(name, namespace, extraArgs); target != "" {
+		args = append(args, "--target="+target)
+	}
+	args = append(args, extraArgs...)
+	if len(command) > 0 {
+		args = append(args, "--")
+		args = append(args, command...)
+	}
+
+	code, err := c.Kubectl.RunInteractive(args, false)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		// kubectl already printed its own message; what is left is deciding
+		// whether this was a stale index worth refreshing, and forwarding the
+		// exit code either way — the same shape describe and exec use.
+		return forwardExit(c.Kubectl, kinds.Pod, name, namespace, code)
+	}
+	return nil
+}
+
+// target names the container the debug container should share a process
+// namespace with.
+//
+// Without it the debug container joins the pod but not the target's processes,
+// so /proc/1/root — the target's filesystem, which is most of the reason to be
+// here on an image with no shell — is out of reach. A pod with one container
+// has only one answer, so kx supplies it; a pod with several is ambiguous and
+// kubectl's own error names the candidates better than a guess would.
+//
+// Best-effort: the lookup costs one kubectl call, and a failure means the
+// flag is omitted rather than the command refused. kubectl still runs, just
+// without the process namespace shared.
+func (c DebugCommand) target(name, namespace string, extraArgs []string) string {
+	if explicit, _, _ := extractString(extraArgs, "--target", ""); explicit != "" {
+		return ""
+	}
+	output, err := c.Kubectl.Run([]string{
+		"get", "pod", name, "-n", namespace,
+		"-o", "jsonpath={range .spec.containers[*]}{.name}{\"\\n\"}{end}",
+	})
+	if err != nil {
+		return ""
+	}
+	containers := strings.Fields(output)
+	if len(containers) != 1 {
+		return ""
+	}
+	return containers[0]
+}
+
 // ContextsCommand lists kubeconfig contexts and indexes them.
 //
 // The listing goes to the context slot and nowhere else. A context is a
