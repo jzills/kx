@@ -289,6 +289,60 @@ func TestAddDedupesDuplicateNamesKeepingFirst(t *testing.T) {
 	}
 }
 
+// `kubectl top pod --containers` prints one row per container: POD holds the
+// pod, NAME holds the container. Two pods in one namespace running the same
+// container name is ordinary (a Deployment's replicas always do), and keying
+// the dedupe on NAME collapsed them — six rows rendered as three.
+func TestAddKeepsEveryContainerRow(t *testing.T) {
+	containers := "POD        NAME      CPU(cores)   MEMORY(bytes)\n" +
+		"web-a      nginx     1m           12Mi\n" +
+		"web-b      nginx     0m           13Mi\n" +
+		"web-a      sidecar   2m           4Mi"
+	table := Service{}.Add(containers)
+
+	if len(table.Rows) != 3 {
+		t.Fatalf("len(Rows) = %d, want 3:\n%s", len(table.Rows), table.Text())
+	}
+	if !strings.Contains(table.Text(), "web-b") {
+		t.Errorf("dropped the second pod's container row:\n%s", table.Text())
+	}
+}
+
+// An index has to name something kx can act on. No kubectl call takes a bare
+// container name, so a `--containers` row resolves to the pod holding it —
+// otherwise `kx logs 1` looks up a pod named "nginx" and reports it missing.
+func TestAddResolvesContainerRowsToTheirPod(t *testing.T) {
+	containers := "POD        NAME      CPU(cores)   MEMORY(bytes)\n" +
+		"web-a      nginx     1m           12Mi\n" +
+		"web-a      sidecar   2m           4Mi"
+	entries := Service{}.Add(containers).Entries
+
+	if len(entries) != 2 {
+		t.Fatalf("len(Entries) = %d, want 2", len(entries))
+	}
+	for i, entry := range entries {
+		if entry.Name != "web-a" {
+			t.Errorf("Entries[%d].Name = %q, want the pod %q", i, entry.Name, "web-a")
+		}
+	}
+}
+
+// The namespace still separates same-named pods, and now has to do it while
+// POD rather than NAME is supplying the name.
+func TestAddSeparatesContainerRowsByNamespace(t *testing.T) {
+	containers := "NAMESPACE   POD     NAME    CPU(cores)   MEMORY(bytes)\n" +
+		"prod        web     nginx   1m           12Mi\n" +
+		"staging     web     nginx   0m           13Mi"
+	entries := Service{}.Add(containers).Entries
+
+	if len(entries) != 2 {
+		t.Fatalf("len(Entries) = %d, want 2 — collapsed two namespaces", len(entries))
+	}
+	if entries[0].Namespace != "prod" || entries[1].Namespace != "staging" {
+		t.Errorf("Entries = %v, want one per namespace", entries)
+	}
+}
+
 type fakeResolver struct{ names []string }
 
 func (f fakeResolver) Names() []string { return f.names }
