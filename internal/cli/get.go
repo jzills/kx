@@ -11,8 +11,11 @@ import (
 
 // Indexer prefixes kubectl output with an index column and filters it by name.
 type Indexer interface {
+	// Add parses kubectl output and numbers it, for callers holding text.
 	Add(output string) index.Table
-	Filter(output, term string) string
+	// AddRows numbers rows already parsed, for callers that narrowed or
+	// widened the table on the way and must not re-serialise it to do so.
+	AddRows(headers []string, rows [][]string) index.Table
 }
 
 // StateWriter is the slice of the state service `get` needs.
@@ -101,9 +104,6 @@ func (c GetCommand) Execute(
 	if err != nil {
 		return index.Table{}, "", err
 	}
-	if filterTerm != "" {
-		output = c.Index.Filter(output, filterTerm)
-	}
 	// An -A listing has no single namespace to record on the entry; each
 	// resource carries its own instead, read from the table's NAMESPACE column.
 	// The caller labels the scope.
@@ -114,7 +114,7 @@ func (c GetCommand) Execute(
 		}
 	}
 
-	indexed := c.Index.Add(output)
+	indexed := c.index(output, filterTerm)
 	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
@@ -168,12 +168,12 @@ func (c GetCommand) ExecuteGroups(
 		if err != nil {
 			return index.Table{}, err
 		}
-		if filterTerm != "" {
-			output = c.Index.Filter(output, filterTerm)
-		}
 		raw = append(raw, output)
 
 		groupHeaders, rows, _ := index.ParseTable(output)
+		if groupHeaders != nil && filterTerm != "" {
+			rows = index.FilterRows(groupHeaders, rows, filterTerm)
+		}
 		if groupHeaders == nil {
 			// Non-tabular (-o json/yaml/name). Nothing to index or stitch;
 			// the raw replies are printed as they came, the same degradation
@@ -191,7 +191,7 @@ func (c GetCommand) ExecuteGroups(
 		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 
-	indexed := c.Index.Add(index.Format(append([][]string{headers}, merged...)))
+	indexed := c.Index.AddRows(headers, merged)
 	if len(indexed.Entries) > 0 {
 		if err := c.State.Save(state.State{
 			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
@@ -200,6 +200,23 @@ func (c GetCommand) ExecuteGroups(
 		}
 	}
 	return indexed, nil
+}
+
+// index parses kubectl output once and numbers it, narrowing by name first
+// when a --match term was given.
+//
+// Filtering happens before numbering so the indexes run 1..n over the rows the
+// user is actually looking at, and on the rows themselves so nothing has to be
+// re-serialised to text and parsed again between the two.
+func (c GetCommand) index(output, filterTerm string) index.Table {
+	if filterTerm == "" {
+		return c.Index.Add(output)
+	}
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil {
+		return c.Index.Add(output)
+	}
+	return c.Index.AddRows(headers, index.FilterRows(headers, rows, filterTerm))
 }
 
 // resourcesFrom turns indexed entries into saved resources of a single kind,
