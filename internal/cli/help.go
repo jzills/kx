@@ -36,13 +36,13 @@ var helpSections = []struct {
 	{"Shell", []string{"completion"}},
 }
 
-// selecting is the index workflow, on the screen people reach for first.
+// examples are the index workflow, on the screen people reach for first.
 //
 // Every line here is a feature that existed only in the README: the numbering
 // itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
 // has none. A per-command --help can't teach any of it, because none of it
 // belongs to one command.
-var selecting = []render.HelpItem{
+var examples = []render.HelpItem{
 	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
 	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
 	{Name: "kx describe 2", Doc: "Any command takes an index from that listing"},
@@ -92,17 +92,19 @@ func homeRelative(path string) string {
 	return "~" + string(filepath.Separator) + rest
 }
 
-// environment lists the config overrides — kx's own keys, and only those.
+// environment lists the config overrides — kx's own keys, and only those,
+// alphabetically, the way every other block on this screen is ordered.
 //
 // NO_COLOR is still honored (see render.New), but it is a terminal-wide
 // convention rather than a kx setting, and listing it beside KX_THEME and
-// KX_NO_COLOR implied kx owned it. The README documents it where it belongs,
-// with the rest of the styling behavior.
+// KX_THEME_DISABLE implied kx owned it. The README documents it where it
+// belongs, with the rest of the styling behavior.
 func environment() []render.HelpItem {
 	var items []render.HelpItem
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	return items
 }
 
@@ -187,7 +189,7 @@ func installHelp(root *cobra.Command, version string) {
 	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		if cmd == root {
 			render.ShowRootHelp(render.RootHelp{
-				Selecting:   selecting,
+				Examples:    examples,
 				Sections:    rootSections(root),
 				Options:     rootOptions(root),
 				Files:       files(),

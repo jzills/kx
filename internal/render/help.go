@@ -28,6 +28,9 @@ type HelpSection struct {
 	Items []HelpItem
 }
 
+// gutter is the space between a help screen's columns, and its left margin.
+const gutter = "  "
+
 // pad right-aligns a help column so descriptions line up.
 func padName(name string, width int) string {
 	if len(name) >= width {
@@ -55,7 +58,6 @@ func (r *Renderer) Detail(pairs [][2]string) string {
 			width = len(pair[0])
 		}
 	}
-	const gutter = "  "
 	lines := make([]string, 0, len(pairs))
 	for _, pair := range pairs {
 		lines = append(lines, gutter+
@@ -132,12 +134,15 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 		}
 	}
 
-	const gutter = "  "
 	indent := len(gutter) + nameWidth + len(gutter)
 	docWidth := r.helpWidth() - indent
 
 	r.Blank()
-	r.line(r.style(theme.Header, title))
+	// An empty title is a block that continues the one above it — the examples
+	// under the Usage heading — rather than a heading rendered blank.
+	if title != "" {
+		r.line(r.style(theme.Header, title))
+	}
 	for _, item := range items {
 		name := gutter + r.style(theme.Body, padName(item.Name, nameWidth)) + gutter
 		wrapped := wrapText(item.Doc, docWidth)
@@ -159,12 +164,14 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 // config package that reads them. The hardcoded option list this replaced had
 // already drifted from the flag it documented.
 type RootHelp struct {
-	// Selecting introduces the index workflow: a spelling paired with what it
-	// does. Sized to the same column as the sections below it.
-	Selecting []HelpItem
-	Sections  []HelpSection
-	Options   []HelpItem
-	Files     []HelpItem
+	// Examples introduce the index workflow: a spelling paired with what it
+	// does. Sized to the same column as the sections below it, and printed
+	// under the same Usage heading as the argv line, since both answer "how do
+	// I spell this".
+	Examples []HelpItem
+	Sections []HelpSection
+	Options  []HelpItem
+	Files    []HelpItem
 	// Environment lists the variables that override the config file.
 	Environment []HelpItem
 	// Footer closes the screen — where to go next, in plain sentences.
@@ -187,10 +194,13 @@ func (r *Renderer) RootHelp(help RootHelp) {
 		r.line(r.style(theme.Header, line))
 	}
 	r.line(r.style(theme.Muted, "kubectl, indexed."))
+	// The argv line and the examples share one heading. Titling the examples
+	// separately put the word "Usage" on the screen twice, three lines apart,
+	// naming the same thing both times.
 	r.Blank()
-	r.line(r.style(theme.Muted, "Usage") + "  kx [OPTIONS] COMMAND [ARGS]...")
-
-	r.itemBlock("Selecting resources", help.Selecting, rootNameWidth)
+	r.line(r.style(theme.Header, "Usage"))
+	r.line(gutter + r.style(theme.Body, "kx [OPTIONS] COMMAND [ARGS]..."))
+	r.itemBlock("", help.Examples, rootNameWidth)
 
 	for _, section := range help.Sections {
 		// The command list is the one block that truncates rather than wraps:

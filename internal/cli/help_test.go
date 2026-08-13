@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 	"testing"
 
@@ -311,14 +312,14 @@ func TestCompletionAppearsOnTheRootScreen(t *testing.T) {
 // The front page teaches the index workflow by example, so a renamed or
 // removed command would leave it demonstrating a spelling kx no longer
 // accepts.
-func TestSelectingBlockUsesRealSpellings(t *testing.T) {
+func TestExampleBlockUsesRealSpellings(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	ranges := false
 
-	for _, item := range selecting {
+	for _, item := range examples {
 		fields := strings.Fields(item.Name)
 		if len(fields) < 2 || fields[0] != "kx" {
-			t.Errorf("selecting example %q does not start with 'kx <something>'", item.Name)
+			t.Errorf("example %q does not start with 'kx <something>'", item.Name)
 			continue
 		}
 		// Whatever follows `kx` must resolve the way Execute resolves it:
@@ -326,7 +327,7 @@ func TestSelectingBlockUsesRealSpellings(t *testing.T) {
 		verb := fields[1]
 		cmd, _, err := root.Find([]string{verb})
 		if (err != nil || cmd == root) && !kinds.IsKindSpelling(verb) {
-			t.Errorf("selecting example %q: %q is neither a command nor a kind", item.Name, verb)
+			t.Errorf("example %q: %q is neither a command nor a kind", item.Name, verb)
 		}
 		// Only the spelling column counts: an ellipsis in a description ("rows
 		// 1, 2, 3...") contains ".." without demonstrating a range.
@@ -403,6 +404,20 @@ func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
 		if !strings.HasPrefix(name, "KX_") {
 			t.Errorf("Environment block lists %s, which is not a kx setting", name)
 		}
+	}
+}
+
+// TestHelpSectionCommandsAreAlphabetized applies the same rule to the command
+// sections, where the order is written down in helpSections. Here it isn't:
+// the Environment block is built from config.Settings(), whose order is
+// whatever the loader's author found convenient.
+func TestEnvironmentBlockIsAlphabetical(t *testing.T) {
+	names := []string{}
+	for _, item := range environment() {
+		names = append(names, item.Name)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("Environment block is out of order: %v", names)
 	}
 }
 

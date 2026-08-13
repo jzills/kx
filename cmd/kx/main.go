@@ -50,7 +50,7 @@ func run() int {
 	// --no-color is resolved from the raw arguments rather than from cobra,
 	// because the pass-through commands disable flag parsing and would
 	// otherwise not surface it until after their first output.
-	render.Configure(cfg.Theme, cfg.NoColor || hasNoColorFlag(os.Args[1:]))
+	render.Configure(cfg.Theme, cfg.ThemeDisable || hasNoColorFlag(os.Args[1:]))
 
 	// Installed here rather than in cli.NewRoot so it only ever runs for the
 	// real binary: internal/cli's own tests call NewRoot directly, many
