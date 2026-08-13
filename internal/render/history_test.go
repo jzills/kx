@@ -235,3 +235,66 @@ func TestStateHistoryShowsSwitchTargetsWithNoEntries(t *testing.T) {
 		t.Errorf("output = %q, want the switch-targets block alongside it", out)
 	}
 }
+
+// An -A listing records no entry namespace — each resource carries its own —
+// so the column would otherwise be blank, which reads as missing data rather
+// than as the scope it is.
+func TestStateHistoryNamesAllNamespacesForASpanningEntry(t *testing.T) {
+	history := state.History{
+		States: []state.State{{
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+				{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
+			}),
+			Context: "docker-desktop",
+		}},
+		Cursor: 0,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if !strings.Contains(out, AllNamespaces) {
+		t.Errorf("output = %q, want the spanning entry scoped %q", out, AllNamespaces)
+	}
+}
+
+// A single-namespace entry still shows its own namespace, not the -A label.
+func TestStateHistoryKeepsASingleNamespace(t *testing.T) {
+	history := state.History{
+		States: []state.State{{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+		}},
+		Cursor: 0,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(history) })
+
+	if !strings.Contains(out, "prod") {
+		t.Errorf("output = %q, want the entry's own namespace", out)
+	}
+	if strings.Contains(out, AllNamespaces) {
+		t.Errorf("output = %q, want no all-namespaces label on a scoped entry", out)
+	}
+}
+
+// `kx state` captions one entry, and the scope sits before the context. A
+// spanning entry showed neither, so the caption jumped from the kind straight
+// to the context.
+func TestStateNamesAllNamespacesForASpanningEntry(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+			}),
+			Context: "docker-desktop",
+		})
+	})
+
+	scope := strings.Index(out, AllNamespaces)
+	context := strings.Index(out, "docker-desktop")
+	if scope < 0 {
+		t.Fatalf("output = %q, want the spanning scope named", out)
+	}
+	if context < 0 || scope > context {
+		t.Errorf("output = %q, want the scope before the context", out)
+	}
+}

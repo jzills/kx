@@ -38,6 +38,23 @@ func entryLabel(count int) string {
 // than a history entry means you can reach this without anything being wrong.
 const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
 
+// AllNamespaces is how kx names a listing that spans them, wherever a single
+// namespace would otherwise be shown.
+const AllNamespaces = "all namespaces"
+
+// scopeLabel names the scope an entry was listed in.
+//
+// A listing that spans namespaces records none on the entry, because there is
+// no single one to record — each resource carries its own. Left as the empty
+// string it would render as a blank column and drop out of the caption
+// entirely, which reads as missing data rather than as the scope it is.
+func scopeLabel(entry state.State) string {
+	if entry.Resources.Spanning() {
+		return AllNamespaces
+	}
+	return entry.Namespace
+}
+
 // spansContexts reports whether the stack holds entries from more than one
 // context, which is the only shape where the context belongs in a column.
 //
@@ -105,7 +122,7 @@ func (r *Renderer) StateHistory(history state.History) {
 			Styled(strconv.Itoa(position+1), rowStyle),
 			Styled(marker, theme.Header),
 			Styled(kindLabel(entry.Resources), rowStyle),
-			Styled(entry.Namespace, rowStyle),
+			Styled(scopeLabel(entry), rowStyle),
 		}
 		if perRow {
 			row = append(row, Styled(entry.Context, rowStyle))
@@ -191,7 +208,7 @@ func (r *Renderer) State(entry state.State) {
 	count := entry.Resources.Len()
 	// The context sits beside the namespace: both say where the listing was
 	// taken, and Caption drops either when it is empty.
-	r.Caption(kindLabel(entry.Resources), entry.Namespace, entry.Context, itemLabel(count))
+	r.Caption(kindLabel(entry.Resources), scopeLabel(entry), entry.Context, itemLabel(count))
 
 	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}, {Header: "NAME"}}
 	rows := make([][]Cell, 0, count)
