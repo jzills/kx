@@ -49,10 +49,30 @@ var columnSepRE = regexp.MustCompile(`\s{2,}`)
 // present when --output-watch-events was requested, NAMESPACE only when
 // -A/--all-namespaces was).
 type TableShape struct {
-	Headers      []string
-	NameIdx      int
+	Headers []string
+	NameIdx int
+	// ResourceIdx is the column naming the resource an index resolves to,
+	// which is not always NAME. See resourceIndex.
+	ResourceIdx  int
 	EventIdx     int
 	NamespaceIdx int
+}
+
+// resourceIndex locates the column naming the resource an index addresses.
+//
+// Usually that is NAME, but `kubectl top pod --containers` prints one row per
+// container: POD holds the pod and NAME holds the container inside it. An index
+// has to resolve to something kx can act on — `kx logs 3` needs a pod, and no
+// kubectl call takes a bare container name — so POD wins wherever both appear.
+//
+// Reading NAME there is what made `kx top --containers` save containers as
+// pods, so `kx logs 1` looked up a pod named "istio-proxy" and reported it
+// missing.
+func resourceIndex(headers []string, nameIdx int) int {
+	if pod := columnIndex(headers, "POD"); pod >= 0 {
+		return pod
+	}
+	return nameIdx
 }
 
 // ParseHeader splits a kubectl header line into column names, and locates
@@ -82,6 +102,7 @@ func shapeOf(headers []string) (TableShape, bool) {
 	return TableShape{
 		Headers:      headers,
 		NameIdx:      nameIdx,
+		ResourceIdx:  resourceIndex(headers, nameIdx),
 		EventIdx:     columnIndex(headers, "EVENT"),
 		NamespaceIdx: columnIndex(headers, "NAMESPACE"),
 	}, true
@@ -261,6 +282,20 @@ type Entry struct {
 	Namespace string
 }
 
+// rowKey is what makes one row distinct from the rows before it.
+//
+// Deliberately not the Entry: several rows can resolve to one resource —
+// `kubectl top pod --containers` prints a row per container, every one of them
+// naming the same pod — and they are distinct rows for all that. Keying the
+// dedupe on the Entry collapsed them.
+type rowKey struct {
+	Entry
+	// Label is the NAME cell when NAME names something *inside* the resource
+	// rather than the resource itself, and "" when the two are one column. It
+	// is what holds two containers of the same pod apart.
+	Label string
+}
+
 // Table is an indexed listing: the shape a renderer draws, the entries state
 // resolves indexes against, and — for output kx cannot number — the raw text to
 // print as it came.
@@ -328,23 +363,30 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	// indistinguishable from an earlier one is collapsed (first-seen wins) —
 	// otherwise the displayed indexes and the state entries desync.
 	//
-	// What "indistinguishable" means depends on the table. Name alone is right
+	// What "indistinguishable" means depends on the table, and it is a property
+	// of the row, not of the resource the row resolves to. Name alone is right
 	// for a single namespace, and wrong the moment a listing spans them: two
-	// namespaces running the same workload name hold two different resources,
-	// and collapsing them drops one from the table entirely. So the key takes
-	// in the namespace whenever the table reports one.
-	seen := make(map[Entry]bool, len(rows))
+	// namespaces running the same workload name hold two different resources.
+	// And a table can legitimately hold several rows for one resource —
+	// `kubectl top pod --containers` prints one per container — which are
+	// different rows however identical their Entry is. Collapsing on the Entry
+	// dropped every container after the first, rendering six rows as three.
+	seen := make(map[rowKey]bool, len(rows))
 	indexed := make([][]string, 0, len(rows))
 	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
-		entry := Entry{Name: row[shape.NameIdx]}
+		entry := Entry{Name: row[shape.ResourceIdx]}
 		if shape.NamespaceIdx >= 0 {
 			entry.Namespace = row[shape.NamespaceIdx]
 		}
-		if seen[entry] {
+		key := rowKey{Entry: entry}
+		if shape.ResourceIdx != shape.NameIdx {
+			key.Label = row[shape.NameIdx]
+		}
+		if seen[key] {
 			continue
 		}
-		seen[entry] = true
+		seen[key] = true
 		entries = append(entries, entry)
 		indexed = append(indexed, append([]string{strconv.Itoa(len(entries))}, row...))
 	}
