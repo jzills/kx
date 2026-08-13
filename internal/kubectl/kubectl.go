@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 const missingKubectl = "kubectl not found on PATH — install kubectl " +
@@ -38,10 +39,70 @@ type Service interface {
 }
 
 // Exec is the real Service, shelling out to kubectl.
-type Exec struct{}
+type Exec struct {
+	// context memoises `kubectl config current-context`.
+	//
+	// A pointer so Exec stays copyable — the methods take it by value, and a
+	// mutex sitting directly in the struct would make every copy a vet
+	// complaint. Nil means "do not cache", which is what a bare Exec{} in a
+	// test gets and what the uncached behaviour used to be everywhere.
+	context *contextCache
+}
 
 // New returns a kubectl service backed by the kubectl binary.
-func New() *Exec { return &Exec{} }
+func New() *Exec { return &Exec{context: &contextCache{}} }
+
+// contextCache holds the current context for the life of the process.
+//
+// Worth caching because every index resolution checks it — kx refuses an index
+// counted in another cluster — and the check ran a subprocess each time: three
+// per index, so `kx labels 1 2 3` spawned nine `kubectl config current-context`
+// processes against three doing the work.
+//
+// Invalidated rather than held forever, because kx changes the answer itself:
+// `kx context 2` switches inside a single process, and the listing saved after
+// that switch belongs to the new context. See Exec.Run.
+type contextCache struct {
+	mu    sync.Mutex
+	value string
+	known bool
+}
+
+func (c *contextCache) get() (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value, c.known
+}
+
+func (c *contextCache) set(value string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.value, c.known = value, true
+}
+
+func (c *contextCache) forget() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.value, c.known = "", false
+}
+
+// changesContext reports whether an invocation switches the current context,
+// which is the one thing that can invalidate the cache from inside kx.
+//
+// Detected from the arguments rather than announced by the caller so it cannot
+// be forgotten: the switch and the invalidation are the same call.
+func changesContext(args []string) bool {
+	return len(args) >= 2 && args[0] == "config" && args[1] == "use-context"
+}
 
 // command builds the exec.Cmd. A missing kubectl surfaces at Start/Run time as
 // exec.ErrNotFound; every entry point below translates it into an actionable
@@ -66,6 +127,12 @@ func (e Exec) Run(args []string) (string, error) {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	// A switch that reached kubectl has changed what the current context is,
+	// whatever it then reported. Dropped before the error checks so a partial
+	// failure cannot leave a cached context that no longer exists.
+	if changesContext(args) {
+		e.context.forget()
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return "", errors.New(strings.TrimSpace(stderr.String()))
@@ -175,12 +242,21 @@ func (e Exec) CurrentNamespace() string {
 
 // CurrentContext reports the active context, or "" when none is set, so context
 // listing still works instead of failing.
+//
+// Memoised for the life of the process, and dropped again when kx switches the
+// context itself — see contextCache. A kubeconfig with no current context
+// caches the empty answer too: "none set" is as worth remembering as a name,
+// and re-asking spawned a subprocess to be told the same thing.
 func (e Exec) CurrentContext() string {
-	out, err := e.Run([]string{"config", "current-context"})
-	if err != nil {
-		return ""
+	if value, known := e.context.get(); known {
+		return value
 	}
-	return strings.TrimSpace(out)
+	value := ""
+	if out, err := e.Run([]string{"config", "current-context"}); err == nil {
+		value = strings.TrimSpace(out)
+	}
+	e.context.set(value)
+	return value
 }
 
 var _ Service = (*Exec)(nil)
