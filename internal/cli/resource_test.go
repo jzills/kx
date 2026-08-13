@@ -945,9 +945,9 @@ func TestContextsIndexesEveryContext(t *testing.T) {
 // namespace each context *defaults to* — not one the context lives in, because
 // contexts are kubeconfig entries and are not namespaced at all.
 //
-// Recorded as a resource namespace it was read as one: Resources.Spanning()
-// treats any per-resource namespace as "this listing spans namespaces", which
-// captioned the context slot in `kx state --targets` as "all namespaces".
+// Recorded as a resource namespace it was read as one, back when the scope was
+// inferred from whether resources carried namespaces — which captioned the
+// context slot in `kx state --targets` as "all namespaces".
 func TestContextsRecordsNoResourceNamespace(t *testing.T) {
 	kubectl := &recordingKubectl{
 		output: "CURRENT   NAME             CLUSTER          NAMESPACE\n" +
@@ -971,7 +971,7 @@ func TestContextsRecordsNoResourceNamespace(t *testing.T) {
 				resource.Name, resource.Namespace)
 		}
 	}
-	if states.named[0].Resources.Spanning() {
+	if states.named[0].AllNamespaces {
 		t.Error("context slot reports itself as spanning namespaces")
 	}
 }

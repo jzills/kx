@@ -320,6 +320,22 @@ type Table struct {
 // Indexable reports whether the output parsed as a table kx could number.
 func (t Table) Indexable() bool { return t.Headers != nil }
 
+// Placed reports whether the entries record where they live.
+//
+// Only meaningful for a listing that spans namespaces, where it is the
+// difference between an index that resolves to one resource and an index that
+// resolves to whichever namespace the caller is standing in. False for an
+// ordinary single-namespace listing too — its table has no NAMESPACE column
+// either — so callers ask this only when they know the scope is -A.
+func (t Table) Placed() bool {
+	for _, entry := range t.Entries {
+		if entry.Namespace != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Text renders the table back to padded text, for the callers that still need a
 // string. Non-tabular output comes back exactly as it arrived.
 func (t Table) Text() string {

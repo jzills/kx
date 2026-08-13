@@ -232,6 +232,45 @@ func TestGetAllNamespacesLeavesTheEntryNamespaceEmpty(t *testing.T) {
 	}
 }
 
+// An -A listing records the scope it was taken at, rather than leaving it to be
+// inferred from whether its resources carry namespaces — which a walk that
+// never left one namespace also does.
+func TestGetAllNamespacesRecordsTheScope(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: allNamespacesPodsOutput}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", []string{"-A"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !states.saved[0].AllNamespaces {
+		t.Error("saved entry does not record that it spans namespaces")
+	}
+}
+
+// Asked for a shape with no NAMESPACE column, an -A listing cannot say where
+// any row lives. Numbering it anyway resolved every index into whatever
+// namespace the caller was standing in, and reported the misses as resources
+// that no longer exist — so it is printed unnumbered, the way `-o json` is, and
+// the listing already in state is left usable.
+func TestGetAllNamespacesWithoutANamespaceColumnIsNotIndexed(t *testing.T) {
+	states := &fakeState{}
+	kubectl := &fakeKubectl{output: "NAME\nnginx-abc-xyz\nredis-def-uvw"}
+
+	table, _, err := newGet(kubectl, states).Execute(
+		"pods", "", []string{"-A", "-o", "custom-columns=NAME:.metadata.name"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if table.Indexable() {
+		t.Errorf("numbered a listing it cannot place:\n%s", table.Text())
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("saved %d entries, want none — the rows have no namespace", len(states.saved))
+	}
+}
+
 // A single-namespace listing has no NAMESPACE column, so its resources record
 // none and the entry's namespace answers for all of them — the shape every
 // existing state file already has.

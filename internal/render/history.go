@@ -67,11 +67,16 @@ func contextListing(resources state.Resources) bool {
 // the source (see contextResources) because slots written before that fix still
 // hold get-contexts' NAMESPACE column on their resources, and a caption should
 // not stay wrong until the user happens to relist.
+//
+// Reads the scope the entry recorded rather than inferring it from whether its
+// resources carry namespaces. A `kx tree -n prod` walk stamps prod onto every
+// resource it returns, which inference read as spanning — captioning a walk
+// that never left one namespace "all namespaces".
 func scopeLabel(entry state.State) string {
 	if contextListing(entry.Resources) {
 		return ""
 	}
-	if entry.Resources.Spanning() {
+	if entry.AllNamespaces {
 		return AllNamespaces
 	}
 	return entry.Namespace

@@ -100,8 +100,9 @@ func (c TopCommand) Execute(
 			entryNamespace = ""
 		}
 		if err := c.State.Save(state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Pod),
-			Namespace: entryNamespace,
+			Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
+			Namespace:     entryNamespace,
+			AllNamespaces: allNamespaces,
 			// Recorded as a `get pods` query so a stale entry refreshes into a
 			// listing, which is what the indexes were assigned against.
 			Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},

@@ -341,7 +341,8 @@ func TestStateHistoryNamesAllNamespacesForASpanningEntry(t *testing.T) {
 				{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
 				{Name: "api", Kind: kinds.Pod, Namespace: "staging"},
 			}),
-			Context: "docker-desktop",
+			AllNamespaces: true,
+			Context:       "docker-desktop",
 		}},
 		Cursor: 0,
 	}
@@ -349,6 +350,28 @@ func TestStateHistoryNamesAllNamespacesForASpanningEntry(t *testing.T) {
 
 	if !strings.Contains(out, AllNamespaces) {
 		t.Errorf("output = %q, want the spanning entry scoped %q", out, AllNamespaces)
+	}
+}
+
+// A tree walk records the namespace on every resource it returns, including a
+// single-namespace walk. Inferring the scope from that made `kx tree -n prod`
+// caption itself "all namespaces" — a walk that never left one namespace.
+func TestStateKeepsTheScopeOfASingleNamespaceWalk(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
+				{Name: "api-7d9", Kind: kinds.Pod, Namespace: "prod"},
+			}),
+			Namespace: "prod",
+		})
+	})
+
+	if strings.Contains(out, AllNamespaces) {
+		t.Errorf("output = %q, want no all-namespaces label on a single-namespace walk", out)
+	}
+	if !strings.Contains(out, "prod") {
+		t.Errorf("output = %q, want the namespace the walk ran in", out)
 	}
 }
 
@@ -380,7 +403,8 @@ func TestStateNamesAllNamespacesForASpanningEntry(t *testing.T) {
 			Resources: state.NewOrderedResources([]state.Resource{
 				{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
 			}),
-			Context: "docker-desktop",
+			AllNamespaces: true,
+			Context:       "docker-desktop",
 		})
 	})
 

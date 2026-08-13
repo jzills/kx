@@ -115,6 +115,16 @@ func (c GetCommand) Execute(
 	}
 
 	indexed := c.index(output, filterTerm)
+	// An index into a spanning listing is only usable if it resolves to a
+	// namespace, and the table is the only place that comes from. Asked for a
+	// shape that omits the NAMESPACE column — `-o custom-columns=NAME:...` — kx
+	// numbered rows it could not place, then resolved every one of them into
+	// whatever namespace the caller happened to be standing in and reported the
+	// misses as resources that no longer exist. Printing it unnumbered says the
+	// same thing kx already says about `-o json`: this is output it cannot index.
+	if allNamespaces(extraArgs) && !indexed.Placed() {
+		return index.Table{Raw: output}, namespace, nil
+	}
 	if len(indexed.Entries) > 0 {
 		var match *string
 		if filterTerm != "" {
@@ -124,8 +134,9 @@ func (c GetCommand) Execute(
 			extraArgs = []string{}
 		}
 		entry := state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
-			Namespace: namespace,
+			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			Namespace:     namespace,
+			AllNamespaces: allNamespaces(extraArgs),
 			Query: &state.Query{
 				Resource: resource,
 				Args:     extraArgs,
@@ -194,7 +205,10 @@ func (c GetCommand) ExecuteGroups(
 	indexed := c.Index.AddRows(headers, merged)
 	if len(indexed.Entries) > 0 {
 		if err := c.State.Save(state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			// Groups are fetched one namespace at a time and stitched back
+			// together, so the merged listing spans them by construction.
+			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+			AllNamespaces: true,
 		}); err != nil {
 			return index.Table{}, err
 		}

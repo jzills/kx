@@ -118,8 +118,9 @@ func (c TriageCommand) Execute(
 		// the entry wants: no single namespace, each resource recording its own.
 		// A second guard here would be dead code.
 		if err := c.Save(state.State{
-			Resources: state.NewOrderedResources(entries),
-			Namespace: namespace,
+			Resources:     state.NewOrderedResources(entries),
+			Namespace:     namespace,
+			AllNamespaces: allNamespaces,
 		}); err != nil {
 			return render.TriageResult{}, err
 		}

@@ -40,7 +40,7 @@ func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tre
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -52,7 +52,7 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed); err != nil {
+	if err := c.save(resources, namespace, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -89,7 +89,14 @@ func (c TreeCommand) ExecuteAllNamespaces(
 //
 // A tree entry carries no Query: it wasn't produced by `kx get`, so there is
 // nothing to re-run if it goes stale.
-func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed bool) error {
+//
+// allNamespaces is passed rather than inferred from an empty namespace: a walk
+// records the namespace on every resource it returns, including a
+// single-namespace one, so nothing about the resources distinguishes the two
+// scopes afterwards.
+func (c TreeCommand) save(
+	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
+) error {
 	if !indexed || len(resources) == 0 {
 		return nil
 	}
@@ -101,8 +108,9 @@ func (c TreeCommand) save(resources []graph.Resource, namespace string, indexed 
 		})
 	}
 	return c.Save(state.State{
-		Resources: state.NewOrderedResources(entries),
-		Namespace: namespace,
+		Resources:     state.NewOrderedResources(entries),
+		Namespace:     namespace,
+		AllNamespaces: allNamespaces,
 	})
 }
 
@@ -191,7 +199,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					}
 					// Saved with no entry namespace: the forest spans them, and
 					// each resource records its own.
-					if err := command.save(resources, "", indexed); err != nil {
+					if err := command.save(resources, "", indexed, true); err != nil {
 						return err
 					}
 					render.ScopeBanner("Namespace", render.AllNamespaces, "")
