@@ -168,6 +168,37 @@ func Normalize(resourceType string) Kind {
 	return Kind(resourceType)
 }
 
+// displayPlural builds a caption plural from a kind and the API's own plural
+// for it.
+//
+// Discovery reports the plural as the API resource *name* — "serviceaccounts",
+// "networkpolicies" — which is lowercase by definition, since it is a URL path
+// segment rather than a display string. Captioning with it directly is what put
+// "serviceaccounts · diagnostics · 1 item" on screen beside "Pods" and
+// "ConfigMaps".
+//
+// The kind is already the PascalCase spelling, so only the pluralising suffix
+// is taken from the API — which is the part worth taking, since the API server
+// knows the irregulars and a rule here would have to guess them.
+func displayPlural(kind Kind, apiPlural string) string {
+	lower := strings.ToLower(string(kind))
+	switch {
+	// "serviceaccount" -> "serviceaccounts" keeps the kind and takes "s";
+	// "ingress" -> "ingresses" takes "es"; "endpoints" -> "endpoints" takes
+	// nothing, which is right — the kind is already plural.
+	case strings.HasPrefix(apiPlural, lower):
+		return string(kind) + apiPlural[len(lower):]
+	// "networkpolicy" -> "networkpolicies" is not a suffix at all: the stem
+	// changes. Recognised rather than guessed, so it only applies when the API
+	// actually spelled it that way.
+	case strings.HasSuffix(lower, "y") && apiPlural == strings.TrimSuffix(lower, "y")+"ies":
+		return strings.TrimSuffix(string(kind), "y") + "ies"
+	}
+	// An irregular nothing here models. The kind is still the right register to
+	// caption in, which a lowercase URL segment never is.
+	return string(kind) + "s"
+}
+
 // PluralDisplay renders a resource type for captions ("pods" -> "Pods"),
 // passing unknown types through unchanged.
 func PluralDisplay(resourceType string) string {
@@ -178,8 +209,8 @@ func PluralDisplay(resourceType string) string {
 		return string(kind) + "s"
 	}
 	if shorthandSource != nil {
-		if _, plural, ok := shorthandSource.Resolve(resourceType); ok && plural != "" {
-			return plural
+		if kind, plural, ok := shorthandSource.Resolve(resourceType); ok && kind != "" {
+			return displayPlural(kind, plural)
 		}
 	}
 	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
