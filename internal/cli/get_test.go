@@ -104,7 +104,7 @@ func TestGetIndexesOutputAndSavesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.HasPrefix(strings.Split(output, "\n")[0], "X") {
+	if !strings.HasPrefix(strings.Split(output.Text(), "\n")[0], "X") {
 		t.Errorf("output is not indexed:\n%s", output)
 	}
 	if len(states.saved) != 1 {
@@ -185,7 +185,7 @@ func TestGetAllNamespacesIsIndexed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if !strings.HasPrefix(output, "X") {
+		if !strings.HasPrefix(output.Text(), "X") {
 			t.Errorf("%s output was not indexed:\n%s", flag, output)
 		}
 		if len(states.saved) != 1 {
@@ -261,8 +261,11 @@ func TestGetAllNamespacesFalseIsIndexed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if output == podsOutput {
-			t.Errorf("%s output was not indexed:\n%s", flag, output)
+		// Asserted on the index column rather than on inequality with the raw
+		// input: a Table carries that input in Raw, so "not equal" would hold
+		// even for output that was never numbered.
+		if indexOfHeader(output.Headers, "X") < 0 {
+			t.Errorf("%s output was not indexed:\n%s", flag, output.Text())
 		}
 		if len(states.saved) != 1 {
 			t.Errorf("%s saved %d states, want 1", flag, len(states.saved))
@@ -291,7 +294,7 @@ func TestGetFiltersByMatchTerm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if strings.Contains(output, "redis") {
+	if strings.Contains(output.Text(), "redis") {
 		t.Errorf("filtered output still contains redis:\n%s", output)
 	}
 	if names := states.saved[0].Names(); len(names) != 1 || names[0] != "nginx-abc-xyz" {

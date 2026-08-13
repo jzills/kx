@@ -572,65 +572,28 @@ type ContextsCommand struct {
 // already, and `kubectl config current-context` is a subprocess worth spawning
 // once. Reading it back out of state is not an option either — the listing goes
 // to the slot, not the history the caller can Load().
-func (c ContextsCommand) Execute() (table, context string, err error) {
+func (c ContextsCommand) Execute() (table index.Table, context string, err error) {
 	output, err := c.Kubectl.Run([]string{"config", "get-contexts"})
 	if err != nil {
-		return "", "", err
+		return index.Table{}, "", err
 	}
 	current := c.Kubectl.CurrentContext()
-	indexed, names := c.Index.Add(dropColumn(output, "CURRENT"))
-	if len(names) > 0 {
+	// The CURRENT column is kept. It is blank on every row but the active one,
+	// and that blank used to be destroyed between here and the screen: Add
+	// prepended the index column, making the cell interior, and the renderer
+	// re-parsed the padded text, where an empty cell and column padding are the
+	// same run of spaces. Rows reach the renderer intact now, so the marker
+	// kubectl prints is the marker kx prints.
+	indexed := c.Index.Add(output)
+	if len(indexed.Entries) > 0 {
 		if err := c.State.SaveNamed(state.State{
-			Resources: resourcesFrom(names, kinds.Context),
+			Resources: resourcesFrom(indexed.Entries, kinds.Context),
 			Namespace: current,
 		}); err != nil {
-			return "", "", err
+			return index.Table{}, "", err
 		}
 	}
 	return indexed, current, nil
-}
-
-// dropColumn removes a named column from kubectl table output, leaving the rest
-// of the table intact. Output that isn't tabular, or that lacks the column, is
-// returned untouched.
-//
-// This exists for exactly one column. `kubectl config get-contexts` marks the
-// active context in a CURRENT column that is *blank* on every other row, and a
-// blank cell is the one thing kx's table text cannot represent: Add prepends the
-// X column, which makes the blank interior, and Format's padding then renders it
-// indistinguishable from a column separator. IndexedTable re-parses that text to
-// draw the table, so each non-current row shifted one column left and every
-// context's CLUSTER appeared under its NAME.
-//
-// Dropping beats defending here because the column was already redundant —
-// Execute returns the active context and it captions the listing, so the marker
-// said nothing the caption didn't. The parser's own blank-first-column handling
-// still covers kubectl's output as kx reads it; this only keeps kx from
-// re-emitting an ambiguity it would then have to re-read.
-func dropColumn(output, header string) string {
-	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
-		return output
-	}
-	column := indexOfHeader(headers, header)
-	if column < 0 {
-		return output
-	}
-	all := make([][]string, 0, len(rows)+1)
-	all = append(all, withoutColumn(headers, column))
-	for _, row := range rows {
-		all = append(all, withoutColumn(row, column))
-	}
-	return index.Format(all)
-}
-
-// withoutColumn copies a row with one cell removed. A copy rather than a
-// slice-splice: the rows share a backing array with the parse, and splicing in
-// place would corrupt the ones not yet visited.
-func withoutColumn(row []string, column int) []string {
-	kept := make([]string, 0, len(row)-1)
-	kept = append(kept, row[:column]...)
-	return append(kept, row[column+1:]...)
 }
 
 // NamedResolver resolves an index against a kind's own slot rather than against

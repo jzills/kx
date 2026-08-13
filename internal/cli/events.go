@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -154,7 +155,8 @@ func newTopCommand(services Services) *cobra.Command {
 			resourceLabel := "pods"
 			scopedAllNamespaces := false
 			note := ""
-			var output, namespace string
+			var output index.Table
+			var namespace string
 			if nodes {
 				resourceLabel = "nodes"
 				output, namespace, err = command.ExecuteNodes(match, rest)
