@@ -70,3 +70,36 @@ func TestVersionRendersWithoutAHomeDirectory(t *testing.T) {
 		t.Errorf("versionText =\n%s\nlost the docs line", text)
 	}
 }
+
+// The state file is half of what kx keeps on disk, and the half a bug report
+// usually turns on — which listing an index was resolving against. --help names
+// both files; --version named only the config one.
+func TestVersionReportsTheStateFile(t *testing.T) {
+	text := versionText(buildinfo.Info{Version: "0.3.2", Go: "go1.24.4", Platform: "linux/amd64"})
+
+	if !strings.Contains(text, "state") {
+		t.Errorf("versionText =\n%s\nmissing the state file line", text)
+	}
+	if !strings.Contains(text, "state.json") {
+		t.Errorf("versionText =\n%s\nwant the state file's path, not just its label", text)
+	}
+}
+
+// Both file lines come from the packages that own those paths, so neither can
+// name a file kx does not use — and a home directory kx cannot locate drops
+// them rather than guessing, the way the help screen's file list does.
+func TestVersionOmitsBothFilesWithoutAHomeDirectory(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	text := versionText(buildinfo.Info{Version: "0.3.2", Go: "go1.24.4", Platform: "linux/amd64"})
+
+	// The labels have to go too, not just the paths. A row whose value resolved
+	// to the empty string still prints its label, and a bare "state" with
+	// nothing after it reads as a broken build rather than an absent file.
+	for _, absent := range []string{"config", "state"} {
+		if strings.Contains(text, absent) {
+			t.Errorf("versionText =\n%s\nkept the %q row with no home directory to resolve it", text, absent)
+		}
+	}
+}
