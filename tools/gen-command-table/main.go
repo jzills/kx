@@ -8,6 +8,9 @@
 //
 // Exits non-zero when it rewrote the table, so the hook surfaces the change for
 // staging rather than committing a stale README.
+//
+// The signature rendering lives in tools/internal/cmddoc, shared with
+// gen-site-docs so the README and the site spell a command the same way.
 package main
 
 import (
@@ -17,8 +20,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/cli"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
+	"github.com/jzills/kx/tools/internal/cmddoc"
 )
 
 const (
@@ -27,62 +29,8 @@ const (
 	readmePath    = "README.md"
 )
 
-// argToken renders a positional argument the way the table shows it: angle
-// brackets name it, square brackets mark it optional, an ellipsis marks it
-// repeatable.
-func argToken(arg cli.Arg) string {
-	name := "<" + arg.Name + ">"
-	if arg.Variadic {
-		name += "..."
-	}
-	if arg.Required {
-		return name
-	}
-	return "[" + name + "]"
-}
-
-// flagToken renders a flag as [--long/-short type], dropping the type for
-// booleans since a switch takes no value.
-func flagToken(flag *pflag.Flag) string {
-	names := "--" + flag.Name
-	if flag.Shorthand != "" {
-		names += "/-" + flag.Shorthand
-	}
-	switch flag.Value.Type() {
-	case "bool":
-		return "[" + names + "]"
-	case "string", "stringArray", "stringSlice":
-		return "[" + names + " str]"
-	default:
-		return "[" + names + " " + flag.Value.Type() + "]"
-	}
-}
-
-func signature(cmd *cobra.Command) string {
-	spec := cli.ParseUse(cmd.Use)
-	parts := []string{"kx " + cmd.Name()}
-	for _, arg := range spec.Args {
-		parts = append(parts, argToken(arg))
-	}
-	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
-		// Inherited flags are global (--no-color) and belong on the root's help,
-		// not on every row of the table.
-		if flag.Hidden || flag.Name == "help" || cmd.InheritedFlags().Lookup(flag.Name) != nil {
-			return
-		}
-		parts = append(parts, flagToken(flag))
-	})
-	if spec.Passthrough != "" {
-		parts = append(parts, "["+spec.Passthrough+"...]")
-	}
-	return strings.Join(parts, " ")
-}
-
 func table() (string, error) {
-	byName := map[string]*cobra.Command{}
-	for _, cmd := range cli.NewRoot(cli.Services{}, "dev").Commands() {
-		byName[cmd.Name()] = cmd
-	}
+	byName := cmddoc.Commands()
 
 	rows := []string{"| Command | Description |", "|---|---|"}
 	for _, name := range cli.CommandOrder() {
@@ -91,7 +39,7 @@ func table() (string, error) {
 			return "", fmt.Errorf("command %q is listed in the help sections but not registered", name)
 		}
 		description := strings.Join(strings.Fields(cmd.Short), " ")
-		rows = append(rows, fmt.Sprintf("| `%s` | %s |", signature(cmd), description))
+		rows = append(rows, fmt.Sprintf("| `%s` | %s |", cmddoc.Signature(cmd), description))
 	}
 	return strings.Join(rows, "\n"), nil
 }

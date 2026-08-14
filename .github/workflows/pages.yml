@@ -15,7 +15,12 @@ on:
       - "assets/**"
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
+      - "tools/gen-site-docs/**"
+      - "tools/internal/cmddoc/**"
       - "internal/theme/**"
+      # The command reference is generated from the command tree, so a flag
+      # added to a command changes the site even when nothing under site/ moved.
+      - "internal/cli/**"
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
@@ -23,7 +28,12 @@ on:
       - "assets/**"
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
+      - "tools/gen-site-docs/**"
+      - "tools/internal/cmddoc/**"
       - "internal/theme/**"
+      # The command reference is generated from the command tree, so a flag
+      # added to a command changes the site even when nothing under site/ moved.
+      - "internal/cli/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -66,6 +76,24 @@ jobs:
           if ! git diff --quiet -- site/assets/css/kx-themes.css site/data/kx_themes.json; then
             echo "::error::site palette files are stale — run 'go run ./tools/gen-site-theme' and commit the result"
             git diff -- site/assets/css/kx-themes.css site/data/kx_themes.json
+            exit 1
+          fi
+
+      # Same contract as the palette check above: the per-command pages are
+      # generated from internal/cli, so a flag added without regenerating would
+      # publish a reference that documents flags kx no longer has.
+      - name: Check the generated command reference is current
+        run: |
+          go run ./tools/gen-site-docs || true
+          if ! git diff --quiet -- site/content/docs/reference/commands; then
+            echo "::error::the site command reference is stale — run 'go run ./tools/gen-site-docs' and commit the result"
+            git diff --stat -- site/content/docs/reference/commands
+            exit 1
+          fi
+          # An added command writes a new file, which git diff does not see.
+          if [ -n "$(git status --porcelain -- site/content/docs/reference/commands)" ]; then
+            echo "::error::the site command reference gained or lost a page — run 'go run ./tools/gen-site-docs' and commit the result"
+            git status --porcelain -- site/content/docs/reference/commands
             exit 1
           fi
 

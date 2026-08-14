@@ -44,6 +44,16 @@ title = "kubectl, indexed."
     # cards, feature grid. Goldmark drops raw HTML unless told otherwise.
     unsafe = true
 
+  # The typographer stays on for quotes, but its dash substitutions are
+  # neutralised: it rewrites "--" as an en dash, which turned every flag named
+  # in prose into "–decode" and "–all-namespaces". Fifteen cells of the
+  # generated command reference were affected. Setting the replacements to the
+  # literal characters is narrower than disabling the extension, which would
+  # also give up the curly quotes.
+  [markup.goldmark.extensions.typographer]
+    enDash = "--"
+    emDash = "---"
+
 [params]
   description = "kubectl, indexed. Select Kubernetes resources by number instead of typing names."
 

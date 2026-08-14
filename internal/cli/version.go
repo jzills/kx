@@ -9,7 +9,12 @@ import (
 
 // docsURL is where the long-form documentation lives. Printed by --version so
 // a binary found on a machine can say where it came from.
-const docsURL = "https://github.com/jzills/kx"
+//
+// The documentation site rather than the repository: this line is read by
+// someone who wants to know how to use the binary in front of them, and the
+// repository answers that with a README and a source tree. It points at /docs/
+// rather than the landing page for the same reason.
+const docsURL = "https://jzills.github.io/kx/docs/"
 
 // versionText is what `kx --version` prints.
 //
