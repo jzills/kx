@@ -33,8 +33,7 @@ pip install kx-cli
 
 ## As a kubectl plugin
 
-`kx` is published to [krew](https://krew.sigs.k8s.io/) as `idx` — `kx` was
-already taken in the plugin index.
+`kx` is published to [krew](https://krew.sigs.k8s.io/) under the name `idx`.
 
 ```bash
 kubectl krew install idx
