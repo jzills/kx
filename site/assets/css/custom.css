@@ -248,7 +248,9 @@ body {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 999px;
-  border: 1px solid var(--kx-border);
+  /* em, like the swatch's own border above: the ring is the palette's accent,
+     and at 1px it read as a hairline rather than as the colour it is naming. */
+  border: 0.15em solid var(--kx-border);
 }
 
 /* Sections
@@ -342,7 +344,8 @@ body {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 999px;
-  border: 1px solid var(--kx-border);
+  /* Matches the landing page's swatch dot; see .kx-themes__dot. */
+  border: 0.15em solid var(--kx-border);
   flex-shrink: 0;
 }
 
