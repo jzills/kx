@@ -1,0 +1,19 @@
+{{- /*
+  An aside, in the reader's palette.
+
+      {{% kx-note %}}Body, as markdown.{{% /kx-note %}}
+      {{% kx-note kind="warn" %}}...{{% /kx-note %}}
+
+  kind is "note" (accent) or "warn" (the palette's warn colour). Two, not
+  five: kx's palettes carry one warning colour and one accent, and a set of
+  callout types wider than the palette would have to invent the difference
+  between "info" and "important" out of hardcoded hues — which is what
+  Hextra's own callout does, and why this exists instead.
+
+  Percent delimiters so the body is rendered as markdown; angle-bracket
+  delimiters would pass it through as raw HTML and lose the links.
+*/ -}}
+{{- $kind := .Get "kind" | default "note" -}}
+<div class="kx-note kx-note--{{ $kind }}">
+{{ .Inner }}
+</div>

@@ -1,8 +1,8 @@
 # Hugo configuration for the kx site.
 #
-# Phase one is a landing page. The docs layout is deliberately already wired —
-# Hextra ships both, so adding content/docs/ turns on the sidebar, the
-# right-hand table of contents and search without restructuring anything here.
+# A landing page at / and the documentation under /docs/. The docs layout is
+# Hextra's own — adding content/docs/ is what turned on the sidebar, the
+# right-hand table of contents and the search below.
 baseURL = "https://jzills.github.io/kx/"
 # The tagline rather than the name, because this is the browser tab's text and
 # the tab already carries the mark as its favicon: "kx" beside a kx logo says
@@ -58,45 +58,71 @@ title = "kubectl, indexed."
     displayCopyright = false
     displayPoweredBy = false
 
-  # Defaults to on, with nothing to search yet — a single landing page with no
-  # search index configured. flexsearch.js still loaded unconditionally and
-  # threw on every keypress, since the box it looks for only exists once real
-  # docs content turns the sidebar on (see the file header above).
   [params.search]
-    enable = false
+    enable = true
 
-  # Hextra's light/dark toggle is off: the kx palettes replace it. The picker
-  # on the page offers all ten, `light` among them, so a second control that
-  # only knows two would disagree with the one that knows the rest.
+    [params.search.flexsearch]
+      # Vendored rather than fetched. Hextra's default pulls the bundle from
+      # jsDelivr with resources.GetRemote and republishes it locally, so the
+      # published page is self-hosted either way — but the *build* then needs
+      # the network, and a jsDelivr blip would fail a deploy that has nothing
+      # to do with jsDelivr. Committing the file is also what the repo already
+      # does with third-party JavaScript; see THIRD_PARTY_NOTICES.md, which
+      # this bundle is listed in beside Tabulator.
+      #
+      # Setting js alone is enough to take the local-asset branch of the
+      # theme's scripts/search.html; base is only for a different CDN.
+      js = "vendor/flexsearch/flexsearch.bundle.min.js"
+
+  # displayToggle is on, but the control it shows is layouts/_partials/
+  # theme-toggle.html — the kx palette menu, not Hextra's light/dark switch.
+  # See that file for why the two can't coexist: ours knows all ten palettes,
+  # two of which are light, and a second control that only knew "light" and
+  # "dark" would disagree with the one that knows the rest.
   [params.theme]
     default = "dark"
-    displayToggle = false
+    displayToggle = true
 
+# Docs leads, then the landing page's own sections. "Themes" used to sit among
+# them and no longer does: the palette menu at the end of this bar is that
+# section's control, on every page rather than one, and two entries offering
+# the same choice a scroll apart is one too many.
 [menu]
+  [[menu.main]]
+    name = "Docs"
+    pageRef = "/docs"
+    weight = 1
   [[menu.main]]
     name = "Install"
     pageRef = "/#install"
-    weight = 1
+    weight = 2
   [[menu.main]]
     name = "Commands"
     pageRef = "/#commands"
-    weight = 2
+    weight = 3
   [[menu.main]]
     name = "Features"
     pageRef = "/#features"
-    weight = 3
-  [[menu.main]]
-    name = "Themes"
-    pageRef = "/#themes"
     weight = 4
   [[menu.main]]
     name = "Reports"
     pageRef = "/#reports"
     weight = 5
   [[menu.main]]
+    name = "Search"
+    weight = 6
+    [menu.main.params]
+      type = "search"
+  [[menu.main]]
     identifier = "github"
     name = "GitHub"
     url = "https://github.com/jzills/kx"
-    weight = 6
+    weight = 7
     [menu.main.params]
       icon = "github"
+  # The kx palette menu; see params.theme above.
+  [[menu.main]]
+    name = "Theme"
+    weight = 8
+    [menu.main.params]
+      type = "theme-toggle"

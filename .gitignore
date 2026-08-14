@@ -1,4 +1,8 @@
-docs/
+# Anchored. Unanchored, "docs/" matches a directory of that name at any depth,
+# which silently swallowed site/content/docs — the published documentation —
+# with nothing failing to say so. This entry is for the design notes at the
+# repository root and only those.
+/docs/
 .superpowers/
 .claude/
 build/
