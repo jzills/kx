@@ -56,9 +56,12 @@ toc: false
 
 <div class="kx-section" id="features">
   <h2 class="kx-section__title">More than a shorter kubectl</h2>
+  <p class="kx-section__lede">
+    Each of these has a guide in <a href="docs/">the documentation</a>.
+  </p>
   <div class="kx-features">
     <div class="kx-feature">
-      <p class="kx-feature__title">Triage a namespace</p>
+      <p class="kx-feature__title"><a href="docs/guides/triage-a-namespace/">Triage a namespace</a></p>
       <p class="kx-feature__body">
         <code>kx diag</code> sweeps every workload and ranks what is unhealthy —
         CrashLoopBackOff, image pull failures, OOMKill risk read from live
@@ -67,7 +70,7 @@ toc: false
       </p>
     </div>
     <div class="kx-feature">
-      <p class="kx-feature__title">Scan images for CVEs</p>
+      <p class="kx-feature__title"><a href="docs/guides/scan-images/">Scan images for CVEs</a></p>
       <p class="kx-feature__body">
         <code>kx scan</code> resolves a workload's unique images and scans each
         one, printing a severity summary. Docker Scout by default, Trivy with
@@ -75,7 +78,7 @@ toc: false
       </p>
     </div>
     <div class="kx-feature">
-      <p class="kx-feature__title">Read a Secret in plaintext</p>
+      <p class="kx-feature__title"><a href="docs/guides/read-a-secret/">Read a Secret in plaintext</a></p>
       <p class="kx-feature__body">
         <code>kx secret 1 --decode</code> prints keys and values decoded, with
         binary payloads shown as a placeholder rather than garbling the table.
@@ -83,7 +86,7 @@ toc: false
       </p>
     </div>
     <div class="kx-feature">
-      <p class="kx-feature__title">Ownership, as a tree</p>
+      <p class="kx-feature__title"><a href="docs/guides/ownership-tree/">Ownership, as a tree</a></p>
       <p class="kx-feature__body">
         <code>kx tree</code> walks ownership references from controllers down to
         containers — the structure kubectl's table output cannot show. Indexed
@@ -91,7 +94,7 @@ toc: false
       </p>
     </div>
     <div class="kx-feature">
-      <p class="kx-feature__title">Reports in the browser</p>
+      <p class="kx-feature__title"><a href="docs/guides/browser-reports/">Reports in the browser</a></p>
       <p class="kx-feature__body">
         <code>--html</code> on diag, scan, tree and top renders the same
         analysis as a filterable page and opens it. Bound to localhost, nothing
@@ -99,7 +102,7 @@ toc: false
       </p>
     </div>
     <div class="kx-feature">
-      <p class="kx-feature__title">Completion that knows your listing</p>
+      <p class="kx-feature__title"><a href="docs/concepts/completion/">Completion that knows your listing</a></p>
       <p class="kx-feature__body">
         <code>kx describe &lt;TAB&gt;</code> offers <code>1  api-7d8f (Pod)</code>,
         not a bare number. Answered from saved state, so it never waits on the

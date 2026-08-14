@@ -7,12 +7,13 @@
  */
 
 html {
-  /* Every item in the navbar is a fragment on this one page — Install,
-     Commands, Features, Themes, Reports, and the mark itself, which goes to
-     the top. Without this the browser teleports, and a reader who clicks
-     "Themes" arrives with no idea whether the page moved a screen or ten;
-     the animation is what says how far. .kx-section's scroll-margin-top is
-     the other half, keeping the landing point clear of the sticky navbar.
+  /* Most of the navbar is fragments on the landing page — Install, Commands,
+     Features, Reports, and the mark itself, which goes to the top — and the
+     docs pages have a table of contents that is nothing but fragments.
+     Without this the browser teleports, and a reader who clicks "Reports"
+     arrives with no idea whether the page moved a screen or ten; the
+     animation is what says how far. .kx-section's scroll-margin-top is the
+     other half, keeping the landing point clear of the sticky navbar.
 
      No reduced-motion guard here: Hextra's reset already forces
      scroll-behavior: auto on everything under that query, so a reader who
@@ -161,6 +162,18 @@ body {
   margin: 0 0 0.4rem;
 }
 
+/* Each card's heading links to that feature's guide. The whole card is not the
+   link target: the body text mentions commands, and a card-wide anchor would
+   swallow any link put in one later. */
+.kx-feature__title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.kx-feature__title a:hover {
+  text-decoration: underline;
+}
+
 .kx-feature__body {
   margin: 0;
   color: var(--kx-muted);
@@ -283,4 +296,327 @@ body {
   height: 2.1rem;
   width: auto;
   display: block;
+}
+
+/* Palette menu
+ * ------------------------------------------------------------------
+ * The navbar and sidebar control; see layouts/_partials/theme-toggle.html.
+ * The landing page's swatch row above is the same choice laid out flat. */
+
+.kx-palette {
+  position: relative;
+  display: flex;
+}
+
+.kx-palette__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--kx-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.kx-palette__button:hover {
+  color: var(--kx-accent);
+}
+
+.kx-palette__name {
+  /* The palette names are long enough to shove the navbar around as they
+     change — "solarized-dark" against "nord". The sidebar copy shows the
+     name; the navbar copy is passed hideLabel and shows the dot alone. */
+  white-space: nowrap;
+}
+
+.kx-palette__chevron {
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.kx-palette__dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--kx-border);
+  flex-shrink: 0;
+}
+
+.kx-palette__menu {
+  position: absolute;
+  z-index: 30;
+  margin: 0.35rem 0 0;
+  padding: 0.25rem;
+  list-style: none;
+  min-width: 11rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+/* location="top" is the navbar, which opens downward; the sidebar's footer
+   sits at the bottom of the viewport and has to open upward or the menu
+   would be drawn off-screen. */
+.kx-palette--top .kx-palette__menu {
+  top: 100%;
+  inset-inline-end: 0;
+}
+
+.kx-palette--bottom .kx-palette__menu {
+  bottom: 100%;
+  inset-inline-start: 0;
+  margin: 0 0 0.35rem;
+}
+
+.kx-palette__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--kx-body);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.55rem;
+  text-align: start;
+}
+
+.kx-palette__option:hover,
+.kx-palette__option:focus-visible {
+  background-color: var(--kx-background);
+  color: var(--kx-accent);
+}
+
+.kx-palette__option[aria-checked="true"] {
+  color: var(--kx-accent);
+}
+
+.kx-palette__label {
+  flex-grow: 1;
+}
+
+.kx-palette__check {
+  flex-shrink: 0;
+  visibility: hidden;
+}
+
+.kx-palette__option[aria-checked="true"] .kx-palette__check {
+  visibility: visible;
+}
+
+/* Hextra chrome
+ * ------------------------------------------------------------------
+ * The theme derives its accent ramp from the --primary-* properties the
+ * generated palette stylesheet sets, so buttons and links already follow a
+ * kx palette. Its *surfaces* do not: they are bg-white / bg-dark, and "dark"
+ * is a fixed #111. On the landing page that was a thin strip behind the
+ * navbar; on a docs page it is the whole sidebar sitting in a different
+ * colour from the body beside it.
+ *
+ * Named surfaces rather than a redefinition of Hextra's --hx-color-white,
+ * which is also what hx:text-white reads — a palette background as a text
+ * colour would be invisible on the surface it came from. */
+
+.hextra-nav-container-blur {
+  background-color: var(--kx-background);
+}
+
+.hextra-sidebar-container [data-toggle-animation] {
+  background-color: var(--kx-background);
+  /* The theme fades the sidebar's contents out under this footer with a
+     hardcoded white/#111 shadow, which reads as a smear of the wrong colour
+     over any other palette. */
+  box-shadow: 0 -12px 16px var(--kx-background);
+  border-color: var(--kx-border);
+}
+
+/* The table of contents' sticky footer — "Scroll to top" and the rule above
+   it — carries the same hardcoded white/#111 fade as the sidebar's, which on
+   any other palette reads as a pale block floating in the margin. */
+.hextra-toc .hextra-scrollbar > div:last-child {
+  background-color: var(--kx-background);
+  box-shadow: 0 -12px 16px var(--kx-background);
+  border-color: var(--kx-border);
+}
+
+.hextra-search-results {
+  background-color: var(--kx-surface);
+  border-color: var(--kx-border);
+  color: var(--kx-body);
+}
+
+.hextra-search-input {
+  color: var(--kx-body);
+}
+
+.hextra-search-input:focus-visible {
+  background-color: var(--kx-surface);
+}
+
+/* Docs prose
+ * ------------------------------------------------------------------
+ * The landing page is hand-written HTML with no prose in it; the docs are
+ * nothing but prose, and Hextra's own typography is styled against fixed
+ * grays. Only the surfaces and text are reclaimed here — chroma's syntax
+ * token colours are left alone. kx's palette is semantic (accent, muted,
+ * status.ok...) and chroma's is lexical (keyword, string, comment); mapping
+ * one onto the other would be invention, and the docs are shell commands,
+ * which highlight almost nothing anyway. */
+
+.content h1,
+.content h2,
+.content h3,
+.content h4 {
+  color: var(--kx-body);
+}
+
+.content h2,
+.content h3 {
+  border-color: var(--kx-border);
+}
+
+.content p,
+.content li {
+  color: var(--kx-body);
+}
+
+.content a {
+  color: var(--kx-accent);
+}
+
+.content pre,
+.content pre.chroma {
+  background-color: var(--kx-surface);
+  color: var(--kx-body);
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+}
+
+/* Inline code only: :not(pre code) leaves the fenced blocks to the rule
+   above, where a per-token chip background would box every keyword. */
+.content code:not(pre code) {
+  background-color: var(--kx-surface);
+  border: 1px solid var(--kx-border);
+  border-radius: 0.25rem;
+  color: var(--kx-body);
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+.content a code:not(pre code) {
+  color: var(--kx-accent);
+}
+
+.content .hextra-code-filename {
+  background-color: var(--kx-surface);
+  border: 1px solid var(--kx-border);
+  border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+  color: var(--kx-muted);
+}
+
+.content .hextra-code-filename + div pre {
+  border-radius: 0 0 0.5rem 0.5rem;
+}
+
+.content table {
+  border-color: var(--kx-border);
+}
+
+.content th,
+.content td {
+  border-color: var(--kx-border);
+  color: var(--kx-body);
+}
+
+.content thead tr,
+.content tbody tr:nth-child(2n) {
+  background-color: var(--kx-surface);
+}
+
+.content blockquote {
+  border-inline-start-color: var(--kx-accent);
+  color: var(--kx-muted);
+}
+
+.content hr {
+  border-color: var(--kx-border);
+}
+
+/* The right-hand table of contents, in the palette's muted rather than the
+   theme's fixed gray. */
+.hextra-toc {
+  color: var(--kx-muted);
+  border-color: var(--kx-border);
+}
+
+/* Section index cards; see layouts/shortcodes/kx-children.html. */
+
+.kx-children {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.kx-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+  padding: 0.9rem 1rem;
+  text-decoration: none;
+  transition: border-color 0.12s ease;
+}
+
+.kx-child:hover {
+  border-color: var(--kx-accent);
+}
+
+.kx-child__title {
+  font-weight: 600;
+  color: var(--kx-accent);
+}
+
+.kx-child__body {
+  color: var(--kx-muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+/* Asides; see layouts/shortcodes/kx-note.html. */
+
+.kx-note {
+  margin-top: 1.5rem;
+  padding: 0.15rem 1rem;
+  border: 1px solid var(--kx-border);
+  border-inline-start: 3px solid var(--kx-accent);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+}
+
+.kx-note--warn {
+  border-inline-start-color: var(--kx-warn);
+}
+
+.kx-note > :last-child {
+  margin-bottom: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kx-child {
+    transition: none;
+  }
 }

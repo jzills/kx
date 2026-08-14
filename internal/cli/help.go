@@ -399,6 +399,39 @@ func CommandOrder() []string {
 	return names
 }
 
+// Section is one group of the root help screen: a heading and the commands
+// under it.
+type Section struct {
+	Title    string
+	Commands []string
+}
+
+// HelpSections returns the groups CommandOrder flattens.
+//
+// Exported for the site's command reference, which lists the same commands in
+// the same groups. CommandOrder alone would have made the docs invent their own
+// grouping, and a second editorial opinion about which commands belong together
+// is exactly what helpSections exists to prevent.
+func HelpSections() []Section {
+	sections := make([]Section, 0, len(helpSections))
+	for _, section := range helpSections {
+		// Copied rather than aliased: helpSections is package state, and a
+		// caller ranging over the slice it gets back should not be able to
+		// reorder the help screen by writing to it.
+		commands := append([]string(nil), section.Commands...)
+		sections = append(sections, Section{Title: section.Title, Commands: commands})
+	}
+	return sections
+}
+
+// HelpFor returns the structured help for one command — the same data
+// `kx <command> --help` renders.
+//
+// Exported so tools/gen-site-docs can write a documentation page from what the
+// binary actually accepts, rather than from a hand-kept list of flags that
+// drifts the first time one is added.
+func HelpFor(cmd *cobra.Command) render.CommandHelp { return commandHelp(cmd) }
+
 // Execute runs the command tree, resolving a bare kind spelling to `kx get`.
 //
 // `kx pods` means `kx get pods`. Registered commands always win, so `kx ns 3`
