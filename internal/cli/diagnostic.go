@@ -181,7 +181,25 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
+			asJSON, _ := cmd.Flags().GetBool("json")
+			failOn, _ := cmd.Flags().GetString("fail-on")
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+
+			if asJSON && html {
+				return errors.New(
+					"'--json' cannot be combined with '--html' — one is for a " +
+						"machine and the other for a browser.")
+			}
+			// Parsed up front so a typo fails before the cluster is read
+			// rather than after a report has already been printed.
+			var threshold diagnostics.Severity
+			if failOn != "" {
+				parsed, err := parseDiagnosticThreshold(failOn)
+				if err != nil {
+					return err
+				}
+				threshold = parsed
+			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
@@ -234,9 +252,17 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if err != nil {
 					return err
 				}
+				if asJSON {
+					document, err := triageJSON(result)
+					if err != nil {
+						return err
+					}
+					render.Raw(document)
+					return sweepGate(result, failOn, threshold)
+				}
 				render.Triage(result)
 				if !htmlOpts.Enabled {
-					return nil
+					return sweepGate(result, failOn, threshold)
 				}
 				scope := namespace
 				if allNamespaces {
@@ -266,9 +292,17 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				document, err := diagnosticJSON(report)
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return verdictGate(report.Verdict, failOn, threshold)
+			}
 			render.Diagnostic(report)
 			if !htmlOpts.Enabled {
-				return nil
+				return verdictGate(report.Verdict, failOn, threshold)
 			}
 			meta, err := pageMeta(services.Config.Theme,
 				"diag · "+string(report.Kind)+"/"+report.Name,
@@ -289,6 +323,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
+	cmd.Flags().Bool("json", false,
+		"Print the report as JSON instead of a table")
+	cmd.Flags().String("fail-on", "",
+		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,
 		"Render the report as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,
@@ -296,4 +334,38 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
 	return cmd
+}
+
+// verdictGate turns a verdict into an exit code when --fail-on asked for one.
+//
+// SilentError because the report has already been printed: this is the exit
+// code, not a second error message. Two rather than one, so a pipeline can tell
+// "the cluster is sick" from "kx itself failed", which is what kx exits 1 for.
+func verdictGate(verdict diagnostics.Severity, failOn string, threshold diagnostics.Severity) error {
+	if failOn == "" || verdict < threshold {
+		return nil
+	}
+	return SilentError{Code: findingsExitCode}
+}
+
+// sweepGate applies the same gate to a sweep, over the worst verdict in it.
+//
+// Every swept resource, not just the rows the table printed: --full governs
+// what fits on a screen, and a gate that changed answer with a display flag
+// would be a trap.
+func sweepGate(result render.TriageResult, failOn string, threshold diagnostics.Severity) error {
+	if failOn == "" {
+		return nil
+	}
+	source := result.All
+	if len(source) == 0 {
+		source = result.Reports
+	}
+	worst := diagnostics.OK
+	for _, report := range source {
+		if report.Verdict > worst {
+			worst = report.Verdict
+		}
+	}
+	return verdictGate(worst, failOn, threshold)
 }

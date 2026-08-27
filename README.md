@@ -33,6 +33,7 @@
   - [Read a Secret in plaintext](#read-a-secret-in-plaintext)
   - [Scan images for vulnerabilities](#scan-images-for-vulnerabilities)
   - [View reports in a browser](#view-reports-in-a-browser)
+  - [Use kx in CI](#use-kx-in-ci)
 - [History](#history)
 - [Configuration](#configuration)
 - [Themes](#themes)
@@ -108,7 +109,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | `kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]` | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
@@ -121,7 +122,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
@@ -218,6 +219,29 @@ gathered to build the table you'd see without `--html`.
 `--port` serves on a specific port instead of picking a free one, and
 `--no-open` skips launching a browser — the URL still prints, so you can
 open it yourself.
+
+## Use kx in CI
+
+`kx diag` and `kx scan` both take `--json`, printing the same analysis as a
+machine-readable document instead of a table — every swept resource, healthy
+ones included, and every CVE behind the counts. It carries a `schemaVersion`,
+and it's built from the same values the terminal and `--html` render, so the
+three views can't disagree.
+
+`--fail-on <severity>` turns either into a gate. `kx diag -A --fail-on critical`
+sweeps every workload kind in every namespace and **exits 2** if anything is
+critical; `kx scan -A --fail-on high` does the same for image vulnerabilities.
+
+```bash
+kx diag -A --fail-on critical          # 0 if the cluster is healthy, 2 if not
+kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.CRITICAL > 0)'
+```
+
+The exit code is **2, not 1**, deliberately: kx exits 1 for its own failures, so
+a pipeline can tell "the cluster is sick" — the check working — from "kx
+couldn't reach the cluster", which means the check never ran. An image whose
+scan failed breaches every threshold for the same reason: an image kx couldn't
+read hasn't been shown to be clean.
 
 #### `kx diag --html`
 

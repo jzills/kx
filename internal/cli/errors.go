@@ -30,3 +30,11 @@ type ExitError struct {
 }
 
 func (e ExitError) Error() string { return e.Message }
+
+// findingsExitCode is what --fail-on exits with when a report breaches its
+// threshold.
+//
+// Two, not one. kx exits 1 for its own failures, so a pipeline that reused it
+// could not tell "the cluster is sick" — which is the check working — from
+// "kx could not reach the cluster", which is the check not having run.
+const findingsExitCode = 2
