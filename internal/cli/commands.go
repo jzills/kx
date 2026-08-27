@@ -347,10 +347,11 @@ func newEditCommand(services Services) *cobra.Command {
 
 func newExecCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:                "exec <index> [kubectl flags] [-- command...]",
-		SuggestFor:         []string{"sh", "shell", "bash", "ssh", "attach"},
-		Short:              "Open an interactive shell in an indexed pod (bash, falling back to sh).",
-		Long:               "Runs a command inside an indexed pod. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.",
+		Use:        "exec <index> [kubectl flags] [-- command...]",
+		SuggestFor: []string{"sh", "shell", "bash", "ssh", "attach"},
+		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
+		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
+			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
