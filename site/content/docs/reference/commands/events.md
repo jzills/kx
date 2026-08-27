@@ -3,7 +3,7 @@
 title: "kx events"
 linkTitle: "events"
 description: "Show Kubernetes events for one or more indexed resources."
-weight: 10
+weight: 12
 ---
 
 Show Kubernetes events for one or more indexed resources.

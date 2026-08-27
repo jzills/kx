@@ -3,7 +3,7 @@
 title: "kx scale"
 linkTitle: "scale"
 description: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count."
-weight: 19
+weight: 21
 ---
 
 Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.

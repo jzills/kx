@@ -103,11 +103,13 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx annotate <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove annotations on an indexed resource. |
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
+| `kx cordon <index>...` | Mark one or more indexed Nodes unschedulable. |
 | `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
 | `kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]` | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]` | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
 | `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
@@ -123,6 +125,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
+| `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
 | `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
@@ -150,6 +153,23 @@ pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed
 CronJob runs, Ingresses referencing missing Services, usage near limits), a per-pod status table, recent log tails
 from broken containers, and warning events — one screen instead of four
 kubectl commands.
+
+Nodes are diagnosed the same way, by index from `kx get nodes` or `kx top
+nodes`: conditions (not ready, memory/disk/PID pressure, network
+unavailable), whether the node is cordoned, and a tally of the pods on it
+that aren't running. They're cluster-scoped, so they don't appear in a
+namespace sweep or in `-A`.
+
+### Take a node out of service
+
+`kx cordon <index>` marks an indexed node unschedulable so nothing new
+lands on it; `kx drain <index>` also evicts what's already there, streaming
+kubectl's progress and prompting first unless you pass `--yes`. `kx
+uncordon <index>` puts it back. Cordon and uncordon take several indexes
+and ranges like `kx delete`; drain takes one, deliberately — it evicts
+running workloads and blocks until they're gone, so a range is a way to
+take a cluster down by typo. kubectl's own drain flags pass through
+(`--ignore-daemonsets`, `--delete-emptydir-data`, ...).
 
 ### Read a Secret in plaintext
 

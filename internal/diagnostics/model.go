@@ -146,12 +146,53 @@ type EventSummary struct {
 	LastTimestamp time.Time
 }
 
+// NodeCondition is one of a Node's status conditions, flattened to what a
+// finding needs. Status is the raw "True"/"False"/"Unknown" tri-state rather
+// than a bool: "Unknown" is how a Node that stopped reporting looks, and it is
+// not the same as False for the Ready condition.
+type NodeCondition struct {
+	Type    string
+	Status  string
+	Reason  string
+	Message string
+}
+
+// PodPhaseCounts is a tally of the pods on a Node, by phase.
+//
+// Counts rather than the per-pod table the workload kinds carry: a real node
+// runs hundreds of pods, and a table that long is not a diagnosis. Naming the
+// pods that are not running is one `kx get pods --field-selector` away, and the
+// finding says so.
+type PodPhaseCounts struct {
+	Total     int
+	Running   int
+	Succeeded int
+	Pending   int
+	Failed    int
+	Unknown   int
+}
+
+// Stalled is the pods that are neither running nor finished — the ones worth
+// a line. Succeeded is excluded deliberately: a Job's pod stays on the node
+// after it completes, and counting those as "not running" would report every
+// node that has ever run a CronJob as degraded.
+func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Failed + c.Unknown }
+
+// NodeHealth is a Node's conditions, whether it has been cordoned, and what is
+// scheduled on it.
+type NodeHealth struct {
+	Conditions    []NodeCondition
+	Unschedulable bool
+	Pods          PodPhaseCounts
+}
+
 // Data is the raw, already-flattened result of a gather. It carries no
 // findings — the analysis layer produces those.
 type Data struct {
 	Kind          kinds.Kind
 	Name          string
 	Namespace     string
+	Node          *NodeHealth
 	Replicas      *ReplicaHealth
 	Job           *JobHealth
 	Service       *ServiceHealth

@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -11,6 +12,7 @@ import (
 
 // SupportedKinds are the kinds kx diag can analyse.
 var SupportedKinds = map[kinds.Kind]bool{
+	kinds.Node:                  true,
 	kinds.Deployment:            true,
 	kinds.StatefulSet:           true,
 	kinds.DaemonSet:             true,
@@ -47,6 +49,9 @@ var configErrorReasons = map[string]bool{
 func BuildReport(data Data) Report {
 	var findings []Finding
 
+	if data.Node != nil {
+		findings = append(findings, nodeFindings(*data.Node)...)
+	}
 	if data.Replicas != nil {
 		findings = append(findings, replicaFindings(*data.Replicas)...)
 	}
@@ -101,6 +106,97 @@ func BuildReport(data Data) Report {
 		Pods:          data.Pods,
 		WarningEvents: data.WarningEvents,
 	}
+}
+
+// pressureConditions are the Node conditions whose True is the bad state,
+// inverted relative to Ready. Each evicts or blocks pods, so each is critical.
+var pressureConditions = map[string]string{
+	"MemoryPressure":     "Under memory pressure",
+	"DiskPressure":       "Under disk pressure",
+	"PIDPressure":        "Under PID pressure",
+	"NetworkUnavailable": "Network unavailable",
+}
+
+// nodeFindings reads a Node's conditions, whether it is cordoned, and what is
+// scheduled on it.
+//
+// Ready is tri-state and the three states mean different things. False is the
+// kubelet reporting that it is not ready. Unknown is the kubelet not reporting
+// at all, which is not the same claim: the node may be running everything on it
+// perfectly behind a kubelet that has stopped talking, and calling that "not
+// ready" would assert something kx cannot see. Both are critical; they are
+// worded apart.
+func nodeFindings(node NodeHealth) []Finding {
+	var findings []Finding
+
+	for _, condition := range node.Conditions {
+		if condition.Type == "Ready" {
+			switch condition.Status {
+			case "False":
+				findings = append(findings, Finding{Critical, Cause,
+					"Not ready: " + conditionDetail(condition)})
+			case "Unknown":
+				findings = append(findings, Finding{Critical, Cause,
+					"Node status unknown: " + conditionDetail(condition)})
+			}
+			continue
+		}
+		if label, pressure := pressureConditions[condition.Type]; pressure && condition.Status == "True" {
+			findings = append(findings, Finding{Critical, Cause,
+				label + ": " + conditionDetail(condition)})
+		}
+	}
+
+	// Warning, not critical, and deliberately so: a cordoned node is usually
+	// cordoned on purpose, and it is exactly what kx cordon just did.
+	if node.Unschedulable {
+		findings = append(findings, Finding{Warning, Cause,
+			"Cordoned: no new pods will be scheduled here"})
+	}
+
+	// An aggregate, and ranked as one — a node reporting both a condition and
+	// stalled pods is broken for the reason the condition names, and the pods
+	// are downstream of it. The count points at kubectl rather than listing
+	// hundreds of pods that would not fit a diagnosis.
+	if stalled := node.Pods.Stalled(); stalled > 0 {
+		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
+			"%d/%d pods not running (%s)", stalled, node.Pods.Total, phaseBreakdown(node.Pods))})
+	}
+	return findings
+}
+
+// conditionDetail prefers the condition's message, which names the actual
+// problem, and falls back to its reason. Neither is guaranteed to be set.
+func conditionDetail(condition NodeCondition) string {
+	if condition.Message != "" {
+		return condition.Message
+	}
+	if condition.Reason != "" {
+		return condition.Reason
+	}
+	return condition.Status
+}
+
+// phaseBreakdown names the phases the stalled pods are actually in, so the
+// count is actionable rather than merely alarming.
+func phaseBreakdown(counts PodPhaseCounts) string {
+	var parts []string
+	for _, phase := range []struct {
+		label string
+		count int
+	}{
+		{"pending", counts.Pending},
+		{"failed", counts.Failed},
+		{"unknown", counts.Unknown},
+	} {
+		if phase.count > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", phase.count, phase.label))
+		}
+	}
+	if len(parts) == 0 {
+		return "phase not reported"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func replicaFindings(replicas ReplicaHealth) []Finding {

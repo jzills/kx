@@ -3,7 +3,7 @@
 title: "kx engine"
 linkTitle: "engine"
 description: "List available scan engines or persist a default choice by name or index."
-weight: 26
+weight: 29
 ---
 
 List available scan engines or persist a default choice by name or index.

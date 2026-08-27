@@ -290,3 +290,36 @@ func TestTriageAllNamespacesHintsAtTheIndex(t *testing.T) {
 		t.Errorf("output = %q, want the index hint", out)
 	}
 }
+
+// A cluster-scoped resource has no namespace, and the header must drop the
+// segment rather than print an empty one: "Node/x ·  · healthy" reads as a
+// value that failed to render rather than one that does not exist.
+func TestDiagnosticHeaderOmitsAnAbsentNamespace(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Node, Name: "node-a", Namespace: "",
+			Verdict:  diagnostics.Warning,
+			Findings: []diagnostics.Finding{{Severity: diagnostics.Warning, Summary: "cordoned"}},
+		})
+	})
+	if strings.Contains(out, "·  ·") {
+		t.Errorf("header has an empty namespace segment:\n%s", out)
+	}
+	if !strings.Contains(out, "Node/node-a · ") {
+		t.Errorf("header does not name the resource:\n%s", out)
+	}
+}
+
+// A namespaced resource still shows its namespace.
+func TestDiagnosticHeaderKeepsANamespace(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod",
+			Verdict:  diagnostics.OK,
+			Findings: nil,
+		})
+	})
+	if !strings.Contains(out, "Pod/web · prod · ") {
+		t.Errorf("header does not name the namespace:\n%s", out)
+	}
+}

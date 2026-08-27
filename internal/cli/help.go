@@ -26,10 +26,10 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"annotate", "annotations", "context", "cp", "debug", "delete", "describe",
-		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
-		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
-		"secret", "top", "tree", "yaml",
+		"annotate", "annotations", "context", "cordon", "cp", "debug", "delete",
+		"describe", "diagnostic", "drain", "edit", "events", "exec", "get",
+		"label", "labels", "logs", "namespace", "port-forward", "rollout",
+		"scale", "scan", "secret", "top", "tree", "uncordon", "yaml",
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},

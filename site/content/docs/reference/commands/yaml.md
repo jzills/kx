@@ -3,7 +3,7 @@
 title: "kx yaml"
 linkTitle: "yaml"
 description: "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."
-weight: 24
+weight: 27
 ---
 
 Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.

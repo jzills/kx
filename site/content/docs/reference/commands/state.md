@@ -3,7 +3,7 @@
 title: "kx state"
 linkTitle: "state"
 description: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets."
-weight: 25
+weight: 28
 ---
 
 Shows the listing that indexes currently resolve against.

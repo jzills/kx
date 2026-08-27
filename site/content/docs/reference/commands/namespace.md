@@ -3,7 +3,7 @@
 title: "kx namespace"
 linkTitle: "namespace"
 description: "List namespaces, or switch to an indexed one; alias: kx ns."
-weight: 16
+weight: 18
 ---
 
 Lists namespaces, or switches to one by index.

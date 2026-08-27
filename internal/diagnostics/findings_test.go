@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/jzills/kx/internal/kinds"
 )
 
 func quantity(value string) *resource.Quantity {
@@ -614,3 +616,168 @@ func TestOrderWithinARankIsStable(t *testing.T) {
 }
 
 func exitCode(value int32) *int32 { return &value }
+
+// A Node that has stopped reporting is the single most consequential thing a
+// cluster can be told about, and kx had nothing to say about it: kx diag on a
+// Node index answered "diagnostic is not supported for 'Node'".
+func TestNodeNotReadyIsCritical(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{Conditions: []NodeCondition{
+			{Type: "Ready", Status: "False", Reason: "KubeletNotReady",
+				Message: "container runtime is down"},
+		}},
+	})
+	if report.Verdict != Critical {
+		t.Errorf("verdict = %v, want Critical", report.Verdict)
+	}
+	if !hasSummaryContaining(report.Findings, "Not ready") {
+		t.Errorf("findings = %v, want a not-ready finding", summaries(report.Findings))
+	}
+	if !hasSummaryContaining(report.Findings, "container runtime is down") {
+		t.Errorf("findings = %v, want the condition's own message", summaries(report.Findings))
+	}
+}
+
+// Unknown is not False. A kubelet that stopped reporting leaves Ready at
+// Unknown, and saying "not ready" for it would claim knowledge kx does not
+// have — the node may be running everything perfectly behind a dead kubelet.
+func TestNodeReadyUnknownIsReportedAsUnknown(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{Conditions: []NodeCondition{
+			{Type: "Ready", Status: "Unknown", Reason: "NodeStatusUnknown",
+				Message: "kubelet stopped posting node status"},
+		}},
+	})
+	if report.Verdict != Critical {
+		t.Errorf("verdict = %v, want Critical", report.Verdict)
+	}
+	if !hasSummaryContaining(report.Findings, "status unknown") {
+		t.Errorf("findings = %v, want an unknown-status finding, not a not-ready one",
+			summaries(report.Findings))
+	}
+}
+
+// The pressure conditions are the ones that evict pods, and they are inverted
+// relative to Ready: True is the bad state.
+func TestNodePressureConditions(t *testing.T) {
+	for _, condition := range []struct{ name, want string }{
+		{"MemoryPressure", "Under memory pressure"},
+		{"DiskPressure", "Under disk pressure"},
+		{"PIDPressure", "Under PID pressure"},
+		{"NetworkUnavailable", "Network unavailable"},
+	} {
+		report := BuildReport(Data{
+			Kind: kinds.Node, Name: "node-a",
+			Node: &NodeHealth{Conditions: []NodeCondition{
+				{Type: "Ready", Status: "True"},
+				{Type: condition.name, Status: "True", Reason: "Pressure"},
+			}},
+		})
+		if report.Verdict != Critical {
+			t.Errorf("%s: verdict = %v, want Critical", condition.name, report.Verdict)
+		}
+		if !hasSummaryContaining(report.Findings, condition.want) {
+			t.Errorf("%s: findings = %v, want %q",
+				condition.name, summaries(report.Findings), condition.want)
+		}
+	}
+}
+
+// A pressure condition at False is the normal state and must produce nothing;
+// a Ready node with nothing else wrong is healthy.
+func TestHealthyNodeHasNoFindings(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{Conditions: []NodeCondition{
+			{Type: "Ready", Status: "True"},
+			{Type: "MemoryPressure", Status: "False"},
+			{Type: "DiskPressure", Status: "False"},
+			{Type: "PIDPressure", Status: "False"},
+		}, Pods: PodPhaseCounts{Total: 12, Running: 12}},
+	})
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v, want OK: %v", report.Verdict, summaries(report.Findings))
+	}
+	if len(report.Findings) != 0 {
+		t.Errorf("findings = %v, want none", summaries(report.Findings))
+	}
+}
+
+// Cordoned is a warning, not a critical: it is usually deliberate, and it is
+// exactly what kx cordon just did.
+func TestCordonedNodeIsAWarning(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions:    []NodeCondition{{Type: "Ready", Status: "True"}},
+			Unschedulable: true,
+		},
+	})
+	if report.Verdict != Warning {
+		t.Errorf("verdict = %v, want Warning", report.Verdict)
+	}
+	if !hasSummaryContaining(report.Findings, "Cordoned") {
+		t.Errorf("findings = %v, want a cordoned finding", summaries(report.Findings))
+	}
+}
+
+// Pods that are not running on an otherwise healthy node are worth a line, and
+// it says where to look rather than listing hundreds of pods.
+func TestNodePodRollupReportsWhatIsNotRunning(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
+			Pods:       PodPhaseCounts{Total: 20, Running: 17, Pending: 2, Failed: 1},
+		},
+	})
+	if !hasSummaryContaining(report.Findings, "3/20 pods not running") {
+		t.Errorf("findings = %v, want a pod rollup", summaries(report.Findings))
+	}
+	if severityOf(t, report.Findings, "pods not running") != Warning {
+		t.Error("the pod rollup should be a warning, not a critical")
+	}
+}
+
+// The rollup ranks below the conditions: a node reporting both is broken for
+// the reason the condition names, and the pods are downstream of it.
+func TestNodeConditionOutranksThePodRollup(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"},
+				{Type: "MemoryPressure", Status: "True"}},
+			Pods: PodPhaseCounts{Total: 20, Running: 17, Failed: 3},
+		},
+	})
+	if !strings.Contains(report.Findings[0].Summary, "memory pressure") {
+		t.Errorf("top finding = %q, want the condition above the rollup: %v",
+			report.Findings[0].Summary, summaries(report.Findings))
+	}
+}
+
+func TestNodeIsASupportedKind(t *testing.T) {
+	if !SupportedKinds[kinds.Node] {
+		t.Error("Node is not a supported diagnostic kind")
+	}
+}
+
+// A Job's pod stays on the node after it completes. Counting those as "not
+// running" would report every node that has ever run a CronJob as degraded.
+func TestNodeRollupIgnoresCompletedPods(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
+			Pods:       PodPhaseCounts{Total: 20, Running: 12, Succeeded: 8},
+		},
+	})
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v, want OK: %v", report.Verdict, summaries(report.Findings))
+	}
+	if hasSummaryContaining(report.Findings, "not running") {
+		t.Errorf("findings = %v, want no rollup for completed pods", summaries(report.Findings))
+	}
+}

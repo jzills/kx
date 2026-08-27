@@ -3,7 +3,7 @@
 title: "kx edit"
 linkTitle: "edit"
 description: "Open an indexed resource in your editor via kubectl edit."
-weight: 9
+weight: 11
 ---
 
 Open an indexed resource in your editor via kubectl edit.

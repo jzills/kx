@@ -3,7 +3,7 @@
 title: "kx completion"
 linkTitle: "completion"
 description: "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
-weight: 28
+weight: 31
 ---
 
 Generate the autocompletion script for kx for the specified shell.

@@ -3,7 +3,7 @@
 title: "kx exec"
 linkTitle: "exec"
 description: "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh)."
-weight: 11
+weight: 13
 ---
 
 Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.

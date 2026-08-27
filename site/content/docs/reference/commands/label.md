@@ -3,7 +3,7 @@
 title: "kx label"
 linkTitle: "label"
 description: "Set or remove labels on an indexed resource."
-weight: 13
+weight: 15
 ---
 
 Set or remove labels on an indexed resource.
