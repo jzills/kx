@@ -162,9 +162,38 @@ type Data struct {
 	WarningEvents []EventSummary
 }
 
+// Rank orders findings of equal severity by how specific they are.
+//
+// The triage table shows one finding per row, so which of several equally
+// severe findings sorts first decides what a whole sweep reads like. A
+// Deployment whose only pod is crashlooping produces both "Only 0/1 replicas
+// ready" and "CrashLoopBackOff in pod x" at Critical; the first is true of
+// every broken Deployment and the second is why this one is broken.
+//
+// Values ascend from most specific to least, so the zero value would be Cause
+// — which is why Finding's fields are set positionally at every construction
+// site rather than defaulted: an unranked finding claiming to name a cause is
+// exactly the mistake this type exists to prevent.
+type Rank int
+
+const (
+	// Cause names a concrete failure: a container state, a scheduling
+	// refusal, an exceeded limit, a missing backend.
+	Cause Rank = iota
+	// Aggregate rolls several things up — replica counts, endpoint counts,
+	// a pod's ready-container tally. True of the resource, but it describes
+	// the shape of the problem rather than its origin.
+	Aggregate
+	// Event is a raw warning event. The weakest headline available: the
+	// report's WARNING EVENTS section already prints it in full, and it
+	// usually restates a symptom a pod-level finding has explained.
+	Event
+)
+
 // Finding is one distilled health signal.
 type Finding struct {
 	Severity Severity
+	Rank     Rank
 	Summary  string
 }
 
