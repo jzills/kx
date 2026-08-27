@@ -8,6 +8,14 @@
 build/
 dist/
 
+# Compiled binaries at the repository root. `go build ./cmd/kx` writes ./kx
+# there, which is the obvious thing to type and 90MB of it — and a throwaway
+# named this way is how tmp-plural-audit, a 65MB one-off, reached the history
+# in #251. Anchored, so a source file named kx elsewhere is unaffected.
+/kx
+/kx.exe
+/tmp-*
+
 # Written by `go test -coverprofile`, which is what CI runs and what you run
 # locally to see where you stand against the floor in pr.yml.
 coverage.out
