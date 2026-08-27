@@ -119,7 +119,7 @@ Global flags: `--no-color` disables styled output, `-v`/`--version` prints the i
 | `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; or Trivy via --engine trivy, https://trivy.dev/ — see kx engine). |
+| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--full] [--html] [--namespace/-n str] [--no-open] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
@@ -173,8 +173,9 @@ namespace in one call, `-n` included — it confirms first unless you pass
 every workload in the namespace. Results come back as a severity summary,
 or the full per-image CVE report with `--full`. Requires the CLI for the
 selected engine — [Docker Scout](https://docs.docker.com/scout/) by
-default, or [Trivy](https://trivy.dev/) via `kx engine trivy` (see
-[Configuration](#configuration)).
+default, or [Trivy](https://trivy.dev/) and
+[Grype](https://github.com/anchore/grype) via `kx engine trivy` /
+`kx engine grype` (see [Configuration](#configuration)).
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
@@ -248,7 +249,7 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | `debug_image` | `KX_DEBUG_IMAGE` | `"busybox"` | Image `kx debug` attaches to a pod; `--image` overrides it. |
 | `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
 | `theme_disable` | `KX_THEME_DISABLE` | `false` | Disable styled output (same as `--no-color`). |
-| `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`). |
+| `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`, `grype`). |
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
 

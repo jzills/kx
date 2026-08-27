@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,6 +72,7 @@ func TestDedupePreservesFirstSeenOrder(t *testing.T) {
 // fakeScanner records invocations and replays scripted results.
 type fakeScanner struct {
 	probeCode int
+	probeErr  error
 	captures  []struct {
 		stdout, stderr string
 		code           int
@@ -80,7 +82,7 @@ type fakeScanner struct {
 
 func (f *fakeScanner) Scan([]string) (int, error) { return 0, nil }
 func (f *fakeScanner) Probe([]string) (int, error) {
-	return f.probeCode, nil
+	return f.probeCode, f.probeErr
 }
 func (f *fakeScanner) Capture([]string) (string, string, int, error) {
 	if f.calls < len(f.captures) {
@@ -101,6 +103,67 @@ func TestEnsureAvailableReportsMissingScanner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "docs.docker.com/scout") {
 		t.Errorf("error = %q, want it to link the install docs", err)
+	}
+}
+
+// A scanner that isn't installed at all reaches EnsureAvailable as an error
+// from Probe rather than as a non-zero exit code, and used to be reported with
+// exec's own generic wording — no engine name, and no install link. That only
+// spared Docker Scout, whose preflight runs the `docker` binary that is
+// present and answers "unknown command" for the missing plugin.
+func TestEnsureAvailableReportsTheEngineWhenTheBinaryIsAbsent(t *testing.T) {
+	for _, engine := range []struct{ name, link string }{
+		{"trivy", "trivy.dev"},
+		{"grype", "github.com/anchore/grype"},
+	} {
+		command := ScanCommand{
+			Scanner: &fakeScanner{probeErr: scanner.NotFoundError{Binary: engine.name}},
+			Status:  noStatus,
+		}
+		_, err := command.EnsureAvailable(engine.name)
+		if err == nil {
+			t.Fatalf("%s: EnsureAvailable succeeded with the binary absent", engine.name)
+		}
+		if !strings.Contains(err.Error(), engine.link) {
+			t.Errorf("%s: error = %q, want it to link the install docs", engine.name, err)
+		}
+	}
+}
+
+// The absent-binary message must not read as a missing Kubernetes resource.
+// isStale falls back to IsNotFound, which matches the bare substring "not
+// found" anywhere in an error — so NotFoundError's "trivy not found on PATH"
+// sent a scanner-availability failure down the stale-state path and appended "Run
+// 'kx get <resource>' to refresh the list." to it, advice that has nothing to
+// do with an uninstalled scanner and no bearing on a sweep with no index.
+func TestEnsureAvailableAbsentBinaryIsNotMistakenForStaleState(t *testing.T) {
+	command := ScanCommand{
+		Scanner: &fakeScanner{probeErr: scanner.NotFoundError{Binary: "grype"}},
+		Status:  noStatus,
+	}
+	_, err := command.EnsureAvailable("grype")
+	if err == nil {
+		t.Fatal("EnsureAvailable succeeded with the binary absent")
+	}
+	if IsNotFound(err) {
+		t.Errorf("error = %q, which IsNotFound matches — it would trigger a stale-state refresh", err)
+	}
+}
+
+// A preflight failure that is neither an exit code nor an absent binary — a
+// binary present but not executable, say — is surfaced as it is. "Install it"
+// would be the wrong advice for a file that is already there.
+func TestEnsureAvailableSurfacesAnUnexpectedProbeFailure(t *testing.T) {
+	command := ScanCommand{
+		Scanner: &fakeScanner{probeErr: errors.New("permission denied")},
+		Status:  noStatus,
+	}
+	_, err := command.EnsureAvailable("grype")
+	if err == nil {
+		t.Fatal("EnsureAvailable succeeded despite a probe failure")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %q, want the underlying failure", err)
 	}
 }
 
@@ -420,5 +483,25 @@ func TestScanOmittedEngineUsesConfiguredDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nonexistent-default") {
 		t.Errorf("err = %v, want it to name the configured default engine", err)
+	}
+}
+
+// A scanner is free to colour its own stderr, and Grype does. Carried into a
+// table cell verbatim, its reset sequence ends kx's styling mid-row and prints
+// the escape's tail as text ("local-directory[0m").
+func TestLastLineStripsScannerColour(t *testing.T) {
+	stderr := "resolving image\n\x1b[31mfailed to fetch \x1b[1mregistry.invalid\x1b[0m\n"
+	got := lastLine(stderr)
+	want := "failed to fetch registry.invalid"
+	if got != want {
+		t.Errorf("lastLine = %q, want %q", got, want)
+	}
+}
+
+// Stripping the escapes must not leave a cell that is empty or blank, which
+// would read as a scan that failed for no reason at all.
+func TestLastLineFallsBackWhenColourIsAllThereIs(t *testing.T) {
+	if got := lastLine("\x1b[31m\x1b[0m\n"); got != "scan failed" {
+		t.Errorf("lastLine = %q, want the generic fallback", got)
 	}
 }

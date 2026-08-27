@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -143,10 +144,22 @@ func (c ScanCommand) EnsureAvailable(name string) (scanner.Engine, error) {
 		return nil, err
 	}
 	code, err := c.Scanner.Probe(engine.PreflightArgv())
-	if err != nil {
+	// An absent binary and a preflight that runs and fails are the same
+	// condition to a user — the scanner isn't usable — and the engine's own
+	// message is the only one that names the CLI and where to get it. Routing
+	// the absent case here as well is what makes every engine report the way
+	// Docker Scout always has: its preflight runs `docker`, which is present
+	// and merely answers "unknown command", so it never took the other path.
+	//
+	// It also keeps the failure out of the stale-state machinery: isStale
+	// falls back to IsNotFound, which matches a bare "not found" anywhere in
+	// an error, and NotFoundError's own wording ("grype not found on PATH")
+	// contains it.
+	var notFound scanner.NotFoundError
+	if err != nil && !errors.As(err, &notFound) {
 		return nil, err
 	}
-	if code != 0 {
+	if err != nil || code != 0 {
 		return nil, fmt.Errorf("%s", engine.UnavailableMessage())
 	}
 	return engine, nil
@@ -195,12 +208,22 @@ func (c ScanCommand) Summarize(engineName string, images []string) ([]scanner.Im
 	return rows, nil
 }
 
+// ansiEscape matches the CSI sequences a scanner uses to colour its own
+// output. Grype colours stderr; its reset lands mid-cell in kx's summary
+// table, ending kx's styling early and printing the escape's tail as text.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+
 // lastLine is the most specific part of a scanner's error output; the earlier
 // lines are usually progress noise.
+//
+// Styling is stripped rather than preserved: the string is bound for a cell kx
+// styles itself, and a scanner's own colours cannot know what they are landing
+// in. A line that was nothing but escapes is treated as empty, so the fallback
+// covers it instead of a cell rendering blank.
 func lastLine(text string) string {
 	var last string
 	for _, line := range strings.Split(text, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
+		if trimmed := strings.TrimSpace(ansiEscape.ReplaceAllString(line, "")); trimmed != "" {
 			last = trimmed
 		}
 	}
@@ -311,11 +334,12 @@ func newScanCommand(services Services) *cobra.Command {
 			"or a whole namespace when no index is given (-n to pick one, -A for every " +
 			"namespace); prints a severity summary table " +
 			"by default, or the raw scanner output with --full. Requires the CLI for the " +
-			"selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; " +
-			"or Trivy via --engine trivy, https://trivy.dev/ — see kx engine).",
+			"selected scan engine (Docker Scout by default; Trivy or Grype via " +
+			"--engine — see kx engine).",
 		Long: "Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.\n\n" +
 			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
+			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
 			"Run 'kx engine' to see or change the default.",
 		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
 		DisableFlagParsing: true,

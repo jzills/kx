@@ -49,8 +49,20 @@ type Service interface {
 // ExecService is the real service, shelling out to the scanner binary.
 type ExecService struct{}
 
+// NotFoundError reports that a scanner binary is absent from PATH.
+//
+// Typed rather than a bare message because this package knows only an argv:
+// the caller knows which engine asked for it, and so can name the CLI and
+// where to install it. Its own wording is the fallback for anything that
+// reaches a user without that context.
+type NotFoundError struct{ Binary string }
+
+func (e NotFoundError) Error() string {
+	return fmt.Sprintf("%s not found on PATH — install it to run this scan.", e.Binary)
+}
+
 func missingBinary(argv []string) error {
-	return fmt.Errorf("%s not found on PATH — install it to run this scan.", argv[0])
+	return NotFoundError{Binary: argv[0]}
 }
 
 func (ExecService) Scan(argv []string) (int, error) {
@@ -351,6 +363,106 @@ func (Trivy) ParseFindings(stdout string) ([]Finding, error) {
 	return findings, nil
 }
 
+const grypeDocsURL = "https://github.com/anchore/grype"
+
+// Grype is the Anchore Grype engine.
+type Grype struct{}
+
+func (Grype) Name() string { return "grype" }
+
+// PreflightArgv checks the grype binary is installed and runnable. `version`
+// is a subcommand rather than a flag, and it answers from data compiled into
+// the binary — no vulnerability database is fetched to satisfy it.
+func (Grype) PreflightArgv() []string { return []string{"grype", "version"} }
+
+func (Grype) UnavailableMessage() string {
+	return "grype is not available — kx scan needs the Grype CLI. " +
+		"Install it: " + grypeDocsURL
+}
+
+func (Grype) PassthroughArgv(image string, extra []string) []string {
+	return append([]string{"grype", image}, extra...)
+}
+
+func (Grype) SummaryArgv(image string) []string {
+	return []string{"grype", "-o", "json", image}
+}
+
+// grypeSeverities maps Grype's own vocabulary onto kx's canonical buckets.
+//
+// Critical, High, Medium and Low match outright once upper-cased. The two that
+// don't are deliberately split rather than both swept into the catch-all:
+// "Unknown" is Grype declining to rate a finding, which is precisely what
+// UNSPECIFIED means and how Trivy's own UNKNOWN is already handled, while
+// "Negligible" is a rating Grype did make. Reporting the latter as UNSPECIFIED
+// would tell the reader the scanner stayed silent about something it graded,
+// so it lands in LOW — the bucket below MEDIUM, which is where a negligible
+// finding belongs.
+var grypeSeverities = map[string]string{
+	"CRITICAL":   "CRITICAL",
+	"HIGH":       "HIGH",
+	"MEDIUM":     "MEDIUM",
+	"LOW":        "LOW",
+	"NEGLIGIBLE": "LOW",
+}
+
+// grypeDocument is the slice of Grype's native `-o json` output kx reads.
+type grypeDocument struct {
+	Matches []struct {
+		Vulnerability struct {
+			ID         string `json:"id"`
+			DataSource string `json:"dataSource"`
+			Severity   string `json:"severity"`
+			Fix        struct {
+				Versions []string `json:"versions"`
+			} `json:"fix"`
+		} `json:"vulnerability"`
+		Artifact struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"artifact"`
+	} `json:"matches"`
+}
+
+// ParseFindings reads Grype's native JSON into one Finding per match.
+//
+// Like Trivy's JSON and unlike Scout's SARIF, the shape is already one entry
+// per (vulnerability, package) pair, with package, version and severity as
+// named fields — there is no purl to parse and no per-result message to
+// scrape.
+//
+// Grype lists every version a fix landed in; only the first is kept. A FIXED
+// IN cell naming three versions answers "upgrade to what?" less clearly than
+// one naming the earliest that works.
+func (Grype) ParseFindings(stdout string) ([]Finding, error) {
+	var document grypeDocument
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		return nil, err
+	}
+
+	var findings []Finding
+	for _, match := range document.Matches {
+		vulnerability := match.Vulnerability
+		severity, rated := grypeSeverities[strings.ToUpper(vulnerability.Severity)]
+		if !rated {
+			severity = "UNSPECIFIED"
+		}
+		var fixedIn string
+		if len(vulnerability.Fix.Versions) > 0 {
+			fixedIn = vulnerability.Fix.Versions[0]
+		}
+		findings = append(findings, Finding{
+			ID:        vulnerability.ID,
+			Severity:  severity,
+			Package:   match.Artifact.Name,
+			Installed: match.Artifact.Version,
+			FixedIn:   fixedIn,
+			URL:       vulnerability.DataSource,
+		})
+	}
+	return findings, nil
+}
+
 // purlPattern matches the package URL embedded in a result's message.
 //
 // Matched rather than parsed off its label, so a change to Scout's column
@@ -419,11 +531,11 @@ func decodePurl(value string) string {
 	return decoded
 }
 
-var engines = map[string]Engine{"scout": Scout{}, "trivy": Trivy{}}
+var engines = map[string]Engine{"scout": Scout{}, "trivy": Trivy{}, "grype": Grype{}}
 
 // engineOrder is `kx engine`'s display order — registration order, not
 // alphabetical, so Scout (the default) is always listed first.
-var engineOrder = []string{"scout", "trivy"}
+var engineOrder = []string{"scout", "trivy", "grype"}
 
 // Names returns the registered engine names in display order.
 func Names() []string {

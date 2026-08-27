@@ -1,6 +1,6 @@
 ---
 title: Scan images for CVEs
-description: kx scan resolves a workload's unique images and scans each one, with Docker Scout or Trivy.
+description: kx scan resolves a workload's unique images and scans each one, with Docker Scout, Trivy or Grype.
 weight: 2
 ---
 
@@ -32,6 +32,7 @@ streams the scanner's own output instead — the per-image CVE list, unabridged.
 | --- | --- | --- |
 | Docker Scout (default) | `--engine scout` | <https://docs.docker.com/scout/> |
 | Trivy | `--engine trivy` | <https://trivy.dev/> |
+| Grype | `--engine grype` | <https://github.com/anchore/grype> |
 
 ```bash
 kx engine          # list engines and show the current default

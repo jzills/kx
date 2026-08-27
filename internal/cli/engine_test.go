@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jzills/kx/internal/scanner"
 )
 
 func TestResolveEngineByIndex(t *testing.T) {
@@ -26,7 +29,12 @@ func TestResolveEngineByName(t *testing.T) {
 }
 
 func TestResolveEngineOutOfRange(t *testing.T) {
-	for _, argument := range []string{"0", "3"} {
+	// The upper bound is derived rather than written out: this test used to
+	// hard-code the first index past the end, so registering a third engine
+	// turned an out-of-range case into a valid one and failed here instead of
+	// wherever the real problem would have been.
+	past := strconv.Itoa(len(scanner.Names()) + 1)
+	for _, argument := range []string{"0", past} {
 		_, err := resolveEngine(argument)
 		if err == nil {
 			t.Errorf("resolveEngine(%q) succeeded, want an error", argument)
@@ -41,5 +49,17 @@ func TestResolveEngineUnknownName(t *testing.T) {
 	_, err := resolveEngine("nonexistent")
 	if err == nil || !strings.Contains(err.Error(), "Unknown engine") {
 		t.Errorf("error = %v, want an unknown-engine message", err)
+	}
+}
+
+func TestResolveEngineByIndexReachesTheLastEngine(t *testing.T) {
+	names := scanner.Names()
+	last := strconv.Itoa(len(names))
+	name, err := resolveEngine(last)
+	if err != nil {
+		t.Fatalf("resolveEngine(%q): %v", last, err)
+	}
+	if want := names[len(names)-1]; name != want {
+		t.Errorf("resolveEngine(%q) = %q, want %q", last, name, want)
 	}
 }
