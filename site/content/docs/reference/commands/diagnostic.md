@@ -33,8 +33,10 @@ kx diagnostic [OPTIONS] [index]
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace; each row is indexed and carries its own namespace |
+| `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--full` | Include healthy resources in the terminal table; the HTML report always includes them |
 | `--html` | Render the report as HTML and serve it in a browser |
+| `--json` | Print the report as JSON instead of a table |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |

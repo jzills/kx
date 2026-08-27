@@ -428,6 +428,11 @@ func newScanCommand(services Services) *cobra.Command {
 			}
 			full, rest := extractBool(rest, "--full")
 			html, rest := extractBool(rest, "--html")
+			asJSON, rest := extractBool(rest, "--json")
+			failOn, rest, err := extractString(rest, "--fail-on", "")
+			if err != nil {
+				return err
+			}
 			noOpen, rest := extractBool(rest, "--no-open")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
@@ -444,6 +449,23 @@ func newScanCommand(services Services) *cobra.Command {
 				return errors.New(
 					"'--full' cannot be combined with '--html' — the HTML report " +
 						"already carries every finding.")
+			}
+			if asJSON && html {
+				return errors.New(
+					"'--json' cannot be combined with '--html' — one is for a " +
+						"machine and the other for a browser.")
+			}
+			if asJSON && full {
+				return errors.New(
+					"'--json' cannot be combined with '--full' — --full streams " +
+						"the scanner's own report, which kx does not parse.")
+			}
+			// Validated up front so a typo fails before any image is scanned
+			// rather than after every one of them has been.
+			if failOn != "" {
+				if _, err := scanThresholdBreached(nil, failOn); err != nil {
+					return err
+				}
 			}
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
 
@@ -520,7 +542,9 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+				if !asJSON {
+					render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()
 			} else {
@@ -536,7 +560,9 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+				if !asJSON {
+					render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
 			}
@@ -560,9 +586,20 @@ func newScanCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				// pageTitle, not pageScope: the latter carries the terminal
+				// caption's "Mixed · " cross-kind label, which is a display
+				// convention and means nothing to a machine.
+				document, err := scanJSON(pageTitle, rows)
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return scanGate(rows, failOn)
+			}
 			render.ScanSummary(rows)
 			if !htmlOpts.Enabled {
-				return nil
+				return scanGate(rows, failOn)
 			}
 			indexArg := ""
 			if len(indexArgs) > 0 {
@@ -595,5 +632,28 @@ func newScanCommand(services Services) *cobra.Command {
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().Bool("json", false,
+		"Print the severity counts and every finding as JSON instead of a table")
+	cmd.Flags().String("fail-on", "",
+		"Exit 2 when any image carries a vulnerability at this severity or worse "+
+			"(critical, high, medium, low)")
 	return cmd
+}
+
+// scanGate turns a scan into an exit code when --fail-on asked for one.
+//
+// SilentError because the summary has already been printed: this is the exit
+// code, not a second error message.
+func scanGate(rows []scanner.ImageScan, failOn string) error {
+	if failOn == "" {
+		return nil
+	}
+	breached, err := scanThresholdBreached(rows, failOn)
+	if err != nil {
+		return err
+	}
+	if !breached {
+		return nil
+	}
+	return SilentError{Code: findingsExitCode}
 }

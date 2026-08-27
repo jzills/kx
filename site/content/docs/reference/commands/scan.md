@@ -33,8 +33,10 @@ kx scan [OPTIONS] [index] [scanner flags]
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace |
 | `--engine string` | Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default |
+| `--fail-on string` | Exit 2 when any image carries a vulnerability at this severity or worse (critical, high, medium, low) |
 | `--full` | Stream the scanner's full output instead of the summary table |
 | `--html` | Render the report as HTML and serve it in a browser |
+| `--json` | Print the severity counts and every finding as JSON instead of a table |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |

@@ -737,3 +737,28 @@ func TestSummarizeReportsProgressOncePerImage(t *testing.T) {
 		t.Errorf("progress fired %d times, want %d", got, len(list))
 	}
 }
+
+// The JSON's scope is the subject, not the terminal caption. "Mixed · " is a
+// cross-kind display label the summary table prints above itself; a machine
+// reading this wants the namespace.
+func TestScanJSONScopeCarriesNoDisplayLabel(t *testing.T) {
+	// sweepPageScope is what the terminal and the HTML page are captioned
+	// with. If the command ever hands that to scanJSON, the scope reads
+	// "Mixed · prod" — which is what this guards.
+	if !strings.Contains(sweepPageScope("prod"), "Mixed") {
+		t.Fatal("sweepPageScope no longer carries the label this guards against")
+	}
+	document, err := scanJSON("prod", nil)
+	if err != nil {
+		t.Fatalf("scanJSON: %v", err)
+	}
+	var decoded struct {
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal([]byte(document), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Scope != "prod" {
+		t.Errorf("scope = %q, want the bare namespace", decoded.Scope)
+	}
+}
