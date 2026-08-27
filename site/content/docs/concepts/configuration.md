@@ -23,7 +23,7 @@ out whether the file you are editing is the file it reads.
 | Key | Environment | Default | What it does |
 | --- | --- | --- | --- |
 | `theme` | `KX_THEME` | `github-dark` | Colour palette for all output; see [themes](../themes/). |
-| `engine` | `KX_ENGINE` | `scout` | Default scanner for `kx scan` — `scout` or `trivy`. |
+| `engine` | `KX_ENGINE` | `scout` | Default scanner for `kx scan` — `scout`, `trivy` or `grype`. |
 | `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](../state/) keeps. |
 | `shells` | `KX_SHELLS` | `bash, sh` | Shell candidates `kx exec` tries, in order. |
 | `debug_image` | `KX_DEBUG_IMAGE` | `busybox` | Image `kx debug` attaches to a pod; `--image` overrides it per run. |

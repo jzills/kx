@@ -73,8 +73,8 @@ toc: false
       <p class="kx-feature__title"><a href="docs/guides/scan-images/">Scan images for CVEs</a></p>
       <p class="kx-feature__body">
         <code>kx scan</code> resolves a workload's unique images and scans each
-        one, printing a severity summary. Docker Scout by default, Trivy with
-        <code>--engine trivy</code>
+        one, printing a severity summary. Docker Scout by default, Trivy or
+        Grype with <code>--engine</code>
       </p>
     </div>
     <div class="kx-feature">

@@ -481,13 +481,186 @@ func TestGetEngineKnowsTrivy(t *testing.T) {
 
 func TestNamesAndExists(t *testing.T) {
 	names := Names()
-	if len(names) != 2 || names[0] != "scout" || names[1] != "trivy" {
-		t.Errorf("Names() = %v, want [scout trivy] in that order", names)
+	if len(names) != 3 || names[0] != "scout" || names[1] != "trivy" || names[2] != "grype" {
+		t.Errorf("Names() = %v, want [scout trivy grype] in that order", names)
 	}
-	if !Exists("scout") || !Exists("trivy") {
+	if !Exists("scout") || !Exists("trivy") || !Exists("grype") {
 		t.Error("Exists false for a registered engine")
 	}
 	if Exists("nonexistent") {
 		t.Error("Exists true for an unregistered engine")
 	}
+}
+
+// grypeJSON is a synthetic (not captured) fixture in Grype's native -o json
+// shape. It covers the four cases the parser has to get right: a fixed
+// Critical, an unfixed High, a Negligible (a rating kx has no bucket for but
+// which is emphatically not "unrated"), and an Unknown (which is). The
+// Critical carries two fix versions, since Grype reports every version a fix
+// landed in and only the earliest is worth printing.
+const grypeJSON = `{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0001",
+        "dataSource": "https://security-tracker.debian.org/tracker/CVE-2024-0001",
+        "namespace": "debian:distro:debian:12",
+        "severity": "Critical",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0001"],
+        "fix": {"versions": ["3.0.13-1", "3.0.14-1"], "state": "fixed"}
+      },
+      "artifact": {"name": "openssl", "version": "3.0.11-1", "type": "deb"}
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0002",
+        "dataSource": "https://security-tracker.debian.org/tracker/CVE-2024-0002",
+        "namespace": "debian:distro:debian:12",
+        "severity": "High",
+        "urls": [],
+        "fix": {"versions": [], "state": "not-fixed"}
+      },
+      "artifact": {"name": "libcurl4", "version": "7.88.1-10", "type": "deb"}
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0003",
+        "dataSource": "https://security-tracker.debian.org/tracker/CVE-2024-0003",
+        "namespace": "debian:distro:debian:12",
+        "severity": "Negligible",
+        "urls": [],
+        "fix": {"versions": [], "state": "wont-fix"}
+      },
+      "artifact": {"name": "zlib1g", "version": "1.2.13.dfsg-1", "type": "deb"}
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-xxxx-yyyy-zzzz",
+        "dataSource": "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz",
+        "namespace": "github:language:go",
+        "severity": "Unknown",
+        "urls": [],
+        "fix": {"versions": [], "state": "unknown"}
+      },
+      "artifact": {"name": "golang.org/x/crypto", "version": "0.16.0", "type": "go-module"}
+    }
+  ]
+}`
+
+func TestGrypeParseFindingsReadsEveryMatch(t *testing.T) {
+	findings, err := Grype{}.ParseFindings(grypeJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	if len(findings) != 4 {
+		t.Fatalf("got %d findings, want 4", len(findings))
+	}
+
+	first := findings[0]
+	if first.ID != "CVE-2024-0001" {
+		t.Errorf("ID = %q", first.ID)
+	}
+	if first.Severity != "CRITICAL" {
+		t.Errorf("Severity = %q, want Grype's title-cased rating upper-cased", first.Severity)
+	}
+	if first.Package != "openssl" {
+		t.Errorf("Package = %q", first.Package)
+	}
+	if first.Installed != "3.0.11-1" {
+		t.Errorf("Installed = %q", first.Installed)
+	}
+	if first.FixedIn != "3.0.13-1" {
+		t.Errorf("FixedIn = %q, want the first of several fix versions", first.FixedIn)
+	}
+	if first.URL != "https://security-tracker.debian.org/tracker/CVE-2024-0001" {
+		t.Errorf("URL = %q", first.URL)
+	}
+}
+
+func TestGrypeParseFindingsUnfixedStaysEmpty(t *testing.T) {
+	findings, err := Grype{}.ParseFindings(grypeJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	finding := findingFor(t, findings, "libcurl4")
+	if finding.FixedIn != "" {
+		t.Errorf("FixedIn = %q, want empty for an unfixed package", finding.FixedIn)
+	}
+	if finding.Severity != "HIGH" {
+		t.Errorf("Severity = %q, want HIGH", finding.Severity)
+	}
+}
+
+// Negligible is a rating Grype gave, not a rating it withheld — folding it
+// into UNSPECIFIED beside Grype's own Unknown would say the scanner stayed
+// silent about a package it did rate. LOW is the bucket below MEDIUM, which
+// is where a negligible finding belongs.
+func TestGrypeParseFindingsFoldsNegligibleToLow(t *testing.T) {
+	findings, err := Grype{}.ParseFindings(grypeJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	if got := findingFor(t, findings, "zlib1g").Severity; got != "LOW" {
+		t.Errorf("Severity = %q, want LOW for Grype's Negligible", got)
+	}
+}
+
+func TestGrypeParseFindingsFoldsUnknownSeverityToUnspecified(t *testing.T) {
+	findings, err := Grype{}.ParseFindings(grypeJSON)
+	if err != nil {
+		t.Fatalf("ParseFindings returned %v", err)
+	}
+	if got := findingFor(t, findings, "golang.org/x/crypto").Severity; got != "UNSPECIFIED" {
+		t.Errorf("Severity = %q, want UNSPECIFIED for Grype's own Unknown", got)
+	}
+}
+
+func TestGrypeParseFindingsRejectsGarbage(t *testing.T) {
+	if _, err := (Grype{}).ParseFindings("not json"); err == nil {
+		t.Error("ParseFindings accepted non-JSON")
+	}
+}
+
+func TestGrypeArgv(t *testing.T) {
+	grype := Grype{}
+	got := grype.SummaryArgv("nginx:1.25")
+	if len(got) != 4 || got[0] != "grype" || got[1] != "-o" || got[2] != "json" || got[3] != "nginx:1.25" {
+		t.Errorf("SummaryArgv = %v, want a json output request", got)
+	}
+	passthrough := grype.PassthroughArgv("nginx:1.25", []string{"--only-fixed"})
+	if passthrough[0] != "grype" || passthrough[1] != "nginx:1.25" {
+		t.Errorf("PassthroughArgv = %v, want the image scanned directly", passthrough)
+	}
+	if passthrough[len(passthrough)-1] != "--only-fixed" {
+		t.Errorf("PassthroughArgv = %v, want the extra flag forwarded", passthrough)
+	}
+	if preflight := grype.PreflightArgv(); len(preflight) != 2 ||
+		preflight[0] != "grype" || preflight[1] != "version" {
+		t.Errorf("PreflightArgv = %v, want [grype version]", preflight)
+	}
+	if grype.Name() != "grype" {
+		t.Errorf("Name() = %q", grype.Name())
+	}
+	if !strings.Contains(grype.UnavailableMessage(), "github.com/anchore/grype") {
+		t.Errorf("UnavailableMessage() = %q, want it to link install docs", grype.UnavailableMessage())
+	}
+}
+
+func TestGetEngineKnowsGrype(t *testing.T) {
+	if _, err := GetEngine("grype"); err != nil {
+		t.Errorf("GetEngine(grype): %v", err)
+	}
+}
+
+// findingFor locates the single finding for a package, failing the test rather
+// than returning a zero value that would make an assertion pass vacuously.
+func findingFor(t *testing.T, findings []Finding, pkg string) Finding {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.Package == pkg {
+			return finding
+		}
+	}
+	t.Fatalf("no finding has Package %q", pkg)
+	return Finding{}
 }
