@@ -3,8 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/web"
@@ -69,14 +73,25 @@ func TestDedupePreservesFirstSeenOrder(t *testing.T) {
 	}
 }
 
+// captured is one image's scripted scanner result.
+type captured struct {
+	image          string
+	stdout, stderr string
+	code           int
+}
+
 // fakeScanner records invocations and replays scripted results.
+//
+// Results are keyed by image rather than handed out in call order: images are
+// scanned concurrently, so call order is not the order they were asked for, and
+// a positional fake would attribute one image's output to another. The mutex is
+// for the same reason.
 type fakeScanner struct {
 	probeCode int
 	probeErr  error
-	captures  []struct {
-		stdout, stderr string
-		code           int
-	}
+	captures  []captured
+
+	mu    sync.Mutex
 	calls int
 }
 
@@ -84,13 +99,17 @@ func (f *fakeScanner) Scan([]string) (int, error) { return 0, nil }
 func (f *fakeScanner) Probe([]string) (int, error) {
 	return f.probeCode, f.probeErr
 }
-func (f *fakeScanner) Capture([]string) (string, string, int, error) {
-	if f.calls < len(f.captures) {
-		result := f.captures[f.calls]
-		f.calls++
-		return result.stdout, result.stderr, result.code, nil
-	}
+func (f *fakeScanner) Capture(argv []string) (string, string, int, error) {
+	f.mu.Lock()
 	f.calls++
+	f.mu.Unlock()
+
+	image := argv[len(argv)-1]
+	for _, result := range f.captures {
+		if result.image == image {
+			return result.stdout, result.stderr, result.code, nil
+		}
+	}
 	return "", "", 1, nil
 }
 
@@ -177,17 +196,14 @@ func TestEnsureAvailableRejectsUnknownEngine(t *testing.T) {
 // One unpullable image records its failure on that row rather than costing the
 // results for every other image.
 func TestSummarizeRecordsPerImageFailures(t *testing.T) {
-	scanner := &fakeScanner{captures: []struct {
-		stdout, stderr string
-		code           int
-	}{
-		{stdout: `{"runs":[]}`},
-		{stderr: "progress noise\nError: failed to pull image", code: 1},
-		{stdout: "not json"},
+	scanner := &fakeScanner{captures: []captured{
+		{image: "good:v1", stdout: `{"Results":[{"Vulnerabilities":[{"VulnerabilityID":"CVE-1","Severity":"HIGH"}]}]}`},
+		{image: "unpullable:v1", code: 1, stderr: "pulling...\nError: failed to pull image\n"},
+		{image: "weird:v1", stdout: "not json"},
 	}}
 
 	rows, err := ScanCommand{Scanner: scanner, Status: noStatus}.
-		Summarize("scout", []string{"good:v1", "unpullable:v1", "weird:v1"})
+		Summarize("trivy", []string{"good:v1", "unpullable:v1", "weird:v1"}, nil)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -503,5 +519,221 @@ func TestLastLineStripsScannerColour(t *testing.T) {
 func TestLastLineFallsBackWhenColourIsAllThereIs(t *testing.T) {
 	if got := lastLine("\x1b[31m\x1b[0m\n"); got != "scan failed" {
 		t.Errorf("lastLine = %q, want the generic fallback", got)
+	}
+}
+
+// concurrentScanner records the order images arrive and how many scans are in
+// flight at once, and can be told to finish them out of order.
+type concurrentScanner struct {
+	mu       sync.Mutex
+	inFlight int
+	peak     int
+	started  []string
+	// release gates each image's completion, keyed by image, so a test can
+	// finish them in whatever order it likes.
+	release map[string]chan struct{}
+	// hardErr is returned from Capture for this image, standing in for a
+	// failure that is not the scanner's exit code — a missing binary.
+	hardErr map[string]error
+	// exitCode is the code returned for this image; anything non-zero records
+	// an error on that image's row instead of aborting.
+	exitCode map[string]int
+	stdout   map[string]string
+}
+
+func newConcurrentScanner() *concurrentScanner {
+	return &concurrentScanner{
+		release:  map[string]chan struct{}{},
+		hardErr:  map[string]error{},
+		exitCode: map[string]int{},
+		stdout:   map[string]string{},
+	}
+}
+
+func (c *concurrentScanner) Scan([]string) (int, error)  { return 0, nil }
+func (c *concurrentScanner) Probe([]string) (int, error) { return 0, nil }
+
+func (c *concurrentScanner) Capture(argv []string) (string, string, int, error) {
+	image := argv[len(argv)-1]
+
+	c.mu.Lock()
+	c.inFlight++
+	if c.inFlight > c.peak {
+		c.peak = c.inFlight
+	}
+	c.started = append(c.started, image)
+	gate := c.release[image]
+	c.mu.Unlock()
+
+	if gate != nil {
+		<-gate
+	}
+
+	c.mu.Lock()
+	c.inFlight--
+	out, code, err := c.stdout[image], c.exitCode[image], c.hardErr[image]
+	c.mu.Unlock()
+
+	return out, "scanner said no", code, err
+}
+
+func images(n int) []string {
+	out := make([]string, 0, n)
+	for i := range n {
+		out = append(out, fmt.Sprintf("img-%02d", i))
+	}
+	return out
+}
+
+// Rows must come back in the order the images were resolved in, whatever order
+// the scans finish — the table is indexed by position and the tests downstream
+// pin it.
+func TestSummarizeKeepsImageOrderWhenScansFinishOutOfOrder(t *testing.T) {
+	list := images(4)
+	fake := newConcurrentScanner()
+	for _, image := range list {
+		fake.release[image] = make(chan struct{})
+		fake.stdout[image] = `{"Results":[]}`
+	}
+	// Finish in reverse.
+	go func() {
+		for i := len(list) - 1; i >= 0; i-- {
+			close(fake.release[list[i]])
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	command := ScanCommand{Scanner: fake, Status: noStatus}
+	rows, err := command.Summarize("trivy", list, nil)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(rows) != len(list) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(list))
+	}
+	for i, row := range rows {
+		if row.Image != list[i] {
+			t.Errorf("rows[%d].Image = %q, want %q", i, row.Image, list[i])
+		}
+	}
+}
+
+// Scanners are heavy; running one per image at once would thrash a laptop
+// scanning a real cluster's worth of images.
+func TestSummarizeBoundsConcurrency(t *testing.T) {
+	list := images(scanWorkers * 3)
+	fake := newConcurrentScanner()
+	// One gate for every image, so none can finish until the test says so.
+	// Without it each scan completes before the next goroutine is scheduled and
+	// the peak is 1 whether the semaphore works or not — the test would pass
+	// against a serial implementation.
+	gate := make(chan struct{})
+	for _, image := range list {
+		fake.stdout[image] = `{"Results":[]}`
+		fake.release[image] = gate
+	}
+
+	go func() {
+		// Wait for the semaphore to fill, then hold the gate a while longer.
+		// The grace period is the whole point: releasing the moment it
+		// saturates lets a *broken* (unbounded) implementation look bounded,
+		// because the extra goroutines have not been scheduled yet. Holding
+		// gives them time to pile up and be counted.
+		deadline := time.After(5 * time.Second)
+		for {
+			fake.mu.Lock()
+			saturated := fake.inFlight >= scanWorkers
+			fake.mu.Unlock()
+			if saturated {
+				break
+			}
+			select {
+			case <-deadline:
+				close(gate)
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+		close(gate)
+	}()
+
+	command := ScanCommand{Scanner: fake, Status: noStatus}
+	if _, err := command.Summarize("trivy", list, nil); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	fake.mu.Lock()
+	peak := fake.peak
+	fake.mu.Unlock()
+	if peak > scanWorkers {
+		t.Errorf("peak in-flight scans = %d, want at most %d", peak, scanWorkers)
+	}
+	if peak < scanWorkers {
+		t.Errorf("peak in-flight scans = %d — the semaphore never saturated, so nothing ran in parallel", peak)
+	}
+}
+
+// One unpullable image still records its failure on its own row rather than
+// costing every other image its results — unchanged by running them at once.
+func TestSummarizeStillContainsAPerImageFailure(t *testing.T) {
+	list := images(3)
+	fake := newConcurrentScanner()
+	for _, image := range list {
+		fake.stdout[image] = `{"Results":[]}`
+	}
+	fake.exitCode[list[1]] = 1
+
+	command := ScanCommand{Scanner: fake, Status: noStatus}
+	rows, err := command.Summarize("trivy", list, nil)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if rows[1].Error == "" {
+		t.Errorf("rows[1] = %+v, want an error recorded on its own row", rows[1])
+	}
+	for _, i := range []int{0, 2} {
+		if rows[i].Error != "" || rows[i].Counts == nil {
+			t.Errorf("rows[%d] = %+v, want a clean result", i, rows[i])
+		}
+	}
+}
+
+// A failure that is not an exit code — the scanner binary vanishing mid-sweep —
+// still aborts, and reports the earliest image's error, which is the one the
+// serial version would have stopped on.
+func TestSummarizeReportsTheEarliestHardFailure(t *testing.T) {
+	list := images(4)
+	fake := newConcurrentScanner()
+	for _, image := range list {
+		fake.stdout[image] = `{"Results":[]}`
+	}
+	fake.hardErr[list[1]] = errors.New("first failure")
+	fake.hardErr[list[3]] = errors.New("later failure")
+
+	command := ScanCommand{Scanner: fake, Status: noStatus}
+	_, err := command.Summarize("trivy", list, nil)
+	if err == nil {
+		t.Fatal("Summarize succeeded despite a hard failure")
+	}
+	if !strings.Contains(err.Error(), "first failure") {
+		t.Errorf("err = %q, want the earliest image's failure", err)
+	}
+}
+
+// The progress callback is what turns a bare spinner into "scanning 7/30".
+func TestSummarizeReportsProgressOncePerImage(t *testing.T) {
+	list := images(6)
+	fake := newConcurrentScanner()
+	for _, image := range list {
+		fake.stdout[image] = `{"Results":[]}`
+	}
+
+	var done atomic.Int64
+	command := ScanCommand{Scanner: fake, Status: noStatus}
+	if _, err := command.Summarize("trivy", list, func() { done.Add(1) }); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if got := done.Load(); got != int64(len(list)) {
+		t.Errorf("progress fired %d times, want %d", got, len(list))
 	}
 }

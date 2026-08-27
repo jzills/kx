@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
@@ -174,38 +175,108 @@ func (c ScanCommand) ScanImage(engineName, image string, extra []string) (int, e
 	return c.Scanner.Scan(engine.PassthroughArgv(image, extra))
 }
 
+// scanWorkers bounds how many scanners run at once.
+//
+// Two, and deliberately not one per CPU. A scanner unpacks an image and walks
+// every package in it, so what limits it is memory, not cores: Grype peaks
+// around 325MB of RSS per image. Measured on a 16-core machine with 7GB of RAM,
+// sweeping this project's test namespace with Grype:
+//
+//	workers   round 1   round 2
+//	      1       58s       13s
+//	      2        6s        6s
+//	      4        7s       16s
+//
+// Four is faster than serial when there is memory to spare and slower than
+// serial when there is not — 1.3GB of scanners on a box with 2GB free spends
+// the difference in reclaim. Two beat both, consistently, and it is the number
+// that degrades gracefully on a machine smaller than the one it was tuned on.
+// The measurements are noisy (serial ranged 13s to 58s across identical runs)
+// but the ordering held.
+//
+// Fixed rather than a flag because nobody has needed to tune it; a knob can be
+// added when someone does.
+const scanWorkers = 2
+
 // Summarize scans each image and rolls the results into severity counts.
 //
-// A failure is recorded on its row rather than aborting: one unpullable image
-// shouldn't cost the results for every other image in the namespace.
-func (c ScanCommand) Summarize(engineName string, images []string) ([]scanner.ImageScan, error) {
+// Images are scanned concurrently: a sweep is almost entirely spent waiting on
+// a scanner, and doing them one at a time made a real cluster's worth of images
+// a minutes-long wait for work that overlaps freely. Results are written by
+// position rather than appended, so the rows come back in the order the images
+// were resolved in whatever order the scans finish — the table is indexed by
+// position, and callers pin that order.
+//
+// onScanned, if given, is called once per image as it completes, from the
+// scanning goroutine — it is what turns the spinner into a count, and must be
+// safe to call concurrently.
+//
+// A scanner failure is recorded on its row rather than aborting: one unpullable
+// image shouldn't cost the results for every other image in the namespace. A
+// failure that is not the scanner's exit code — the binary missing — still
+// aborts, reporting the earliest image's error, which is the one the serial
+// version stopped on.
+func (c ScanCommand) Summarize(
+	engineName string, images []string, onScanned func(),
+) ([]scanner.ImageScan, error) {
 	engine, err := scanner.GetEngine(engineName)
 	if err != nil {
 		return nil, err
 	}
 
-	rows := make([]scanner.ImageScan, 0, len(images))
-	for _, image := range images {
-		stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
-		if err != nil {
-			return nil, err
+	rows := make([]scanner.ImageScan, len(images))
+	failures := make([]error, len(images))
+
+	var group sync.WaitGroup
+	// A buffered channel as a semaphore: taking a slot blocks once
+	// scanWorkers are out, so no more than that many scanners ever run.
+	slots := make(chan struct{}, scanWorkers)
+	for position, image := range images {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			// Each goroutine writes its own element of each slice, which is
+			// why neither needs a lock.
+			rows[position], failures[position] = c.scanImage(engine, image)
+			if onScanned != nil {
+				onScanned()
+			}
+		}()
+	}
+	group.Wait()
+
+	// In order, so the reported failure is the same one a serial sweep would
+	// have stopped on rather than whichever goroutine happened to finish first.
+	for _, failure := range failures {
+		if failure != nil {
+			return nil, failure
 		}
-		if code != 0 {
-			rows = append(rows, scanner.ImageScan{Image: image, Error: lastLine(stderr)})
-			continue
-		}
-		findings, err := engine.ParseFindings(stdout)
-		if err != nil {
-			rows = append(rows, scanner.ImageScan{Image: image, Error: "unparseable output"})
-			continue
-		}
-		rows = append(rows, scanner.ImageScan{
-			Image:    image,
-			Counts:   scanner.CountBySeverity(findings),
-			Findings: findings,
-		})
 	}
 	return rows, nil
+}
+
+// scanImage is one image's scan. The error return is reserved for a failure
+// that is not the scanner's own verdict; anything the scanner reported lands on
+// the row.
+func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.ImageScan, error) {
+	stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
+	if err != nil {
+		return scanner.ImageScan{}, err
+	}
+	if code != 0 {
+		return scanner.ImageScan{Image: image, Error: lastLine(stderr)}, nil
+	}
+	findings, err := engine.ParseFindings(stdout)
+	if err != nil {
+		return scanner.ImageScan{Image: image, Error: "unparseable output"}, nil
+	}
+	return scanner.ImageScan{
+		Image:    image,
+		Counts:   scanner.CountBySeverity(findings),
+		Findings: findings,
+	}, nil
 }
 
 // ansiEscape matches the CSI sequences a scanner uses to colour its own
@@ -483,8 +554,8 @@ func newScanCommand(services Services) *cobra.Command {
 				return nil
 			}
 
-			stop := render.Status("scanning")
-			rows, err := command.Summarize(engine, images)
+			advance, stop := render.Progress("scanning", len(images))
+			rows, err := command.Summarize(engine, images, advance)
 			stop()
 			if err != nil {
 				return err
