@@ -87,14 +87,16 @@ func newDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
 // resolve (their cache entry was missing or stale, most likely) but others
 // did — that's still usable data, not a hard failure. Any other error is.
 func buildLookup(lists []*metav1.APIResourceList, err error) (
-	shorthands map[string]kinds.Kind, plurals map[kinds.Kind]string, ok bool,
+	shorthands map[string]kinds.Kind, plurals map[kinds.Kind]string,
+	namespaced map[kinds.Kind]bool, ok bool,
 ) {
 	if err != nil && !discovery.IsGroupDiscoveryFailedError(err) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	shorthands = map[string]kinds.Kind{}
 	plurals = map[kinds.Kind]string{}
+	namespaced = map[kinds.Kind]bool{}
 	for _, list := range lists {
 		if list == nil {
 			continue
@@ -107,6 +109,10 @@ func buildLookup(lists []*metav1.APIResourceList, err error) (
 			}
 			kind := kinds.Kind(resource.Kind)
 			plurals[kind] = resource.Name
+			// The scope kubectl already recorded for every resource, which is
+			// what tells a Node listing it has no namespace to be captioned
+			// with. Free here: the cache entry carries it either way.
+			namespaced[kind] = resource.Namespaced
 			shorthands[strings.ToLower(resource.Name)] = kind
 			shorthands[strings.ToLower(resource.Kind)] = kind
 			if resource.SingularName != "" {
@@ -117,7 +123,7 @@ func buildLookup(lists []*metav1.APIResourceList, err error) (
 			}
 		}
 	}
-	return shorthands, plurals, true
+	return shorthands, plurals, namespaced, true
 }
 
 // Source implements kinds.ShorthandSource by reading kubectl's on-disk
@@ -128,6 +134,7 @@ type Source struct {
 	once       sync.Once
 	shorthands map[string]kinds.Kind
 	plurals    map[kinds.Kind]string
+	namespaced map[kinds.Kind]bool
 }
 
 // NewSource returns a Source ready to install via kinds.SetShorthandSource.
@@ -143,6 +150,17 @@ func (s *Source) Resolve(spelling string) (kinds.Kind, string, bool) {
 		return "", "", false
 	}
 	return kind, s.plurals[kind], true
+}
+
+// Namespaced implements kinds.ShorthandSource.
+//
+// A kind absent from the cache is reported unknown rather than assumed either
+// way: the lookup is built from whatever groups resolved, and a group that
+// did not is a gap in kx's knowledge, not evidence about scope.
+func (s *Source) Namespaced(kind kinds.Kind) (bool, bool) {
+	s.once.Do(s.load)
+	scoped, ok := s.namespaced[kind]
+	return scoped, ok
 }
 
 // withUnhandledErrorsSuppressed runs fn with apimachinery's
@@ -179,6 +197,7 @@ func withUnhandledErrorsSuppressed(fn func()) {
 func (s *Source) load() {
 	s.shorthands = map[string]kinds.Kind{}
 	s.plurals = map[kinds.Kind]string{}
+	s.namespaced = map[kinds.Kind]bool{}
 
 	client, err := newDiscoveryClient()
 	if err != nil {
@@ -189,10 +208,11 @@ func (s *Source) load() {
 	withUnhandledErrorsSuppressed(func() {
 		lists, discoveryErr = client.ServerPreferredResources()
 	})
-	shorthands, plurals, ok := buildLookup(lists, discoveryErr)
+	shorthands, plurals, namespaced, ok := buildLookup(lists, discoveryErr)
 	if !ok {
 		return
 	}
 	s.shorthands = shorthands
 	s.plurals = plurals
+	s.namespaced = namespaced
 }

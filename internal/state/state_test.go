@@ -1441,3 +1441,71 @@ func TestUnscopedEntryStillDefaults(t *testing.T) {
 		t.Errorf("Namespace = %q, want default", loaded.Namespace)
 	}
 }
+
+// An entry with no namespace used to be "corrected" to "default" on load, so
+// a cluster-scoped listing that deliberately recorded none got one invented
+// for it — kx get nodes then described Node/x as living in "default".
+//
+// The scope is recovered from the kinds the entry already records rather than
+// from a new field: every resource carries its Kind, and a listing whose sole
+// kind is cluster-scoped has no namespace by definition.
+func TestClusterScopedEntryKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"node-a"}, kinds.Node),
+		Namespace: "",
+	})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — a Node listing has no namespace", loaded.Namespace)
+	}
+
+	_, namespace, kind, err := service.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if namespace != "" {
+		t.Errorf("Fields namespace = %q, want empty", namespace)
+	}
+	if kind != kinds.Node {
+		t.Errorf("Fields kind = %q, want Node", kind)
+	}
+}
+
+// The backfill still applies to a namespaced listing that recorded none, which
+// is what it was written for.
+func TestNamespacedEntryWithNoNamespaceStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: ""})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default", loaded.Namespace)
+	}
+}
+
+// A mixed-kind entry — a tree walk, a triage sweep — has no sole kind to read
+// a scope from, so it keeps the backfill rather than having one guessed.
+func TestMixedKindEntryStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	mixed := NewOrderedResources([]Resource{
+		{Name: "web", Kind: kinds.Deployment},
+		{Name: "web-abc", Kind: kinds.Pod},
+	})
+	save(t, service, State{Resources: mixed, Namespace: ""})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default for a mixed-kind entry", loaded.Namespace)
+	}
+}

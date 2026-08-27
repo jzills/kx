@@ -484,3 +484,68 @@ func TestGetRegistersNamespaceFlags(t *testing.T) {
 		}
 	}
 }
+
+// A cluster-scoped listing records no namespace, because there isn't one.
+// kx used to stamp whichever namespace the caller happened to be standing in
+// onto every Node, PersistentVolume, StorageClass and CRD it listed, then
+// print it back as though it meant something: "Nodes · diagnostics · 1 item",
+// and "Node/desktop-control-plane · diagnostics" on the describe banner.
+func TestClusterScopedListingSavesNoNamespace(t *testing.T) {
+	const nodesOutput = "NAME      STATUS   ROLES           AGE   VERSION\n" +
+		"node-a    Ready    control-plane   1d    v1.34.3\n"
+
+	kubectl := &fakeKubectl{output: nodesOutput, namespace: "diagnostics"}
+	states := &fakeState{}
+
+	_, namespace, err := newGet(kubectl, states).Execute("nodes", "", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "" {
+		t.Errorf("reported namespace = %q, want empty — a Node is not in a namespace", namespace)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries, want 1", len(states.saved))
+	}
+	if got := states.saved[0].Namespace; got != "" {
+		t.Errorf("saved namespace = %q, want empty", got)
+	}
+	if states.saved[0].AllNamespaces {
+		t.Error("AllNamespaces set for a cluster-scoped listing; it spans no namespaces at all")
+	}
+}
+
+// The namespaced path is untouched: the listing still records where it came
+// from, or later commands resolve indexes against the wrong namespace.
+func TestNamespacedListingStillSavesItsNamespace(t *testing.T) {
+	kubectl := &fakeKubectl{output: podsOutput, namespace: "diagnostics"}
+	states := &fakeState{}
+
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := states.saved[0].Namespace; got != "diagnostics" {
+		t.Errorf("saved namespace = %q, want diagnostics", got)
+	}
+}
+
+// A kind kx cannot place — a CRD with no discovery cache — keeps today's
+// behaviour rather than having a scope invented for it. Guessing
+// cluster-scoped would strip the namespace off a namespaced CRD and leave
+// every index resolving into the wrong place.
+func TestUnknownKindKeepsTheCurrentNamespace(t *testing.T) {
+	const output = "NAME       AGE\ngw-a       1d\n"
+	kubectl := &fakeKubectl{output: output, namespace: "diagnostics"}
+	states := &fakeState{}
+
+	_, namespace, err := newGet(kubectl, states).Execute("gateways.gateway.networking.k8s.io", "", nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if namespace != "diagnostics" {
+		t.Errorf("reported namespace = %q, want the current namespace for an unplaceable kind", namespace)
+	}
+	if got := states.saved[0].Namespace; got != "diagnostics" {
+		t.Errorf("saved namespace = %q, want diagnostics", got)
+	}
+}

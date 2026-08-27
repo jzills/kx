@@ -111,15 +111,23 @@ func TestEnsureKindOmitsBackWhenPreviousDoesNotList(t *testing.T) {
 }
 
 type fakeShorthandSource struct {
-	kind   Kind
-	plural string
-	ok     bool
-	calls  []string
+	kind       Kind
+	plural     string
+	ok         bool
+	calls      []string
+	namespaced bool
+	scopeKnown bool
+	scopeCalls []Kind
 }
 
 func (f *fakeShorthandSource) Resolve(spelling string) (Kind, string, bool) {
 	f.calls = append(f.calls, spelling)
 	return f.kind, f.plural, f.ok
+}
+
+func (f *fakeShorthandSource) Namespaced(kind Kind) (bool, bool) {
+	f.scopeCalls = append(f.scopeCalls, kind)
+	return f.namespaced, f.scopeKnown
 }
 
 // A spelling already in kindMap must never reach the fallback — the static
@@ -251,5 +259,60 @@ func TestPluralDisplayCapitalisesADiscoveredType(t *testing.T) {
 
 	if got := PluralDisplay("sa"); got != "ServiceAccounts" {
 		t.Errorf("PluralDisplay(sa) = %q, want ServiceAccounts", got)
+	}
+}
+
+// Cluster-scoped kinds kx names itself must be recognised with no discovery
+// cache at all — a fresh machine, or a kubeconfig kubectl has never populated
+// a cache for. Without this, kx would caption a Node listing with whichever
+// namespace the caller happened to be standing in.
+func TestClusterScopedIsKnownWithoutADiscoverySource(t *testing.T) {
+	SetShorthandSource(nil)
+	for _, kind := range []Kind{Node, Namespace} {
+		namespaced, known := Namespaced(kind)
+		if !known {
+			t.Errorf("Namespaced(%s) not known with no source installed", kind)
+		}
+		if namespaced {
+			t.Errorf("Namespaced(%s) = true, want false — it is cluster-scoped", kind)
+		}
+	}
+	for _, kind := range []Kind{Pod, Deployment, Secret, PersistentVolumeClaim} {
+		namespaced, known := Namespaced(kind)
+		if !known || !namespaced {
+			t.Errorf("Namespaced(%s) = (%v, %v), want (true, true)", kind, namespaced, known)
+		}
+	}
+}
+
+// A kind kx has never heard of — a CRD — is answered by the discovery cache,
+// which records scope per resource. There is no guessing fallback: an unknown
+// kind with no source reports "not known", and the caller keeps today's
+// behaviour rather than inventing a scope for it.
+func TestNamespacedFallsBackToTheDiscoverySource(t *testing.T) {
+	SetShorthandSource(nil)
+	if _, known := Namespaced(Kind("Gateway")); known {
+		t.Error("Namespaced(Gateway) claimed to know a CRD's scope with no source")
+	}
+
+	fake := &fakeShorthandSource{namespaced: false, scopeKnown: true}
+	SetShorthandSource(fake)
+	defer SetShorthandSource(nil)
+	namespaced, known := Namespaced(Kind("ClusterIssuer"))
+	if !known || namespaced {
+		t.Errorf("Namespaced(ClusterIssuer) = (%v, %v), want (false, true)", namespaced, known)
+	}
+	if len(fake.scopeCalls) != 1 || fake.scopeCalls[0] != Kind("ClusterIssuer") {
+		t.Errorf("scopeCalls = %v, want the kind asked about once", fake.scopeCalls)
+	}
+}
+
+// The static table wins over the source, so a stale or wrong cache entry can
+// never make kx treat a Pod as cluster-scoped.
+func TestNamespacedPrefersTheStaticTable(t *testing.T) {
+	SetShorthandSource(&fakeShorthandSource{namespaced: false, scopeKnown: true})
+	defer SetShorthandSource(nil)
+	if namespaced, known := Namespaced(Pod); !known || !namespaced {
+		t.Errorf("Namespaced(Pod) = (%v, %v), want (true, true)", namespaced, known)
 	}
 }
