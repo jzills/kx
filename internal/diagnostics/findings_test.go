@@ -1,6 +1,7 @@
 package diagnostics
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -313,7 +314,7 @@ func TestPodPhaseFindings(t *testing.T) {
 		Name: "nginx", Phase: "Pending",
 		Scheduling: SchedulingInfo{Schedulable: false, Message: "0/1 nodes are available"},
 	})
-	if got := severityOf(t, unschedulable, "unschedulable: 0/1 nodes"); got != Critical {
+	if got := severityOf(t, unschedulable, "Unschedulable: 0/1 nodes"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
 
@@ -419,3 +420,197 @@ func TestIngressFindings(t *testing.T) {
 		t.Errorf("findings = %v, want both backends named", summaries(many))
 	}
 }
+
+// crashingPod is a Deployment-shaped Data: replicas short AND a pod that says
+// why. Both findings are Critical, so severity alone cannot separate them.
+func brokenWorkload(pod PodDiagnostic) Data {
+	return Data{
+		Kind:     "Deployment",
+		Replicas: &ReplicaHealth{Desired: 1, Ready: 0, Available: 0, Updated: 1},
+		Pods:     []PodDiagnostic{pod},
+	}
+}
+
+// The triage table shows one finding per row, so which Critical finding sorts
+// first decides what a whole sweep reads like. Five differently-broken
+// Deployments all reported "Only 0/1 replicas ready" — the replica shortfall
+// is produced first and the sort is stable, so it won every tie and buried the
+// cause one row down in the detail view.
+func TestTopFindingNamesTheCauseNotTheReplicaShortfall(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		pod  PodDiagnostic
+		want string
+	}{
+		{
+			name: "crashloop",
+			pod: PodDiagnostic{
+				Name: "worker-abc", Phase: "Running", TotalContainers: 1,
+				Containers: []ContainerDiagnostic{
+					{Name: "worker", WaitingReason: "CrashLoopBackOff", RestartCount: 12},
+				},
+			},
+			want: "CrashLoopBackOff",
+		},
+		{
+			name: "image pull",
+			pod: PodDiagnostic{
+				Name: "api-abc", Phase: "Pending", TotalContainers: 1,
+				Scheduling: SchedulingInfo{Schedulable: true},
+				Containers: []ContainerDiagnostic{
+					{Name: "api", WaitingReason: "ImagePullBackOff"},
+				},
+			},
+			want: "Image pull failure",
+		},
+		{
+			name: "oomkilled",
+			pod: PodDiagnostic{
+				Name: "cache-abc", Phase: "Running", TotalContainers: 1,
+				Containers: []ContainerDiagnostic{
+					{Name: "cache", LastTerminatedReason: "OOMKilled"},
+				},
+			},
+			want: "OOMKilled",
+		},
+		{
+			name: "config error",
+			pod: PodDiagnostic{
+				Name: "queue-abc", Phase: "Pending", TotalContainers: 1,
+				Scheduling: SchedulingInfo{Schedulable: true},
+				Containers: []ContainerDiagnostic{
+					{Name: "queue", WaitingReason: "CreateContainerConfigError",
+						WaitingMessage: "secret \"queue-creds\" not found"},
+				},
+			},
+			want: "Container config error",
+		},
+		{
+			name: "terminated non-zero",
+			pod: PodDiagnostic{
+				Name: "batch-abc", Phase: "Running", TotalContainers: 1,
+				Containers: []ContainerDiagnostic{
+					{Name: "batch", TerminatedReason: "Error", ExitCode: exitCode(137)},
+				},
+			},
+			want: "terminated: Error (exit 137)",
+		},
+		{
+			name: "unschedulable",
+			pod: PodDiagnostic{
+				Name: "report-abc", Phase: "Pending", TotalContainers: 1,
+				Scheduling: SchedulingInfo{Schedulable: false, Reason: "Unschedulable",
+					Message: "0/1 nodes are available: insufficient cpu"},
+			},
+			want: "Unschedulable: 0/1 nodes are available",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			report := BuildReport(brokenWorkload(testCase.pod))
+			if len(report.Findings) == 0 {
+				t.Fatal("no findings")
+			}
+			top := report.Findings[0].Summary
+			if !strings.Contains(top, testCase.want) {
+				t.Errorf("top finding = %q, want it to name %q\nall: %v",
+					top, testCase.want, summaries(report.Findings))
+			}
+		})
+	}
+}
+
+// Rank breaks ties within a severity; it never reaches across one. A Critical
+// aggregate outranks a Warning cause, because the reader wants the worst thing
+// first and only then the most specific.
+func TestSeverityStillOutranksSpecificity(t *testing.T) {
+	report := BuildReport(Data{
+		Kind:     "Deployment",
+		Replicas: &ReplicaHealth{Desired: 1, Ready: 0, Available: 0, Updated: 1},
+		Pods: []PodDiagnostic{{
+			Name: "web-abc", Phase: "Running", ReadyContainers: 0, TotalContainers: 1,
+			Containers: []ContainerDiagnostic{{Name: "web", RestartCount: 9}},
+		}},
+	})
+	if report.Findings[0].Severity != Critical {
+		t.Fatalf("top finding = %v, want the Critical one first: %v",
+			report.Findings[0], summaries(report.Findings))
+	}
+	if !strings.Contains(report.Findings[0].Summary, "replicas ready") {
+		t.Errorf("top finding = %q, want the only Critical finding",
+			report.Findings[0].Summary)
+	}
+}
+
+// A warning event is the weakest headline there is: the WARNING EVENTS section
+// already prints it in full, and it usually restates a symptom a pod-level
+// finding has already explained.
+//
+// Pinned against an *aggregate* rather than a cause. BuildReport appends
+// events last, so a stable sort already puts them behind every equally severe
+// finding produced before them — an event outranking a cause is unreachable,
+// and a test asserting it passes no matter what rank events carry. Ranking
+// below an aggregate is the one thing the Event rank actually decides.
+func TestWarningEventsRankBelowAggregates(t *testing.T) {
+	report := BuildReport(Data{
+		Kind:     "Deployment",
+		Replicas: &ReplicaHealth{Desired: 2, Ready: 1, Available: 1, Updated: 2},
+		WarningEvents: []EventSummary{
+			{Reason: "BackOff", Count: 300, Kind: "Pod", Name: "billing-abc"},
+		},
+	})
+	if len(report.Findings) < 2 {
+		t.Fatalf("want both findings, got %v", summaries(report.Findings))
+	}
+	if !strings.Contains(report.Findings[0].Summary, "replicas ready") {
+		t.Errorf("top finding = %q, want the aggregate above the raw event\nall: %v",
+			report.Findings[0].Summary, summaries(report.Findings))
+	}
+	last := report.Findings[len(report.Findings)-1]
+	if !strings.Contains(last.Summary, "BackOff") {
+		t.Errorf("last finding = %q, want the raw event\nall: %v",
+			last.Summary, summaries(report.Findings))
+	}
+}
+
+// Within one rank the order findings were produced in still survives, so a
+// pod's containers keep reporting in the order they are declared.
+//
+// This pins the observable order, not the choice of sort.SliceStable over
+// sort.Slice. Nothing can pin that here: every finding in this fixture
+// compares equal, so the comparator never returns true, and Go's pdqsort
+// recognises an already-ordered run and leaves it alone whatever the size.
+// SliceStable stays because the guarantee is what the code means to rely on —
+// but a mutation to sort.Slice survives this test, and no test in this package
+// would catch it.
+func TestOrderWithinARankIsStable(t *testing.T) {
+	const count = 24
+	containers := make([]ContainerDiagnostic, 0, count)
+	want := make([]string, 0, count)
+	for i := range count {
+		name := fmt.Sprintf("c%02d", i)
+		containers = append(containers, ContainerDiagnostic{
+			Name: name, WaitingReason: "CreateContainerConfigError",
+			WaitingMessage: "secret " + name + " not found",
+		})
+		want = append(want, name)
+	}
+
+	report := BuildReport(Data{
+		Kind: "Pod", Name: "multi",
+		Pods: []PodDiagnostic{{
+			Name: "multi", Phase: "Running", TotalContainers: count,
+			Containers: containers,
+		}},
+	})
+	if len(report.Findings) != count {
+		t.Fatalf("got %d findings, want %d", len(report.Findings), count)
+	}
+	for i, finding := range report.Findings {
+		if !strings.Contains(finding.Summary, want[i]) {
+			t.Fatalf("finding %d = %q, want it to name %q — declaration order was not preserved",
+				i, finding.Summary, want[i])
+		}
+	}
+}
+
+func exitCode(value int32) *int32 { return &value }
