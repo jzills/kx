@@ -313,7 +313,7 @@ func TestBuildLookupMapsEveryShortNamePluralAndKindToTheSameKind(t *testing.T) {
 			{Name: "gateways", SingularName: "gateway", Kind: "Gateway", ShortNames: []string{"gw"}},
 		},
 	}}
-	shorthands, plurals, ok := buildLookup(lists, nil)
+	shorthands, plurals, _, ok := buildLookup(lists, nil)
 	if !ok {
 		t.Fatal("buildLookup reported not ok for valid input")
 	}
@@ -335,7 +335,7 @@ func TestBuildLookupSkipsSubresources(t *testing.T) {
 			{Name: "deployments/scale", Kind: "Scale"},
 		},
 	}}
-	shorthands, _, ok := buildLookup(lists, nil)
+	shorthands, _, _, ok := buildLookup(lists, nil)
 	if !ok {
 		t.Fatal("buildLookup reported not ok for valid input")
 	}
@@ -359,7 +359,7 @@ func TestBuildLookupTreatsPartialGroupFailureAsUsable(t *testing.T) {
 	partialErr := &k8sdiscovery.ErrGroupDiscoveryFailed{
 		Groups: map[schema.GroupVersion]error{{Group: "gateway.networking.k8s.io", Version: "v1"}: errNetworkDisabled},
 	}
-	shorthands, _, ok := buildLookup(lists, partialErr)
+	shorthands, _, _, ok := buildLookup(lists, partialErr)
 	if !ok {
 		t.Fatal("buildLookup treated a partial-group-discovery failure as a hard failure")
 	}
@@ -369,7 +369,7 @@ func TestBuildLookupTreatsPartialGroupFailureAsUsable(t *testing.T) {
 }
 
 func TestBuildLookupHardFailsOnAnyOtherError(t *testing.T) {
-	_, _, ok := buildLookup(nil, errNetworkDisabled)
+	_, _, _, ok := buildLookup(nil, errNetworkDisabled)
 	if ok {
 		t.Error("buildLookup reported ok for a non-partial error")
 	}
@@ -396,5 +396,52 @@ func TestSourceResolvesFromAFixtureCache(t *testing.T) {
 	_, _, ok = source.Resolve("nonexistent-thing")
 	if ok {
 		t.Error("Resolve(nonexistent-thing) = true, want false")
+	}
+}
+
+// The scope kubectl records per resource is what lets kx tell a Node listing
+// it has no namespace. A subresource is skipped here as everywhere else.
+func TestBuildLookupKeepsResourceScope(t *testing.T) {
+	lists := []*metav1.APIResourceList{{
+		APIResources: []metav1.APIResource{
+			{Name: "pods", Kind: "Pod", Namespaced: true},
+			{Name: "nodes", Kind: "Node", Namespaced: false},
+			{Name: "clusterissuers", Kind: "ClusterIssuer", Namespaced: false},
+		},
+	}}
+	_, _, namespaced, ok := buildLookup(lists, nil)
+	if !ok {
+		t.Fatal("buildLookup reported not ok for valid input")
+	}
+	for kind, want := range map[kinds.Kind]bool{
+		"Pod": true, "Node": false, "ClusterIssuer": false,
+	} {
+		got, found := namespaced[kind]
+		if !found {
+			t.Errorf("namespaced has no entry for %s", kind)
+			continue
+		}
+		if got != want {
+			t.Errorf("namespaced[%s] = %v, want %v", kind, got, want)
+		}
+	}
+}
+
+// A kind the cache never mentioned is unknown, not assumed. A partial
+// discovery failure leaves real gaps, and answering "cluster-scoped" for one
+// would strip the namespace off a listing that has one.
+func TestSourceNamespacedReportsUnknownForAnAbsentKind(t *testing.T) {
+	source := &Source{
+		shorthands: map[string]kinds.Kind{},
+		plurals:    map[kinds.Kind]string{},
+		namespaced: map[kinds.Kind]bool{"Pod": true},
+	}
+	source.once.Do(func() {})
+
+	if namespaced, known := source.Namespaced(kinds.Kind("Pod")); !known || !namespaced {
+		t.Errorf("Namespaced(Pod) = (%v, %v), want (true, true)", namespaced, known)
+	}
+	if _, known := source.Namespaced(kinds.Kind("Gateway")); known {
+		t.Error("Namespaced(Gateway) claimed to know a kind the cache never mentioned")
 	}
 }

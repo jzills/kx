@@ -365,7 +365,15 @@ func (s *Service) loadHistory() (History, error) {
 		// an unrecorded one, and "default" would caption an all-namespace
 		// listing with a namespace it never came from — then resolve every one
 		// of its indexes into that namespace.
-		if state.Namespace == "" && !state.AllNamespaces {
+		//
+		// Nor a cluster-scoped listing, for the third reason an entry can
+		// legitimately carry no namespace: there is no namespace to carry.
+		// Read from the kinds the entry already records rather than from a new
+		// field — every resource stores its Kind, so a listing whose sole kind
+		// is cluster-scoped is self-describing, and the on-disk shape (a
+		// compatibility surface) does not have to change to say so. A
+		// mixed-kind entry has no sole kind and keeps the backfill.
+		if state.Namespace == "" && !state.AllNamespaces && !clusterScopedEntry(state) {
 			state.Namespace = "default"
 		}
 		history.States = append(history.States, state)
@@ -653,6 +661,21 @@ func (s *Service) Count() (int, error) {
 		return 0, err
 	}
 	return current.Resources.Len(), nil
+}
+
+// clusterScopedEntry reports whether every resource in an entry is of one kind
+// that lives outside any namespace.
+//
+// Unknown counts as namespaced: a kind kx cannot place must not have its
+// namespace stripped on the strength of a guess, and leaving the backfill in
+// place is what kx did for every kind before it could tell.
+func clusterScopedEntry(entry State) bool {
+	kind := soleKind(entry)
+	if kind == "" {
+		return false
+	}
+	namespaced, known := kinds.Namespaced(kind)
+	return known && !namespaced
 }
 
 // soleKind returns the kind every resource in an entry shares, or "" when the

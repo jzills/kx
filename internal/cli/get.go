@@ -107,7 +107,18 @@ func (c GetCommand) Execute(
 	// An -A listing has no single namespace to record on the entry; each
 	// resource carries its own instead, read from the table's NAMESPACE column.
 	// The caller labels the scope.
-	if !allNamespaces(extraArgs) {
+	//
+	// A cluster-scoped kind has none to record either, for a different reason:
+	// there is no namespace to be in. Left to default, kx stamped whichever one
+	// the caller happened to be standing in onto every Node, PersistentVolume,
+	// StorageClass and CRD it listed, then printed it back as though it meant
+	// something — "Nodes · diagnostics · 1 item". Empty is what Caption already
+	// drops, so the scope segment disappears rather than lying.
+	//
+	// This is display and saved state only. kubectl ignores -n for a
+	// cluster-scoped resource, and accepts an empty one, so the commands that
+	// resolve these indexes need no change.
+	if !allNamespaces(extraArgs) && !clusterScoped(resource) {
 		namespace = extractNamespace(extraArgs)
 		if namespace == "" {
 			namespace = c.Kubectl.CurrentNamespace()
@@ -253,4 +264,17 @@ func resourcesFrom(entries []index.Entry, kind kinds.Kind) state.Resources {
 		})
 	}
 	return state.NewOrderedResources(resources)
+}
+
+// clusterScoped reports whether a resource spelling names a kind that lives
+// outside any namespace.
+//
+// A kind whose scope is unknown — a CRD on a machine with no discovery cache —
+// is treated as namespaced, which is what kx did for every kind before it
+// could tell. Guessing the other way would strip the namespace off a
+// namespaced CRD and leave every index resolving into the wrong place; being
+// wrong about a caption is the cheaper of the two failures.
+func clusterScoped(resource string) bool {
+	namespaced, known := kinds.Namespaced(kinds.Normalize(resource))
+	return known && !namespaced
 }

@@ -106,6 +106,12 @@ var pluralDisplay = map[Kind]string{
 // to today's behavior.
 type ShorthandSource interface {
 	Resolve(spelling string) (kind Kind, plural string, ok bool)
+	// Namespaced reports whether a kind is namespaced, and whether the
+	// source knows. "Don't know" is distinct from "cluster-scoped": a
+	// discovery cache that is missing, stale or partial must leave the
+	// caller on its existing behaviour rather than have kx decide a
+	// namespaced resource has no namespace.
+	Namespaced(kind Kind) (namespaced, known bool)
 }
 
 var shorthandSource ShorthandSource
@@ -118,6 +124,56 @@ var shorthandSource ShorthandSource
 // source.
 func SetShorthandSource(source ShorthandSource) {
 	shorthandSource = source
+}
+
+// clusterScoped are the kinds kx names itself that live outside any namespace.
+//
+// Only the kinds in the Kind constants above: the full set on a real cluster
+// runs to thirty-odd and grows with every CRD, which is exactly why the
+// discovery cache is the primary source. This table exists so the kinds kx
+// hard-codes are still answered correctly with no cache at all — a fresh
+// machine, or a kubeconfig kubectl has never populated one for.
+//
+// Context is not here. It is not a Kubernetes kind and never reaches a
+// namespace question; kx already special-cases it everywhere it matters.
+var clusterScoped = map[Kind]bool{
+	Node:      true,
+	Namespace: true,
+}
+
+// namespacedKinds are the kinds kx names itself that live inside one. Written
+// out rather than derived as "everything not in clusterScoped", so a kind
+// added to the constants above without a scope is reported unknown instead of
+// silently assumed namespaced.
+var namespacedKinds = map[Kind]bool{
+	Pod: true, Deployment: true, ReplicaSet: true, StatefulSet: true,
+	DaemonSet: true, CronJob: true, Service: true, HorizontalPodAutoscaler: true,
+	Ingress: true, ConfigMap: true, Secret: true, Job: true,
+	PersistentVolumeClaim: true,
+}
+
+// Namespaced reports whether a kind lives inside a namespace, and whether that
+// is known at all.
+//
+// The static table is consulted first so a stale or partial discovery cache
+// can never make kx treat a Pod as cluster-scoped. Anything kx does not name
+// itself — every CRD — is answered by the installed source, which reads the
+// scope kubectl already recorded per resource.
+//
+// The third answer, "not known", matters as much as the other two: it is what
+// a caller gets for a CRD with no discovery cache, and it must leave existing
+// behaviour alone rather than guess.
+func Namespaced(kind Kind) (namespaced, known bool) {
+	if namespacedKinds[kind] {
+		return true, true
+	}
+	if clusterScoped[kind] {
+		return false, true
+	}
+	if shorthandSource == nil {
+		return false, false
+	}
+	return shorthandSource.Namespaced(kind)
 }
 
 // Spelling is one recognized resource spelling and the kind it maps to.
