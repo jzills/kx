@@ -15,6 +15,13 @@ repos:
         pass_filenames: false
         files: '\.go$'
 
+      - id: check-file-size
+        name: Reject oversized files
+        language: system
+        # Unlike the generators below, this one reads the files being committed
+        # rather than the command tree, so it takes filenames.
+        entry: scripts/check_file_size.sh
+
       - id: gen-command-table
         name: Regenerate README command table
         language: system
