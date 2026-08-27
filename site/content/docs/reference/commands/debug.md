@@ -3,7 +3,7 @@
 title: "kx debug"
 linkTitle: "debug"
 description: "Attach an ephemeral debug container to an indexed pod, for images with no shell."
-weight: 5
+weight: 6
 ---
 
 Attaches a container carrying its own shell to a running pod, which is how to get inside an image that has none — distroless or scratch, where kx exec can only report that it found no shell. The pod is not restarted and what it runs is unchanged.

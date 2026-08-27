@@ -3,7 +3,7 @@
 title: "kx labels"
 linkTitle: "labels"
 description: "Show labels for one or more indexed resources; --selector formats output as a label selector."
-weight: 14
+weight: 16
 ---
 
 Show labels for one or more indexed resources; --selector formats output as a label selector.

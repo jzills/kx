@@ -3,7 +3,7 @@
 title: "kx top"
 linkTitle: "top"
 description: "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits."
-weight: 22
+weight: 24
 ---
 
 Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.

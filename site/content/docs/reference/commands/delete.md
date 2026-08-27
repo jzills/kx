@@ -3,7 +3,7 @@
 title: "kx delete"
 linkTitle: "delete"
 description: "Delete one or more indexed resources (prompts for confirmation unless --yes)."
-weight: 6
+weight: 7
 ---
 
 Delete one or more indexed resources (prompts for confirmation unless --yes).

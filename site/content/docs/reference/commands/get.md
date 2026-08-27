@@ -3,7 +3,7 @@
 title: "kx get"
 linkTitle: "get"
 description: "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3)."
-weight: 12
+weight: 14
 ---
 
 Fetches resources with kubectl and assigns each row an index.

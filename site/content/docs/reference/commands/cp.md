@@ -3,7 +3,7 @@
 title: "kx cp"
 linkTitle: "cp"
 description: "Copy files to or from an indexed pod via kubectl cp."
-weight: 4
+weight: 5
 ---
 
 Copy files to or from an indexed pod via kubectl cp.

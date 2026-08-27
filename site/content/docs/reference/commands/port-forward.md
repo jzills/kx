@@ -3,7 +3,7 @@
 title: "kx port-forward"
 linkTitle: "port-forward"
 description: "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service)."
-weight: 17
+weight: 19
 ---
 
 Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).

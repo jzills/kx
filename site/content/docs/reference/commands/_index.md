@@ -15,11 +15,13 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx annotate <index> [<key=value>...] [--overwrite] [--remove str]`](annotate/) | Set or remove annotations on an indexed resource. |
 | [`kx annotations <index>...`](annotations/) | Show annotations for one or more indexed resources. |
 | [`kx context [<index>]`](context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
+| [`kx cordon <index>...`](cordon/) | Mark one or more indexed Nodes unschedulable. |
 | [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](cp/) | Copy files to or from an indexed pod via kubectl cp. |
 | [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](debug/) | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
 | [`kx delete <index>... [--yes/-y]`](delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](drain/) | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>...`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
@@ -35,6 +37,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--port int] [kubectl flags...]`](top/) | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | [`kx tree [<index>] [--all-namespaces/-A] [--html] [--namespace/-n str] [--no-index] [--no-open] [--port int]`](tree/) | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
+| [`kx uncordon <index>...`](uncordon/) | Mark one or more indexed Nodes schedulable again. |
 | [`kx yaml <index>... [--show str]`](yaml/) | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 
 ## History

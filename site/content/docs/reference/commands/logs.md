@@ -3,7 +3,7 @@
 title: "kx logs"
 linkTitle: "logs"
 description: "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services."
-weight: 15
+weight: 17
 ---
 
 Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.

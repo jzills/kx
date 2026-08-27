@@ -3,7 +3,7 @@
 title: "kx rollout"
 linkTitle: "rollout"
 description: "Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet."
-weight: 18
+weight: 20
 ---
 
 Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.
