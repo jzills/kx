@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -601,15 +602,6 @@ func TestLogsRejectsUnsupportedKind(t *testing.T) {
 	}
 }
 
-func TestExecRejectsNonPod(t *testing.T) {
-	err := ExecCommand{
-		Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment), Shells: []string{"sh"},
-	}.Execute(1, nil, nil)
-	if err == nil {
-		t.Fatal("exec'd into a Deployment, want an error")
-	}
-}
-
 func TestExecWithExplicitCommand(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	if err := (ExecCommand{Kubectl: kubectl, State: pod("nginx"), Shells: []string{"sh"}}).
@@ -1196,5 +1188,99 @@ func TestDebugReportsAMalformedTargetFlag(t *testing.T) {
 	}
 	if len(kubectl.interactive) != 0 {
 		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
+
+// kx logs aggregates across a workload's pods and kx port-forward takes one
+// directly, but kx exec alone answered "only supported for pods" — so the one
+// command people reach for most needed an index kx had just made harder to
+// get. kubectl resolves TYPE/NAME to a pod itself, the same way port-forward
+// already relies on.
+func TestExecAcceptsAWorkload(t *testing.T) {
+	for _, kind := range []kinds.Kind{
+		kinds.Deployment, kinds.ReplicaSet, kinds.StatefulSet, kinds.DaemonSet,
+	} {
+		kubectl := &recordingKubectl{probeCode: 0}
+		err := ExecCommand{
+			Kubectl: kubectl, State: workload("web", kind), Shells: []string{"sh"},
+		}.Execute(1, []string{"ls"}, nil)
+		if err != nil {
+			t.Fatalf("%s: Execute: %v", kind, err)
+		}
+		want := string(kind) + "/web"
+		last := kubectl.interactive[len(kubectl.interactive)-1]
+		if !slices.Contains(last, want) {
+			t.Errorf("%s: kubectl args = %v, want the target spelled %q", kind, last, want)
+		}
+	}
+}
+
+// A Pod is still addressed by bare name, not Pod/name. Both work in kubectl,
+// but the bare form is what every other pod-only command already sends and
+// what the existing tests pin.
+func TestExecStillAddressesAPodByName(t *testing.T) {
+	kubectl := &recordingKubectl{probeCode: 0}
+	if err := (ExecCommand{
+		Kubectl: kubectl, State: pod("nginx"), Shells: []string{"sh"},
+	}).Execute(1, []string{"ls"}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	args := kubectl.interactive[len(kubectl.interactive)-1]
+	if slices.Contains(args, "Pod/nginx") {
+		t.Errorf("kubectl args = %v, want the bare pod name", args)
+	}
+	if !slices.Contains(args, "nginx") {
+		t.Errorf("kubectl args = %v, want the pod named", args)
+	}
+}
+
+// The shell probe has to name the same target the session will, or kx probes
+// one thing and execs into another.
+func TestExecProbesTheSameTargetItExecsInto(t *testing.T) {
+	kubectl := &recordingKubectl{probeCode: 0}
+	if err := (ExecCommand{
+		Kubectl: kubectl, State: workload("web", kinds.Deployment), Shells: []string{"sh"},
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, call := range append(append([][]string{}, kubectl.probes...), kubectl.interactive...) {
+		if !slices.Contains(call, "Deployment/web") {
+			t.Errorf("call %v does not name Deployment/web", call)
+		}
+	}
+}
+
+// Service is not in the allowlist: kubectl exec does not accept one, so kx
+// refuses it here rather than letting kubectl produce a worse message.
+func TestExecStillRefusesAKindKubectlCannotExecInto(t *testing.T) {
+	for _, kind := range []kinds.Kind{kinds.Service, kinds.ConfigMap, kinds.Node} {
+		err := ExecCommand{
+			Kubectl: &recordingKubectl{}, State: workload("thing", kind), Shells: []string{"sh"},
+		}.Execute(1, []string{"ls"}, nil)
+		if err == nil {
+			t.Errorf("%s: Execute succeeded, want a refusal", kind)
+			continue
+		}
+		if !strings.Contains(err.Error(), "exec is not supported") {
+			t.Errorf("%s: err = %q, want an unsupported-kind message", kind, err)
+		}
+	}
+}
+
+// The staleness check has to ask about the resolved kind. Asked about a Pod
+// that never existed under that name, a vanished Deployment reported the wrong
+// thing — or nothing.
+func TestExecChecksStalenessAgainstTheResolvedKind(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := ExecCommand{
+		Kubectl: kubectl, State: workload("web", kinds.Deployment), Shells: []string{"sh"},
+	}.Execute(1, []string{"ls"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+	if stale.Kind != kinds.Deployment {
+		t.Errorf("stale kind = %q, want Deployment", stale.Kind)
 	}
 }

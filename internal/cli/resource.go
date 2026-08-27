@@ -410,17 +410,40 @@ type ExecCommand struct {
 	Shells []string
 }
 
+// execKinds are the kinds kubectl exec accepts. Deliberately not Service:
+// kubectl resolves a Service to an endpoint for port-forward but has no
+// equivalent for exec, so kx refuses it here rather than letting kubectl
+// produce a worse message.
+var execKinds = map[kinds.Kind]bool{
+	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
+	kinds.StatefulSet: true, kinds.DaemonSet: true,
+}
+
+// execTarget is how an indexed resource is named to kubectl exec.
+//
+// A Pod is addressed bare, which is what every other pod-only command already
+// sends and what kubectl has always taken. A workload is addressed TYPE/NAME,
+// and kubectl picks one of its pods — the same delegation PortForwardCommand
+// already relies on rather than resolving pods itself.
+func execTarget(kind kinds.Kind, name string) string {
+	if kind == kinds.Pod {
+		return name
+	}
+	return string(kind) + "/" + name
+}
+
 func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return err
 	}
-	if kind != kinds.Pod {
-		return fmt.Errorf("exec is only supported for pods.")
+	if !execKinds[kind] {
+		return fmt.Errorf("exec is not supported for '%s'.", kind)
 	}
+	target := execTarget(kind, name)
 
 	if len(command) > 0 {
-		args := append([]string{"exec", "-it", name, "-n", namespace}, extraArgs...)
+		args := append([]string{"exec", "-it", target, "-n", namespace}, extraArgs...)
 		args = append(args, "--")
 		args = append(args, command...)
 		// kubectl's own stderr is suppressed: a failing command inside the
@@ -431,7 +454,7 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
+			if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed
@@ -446,18 +469,18 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	}
 
 	for _, shell := range c.Shells {
-		probe := append([]string{"exec", name, "-n", namespace}, extraArgs...)
+		probe := append([]string{"exec", target, "-n", namespace}, extraArgs...)
 		probe = append(probe, "--", shell, "-c", "exit 0")
 		if c.Kubectl.Probe(probe) != 0 {
 			continue
 		}
-		args := append([]string{"exec", "-it", name, "-n", namespace}, extraArgs...)
+		args := append([]string{"exec", "-it", target, "-n", namespace}, extraArgs...)
 		args = append(args, "--", shell)
 		_, err := c.Kubectl.RunInteractive(args, false)
 		return err
 	}
 
-	if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
+	if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
 		return err
 	}
 	return fmt.Errorf(

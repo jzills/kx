@@ -22,7 +22,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx diagnostic [<index>] [--all-namespaces/-A] [--full] [--html] [--namespace/-n str] [--no-open] [--port int]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>...`](events/) | Show Kubernetes events for one or more indexed resources. |
-| [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed pod (bash, falling back to sh). |
+| [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--overwrite] [--remove str]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
