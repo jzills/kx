@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -515,5 +516,99 @@ func TestDiagSingleWithoutHTMLStillPrintsTheTerminalReport(t *testing.T) {
 	}
 	if strings.Contains(sink.String(), "serving at") {
 		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
+	}
+}
+
+// unhealthyDeployment is a Deployment that wants replicas and has none ready,
+// which BuildReport rates Critical — the cheapest fixture that trips a gate.
+func unhealthyDeployment() *appsv1.Deployment {
+	replicas := int32(2)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+	}
+}
+
+// --fail-on is a gate for a pipeline and --html is how that pipeline publishes
+// what it found, so the two belong together. Returning servePage's result
+// *instead of* the gate's made them mutually exclusive: adding --html to a
+// green pipeline kept it green whatever the sweep turned up, with nothing
+// printed to say the gate had been dropped.
+//
+// Only driving RunE can see this. sweepGate and verdictGate were always
+// correct on their own; the defect was which of them the html branch returned.
+func TestDiagSweepWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(
+		diagnosticHTMLServices(t, unhealthyDeployment()), "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"namespace", "prod"}, {"html", "true"}, {"no-open", "true"},
+		{"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	var silent SilentError
+	err := cmd.RunE(cmd, nil)
+	if !errors.As(err, &silent) {
+		t.Fatalf("RunE = %v, want --fail-on to exit %d through the html branch", err, findingsExitCode)
+	}
+	if silent.Code != findingsExitCode {
+		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
+	}
+}
+
+// The other half of the gate: a clean sweep must still exit 0 with --html set.
+// Without this, the test above passes just as well against a gate that always
+// fires.
+func TestDiagSweepWithHTMLPassesACleanGate(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(diagnosticHTMLServices(t), "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"namespace", "prod"}, {"html", "true"}, {"no-open", "true"},
+		{"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Errorf("RunE = %v, want nil for a sweep with nothing to report", err)
+	}
+}
+
+// Same regression, single-resource branch: verdictGate has to survive --html
+// exactly as sweepGate does.
+func TestDiagSingleWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
+	quietRender(t)
+	services := diagnosticHTMLServices(t, unhealthyDeployment())
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{{Name: "web", Kind: kinds.Deployment}}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"html", "true"}, {"no-open", "true"}, {"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	var silent SilentError
+	err := cmd.RunE(cmd, []string{"1"})
+	if !errors.As(err, &silent) {
+		t.Fatalf("RunE = %v, want --fail-on to exit %d through the html branch", err, findingsExitCode)
+	}
+	if silent.Code != findingsExitCode {
+		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
 	}
 }

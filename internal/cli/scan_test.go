@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 )
 
@@ -760,5 +763,81 @@ func TestScanJSONScopeCarriesNoDisplayLabel(t *testing.T) {
 	}
 	if decoded.Scope != "prod" {
 		t.Errorf("scope = %q, want the bare namespace", decoded.Scope)
+	}
+}
+
+// --fail-on needs findings kx has parsed, and --full hands the scanner the
+// terminal and never parses a thing — the same reason --json and --full are
+// refused together. Accepting the pair and then exiting 0 whatever was found
+// is the one outcome a gate must not have.
+func TestScanRejectsFullWithFailOn(t *testing.T) {
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"1", "--full", "--fail-on", "critical"})
+	if err == nil {
+		t.Fatal("--full with --fail-on was accepted")
+	}
+	if !strings.Contains(err.Error(), "--full") || !strings.Contains(err.Error(), "--fail-on") {
+		t.Errorf("error %q names neither flag", err)
+	}
+}
+
+// trivyCritical is one CRITICAL vulnerability in trivy's own JSON shape.
+const trivyCritical = `{"Results":[{"Vulnerabilities":[` +
+	`{"VulnerabilityID":"CVE-2024-0001","Severity":"CRITICAL",` +
+	`"PkgName":"openssl","InstalledVersion":"1.0"}]}]}`
+
+// scanHTMLServices drives newScanCommand's RunE all the way through a sweep,
+// a scan and the html branch, which needs a scanner Services can substitute —
+// the command used to build an ExecService inline and shell out for real.
+func scanHTMLServices(t *testing.T, stdout string) (Services, *fakeScanner) {
+	t.Helper()
+	fake := &fakeScanner{captures: []captured{{image: "api:v1", stdout: stdout}}}
+	return Services{
+		Kubectl: &fakeKubectl{
+			namespace: "prod",
+			output:    `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}]}`,
+		},
+		State:   &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config:  config.Default(),
+		Scanner: fake,
+	}, fake
+}
+
+// The twin of the diag gate: --html said where the findings go, and returning
+// servePage's nil instead of scanGate's exit code meant a pipeline that added
+// --html to publish its report stopped failing on what the report contained.
+func TestScanWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
+	quietRender(t)
+	services, _ := scanHTMLServices(t, trivyCritical)
+	cmd := newScanCommand(services)
+	cmd.SetContext(stoppedContext())
+
+	var silent SilentError
+	err := cmd.RunE(cmd, []string{
+		"--engine", "trivy", "--namespace", "prod",
+		"--html", "--no-open", "--fail-on", "critical",
+	})
+	if !errors.As(err, &silent) {
+		t.Fatalf("RunE = %v, want --fail-on to exit %d through the html branch", err, findingsExitCode)
+	}
+	if silent.Code != findingsExitCode {
+		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
+	}
+}
+
+// The other half: a clean scan still exits 0 with --html set, so the test above
+// is not passing against a gate that always fires.
+func TestScanWithHTMLPassesACleanGate(t *testing.T) {
+	quietRender(t)
+	services, _ := scanHTMLServices(t, `{"Results":[]}`)
+	cmd := newScanCommand(services)
+	cmd.SetContext(stoppedContext())
+
+	err := cmd.RunE(cmd, []string{
+		"--engine", "trivy", "--namespace", "prod",
+		"--html", "--no-open", "--fail-on", "critical",
+	})
+	if err != nil {
+		t.Errorf("RunE = %v, want nil for a scan with nothing at the threshold", err)
 	}
 }
