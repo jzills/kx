@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 func node(name string) fakeResolver {
@@ -84,9 +86,15 @@ func TestDrainAbortsWithoutConfirmation(t *testing.T) {
 	if err := command.Execute(1, false, nil); !errors.Is(err, declined) {
 		t.Fatalf("err = %v, want the confirmation's own error", err)
 	}
-	if len(kubectl.interactive) != 0 || len(kubectl.runs) != 0 {
-		t.Errorf("kubectl was called despite a declined confirmation: %v %v",
-			kubectl.runs, kubectl.interactive)
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("the drain ran despite a declined confirmation: %v", kubectl.interactive)
+	}
+	// One Run is expected and harmless: the existence preflight that turns a
+	// vanished node into a stale-state error before the prompt asks about it.
+	for _, run := range kubectl.runs {
+		if !slices.Equal(run, []string{"get", "node", "node-a"}) {
+			t.Errorf("kubectl ran %v despite a declined confirmation", run)
+		}
 	}
 }
 
@@ -217,5 +225,112 @@ func TestDrainRegistersTheFlagsItParsesByHand(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("--%s is not registered, so it is absent from --help", name)
 		}
+	}
+}
+
+// mixedListing saves a listing that straddles kinds, the way a tree listing or
+// a hand-saved entry does — the shape `kx cordon 1..3` has to refuse whole.
+func mixedListing(t *testing.T, resources ...state.Resource) *state.Service {
+	t.Helper()
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := store.Save(state.State{
+		Resources: state.NewOrderedResources(resources),
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	return store
+}
+
+// validateIndexes exists so a batch does not half-apply, and the kind is as
+// much a precondition as the index resolving at all. The check used to live
+// inside Execute, one index at a time, so `kx cordon 1..3` over a listing
+// whose third entry is a Deployment cordoned the two nodes ahead of it,
+// printed two successes and then failed.
+func TestCordonRefusesAMixedBatchBeforeActingOnAnyOfIt(t *testing.T) {
+	for _, verb := range []string{"cordon", "uncordon"} {
+		kubectl := &recordingKubectl{}
+		cmd := newCordonCommand(Services{
+			Kubectl: kubectl,
+			State: mixedListing(t,
+				state.Resource{Name: "node-a", Kind: kinds.Node},
+				state.Resource{Name: "node-b", Kind: kinds.Node},
+				state.Resource{Name: "web", Kind: kinds.Deployment}),
+		}, verb)
+
+		err := cmd.RunE(cmd, []string{"1..3"})
+		if err == nil {
+			t.Fatalf("%s: a batch containing a Deployment was accepted", verb)
+		}
+		if !strings.Contains(err.Error(), verb+" is only supported for nodes") {
+			t.Errorf("%s: err = %q, want a nodes-only message", verb, err)
+		}
+		if len(kubectl.runs) != 0 {
+			t.Errorf("%s: ran %v — the batch must not half-apply", verb, kubectl.runs)
+		}
+	}
+}
+
+// The batch still runs when every index is a Node, so the guard above is not
+// simply refusing everything.
+func TestCordonAppliesAWholeNodeBatch(t *testing.T) {
+	quietRender(t)
+	kubectl := &recordingKubectl{}
+	cmd := newCordonCommand(Services{
+		Kubectl: kubectl,
+		State: mixedListing(t,
+			state.Resource{Name: "node-a", Kind: kinds.Node},
+			state.Resource{Name: "node-b", Kind: kinds.Node}),
+	}, "cordon")
+
+	if err := cmd.RunE(cmd, []string{"1..2"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if len(kubectl.runs) != 2 {
+		t.Errorf("kubectl ran %d times, want 2: %v", len(kubectl.runs), kubectl.runs)
+	}
+}
+
+// Drain streams rather than captures, so kubectl's own "not found" reaches the
+// terminal and only an exit code comes back — which withRefresh does not treat
+// as stale. Drain was therefore the one node command that could not relist,
+// and it asked "Evict all pods from Node/node-a?" about a node that had not
+// existed for a while before saying so.
+func TestDrainReportsAVanishedNodeAsStale(t *testing.T) {
+	kubectl := &recordingKubectl{err: errors.New(`Error from server (NotFound): nodes "node-a" not found`)}
+	asked := false
+	command := DrainCommand{
+		Kubectl: kubectl, State: node("node-a"),
+		Confirm: func(string) error { asked = true; return nil },
+	}
+
+	var stale StaleResourceError
+	err := command.Execute(1, false, nil)
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+	if stale.Kind != kinds.Node {
+		t.Errorf("stale kind = %q, want Node", stale.Kind)
+	}
+	if asked {
+		t.Error("prompted for consent to drain a node that no longer exists")
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran the drain anyway: %v", kubectl.interactive)
+	}
+}
+
+// A preflight that fails for any other reason must not take the command away:
+// the drain runs and reports for itself.
+func TestDrainProceedsWhenThePreflightFailsForAnotherReason(t *testing.T) {
+	kubectl := &recordingKubectl{err: errors.New("the server was unable to return a response")}
+	command := DrainCommand{
+		Kubectl: kubectl, State: node("node-a"),
+		Confirm: func(string) error { return nil },
+	}
+	if err := command.Execute(1, true, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(kubectl.interactive) != 1 {
+		t.Errorf("drain ran %d times, want 1: %v", len(kubectl.interactive), kubectl.interactive)
 	}
 }

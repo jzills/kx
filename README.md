@@ -158,8 +158,11 @@ kubectl commands.
 Nodes are diagnosed the same way, by index from `kx get nodes` or `kx top
 nodes`: conditions (not ready, memory/disk/PID pressure, network
 unavailable), whether the node is cordoned, and a tally of the pods on it
-that aren't running. They're cluster-scoped, so they don't appear in a
-namespace sweep or in `-A`.
+that are stuck — pending, or in a phase the kubelet hasn't reported. Pods
+that already finished, successfully or not, are left out: their objects sit
+on the node until garbage collection, so counting them would keep a healthy
+node looking sick for days. They're cluster-scoped, so they don't appear in
+a namespace sweep or in `-A`.
 
 ### Take a node out of service
 
