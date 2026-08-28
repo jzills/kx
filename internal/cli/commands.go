@@ -806,7 +806,7 @@ func listSwitchTargets(services Services, isContext bool) error {
 	stop := render.Status("fetching namespaces")
 	// Slot only: `kx ns` is a switch listing, not work. `kx get ns` remains the
 	// way to put namespaces in history for `kx describe <n>` and friends.
-	output, namespace, err := GetCommand{
+	output, _, err := GetCommand{
 		Kubectl: services.Kubectl,
 		State:   slotOnly{writer: services.State},
 		Index:   services.Index,
@@ -815,7 +815,16 @@ func listSwitchTargets(services Services, isContext bool) error {
 	if err != nil {
 		return err
 	}
-	render.IndexedTable(output, "namespaces", namespace)
+	// Read live rather than taken from Execute, which returns the empty string
+	// a Namespace listing rightly records: a Namespace is cluster-scoped, and
+	// #271 stopped kx get namespaces claiming otherwise.
+	//
+	// The caption here was never describing the listed resources' scope though.
+	// On a switch screen it answers "where am I now", which is the whole point
+	// of the screen — and per #240 that answer lives in the kubeconfig, not in
+	// a slot that froze whenever the listing was taken. The contexts branch
+	// above takes its own caption the same way, and for the same reason.
+	render.IndexedTable(output, "namespaces", services.Kubectl.CurrentNamespace())
 	return nil
 }
 

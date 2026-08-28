@@ -144,8 +144,11 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
-	if namespace != "prod" {
-		t.Errorf("namespace = %q, want prod", namespace)
+	// A Node is cluster-scoped: kx get nodes records no namespace for one, and
+	// kx top nodes must record the same, or the same index diagnoses differently
+	// depending on which command handed it out.
+	if namespace != "" {
+		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", namespace)
 	}
 	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
 		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
@@ -690,5 +693,43 @@ func TestTopRegistersNamespaceFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("--%s is not registered, so it will not appear in --help", name)
 		}
+	}
+}
+
+// kx diag's help offers `kx get nodes` and `kx top nodes` as two ways to reach
+// the same index, so the entry they save has to be the same entry. It was not:
+// #271 blanked the namespace on the get path only, and a Node indexed by
+// top carried whichever namespace the caller happened to be standing in.
+//
+// That is not just a caption. Gather is handed the saved namespace and filters
+// the node's warning events by it (diagnostics/service.go), and node events
+// live in `default` — so a node indexed by top diagnosed with every warning
+// event missing, while the same node indexed by get showed them.
+func TestTopNodesAndGetNodesSaveTheSameNamespace(t *testing.T) {
+	tops := &fakeState{}
+	if _, _, err := (TopCommand{
+		Kubectl: &scriptedKubectl{outputs: []string{nodesOutput}},
+		State:   tops, Index: indexService(),
+	}).ExecuteNodes("", nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+
+	gets := &fakeState{}
+	if _, _, err := (GetCommand{
+		Kubectl: &fakeKubectl{namespace: "prod", output: nodesOutput},
+		State:   gets, Index: indexService(),
+	}).Execute("nodes", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(tops.saved) != 1 || len(gets.saved) != 1 {
+		t.Fatalf("saved %d/%d entries, want 1 each", len(tops.saved), len(gets.saved))
+	}
+	if tops.saved[0].Namespace != gets.saved[0].Namespace {
+		t.Errorf("kx top nodes saved namespace %q, kx get nodes saved %q — the same index must resolve the same way",
+			tops.saved[0].Namespace, gets.saved[0].Namespace)
+	}
+	if tops.saved[0].Namespace != "" {
+		t.Errorf("saved namespace = %q, want empty", tops.saved[0].Namespace)
 	}
 }

@@ -1278,3 +1278,50 @@ func TestNewUsageIsAlwaysKnown(t *testing.T) {
 		t.Errorf("NewUsage(50, cpu) = %+v, want Known with Pct 50", u)
 	}
 }
+
+// #271 dropped the namespace from the terminal diagnostic header for a
+// cluster-scoped resource. This template renders the same report, and kept
+// printing an empty span between two separators — "Node/node-a · · healthy".
+// Two views of one report must not disagree about whether it has a namespace.
+func TestRenderDiagOmitsAnAbsentNamespaceFromTheBanner(t *testing.T) {
+	report := criticalReport(t)
+	report.Kind = kinds.Node
+	report.Name = "node-a"
+	report.Namespace = ""
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true, Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	html := string(out)
+
+	if strings.Contains(html, `<span class="ns"></span>`) {
+		t.Error("banner renders an empty namespace span for a cluster-scoped resource")
+	}
+	banner := html[strings.Index(html, `<div class="banner">`):]
+	banner = banner[:strings.Index(banner, "</div>")]
+	if separators := strings.Count(banner, `<span class="sep">`); separators != 1 {
+		t.Errorf("banner has %d separators, want 1:\n%s", separators, banner)
+	}
+}
+
+// The namespaced case still prints it, so the guard above cannot be satisfied
+// by dropping the segment altogether.
+func TestRenderDiagKeepsANamespaceInTheBanner(t *testing.T) {
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true, Reports: []diagnostics.Report{criticalReport(t)},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	banner := string(out)[strings.Index(string(out), `<div class="banner">`):]
+	banner = banner[:strings.Index(banner, "</div>")]
+	if !strings.Contains(banner, `<span class="ns">diagnostics</span>`) {
+		t.Errorf("banner dropped the namespace of a namespaced resource:\n%s", banner)
+	}
+	if separators := strings.Count(banner, `<span class="sep">`); separators != 2 {
+		t.Errorf("banner has %d separators, want 2:\n%s", separators, banner)
+	}
+}

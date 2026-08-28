@@ -106,8 +106,15 @@
   <div class="banner">
     <span>{{$r.Kind}}/{{$r.Name}}</span>
     <span class="sep">·</span>
-    <span class="ns">{{$r.Namespace}}</span>
-    <span class="sep">·</span>
+    {{/* Dropped whole for a cluster-scoped resource — a Node, a PV, a
+         StorageClass — which has no namespace to name. The terminal header
+         omits it for the same reason (render/diagnostic.go); leaving it here
+         rendered an empty span between two separators, so the page said
+         "Node/node-a · · healthy" where the terminal said the truth. */}}
+    {{if $r.Namespace}}
+      <span class="ns">{{$r.Namespace}}</span>
+      <span class="sep">·</span>
+    {{end}}
     <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
   </div>
   {{template "report" $r}}
