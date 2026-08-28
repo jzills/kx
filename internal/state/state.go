@@ -368,14 +368,11 @@ func (s *Service) loadHistory() (History, error) {
 		//
 		// Nor a cluster-scoped listing, for the third reason an entry can
 		// legitimately carry no namespace: there is no namespace to carry.
-		// Read from the kinds the entry already records rather than from a new
-		// field — every resource stores its Kind, so a listing whose sole kind
-		// is cluster-scoped is self-describing, and the on-disk shape (a
-		// compatibility surface) does not have to change to say so. A
-		// mixed-kind entry has no sole kind and keeps the backfill.
-		if state.Namespace == "" && !state.AllNamespaces && !clusterScopedEntry(state) {
-			state.Namespace = "default"
-		}
+		//
+		// The backfill itself is applied by backfilled(), at the point an
+		// entry is read, rather than here over the whole stack. See its own
+		// comment: deciding it here put a discovery round-trip on every state
+		// load, for entries most commands never look at.
 		history.States = append(history.States, state)
 	}
 	for kind, entry := range raw.Named {
@@ -516,11 +513,47 @@ func (s *Service) Load() (State, error) {
 	if len(history.States) == 0 {
 		return State{}, ErrNoState
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
 // LoadHistory returns the whole stack.
-func (s *Service) LoadHistory() (History, error) { return s.loadHistory() }
+//
+// Every entry backfilled, because the views built on this one render each
+// entry's scope. That is the walk Load no longer does — paid by the commands
+// that actually show the whole stack rather than by every index lookup.
+func (s *Service) LoadHistory() (History, error) {
+	history, err := s.loadHistory()
+	if err != nil {
+		return History{}, err
+	}
+	for i := range history.States {
+		history.States[i] = backfilled(history.States[i])
+	}
+	return history, nil
+}
+
+// backfilled defaults an entry's namespace, for the entry being read.
+//
+// An entry can legitimately carry no namespace three ways — a spanning
+// listing, a cluster-scoped one, and a context slot — and loadHistory's own
+// comment says which is which. Only the fourth case, a namespace that was
+// never recorded, takes the default.
+//
+// Applied here rather than in loadHistory because the cluster-scoped test asks
+// kinds.Namespaced, which falls through to the discovery cache for any kind
+// outside kx's static tables — every CRD. loadHistory ran it over every entry
+// in the stack, and runs on every index-resolving command, so one listing of a
+// cluster-scoped custom resource anywhere in history made `kx describe 1`
+// against a pod listing block on a discovery round-trip before it could reach
+// kubectl. Reading it here costs that lookup only when the entry being read is
+// the one that needs it — and a command working with that listing pays for
+// discovery anyway.
+func backfilled(entry State) State {
+	if entry.Namespace == "" && !entry.AllNamespaces && !clusterScopedEntry(entry) {
+		entry.Namespace = "default"
+	}
+	return entry
+}
 
 func clamp(value, high int) int {
 	if value < 0 {
@@ -545,7 +578,7 @@ func (s *Service) Navigate(delta int) (State, error) {
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
 // NavigateTo moves the cursor to a 1-based position, clamped to the stack.
@@ -561,7 +594,7 @@ func (s *Service) NavigateTo(position int) (State, error) {
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
 // Drop removes the entry at a 1-based position, keeping the cursor pointing at

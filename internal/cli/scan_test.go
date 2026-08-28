@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -760,5 +761,57 @@ func TestScanJSONScopeCarriesNoDisplayLabel(t *testing.T) {
 	}
 	if decoded.Scope != "prod" {
 		t.Errorf("scope = %q, want the bare namespace", decoded.Scope)
+	}
+}
+
+// The bound was always scanWorkers, but the shape that enforced it launched a
+// goroutine per image and had all but scanWorkers of them sit blocked on a
+// semaphore for the whole sweep. A namespace sweep resolves hundreds of unique
+// images, so that was hundreds of goroutines and their stacks buying nothing.
+//
+// Counted while every scan is held, when the pool is at its widest: a fixed
+// pool parks the caller on the position channel and holds scanWorkers workers,
+// where the old shape held one goroutine for every image not yet started.
+func TestSummarizeDoesNotLaunchAGoroutinePerImage(t *testing.T) {
+	const count = 60
+	list := images(count)
+	fake := newConcurrentScanner()
+	gate := make(chan struct{})
+	for _, image := range list {
+		fake.stdout[image] = `{"Results":[]}`
+		fake.release[image] = gate
+	}
+
+	before := runtime.NumGoroutine()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).
+			Summarize("trivy", list, nil); err != nil {
+			t.Errorf("Summarize: %v", err)
+		}
+	}()
+
+	// Wait until the pool is saturated — every worker is inside a held scan,
+	// which is the moment the old shape had the rest of its goroutines parked.
+	for {
+		fake.mu.Lock()
+		started := len(fake.started)
+		fake.mu.Unlock()
+		if started >= scanWorkers {
+			break
+		}
+		runtime.Gosched()
+	}
+	peak := runtime.NumGoroutine() - before
+
+	close(gate)
+	<-done
+
+	// Generous: the pool costs scanWorkers plus the goroutine driving
+	// Summarize. Anything near `count` is a goroutine per image.
+	if limit := scanWorkers + 8; peak > limit {
+		t.Errorf("Summarize held %d extra goroutines for %d images, want at most %d",
+			peak, count, limit)
 	}
 }

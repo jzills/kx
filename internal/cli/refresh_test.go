@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -341,5 +343,39 @@ func TestEnsureExists(t *testing.T) {
 	live := &recordingKubectl{probeCode: 0}
 	if err := ensureExists(live, kinds.Pod, "nginx", "prod"); err != nil {
 		t.Errorf("ensureExists on a live resource = %v, want nil", err)
+	}
+}
+
+// IsNotFound matches the bare substring "not found", which it has to: kubectl
+// offers no exit code that distinguishes a missing resource. scanner's own
+// "grype not found on PATH" reads the same to it.
+//
+// #269 guarded the one call site where that collided. The collision is in the
+// wording, so it exists wherever the two errors meet — here, a scanner that
+// vanished between kx scan's preflight and the scan, which surfaces from
+// Capture rather than from EnsureAvailable. Left alone, kx printed the install
+// message and then "Run 'kx get <resource>' to refresh the list."
+func TestAMissingScannerIsNotStaleState(t *testing.T) {
+	err := scanner.NotFoundError{Binary: "grype"}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %q; this test is only meaningful while the wording collides", err)
+	}
+	if isStale(err) {
+		t.Error("a missing scanner binary was treated as a vanished resource")
+	}
+}
+
+// Wrapped the way Summarize returns it, since errors.As is what does the work.
+func TestAWrappedMissingScannerIsNotStaleState(t *testing.T) {
+	if isStale(fmt.Errorf("scanning api:v1: %w", scanner.NotFoundError{Binary: "trivy"})) {
+		t.Error("a wrapped missing-scanner error was treated as a vanished resource")
+	}
+}
+
+// A real vanished resource still relists, so the exclusion above is not simply
+// switching staleness off.
+func TestAVanishedResourceIsStillStaleState(t *testing.T) {
+	if !isStale(errors.New(`Error from server (NotFound): pods "nginx" not found`)) {
+		t.Error("a vanished pod was not treated as stale")
 	}
 }

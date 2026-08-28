@@ -15,6 +15,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -96,6 +97,20 @@ func isStale(err error) bool {
 		// listing that is fresh, correct, and about something else. Those errors
 		// carry their own relist hint and are reported as they are.
 		return mismatch.Relist == ""
+	}
+	// A missing scanner is not a missing resource. IsNotFound matches the bare
+	// substring "not found" — it has to, since kubectl offers no exit code that
+	// distinguishes one — and scanner.NotFoundError reads "grype not found on
+	// PATH — install it to run this scan.". Left to that match, a scanner that
+	// vanished between kx scan's preflight and the scan itself printed its
+	// install message and then "Run 'kx get <resource>' to refresh the list.",
+	// which relists a listing that was never the problem.
+	//
+	// Excluded by type rather than by guarding one call site, because the
+	// collision is in the two errors' wording and exists wherever they meet.
+	var missingScanner scanner.NotFoundError
+	if errors.As(err, &missingScanner) {
+		return false
 	}
 	return IsNotFound(err)
 }
