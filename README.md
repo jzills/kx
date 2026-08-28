@@ -235,7 +235,15 @@ critical; `kx scan -A --fail-on high` does the same for image vulnerabilities.
 ```bash
 kx diag -A --fail-on critical          # 0 if the cluster is healthy, 2 if not
 kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.CRITICAL > 0)'
+kx diag -A --fail-on critical --html   # publishes the report *and* fails the build
 ```
+
+The gate is independent of how the findings are presented: `--fail-on` applies
+alongside `--json` and `--html` alike, so a pipeline can publish a report and
+still fail on what's in it. With `--html` the exit code lands once the server
+stops. The one combination that can't work is `kx scan --full --fail-on`, and
+it's refused rather than ignored — `--full` streams the scanner's own report,
+which kx never parses, so there would be nothing for the gate to read.
 
 The exit code is **2, not 1**, deliberately: kx exits 1 for its own failures, so
 a pipeline can tell "the cluster is sick" — the check working — from "kx
