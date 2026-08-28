@@ -130,11 +130,13 @@ func (c TopCommand) ExecuteNodes(
 	if err != nil {
 		return index.Table{}, "", err
 	}
-	namespace = extractNamespace(extraArgs)
-	if namespace == "" {
-		namespace = c.Kubectl.CurrentNamespace()
-	}
-
+	// No namespace, and not the caller's current one: a Node is cluster-scoped.
+	// This is the rule #271 gave kx get nodes, and kx top nodes is the other way
+	// a Node gets an index — the two must agree, since kx diag says they are
+	// interchangeable. Stamping "prod" on here captioned the listing
+	// "Nodes · prod · 3 items", and then cost more than a caption: Gather was
+	// handed that namespace and filtered the node's warning events down to it,
+	// finding none, because node events live in default.
 	headers, rows, _ := index.ParseTable(output)
 	if headers == nil {
 		return c.Index.Add(output), namespace, nil

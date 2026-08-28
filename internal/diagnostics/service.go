@@ -39,16 +39,32 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 		return Data{}, err
 	}
 
-	pods, err := s.Graph.ResolveWorkloadPods(ctx, kind, name, namespace)
-	if err != nil {
-		return Data{}, err
+	// Everything below is about a workload's own pods, and a Node has none in
+	// that sense — attachKindHealth already tallied what is scheduled on it,
+	// through the field selector the API server indexes.
+	//
+	// Run unguarded for a Node, this tail was three cluster-wide reads whose
+	// results were all discarded: ResolveWorkloadPods listed every pod in the
+	// cluster before falling to graph's `default: return nil, nil`, and
+	// usageLookup then fetched every pod's metrics to attach them to the empty
+	// slice that came back. On a large cluster that is tens of megabytes, and
+	// a timeout, for one node's conditions.
+	var pods []corev1.Pod
+	if kind != kinds.Node {
+		var err error
+		pods, err = s.Graph.ResolveWorkloadPods(ctx, kind, name, namespace)
+		if err != nil {
+			return Data{}, err
+		}
+		for i := range pods {
+			data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
+		}
+		attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
+		s.attachLogs(ctx, data.Pods, namespace)
 	}
-	for i := range pods {
-		data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
-	}
-	attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
-	s.attachLogs(ctx, data.Pods, namespace)
 
+	// Events are the exception: a Node's own warning events are the point of
+	// diagnosing one, so this read stays.
 	all, err := s.Events.Get(ctx, namespace)
 	if err != nil {
 		return Data{}, err
