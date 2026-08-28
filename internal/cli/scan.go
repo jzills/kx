@@ -227,24 +227,33 @@ func (c ScanCommand) Summarize(
 	rows := make([]scanner.ImageScan, len(images))
 	failures := make([]error, len(images))
 
+	// A fixed pool draining a channel of positions, rather than a goroutine per
+	// image parked on a semaphore. The bound is scanWorkers either way, but a
+	// namespace sweep resolves hundreds of unique images, and the semaphore
+	// shape launched a goroutine for every one of them — all but two spending
+	// the whole sweep blocked on a slot, for nothing. Making the pool the
+	// structure also means the bound is not something each goroutine has to
+	// remember to take.
+	positions := make(chan int)
 	var group sync.WaitGroup
-	// A buffered channel as a semaphore: taking a slot blocks once
-	// scanWorkers are out, so no more than that many scanners ever run.
-	slots := make(chan struct{}, scanWorkers)
-	for position, image := range images {
+	for range min(scanWorkers, len(images)) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			slots <- struct{}{}
-			defer func() { <-slots }()
-			// Each goroutine writes its own element of each slice, which is
-			// why neither needs a lock.
-			rows[position], failures[position] = c.scanImage(engine, image)
-			if onScanned != nil {
-				onScanned()
+			for position := range positions {
+				// Each position is handled by exactly one worker, so the two
+				// slices are written without overlap and neither needs a lock.
+				rows[position], failures[position] = c.scanImage(engine, images[position])
+				if onScanned != nil {
+					onScanned()
+				}
 			}
 		}()
 	}
+	for position := range images {
+		positions <- position
+	}
+	close(positions)
 	group.Wait()
 
 	// In order, so the reported failure is the same one a serial sweep would

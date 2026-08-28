@@ -1509,3 +1509,95 @@ func TestMixedKindEntryStillDefaults(t *testing.T) {
 		t.Errorf("Namespace = %q, want default for a mixed-kind entry", loaded.Namespace)
 	}
 }
+
+// countingSource records how often the discovery fallback was consulted, and
+// answers "don't know" — the shape a cache that has never heard of a kind has.
+type countingSource struct{ namespacedCalls int }
+
+func (c *countingSource) Resolve(string) (kinds.Kind, string, bool) { return "", "", false }
+func (c *countingSource) Namespaced(kinds.Kind) (bool, bool) {
+	c.namespacedCalls++
+	return false, false
+}
+
+// The namespace backfill asks kinds.Namespaced, which falls through to the
+// discovery cache for any kind outside kx's static tables — every CRD, and a
+// stale cache means network round-trips per API group.
+//
+// It used to run over every entry in the stack on every load, and Load runs on
+// every index-resolving command. So one listing of a cluster-scoped custom
+// resource anywhere in history made `kx describe 1` against a pod listing wait
+// on discovery before it could reach kubectl.
+func TestLoadDoesNotConsultDiscoveryForOtherHistoryEntries(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	// Written straight to disk rather than through Save, which loads the stack
+	// and writes it back: that round trip would persist whatever the backfill
+	// decided about the CRD entry, and the assertion below would then pass for
+	// the wrong reason on either implementation.
+	if err := service.saveHistory(History{
+		Cursor: 1,
+		States: []State{
+			// A CRD listing with no namespace: the entry that reaches the
+			// discovery fallback.
+			{Resources: NewResources([]string{"web-gateway"}, kinds.Kind("Gateway"))},
+			// The pod listing on top, which is what the cursor points at.
+			{Resources: NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod"},
+		},
+	}); err != nil {
+		t.Fatalf("write the stack: %v", err)
+	}
+
+	source := &countingSource{}
+	kinds.SetShorthandSource(source)
+	t.Cleanup(func() { kinds.SetShorthandSource(nil) })
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "prod" {
+		t.Errorf("namespace = %q, want prod", current.Namespace)
+	}
+	if source.namespacedCalls != 0 {
+		t.Errorf("Load consulted discovery %d time(s) for an entry it did not return",
+			source.namespacedCalls)
+	}
+}
+
+// The entry being read still gets the backfill, so the saving above is in what
+// is skipped rather than in the answer.
+func TestLoadStillBackfillsTheEntryItReturns(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := service.Save(State{
+		Resources: NewResources([]string{"nginx"}, kinds.Pod),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "default" {
+		t.Errorf("namespace = %q, want the backfilled default", current.Namespace)
+	}
+}
+
+// A cluster-scoped listing keeps its empty namespace — #271, which the
+// backfill has to keep honouring wherever it now runs.
+func TestLoadLeavesAClusterScopedListingWithoutANamespace(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := service.Save(State{
+		Resources: NewResources([]string{"node-a"}, kinds.Node),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "" {
+		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", current.Namespace)
+	}
+}
