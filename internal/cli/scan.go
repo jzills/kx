@@ -460,6 +460,16 @@ func newScanCommand(services Services) *cobra.Command {
 					"'--json' cannot be combined with '--full' — --full streams " +
 						"the scanner's own report, which kx does not parse.")
 			}
+			// Same reason, one step further: a gate needs findings, and --full
+			// leaves kx with none to read. Refused rather than quietly ignored,
+			// which is what this did — a pipeline that added --full went green
+			// whatever the scan turned up, and nothing said the gate had gone.
+			if full && failOn != "" {
+				return errors.New(
+					"'--full' cannot be combined with '--fail-on' — --full streams " +
+						"the scanner's own report, which kx does not parse, so the " +
+						"gate has nothing to read.")
+			}
 			// Validated up front so a typo fails before any image is scanned
 			// rather than after every one of them has been.
 			if failOn != "" {
@@ -486,7 +496,7 @@ func newScanCommand(services Services) *cobra.Command {
 			command := ScanCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
-				Scanner: scanner.ExecService{},
+				Scanner: services.scannerService(),
 				Status:  render.Status,
 			}
 
@@ -598,23 +608,30 @@ func newScanCommand(services Services) *cobra.Command {
 				return scanGate(rows, failOn)
 			}
 			render.ScanSummary(rows)
-			if !htmlOpts.Enabled {
-				return scanGate(rows, failOn)
+			// The gate is the tail of every path, not the alternative to one.
+			// Publishing a report and failing the build are not in conflict:
+			// --html says where the findings go, --fail-on says what they mean.
+			if htmlOpts.Enabled {
+				indexArg := ""
+				if len(indexArgs) > 0 {
+					indexArg = indexArgs[0]
+				}
+				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
+					invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderScan(scanPage(pageScope, rows, meta))
+				if err != nil {
+					return err
+				}
+				// After the server stops, so Ctrl-C ends the command with the
+				// exit code the scan earned rather than the server's nil.
+				if err := servePage(cmd.Context(), page, htmlOpts); err != nil {
+					return err
+				}
 			}
-			indexArg := ""
-			if len(indexArgs) > 0 {
-				indexArg = indexArgs[0]
-			}
-			meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-				invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
-			if err != nil {
-				return err
-			}
-			page, err := web.RenderScan(scanPage(pageScope, rows, meta))
-			if err != nil {
-				return err
-			}
-			return servePage(cmd.Context(), page, htmlOpts)
+			return scanGate(rows, failOn)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.

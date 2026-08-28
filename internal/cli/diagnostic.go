@@ -261,23 +261,31 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					return sweepGate(result, failOn, threshold)
 				}
 				render.Triage(result)
-				if !htmlOpts.Enabled {
-					return sweepGate(result, failOn, threshold)
+				// The gate is the tail of every path, not the alternative to
+				// one. --html says where the findings go; --fail-on says what
+				// they mean, and a sweep that found something critical means
+				// the same thing whether or not a browser was opened on it.
+				if htmlOpts.Enabled {
+					scope := namespace
+					if allNamespaces {
+						scope = render.AllNamespaces
+					}
+					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
+						invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
+					if err != nil {
+						return err
+					}
+					page, err := web.RenderDiag(sweepPage(result, meta))
+					if err != nil {
+						return err
+					}
+					// After the server stops, so Ctrl-C ends the command with
+					// the exit code the sweep earned rather than servePage's nil.
+					if err := servePage(ctx, page, htmlOpts); err != nil {
+						return err
+					}
 				}
-				scope := namespace
-				if allNamespaces {
-					scope = render.AllNamespaces
-				}
-				meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
-					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
-				if err != nil {
-					return err
-				}
-				page, err := web.RenderDiag(sweepPage(result, meta))
-				if err != nil {
-					return err
-				}
-				return servePage(ctx, page, htmlOpts)
+				return sweepGate(result, failOn, threshold)
 			}
 
 			index, err := parseIndex("index", args[0])
@@ -301,20 +309,22 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return verdictGate(report.Verdict, failOn, threshold)
 			}
 			render.Diagnostic(report)
-			if !htmlOpts.Enabled {
-				return verdictGate(report.Verdict, failOn, threshold)
+			if htmlOpts.Enabled {
+				meta, err := pageMeta(services.Config.Theme,
+					"diag · "+string(report.Kind)+"/"+report.Name,
+					invocation(use, args[0], portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderDiag(resourcePage(report, meta))
+				if err != nil {
+					return err
+				}
+				if err := servePage(ctx, page, htmlOpts); err != nil {
+					return err
+				}
 			}
-			meta, err := pageMeta(services.Config.Theme,
-				"diag · "+string(report.Kind)+"/"+report.Name,
-				invocation(use, args[0], portFlag(port)))
-			if err != nil {
-				return err
-			}
-			page, err := web.RenderDiag(resourcePage(report, meta))
-			if err != nil {
-				return err
-			}
-			return servePage(ctx, page, htmlOpts)
+			return verdictGate(report.Verdict, failOn, threshold)
 		},
 	}
 	cmd.Flags().StringP("namespace", "n", "",
@@ -357,12 +367,8 @@ func sweepGate(result render.TriageResult, failOn string, threshold diagnostics.
 	if failOn == "" {
 		return nil
 	}
-	source := result.All
-	if len(source) == 0 {
-		source = result.Reports
-	}
 	worst := diagnostics.OK
-	for _, report := range source {
+	for _, report := range result.All {
 		if report.Verdict > worst {
 			worst = report.Verdict
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -33,6 +34,11 @@ type Services struct {
 	// renderer's own Confirm reads os.Stdin, which under `go test` is closed
 	// and therefore always declines.
 	Confirm func(string) error
+	// Scanner runs the vulnerability scanner. Injected for the same reason as
+	// Confirm: kx scan built an ExecService inline, so every test of that
+	// command stopped at the argument guards rather than reaching what the
+	// command does with what it scanned.
+	Scanner scanner.Service
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
@@ -42,6 +48,16 @@ func (s Services) confirm() func(string) error {
 		return s.Confirm
 	}
 	return render.Confirm
+}
+
+// scannerService is the scanner runner, falling back to the real one for the
+// same reason confirm does. Named for the field rather than the package, which
+// is already spelled `scanner` here.
+func (s Services) scannerService() scanner.Service {
+	if s.Scanner != nil {
+		return s.Scanner
+	}
+	return scanner.ExecService{}
 }
 
 // NewServices builds the production service set from the loaded config.
