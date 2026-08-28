@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/jzills/kx/internal/kinds"
 )
@@ -387,4 +388,75 @@ func mustQuantity(t *testing.T, s string) *resource.Quantity {
 		t.Fatalf("ParseQuantity(%q): %v", s, err)
 	}
 	return &q
+}
+
+// Gather's tail resolves a workload's pods, attaches their usage and reads
+// their logs. A Node has no pods in that sense — attachKindHealth already
+// tallied what is scheduled on it, using the field selector the API server
+// indexes — but the tail ran anyway, listing every pod in the cluster and then
+// throwing the list away at graph's `default: return nil, nil`.
+//
+// Counting pod lists is what sees it: the field-selected one is legitimate and
+// the unrestricted one is the defect, so the shape of the assertion has to be
+// "which lists", not "how many reads".
+func TestGatherNodeDoesNotListEveryPodInTheCluster(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
+		podWith("web", "uid-web", corev1.PodRunning, nil),
+	)
+	if _, err := New(client).Gather(context.Background(), kinds.Node, "node-a", ""); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	var scoped, unrestricted int
+	for _, action := range client.Actions() {
+		list, ok := action.(k8stesting.ListAction)
+		if !ok || action.GetResource().Resource != "pods" {
+			continue
+		}
+		if list.GetListRestrictions().Fields.Empty() {
+			unrestricted++
+		} else {
+			scoped++
+		}
+	}
+	if unrestricted != 0 {
+		t.Errorf("Gather made %d unrestricted pod list(s); a Node's pods come from the spec.nodeName selector", unrestricted)
+	}
+	if scoped != 1 {
+		t.Errorf("Gather made %d field-selected pod list(s), want exactly 1", scoped)
+	}
+}
+
+// The node's own warning events are the point of diagnosing one, so that read
+// must survive the guard above.
+func TestGatherNodeStillReadsWarningEvents(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
+		warning("node-a.1", "NodeNotReady", "Node", "node-a", 3),
+	)
+	data, err := New(client).Gather(context.Background(), kinds.Node, "node-a", "")
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) == 0 {
+		t.Error("Gather returned no warning events for a Node that has one")
+	}
+}
+
+// A workload still resolves its pods — the guard is for Nodes only, and must
+// not have quietly emptied the pod table every other kind depends on.
+func TestGatherWorkloadStillResolvesItsPods(t *testing.T) {
+	deployment := &appsv1.Deployment{ObjectMeta: meta("web", "uid-deploy")}
+	replicaSet := &appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "uid-rs", owner("uid-deploy"))}
+	pod := podWith("web-abc-1", "uid-pod", corev1.PodRunning, nil, owner("uid-rs"))
+
+	data, err := service(deployment, replicaSet, pod).
+		Gather(context.Background(), kinds.Deployment, "web", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.Pods) != 1 {
+		t.Fatalf("got %d pods, want 1", len(data.Pods))
+	}
 }

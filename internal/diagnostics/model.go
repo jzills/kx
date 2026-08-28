@@ -176,7 +176,18 @@ type PodPhaseCounts struct {
 // a line. Succeeded is excluded deliberately: a Job's pod stays on the node
 // after it completes, and counting those as "not running" would report every
 // node that has ever run a CronJob as degraded.
-func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Failed + c.Unknown }
+//
+// Failed is excluded for exactly the same reason, which the original wording
+// gave and then did not act on. Kubernetes keeps a terminated pod's object on
+// the node until the terminated-pod GC threshold — 12500 by default — so one
+// preemption or OOM eviction left a node reporting "1/40 pods not running"
+// indefinitely, its verdict never returning to healthy, and (since --fail-on
+// shipped) failing a CI gate forever on a cluster with nothing wrong with it.
+//
+// The pod itself is not lost: a pod that failed is a fact about the workload
+// that owns it, and kx diag on that workload reports it. A node is not the
+// right place to be told about something that finished days ago.
+func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Unknown }
 
 // NodeHealth is a Node's conditions, whether it has been cordoned, and what is
 // scheduled on it.

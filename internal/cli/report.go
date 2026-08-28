@@ -71,19 +71,15 @@ func diagnosticJSON(report diagnostics.Report) (string, error) {
 // governs how much of a table fits on a screen, and nothing is scrolling past
 // a machine. The HTML report takes the same view for the same reason.
 func triageJSON(result render.TriageResult) (string, error) {
-	source := result.All
-	if len(source) == 0 {
-		source = result.Reports
-	}
-	resources := make([]jsonReport, 0, len(source))
-	for _, report := range source {
+	resources := make([]jsonReport, 0, len(result.All))
+	for _, report := range result.All {
 		resources = append(resources, reportOf(report))
 	}
 
+	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute
+	// blanks it before Sweep runs, since there is no single namespace the
+	// listing came from.
 	namespace := result.Namespace
-	if result.AllNamespaces {
-		namespace = ""
-	}
 	return encode(struct {
 		SchemaVersion int          `json:"schemaVersion"`
 		Namespace     string       `json:"namespace,omitempty"`

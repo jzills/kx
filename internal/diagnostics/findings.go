@@ -178,7 +178,8 @@ func conditionDetail(condition NodeCondition) string {
 }
 
 // phaseBreakdown names the phases the stalled pods are actually in, so the
-// count is actionable rather than merely alarming.
+// count is actionable rather than merely alarming. Failed is absent because
+// Stalled no longer counts it — see PodPhaseCounts.Stalled.
 func phaseBreakdown(counts PodPhaseCounts) string {
 	var parts []string
 	for _, phase := range []struct {
@@ -186,7 +187,6 @@ func phaseBreakdown(counts PodPhaseCounts) string {
 		count int
 	}{
 		{"pending", counts.Pending},
-		{"failed", counts.Failed},
 		{"unknown", counts.Unknown},
 	} {
 		if phase.count > 0 {
