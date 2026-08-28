@@ -18,6 +18,14 @@ owns — and prints what's unhealthy, worst first.
 
 Healthy resources are left out of the terminal table. `--full` puts them back.
 
+Each row shows one finding, so which of several equally severe findings sorts
+first decides what the whole sweep reads like. Rows are ordered by severity,
+and within a severity by how specific the finding is: a concrete cause — a
+container state, a scheduling refusal, an exceeded limit — outranks a rollup
+like "Only 0/3 replicas ready", which outranks a raw warning event. Without
+that, five differently-broken Deployments all headlined the same replica
+count and the actual cause sat one screen down.
+
 ## The rows are indexed
 
 That's the part that makes it a starting point rather than a report:
@@ -51,6 +59,18 @@ Findings also draw on live resource usage, the same data
 its memory limit is flagged as an OOMKill risk *before* it gets killed, which
 is the one finding you cannot get from `describe`.
 
+## Nodes
+
+A Node is diagnosed the same way, by index rather than by sweep — it is
+cluster-scoped, so it appears in neither a namespace sweep nor `-A`.
+
+```bash
+kx get nodes
+kx diag 1
+```
+
+See [taking a node out of service](../take-a-node-out-of-service/).
+
 ## Wider than one namespace
 
 ```bash
@@ -60,6 +80,16 @@ kx diag -A         # every namespace
 
 `-A` indexes the sweep too, and adds a `NAMESPACE` column beside the numbers,
 so `kx logs 7` reaches whichever namespace row 7 came from.
+
+## As a check
+
+```bash
+kx diag -A --json
+kx diag -A --fail-on critical
+```
+
+`--json` prints the same sweep as a document, and `--fail-on` exits 2 when any
+resource reaches that verdict. See [using kx in CI](../use-kx-in-ci/).
 
 ## In a browser
 

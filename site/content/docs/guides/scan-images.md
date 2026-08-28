@@ -23,6 +23,9 @@ kx scan 1 --full
 ```
 
 streams the scanner's own output instead — the per-image CVE list, unabridged.
+Because that is the scanner's own formatting rather than something kx parses,
+`--full` cannot be combined with `--json`, `--html` or `--fail-on`; kx refuses
+those pairings rather than quietly dropping one side.
 
 ## Engines
 
@@ -48,6 +51,22 @@ The default is stored in [`~/.kx/config.toml`](../../concepts/configuration/);
 kx scan -n prod
 kx scan -A
 ```
+
+Images are scanned two at a time. The bound is memory rather than cores — a
+scanner unpacks an image and walks every package in it — so a wide sweep stays
+steady on a small machine instead of thrashing it. Rows come back in the order
+the images were resolved, whatever order the scans finish in.
+
+## As a check
+
+```bash
+kx scan -n prod --json
+kx scan -n prod --fail-on high
+```
+
+`--json` prints the severity counts and every finding as a document, and
+`--fail-on` exits 2 when any image carries a vulnerability at that severity or
+worse. See [using kx in CI](../use-kx-in-ci/).
 
 ## In a browser
 
