@@ -72,7 +72,11 @@ jobs:
       # the README command table does.
       - name: Check the generated palette stylesheet is current
         run: |
-          go run ./tools/gen-site-theme || true
+          # Exit 1 is the generator saying it rewrote a file, which the diff
+          # below reports properly. Anything else is the generator failing,
+          # and must not be swallowed: a failure writes nothing, so the diff
+          # comes back clean and a bare `|| true` would report success.
+          go run ./tools/gen-site-theme || { status=$?; [ "$status" -eq 1 ] || exit "$status"; }
           if ! git diff --quiet -- site/assets/css/kx-themes.css site/data/kx_themes.json; then
             echo "::error::site palette files are stale — run 'go run ./tools/gen-site-theme' and commit the result"
             git diff -- site/assets/css/kx-themes.css site/data/kx_themes.json
@@ -84,7 +88,12 @@ jobs:
       # publish a reference that documents flags kx no longer has.
       - name: Check the generated command reference is current
         run: |
-          go run ./tools/gen-site-docs || true
+          # No `|| true`, unlike the palette step above: gen-site-docs has no
+          # rewrote-a-file exit code to tolerate — it exits non-zero only on
+          # error. Swallowing that let a broken generator publish a stale
+          # reference and pass, since a run that writes nothing leaves the
+          # diff and the porcelain below both clean.
+          go run ./tools/gen-site-docs
           if ! git diff --quiet -- site/content/docs/reference/commands; then
             echo "::error::the site command reference is stale — run 'go run ./tools/gen-site-docs' and commit the result"
             git diff --stat -- site/content/docs/reference/commands
