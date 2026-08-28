@@ -34,6 +34,19 @@ kx diag --html --no-open     # don't launch a browser; the URL still prints
 `--no-open` is what you want over SSH with a forwarded port, or in a terminal
 that would open the wrong browser.
 
+## Serving a report and failing on it
+
+`--html` says where the findings go; it does not say what they mean. On
+`kx diag` and `kx scan` it composes with `--fail-on`, so a job can publish a
+report and still fail the build on what is in it:
+
+```bash
+kx diag -A --fail-on critical --html --no-open
+```
+
+The exit code lands once the server stops. See
+[using kx in CI](../use-kx-in-ci/).
+
 ## What the page adds
 
 Detail the terminal has no room for:

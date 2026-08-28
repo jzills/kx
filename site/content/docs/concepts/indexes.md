@@ -97,6 +97,25 @@ kx pods --field-selector status.phase=Running
 that output, so nothing is indexed. The command prints what kubectl printed.
 {{% /kx-note %}}
 
+## Resources with no namespace
+
+Some kinds do not live in one — Nodes, PersistentVolumes, StorageClasses,
+ClusterRoles, CRDs, and Namespaces themselves. Their listings record no
+namespace, and the caption leaves the segment out rather than naming whichever
+one you happened to be standing in:
+
+```text
+Nodes · 1 item
+```
+
+not `Nodes · prod · 1 item`. The commands that resolve those indexes need
+nothing extra — `kubectl` ignores `-n` for a cluster-scoped resource — but a
+scope printed back at you should be one the resource actually has.
+
+Kinds kx cannot place — a CRD missing from the cluster's discovery data —
+keep a namespace rather than having one stripped on a guess. Being wrong about
+a caption is cheaper than resolving every index into the wrong place.
+
 ## Every namespace
 
 `-A` is indexed like any other listing. Each row records the namespace it came
