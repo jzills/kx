@@ -72,6 +72,19 @@ func (c DrainCommand) Execute(index int, yes bool, extraArgs []string) error {
 	if kind != kinds.Node {
 		return fmt.Errorf("drain is only supported for nodes.")
 	}
+	// Asked before the prompt, and before the drain, because a drain streams
+	// rather than captures: kubectl's own "not found" goes straight to the
+	// terminal and all that comes back is an exit code, which withRefresh does
+	// not treat as stale. So drain was the one node command that could not
+	// relist — and it asked "Evict all pods from Node/node-a?" about a node
+	// that had not existed for a while before saying so.
+	//
+	// Only a NotFound diverts: any other failure here leaves the drain to run
+	// and report for itself, so a preflight can add information but never take
+	// the command away.
+	if _, err := c.Kubectl.Run([]string{"get", "node", name}); IsNotFound(err) {
+		return StaleResourceError{Kind: kinds.Node, Name: name}
+	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
 			"Evict all pods from Node/%s?", name)); err != nil {
@@ -115,7 +128,7 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			if err := validateNodeIndexes(services.State, indexes, verb); err != nil {
 				return err
 			}
 			command := NodeCommand{Kubectl: services.Kubectl, State: services.State, Verb: verb}
@@ -182,4 +195,26 @@ func newDrainCommand(services Services) *cobra.Command {
 		"Seconds to give each pod to terminate; -1 uses the pod's own")
 	cmd.Flags().Duration("timeout", 0, "Give up waiting after this long")
 	return cmd
+}
+
+// validateNodeIndexes resolves a batch and refuses it whole unless every index
+// names a Node.
+//
+// The kind check used to live inside NodeCommand.Execute, one index at a time,
+// so `kx cordon 1..3` over a listing whose third entry is not a node cordoned
+// the two ahead of it, printed two successes, and then failed — leaving two
+// nodes unschedulable and reporting an error. validateIndexes exists precisely
+// so a batch does not half-apply, and a wrong kind is as much a precondition
+// as an index that does not resolve.
+func validateNodeIndexes(resolver IndexResolver, indexes []int, verb string) error {
+	for _, index := range indexes {
+		_, _, kind, err := resolver.Fields(index)
+		if err != nil {
+			return err
+		}
+		if kind != kinds.Node {
+			return fmt.Errorf("%s is only supported for nodes.", verb)
+		}
+	}
+	return nil
 }

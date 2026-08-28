@@ -730,7 +730,7 @@ func TestNodePodRollupReportsWhatIsNotRunning(t *testing.T) {
 		Kind: kinds.Node, Name: "node-a",
 		Node: &NodeHealth{
 			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
-			Pods:       PodPhaseCounts{Total: 20, Running: 17, Pending: 2, Failed: 1},
+			Pods:       PodPhaseCounts{Total: 20, Running: 17, Pending: 2, Unknown: 1},
 		},
 	})
 	if !hasSummaryContaining(report.Findings, "3/20 pods not running") {
@@ -749,7 +749,7 @@ func TestNodeConditionOutranksThePodRollup(t *testing.T) {
 		Node: &NodeHealth{
 			Conditions: []NodeCondition{{Type: "Ready", Status: "True"},
 				{Type: "MemoryPressure", Status: "True"}},
-			Pods: PodPhaseCounts{Total: 20, Running: 17, Failed: 3},
+			Pods: PodPhaseCounts{Total: 20, Running: 17, Pending: 3},
 		},
 	})
 	if !strings.Contains(report.Findings[0].Summary, "memory pressure") {
@@ -779,5 +779,45 @@ func TestNodeRollupIgnoresCompletedPods(t *testing.T) {
 	}
 	if hasSummaryContaining(report.Findings, "not running") {
 		t.Errorf("findings = %v, want no rollup for completed pods", summaries(report.Findings))
+	}
+}
+
+// A pod that failed leaves its object on the node until the terminated-pod GC
+// threshold — 12500 by default — so counting one as "not running" left a node
+// permanently degraded by an eviction that happened days ago, and (once
+// --fail-on shipped) failed a CI gate forever on a healthy cluster.
+//
+// Same reasoning as completed pods, which the code already excluded. The pod
+// is still reported where it belongs: against the workload that owns it.
+func TestNodeRollupIgnoresPodsThatAlreadyFailed(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
+			Pods:       PodPhaseCounts{Total: 40, Running: 39, Failed: 1},
+		},
+	})
+	if hasSummaryContaining(report.Findings, "pods not running") {
+		t.Errorf("findings = %v, want no rollup for a node whose only non-running pod failed",
+			summaries(report.Findings))
+	}
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v, want OK — a failed pod is not a sick node", report.Verdict)
+	}
+}
+
+// Pending and Unknown still count: those are pods the node has not placed or
+// is not reporting on, which is a fact about the node right now.
+func TestNodeRollupStillCountsPendingAndUnknown(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
+			Pods:       PodPhaseCounts{Total: 40, Running: 37, Pending: 2, Unknown: 1, Failed: 5},
+		},
+	})
+	if !hasSummaryContaining(report.Findings, "3/40 pods not running") {
+		t.Errorf("findings = %v, want the pending and unknown pods counted and the failed ones not",
+			summaries(report.Findings))
 	}
 }
