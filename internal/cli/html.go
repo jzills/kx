@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -17,6 +18,38 @@ type htmlOptions struct {
 	Enabled bool
 	Port    int
 	NoOpen  bool
+}
+
+// validate refuses the flags that only configure --html's server when no HTML
+// was asked for.
+//
+// Both were accepted and dropped on the floor: `kx diag --port 9090` printed a
+// table and said nothing about the port it had ignored. kx refuses every other
+// contradictory combination it can see — '--json' with '--html', '--full' with
+// '--fail-on', a scope flag beside an index — and a flag that configures a
+// server nobody asked to start is the same mistake, told the same way.
+//
+// portSet and noOpenSet are passed rather than read off the struct because
+// zero is a legitimate --port (it means "pick a free one"), so the value
+// cannot say whether the flag was given.
+func (o htmlOptions) validate(portSet, noOpenSet bool) error {
+	if o.Enabled {
+		return nil
+	}
+	if portSet {
+		return htmlOnlyFlagError("--port")
+	}
+	if noOpenSet {
+		return htmlOnlyFlagError("--no-open")
+	}
+	return nil
+}
+
+func htmlOnlyFlagError(flag string) error {
+	return fmt.Errorf(
+		"'%s' only applies with '--html' — it configures the report's server, "+
+			"and without '--html' there is nothing being served. Add '--html', "+
+			"or drop '%s'.", flag, flag)
 }
 
 // pageMeta builds the provenance block every page carries.

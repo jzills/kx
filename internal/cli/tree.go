@@ -165,6 +165,10 @@ func newTreeCommand(services Services) *cobra.Command {
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			if err := htmlOpts.validate(
+				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
+				return err
+			}
 
 			namespaceFlag, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")

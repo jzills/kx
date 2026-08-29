@@ -108,7 +108,8 @@ The exit code lands once the server stops.
 `kx scan --full --fail-on` is refused rather than ignored. `--full` streams
 the scanner's own report, which kx never parses, so the gate would have
 nothing to read. `--json` and `--full` are refused together for the same
-reason.
+reason, and `kx diag --json --full` is refused because a document already
+carries every resource swept — `--full` has nothing to add to one.
 {{% /kx-note %}}
 
 ## A whole cluster
