@@ -443,6 +443,10 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			noOpen, rest := extractBool(rest, "--no-open")
+			out, rest, err := extractString(rest, "--out", "")
+			if err != nil {
+				return err
+			}
 			hasPort := hasFlag(rest, "--port", "")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
@@ -487,7 +491,7 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 			}
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
 				return err
 			}
@@ -647,7 +651,7 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				// After the server stops, so Ctrl-C ends the command with the
 				// exit code the scan earned rather than the server's nil.
-				if err := servePage(cmd.Context(), page, htmlOpts); err != nil {
+				if err := deliverPage(cmd.Context(), page, htmlOpts); err != nil {
 					return err
 				}
 			}
@@ -669,6 +673,8 @@ func newScanCommand(services Services) *cobra.Command {
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().String("out", "",
+		"Write the HTML report to this file instead of serving it in a browser")
 	cmd.Flags().Bool("json", false,
 		"Print the severity counts and every finding as JSON instead of a table")
 	cmd.Flags().String("fail-on", "",

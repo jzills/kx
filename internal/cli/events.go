@@ -116,6 +116,10 @@ func newTopCommand(services Services) *cobra.Command {
 			noLimits, rest := extractBool(rest, "--no-limits")
 			html, rest := extractBool(rest, "--html")
 			noOpen, rest := extractBool(rest, "--no-open")
+			out, rest, err := extractString(rest, "--out", "")
+			if err != nil {
+				return err
+			}
 			hasPort := hasFlag(rest, "--port", "")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
@@ -128,7 +132,7 @@ func newTopCommand(services Services) *cobra.Command {
 						"Invalid value for '--port': '%s' is not a valid int.", portText)
 				}
 			}
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
 				return err
 			}
@@ -216,7 +220,7 @@ func newTopCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return servePage(cmd.Context(), page, htmlOpts)
+			return deliverPage(cmd.Context(), page, htmlOpts)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
@@ -226,6 +230,7 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().Bool("html", false, "Render the listing as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0, "Port to serve --html on (random free port by default)")
 	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")
+	cmd.Flags().String("out", "", "Write the HTML report to this file instead of serving it in a browser")
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "",

@@ -181,9 +181,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
+			out, _ := cmd.Flags().GetString("out")
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
 				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
 				return err
@@ -295,7 +296,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					}
 					// After the server stops, so Ctrl-C ends the command with
 					// the exit code the sweep earned rather than servePage's nil.
-					if err := servePage(ctx, page, htmlOpts); err != nil {
+					if err := deliverPage(ctx, page, htmlOpts); err != nil {
 						return err
 					}
 				}
@@ -334,7 +335,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if err != nil {
 					return err
 				}
-				if err := servePage(ctx, page, htmlOpts); err != nil {
+				if err := deliverPage(ctx, page, htmlOpts); err != nil {
 					return err
 				}
 			}
@@ -357,6 +358,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().String("out", "",
+		"Write the HTML report to this file instead of serving it in a browser")
 	return cmd
 }
 

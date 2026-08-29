@@ -34,6 +34,16 @@ kx diag --html --no-open     # don't launch a browser; the URL still prints
 Both only mean anything alongside `--html` — they configure the server it
 starts — so kx refuses either on its own rather than ignoring it.
 
+```bash
+kx diag --html --out diag.html   # write the page instead of serving it
+```
+
+`--out` replaces the server rather than configuring it: the page is written,
+the command returns, and no browser opens. That is what you want in CI, where
+nothing is there to press Ctrl-C — see [Use kx in CI](../use-kx-in-ci/).
+Because there is then no server, `--port` and `--no-open` are refused
+alongside it.
+
 `--no-open` is what you want over SSH with a forwarded port, or in a terminal
 that would open the wrong browser.
 

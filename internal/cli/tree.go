@@ -164,7 +164,8 @@ func newTreeCommand(services Services) *cobra.Command {
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			out, _ := cmd.Flags().GetString("out")
+			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
 				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
 				return err
@@ -239,7 +240,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					return servePage(ctx, page, htmlOpts)
+					return deliverPage(ctx, page, htmlOpts)
 				}
 
 				namespace := namespaceFlag
@@ -268,7 +269,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return servePage(ctx, page, htmlOpts)
+				return deliverPage(ctx, page, htmlOpts)
 			}
 
 			index, err := parseIndex("index", args[0])
@@ -309,7 +310,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return servePage(ctx, page, htmlOpts)
+			return deliverPage(ctx, page, htmlOpts)
 		},
 	}
 	cmd.Flags().Bool("no-index", false,
@@ -324,5 +325,7 @@ func newTreeCommand(services Services) *cobra.Command {
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().String("out", "",
+		"Write the HTML report to this file instead of serving it in a browser")
 	return cmd
 }

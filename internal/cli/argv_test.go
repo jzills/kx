@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,5 +288,93 @@ func TestDiagnosticAcceptsJSONAndFullSeparately(t *testing.T) {
 				t.Errorf("kx diag %s was refused on its own: %v", flag, err)
 			}
 		})
+	}
+}
+
+// --html serves and blocks until Ctrl-C, which a pipeline never sends. The CI
+// guide's own recipe — publish a report and fail on what is in it — therefore
+// hung until the runner killed the job. --out writes the page and returns, so
+// the gate that follows can actually be reached.
+func TestHTMLOutWritesTheReportAndReturns(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			// A command that reaches the cluster fails in tests, so this
+			// asserts on the flag plumbing: --out must not be refused, and
+			// must not be mistaken for a served-report flag.
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--html", "--out", path})
+			if err != nil && strings.Contains(err.Error(), "--out") {
+				t.Errorf("kx %s --html --out was refused: %v", command, err)
+			}
+		})
+	}
+}
+
+// The page actually reaches the file, through the real delivery path.
+//
+// An already-cancelled context, so a regression that serves instead of writing
+// fails here rather than hanging until the test binary's own timeout: servePage
+// returns as soon as the context is done, leaving nothing on disk to read back.
+func TestDeliverPageWritesToOut(t *testing.T) {
+	quietRender(t)
+	path := filepath.Join(t.TempDir(), "report.html")
+	page := []byte("<!doctype html><title>kx</title>")
+
+	if err := deliverPage(stoppedContext(), page, htmlOptions{Enabled: true, Out: path}); err != nil {
+		t.Fatalf("deliverPage: %v", err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !bytes.Equal(written, page) {
+		t.Errorf("wrote %q, want the rendered page", written)
+	}
+}
+
+// A path kx cannot write is reported rather than swallowed — a CI job that
+// pointed --out at a directory that does not exist must fail, not pass having
+// published nothing.
+func TestDeliverPageReportsAnUnwritableOut(t *testing.T) {
+	quietRender(t)
+	path := filepath.Join(t.TempDir(), "no-such-directory", "report.html")
+
+	if err := deliverPage(stoppedContext(), nil, htmlOptions{Enabled: true, Out: path}); err == nil {
+		t.Fatal("deliverPage reported success for a path it could not write")
+	}
+}
+
+// --out replaces the server; --port and --no-open configure one. Together they
+// describe something that is not happening, so kx says so — the same call it
+// makes for those two flags without --html at all.
+func TestOutRefusesTheServedOnlyFlags(t *testing.T) {
+	for _, flag := range [][]string{{"--port", "9090"}, {"--no-open"}} {
+		t.Run(flag[0], func(t *testing.T) {
+			quietRender(t)
+			argv := append([]string{"diag", "--html", "--out", "r.html"}, flag...)
+			err := Execute(NewRoot(argvServices(t), "test"), argv)
+			if err == nil {
+				t.Fatalf("kx %v was accepted", argv)
+			}
+			if !strings.Contains(err.Error(), flag[0]) ||
+				!strings.Contains(err.Error(), "--out") {
+				t.Errorf("error = %q, want it to name %q and --out", err, flag[0])
+			}
+		})
+	}
+}
+
+// --out is an --html flag like the others, so on its own it is refused the
+// same way --port is.
+func TestOutNeedsHTML(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--out", "r.html"})
+	if err == nil {
+		t.Fatal("kx diag --out was accepted with no --html")
+	}
+	if !strings.Contains(err.Error(), "--out") || !strings.Contains(err.Error(), "--html") {
+		t.Errorf("error = %q, want it to name --out and --html", err)
 	}
 }
