@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -115,6 +116,7 @@ func newTopCommand(services Services) *cobra.Command {
 			noLimits, rest := extractBool(rest, "--no-limits")
 			html, rest := extractBool(rest, "--html")
 			noOpen, rest := extractBool(rest, "--no-open")
+			hasPort := hasFlag(rest, "--port", "")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
 				return err
@@ -127,6 +129,9 @@ func newTopCommand(services Services) *cobra.Command {
 				}
 			}
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
+				return err
+			}
 
 			// A leading non-flag token names the resource type, mirroring
 			// how `kx get`/`kx <kind>` resolve kind shorthands. A
@@ -157,6 +162,17 @@ func newTopCommand(services Services) *cobra.Command {
 			if nodes {
 				if flag := scopeFlagIn(rest); flag != "" {
 					return clusterScopedScopeError(flag, "nodes")
+				}
+				// --no-limits skips the second kubectl call that fetches each
+				// pod's limits, so the percentage columns can be computed.
+				// kubectl reports a node's own CPU%/MEM% against its capacity,
+				// in the same table — there is no extra call to skip and no
+				// column that goes away, so the flag did nothing at all here.
+				if noLimits {
+					return errors.New(
+						"'--no-limits' cannot be combined with 'nodes' — kubectl " +
+							"reports a node's CPU% and MEM% against its capacity, " +
+							"in the same call, so there are no limits to skip.")
 				}
 			}
 

@@ -443,6 +443,7 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			noOpen, rest := extractBool(rest, "--no-open")
+			hasPort := hasFlag(rest, "--port", "")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
 				return err
@@ -487,6 +488,9 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 			}
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
+				return err
+			}
 
 			// Presence is checked before extractString consumes the flag:
 			// `-n ""` is a namespace flag the guards below still have to see,

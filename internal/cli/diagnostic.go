@@ -184,11 +184,25 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			if err := htmlOpts.validate(
+				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
+				return err
+			}
 
 			if asJSON && html {
 				return errors.New(
 					"'--json' cannot be combined with '--html' — one is for a " +
 						"machine and the other for a browser.")
+			}
+			// Unlike kx scan's, this pair is redundant rather than impossible:
+			// a document always carries every swept resource, so --full has
+			// nothing to add to one. Refused rather than ignored all the same,
+			// so a flag that changes nothing never looks as though it did.
+			if asJSON && cmd.Flags().Changed("full") {
+				return errors.New(
+					"'--json' cannot be combined with '--full' — a document " +
+						"already carries every resource swept, healthy ones " +
+						"included, so '--full' has nothing to add to it.")
 			}
 			// Parsed up front so a typo fails before the cluster is read
 			// rather than after a report has already been printed.

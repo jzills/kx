@@ -192,3 +192,100 @@ func TestLegacyTopLevelHistoryCommandsAreHidden(t *testing.T) {
 		}
 	}
 }
+
+// --port and --no-open configure the server --html starts. Without --html they
+// were accepted and dropped: `kx diag --port 9090` printed a table and said
+// nothing about the port it had ignored. kx refuses every other contradiction
+// it can see, and this is the same mistake.
+//
+// Driven through real argv across all four commands, because two of them parse
+// these flags by hand and two let cobra do it — the bug was in the wiring, not
+// in one command.
+func TestHTMLOnlyFlagsNeedHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		for _, flag := range [][]string{{"--port", "9090"}, {"--no-open"}} {
+			t.Run(command+" "+flag[0], func(t *testing.T) {
+				quietRender(t)
+				argv := append([]string{command}, flag...)
+				err := Execute(NewRoot(argvServices(t), "test"), argv)
+				if err == nil {
+					t.Fatalf("kx %v was accepted with no --html", argv)
+				}
+				if !strings.Contains(err.Error(), flag[0]) ||
+					!strings.Contains(err.Error(), "--html") {
+					t.Errorf("error = %q, want it to name %q and --html", err, flag[0])
+				}
+			})
+		}
+	}
+}
+
+// The flags still work for what they are for. Asserted by the error kx gets
+// *past* them to — no cluster in tests — rather than by success, which these
+// commands cannot reach here.
+func TestHTMLOnlyFlagsAreAcceptedWithHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			argv := []string{command, "--html", "--port", "9090", "--no-open"}
+			err := Execute(NewRoot(argvServices(t), "test"), argv)
+			if err != nil && strings.Contains(err.Error(), "only applies with") {
+				t.Errorf("kx %v was refused: %v", argv, err)
+			}
+		})
+	}
+}
+
+// --no-limits skips the extra kubectl call that fetches each pod's limits.
+// kubectl reports a node's own percentages against its capacity in the same
+// call, so on nodes the flag had nothing to skip and did nothing at all.
+func TestTopNodesRefusesNoLimits(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"top", "nodes", "--no-limits"})
+	if err == nil {
+		t.Fatal("kx top nodes accepted --no-limits")
+	}
+	if !strings.Contains(err.Error(), "--no-limits") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+}
+
+// Pods are what --no-limits is for, so it keeps working there.
+func TestTopPodsStillAcceptsNoLimits(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"top", "--no-limits"})
+	if err != nil && strings.Contains(err.Error(), "--no-limits") {
+		t.Errorf("kx top --no-limits was refused: %v", err)
+	}
+}
+
+// kx scan already refuses --json with --full. kx diag accepted the pair and
+// ignored the second: a document always carries every swept resource, so
+// --full has nothing to add to one. Refused rather than ignored, so a flag
+// that changes nothing never looks as though it did.
+func TestDiagnosticRefusesJSONWithFull(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--json", "--full"})
+	if err == nil {
+		t.Fatal("kx diag accepted --json with --full")
+	}
+	for _, want := range []string{"--json", "--full"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err, want)
+		}
+	}
+}
+
+// Each still works alone: --full is the sweep's own display flag, and --json
+// is the document. Only together are they contradictory.
+func TestDiagnosticAcceptsJSONAndFullSeparately(t *testing.T) {
+	for _, flag := range []string{"--json", "--full"} {
+		t.Run(flag, func(t *testing.T) {
+			quietRender(t)
+			err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", flag})
+			if err != nil && strings.Contains(err.Error(), "cannot be combined") {
+				t.Errorf("kx diag %s was refused on its own: %v", flag, err)
+			}
+		})
+	}
+}

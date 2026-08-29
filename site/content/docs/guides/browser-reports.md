@@ -31,6 +31,9 @@ kx diag --html --port 8080   # a specific port instead of a free one
 kx diag --html --no-open     # don't launch a browser; the URL still prints
 ```
 
+Both only mean anything alongside `--html` — they configure the server it
+starts — so kx refuses either on its own rather than ignoring it.
+
 `--no-open` is what you want over SSH with a forwarded port, or in a terminal
 that would open the wrong browser.
 
