@@ -149,6 +149,17 @@ func newTopCommand(services Services) *cobra.Command {
 				}
 			}
 
+			// kubectl rejects -A on `top node` with its own error, naming its
+			// own command; -n it accepts and ignores. Both are refused here
+			// instead, in kx's voice and before kubectl is spawned, because a
+			// Node has no namespace either flag could be talking about. kx top
+			// pods is untouched — see clusterScopedScopeError.
+			if nodes {
+				if flag := scopeFlagIn(rest); flag != "" {
+					return clusterScopedScopeError(flag, "nodes")
+				}
+			}
+
 			command := TopCommand{
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
 			}
@@ -201,7 +212,9 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.
-	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
-	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
+	cmd.Flags().StringP("namespace", "n", "",
+		"Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace")
+	cmd.Flags().BoolP("all-namespaces", "A", false,
+		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
 	return cmd
 }

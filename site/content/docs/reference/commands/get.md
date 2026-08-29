@@ -10,6 +10,8 @@ Fetches resources with kubectl and assigns each row an index.
 
 `-n <namespace>`, label selectors and output flags all work as usual.
 
+A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace for either to name, so kx refuses them rather than listing something other than what was asked for.
+
 Unrecognized flags are passed through to kubectl.
 
 ## Usage

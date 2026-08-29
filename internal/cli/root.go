@@ -204,7 +204,11 @@ func newGetCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"list", "ls", "ps"},
 		Short:      "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
-			"`-n <namespace>`, label selectors and output flags all work as usual.",
+			"`-n <namespace>`, label selectors and output flags all work as usual.\n\n" +
+			"A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a " +
+			"cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace " +
+			"for either to name, so kx refuses them rather than listing something " +
+			"other than what was asked for.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
 		Args:    cobra.MinimumNArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
