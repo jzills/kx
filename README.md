@@ -237,7 +237,7 @@ critical; `kx scan -A --fail-on high` does the same for image vulnerabilities.
 
 ```bash
 kx diag -A --fail-on critical          # 0 if the cluster is healthy, 2 if not
-kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.CRITICAL > 0)'
+kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
 kx diag -A --fail-on critical --html   # publishes the report *and* fails the build
 ```
 

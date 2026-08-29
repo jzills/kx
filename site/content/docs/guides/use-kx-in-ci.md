@@ -20,7 +20,7 @@ healthy ones included, and every CVE behind the severity counts.
 
 ```bash
 kx diag -n prod --json | jq '.resources[] | select(.verdict == "critical") | .name'
-kx scan -n prod --json | jq '.images[] | select(.counts.CRITICAL > 0)'
+kx scan -n prod --json | jq '.images[] | select(.counts.critical > 0)'
 ```
 
 It is built from the same values the terminal and `--html` render, so the
@@ -41,6 +41,26 @@ underneath that is worse than one it can check for.
   "resources": [ … ]
 }
 ```
+
+Both commands name their subject with the same fields, so a pipeline that
+reads one does not have to learn a second shape to read the other. A sweep
+carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run carries
+`kind`, `name` and `namespace`:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "Deployment",
+  "name": "api",
+  "namespace": "prod",
+  "images": [ … ]
+}
+```
+
+Severities are lower case throughout — `critical`, `high`, `medium`, `low` for
+image findings, `critical`, `warning`, `healthy` for verdicts — which is
+exactly what `--fail-on` accepts, so a value read out of a document can be
+typed straight back at the gate.
 
 ## `--fail-on`
 

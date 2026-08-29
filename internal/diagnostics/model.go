@@ -35,6 +35,20 @@ func (s Severity) String() string {
 	}
 }
 
+// Token is the machine-readable spelling, for --json.
+//
+// Singular where String() is plural. A verdict is a headline on screen —
+// "Deployment/api · warnings" — and the plural reads correctly there. In a
+// document it is the value of a severity field, and one finding does not have
+// severity "warnings". The singular is also the spelling --fail-on documents,
+// so a value read out of the JSON can be typed straight back at the gate.
+func (s Severity) Token() string {
+	if s == Warning {
+		return "warning"
+	}
+	return s.String()
+}
+
 // ContainerDiagnostic is one container's flattened status.
 type ContainerDiagnostic struct {
 	Name                 string

@@ -544,6 +544,11 @@ func newScanCommand(services Services) *cobra.Command {
 			// reading "scan · Mixed · prod" says less than "scan · prod".
 			// kx diag titles itself the same way.
 			var pageScope, pageTitle string
+			// subject is what --json says the scan was about. Built beside the
+			// page labels rather than derived from them: those are display
+			// strings, and the whole point of the struct is that a machine
+			// never has to read one.
+			var subject scanSubject
 			var images []string
 			if len(indexArgs) == 0 {
 				scope := scanScope{Namespace: namespace, All: all}
@@ -566,6 +571,10 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()
+				subject = scanSubject{AllNamespaces: scope.All}
+				if !scope.All {
+					subject.Namespace = scope.Namespace
+				}
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {
@@ -584,6 +593,7 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
+				subject = scanSubject{Kind: kind, Name: name, Namespace: resourceNamespace}
 			}
 
 			if full {
@@ -606,10 +616,7 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			if asJSON {
-				// pageTitle, not pageScope: the latter carries the terminal
-				// caption's "Mixed · " cross-kind label, which is a display
-				// convention and means nothing to a machine.
-				document, err := scanJSON(pageTitle, rows)
+				document, err := scanJSON(subject, rows)
 				if err != nil {
 					return err
 				}

@@ -122,7 +122,7 @@ func TestTriageJSONCarriesEveryResourceNotJustThePrintedRows(t *testing.T) {
 }
 
 func TestScanJSONCarriesCountsAndFindings(t *testing.T) {
-	out, err := scanJSON("prod", []scanner.ImageScan{{
+	out, err := scanJSON(scanSubject{Namespace: "prod"}, []scanner.ImageScan{{
 		Image:  "nginx:1.27",
 		Counts: map[string]int{"CRITICAL": 1, "HIGH": 2},
 		Findings: []scanner.Finding{
@@ -150,8 +150,8 @@ func TestScanJSONCarriesCountsAndFindings(t *testing.T) {
 	if len(decoded.Images) != 2 {
 		t.Fatalf("images = %d, want 2", len(decoded.Images))
 	}
-	if decoded.Images[0].Counts["CRITICAL"] != 1 {
-		t.Errorf("counts = %v, want CRITICAL 1", decoded.Images[0].Counts)
+	if decoded.Images[0].Counts["critical"] != 1 {
+		t.Errorf("counts = %v, want critical 1", decoded.Images[0].Counts)
 	}
 	if len(decoded.Images[0].Findings) != 1 || decoded.Images[0].Findings[0].ID != "CVE-1" {
 		t.Errorf("findings = %v, want CVE-1", decoded.Images[0].Findings)
@@ -241,8 +241,9 @@ func TestScanThresholdRejectsAnUnknownSeverity(t *testing.T) {
 	}
 }
 
-// A verdict prints as "warnings", on screen and in --json. Someone who reads
-// one and types it back at --fail-on must not be told it is invalid.
+// A verdict prints as "warnings" on screen. Someone who reads one and types it
+// back at --fail-on must not be told it is invalid — the document's own
+// spelling is the singular one, and both are accepted.
 func TestDiagnosticThresholdAcceptsTheVerdictSpelling(t *testing.T) {
 	printed := diagnostics.Warning.String()
 	threshold, err := parseDiagnosticThreshold(printed)
@@ -251,5 +252,201 @@ func TestDiagnosticThresholdAcceptsTheVerdictSpelling(t *testing.T) {
 	}
 	if threshold != diagnostics.Warning {
 		t.Errorf("threshold = %v, want Warning", threshold)
+	}
+}
+
+// A document names what it is about with fields, not with a sentence. kx scan
+// used to describe its subject as one display string — "Deployment/api" for an
+// indexed scan, the bare namespace for a sweep, and the literal words "all
+// namespaces" for -A — leaving a consumer to split it, and leaving a namespace
+// genuinely called "all namespaces" indistinguishable from every namespace.
+func TestScanJSONNamesTheWorkloadItScanned(t *testing.T) {
+	out, err := scanJSON(scanSubject{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+	}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	if err != nil {
+		t.Fatalf("scanJSON: %v", err)
+	}
+	document := decodeJSON(t, out)
+
+	for field, want := range map[string]any{
+		"kind": "Deployment", "name": "api", "namespace": "prod",
+	} {
+		if got := document[field]; got != want {
+			t.Errorf("%s = %v, want %v", field, got, want)
+		}
+	}
+	if _, present := document["scope"]; present {
+		t.Errorf("the display string is still in the document:\n%s", out)
+	}
+	if _, present := document["allNamespaces"]; present {
+		t.Error("an indexed scan is marked all-namespaces")
+	}
+}
+
+// A sweep of one namespace names the namespace and nothing else — there is no
+// single workload it was about.
+func TestScanJSONNamesTheNamespaceItSwept(t *testing.T) {
+	out, err := scanJSON(scanSubject{Namespace: "prod"}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	if err != nil {
+		t.Fatalf("scanJSON: %v", err)
+	}
+	document := decodeJSON(t, out)
+
+	if got := document["namespace"]; got != "prod" {
+		t.Errorf("namespace = %v, want prod", got)
+	}
+	for _, field := range []string{"kind", "name", "scope", "allNamespaces"} {
+		if _, present := document[field]; present {
+			t.Errorf("%s is set for a namespace sweep:\n%s", field, out)
+		}
+	}
+}
+
+// -A is a flag, not a namespace called "all namespaces". kx diag already says
+// so with a boolean; kx scan says it the same way.
+func TestScanJSONMarksAClusterWideSweep(t *testing.T) {
+	out, err := scanJSON(scanSubject{AllNamespaces: true}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	if err != nil {
+		t.Fatalf("scanJSON: %v", err)
+	}
+	document := decodeJSON(t, out)
+
+	if got := document["allNamespaces"]; got != true {
+		t.Errorf("allNamespaces = %v, want true", got)
+	}
+	if _, present := document["namespace"]; present {
+		t.Errorf("a cluster-wide sweep named a single namespace:\n%s", out)
+	}
+}
+
+// The point of the change: two commands, one vocabulary for saying what was
+// analysed. A pipeline that reads kx diag must not have to learn a second
+// shape to read kx scan.
+func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
+	t.Run("one resource", func(t *testing.T) {
+		scanned, err := scanJSON(scanSubject{
+			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		}, nil)
+		if err != nil {
+			t.Fatalf("scanJSON: %v", err)
+		}
+		diagnosed, err := diagnosticJSON(diagnostics.Report{
+			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		})
+		if err != nil {
+			t.Fatalf("diagnosticJSON: %v", err)
+		}
+		assertSameSubject(t, decodeJSON(t, scanned), decodeJSON(t, diagnosed),
+			"kind", "name", "namespace")
+	})
+
+	t.Run("a cluster-wide sweep", func(t *testing.T) {
+		scanned, err := scanJSON(scanSubject{AllNamespaces: true}, nil)
+		if err != nil {
+			t.Fatalf("scanJSON: %v", err)
+		}
+		swept, err := triageJSON(render.TriageResult{AllNamespaces: true})
+		if err != nil {
+			t.Fatalf("triageJSON: %v", err)
+		}
+		assertSameSubject(t, decodeJSON(t, scanned), decodeJSON(t, swept),
+			"namespace", "allNamespaces")
+	})
+}
+
+// assertSameSubject checks two documents agree on the named fields, present or
+// absent alike — a field one omits and the other sets is the disagreement.
+func assertSameSubject(t *testing.T, scanned, diagnosed map[string]any, fields ...string) {
+	t.Helper()
+	for _, field := range fields {
+		scanValue, inScan := scanned[field]
+		diagValue, inDiag := diagnosed[field]
+		if inScan != inDiag {
+			t.Errorf("%q present in scan=%v, in diag=%v", field, inScan, inDiag)
+			continue
+		}
+		if scanValue != diagValue {
+			t.Errorf("%q = %v in scan, %v in diag", field, scanValue, diagValue)
+		}
+	}
+}
+
+// A severity is a level, and one finding does not have severity "warnings".
+// The plural is the terminal's headline spelling ("Deployment/api · warnings");
+// the document uses the singular, which is also what --fail-on documents.
+func TestDiagnosticJSONUsesTheSingularSeverityToken(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod",
+		Verdict:  diagnostics.Warning,
+		Findings: []diagnostics.Finding{{Severity: diagnostics.Warning, Summary: "hot"}},
+	}
+	out, err := diagnosticJSON(report)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	document := decodeJSON(t, out)
+
+	if got := document["verdict"]; got != "warning" {
+		t.Errorf("verdict = %v, want warning", got)
+	}
+	findings, ok := document["findings"].([]any)
+	if !ok || len(findings) != 1 {
+		t.Fatalf("findings = %v, want one", document["findings"])
+	}
+	if got := findings[0].(map[string]any)["severity"]; got != "warning" {
+		t.Errorf("finding severity = %v, want warning", got)
+	}
+}
+
+// kx scan's severities reach kx as the SARIF labels every engine emits, in
+// upper case. The terminal table and the HTML report render them as they
+// arrive; a document kx writes uses kx's own spelling — the lower case
+// --fail-on takes, and the case kx diag's verdicts already use.
+func TestScanJSONUsesLowercaseSeverities(t *testing.T) {
+	out, err := scanJSON(scanSubject{Namespace: "prod"}, []scanner.ImageScan{{
+		Image:    "nginx:1.27",
+		Counts:   map[string]int{"CRITICAL": 1, "HIGH": 2, "MEDIUM": 0},
+		Findings: []scanner.Finding{{ID: "CVE-1", Severity: "CRITICAL"}},
+	}})
+	if err != nil {
+		t.Fatalf("scanJSON: %v", err)
+	}
+	if strings.Contains(out, `"CRITICAL"`) || strings.Contains(out, `"HIGH"`) {
+		t.Errorf("upper-case severities survived into the document:\n%s", out)
+	}
+
+	var decoded struct {
+		Images []struct {
+			Counts   map[string]int `json:"counts"`
+			Findings []struct {
+				Severity string `json:"severity"`
+			} `json:"findings"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Images[0].Counts["critical"] != 1 || decoded.Images[0].Counts["high"] != 2 {
+		t.Errorf("counts = %v, want critical 1 and high 2", decoded.Images[0].Counts)
+	}
+	if got := decoded.Images[0].Findings[0].Severity; got != "critical" {
+		t.Errorf("finding severity = %q, want critical", got)
+	}
+}
+
+// The lower-case document spelling is exactly what --fail-on accepts, so a
+// value read out of the JSON can be typed straight back at the gate.
+func TestScanJSONSeveritiesAreValidThresholds(t *testing.T) {
+	for _, severity := range scanner.Severities {
+		token := severityToken(severity)
+		if token == "unspecified" {
+			// A bucket, not a level — "fail on unspecified or worse" means
+			// nothing, and scanThresholdBreached refuses it on purpose.
+			continue
+		}
+		if _, err := scanThresholdBreached(nil, token); err != nil {
+			t.Errorf("--fail-on %q: %v — that is how the document spells it", token, err)
+		}
 	}
 }

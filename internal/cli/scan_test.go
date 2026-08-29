@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
@@ -742,28 +743,53 @@ func TestSummarizeReportsProgressOncePerImage(t *testing.T) {
 	}
 }
 
-// The JSON's scope is the subject, not the terminal caption. "Mixed · " is a
-// cross-kind display label the summary table prints above itself; a machine
-// reading this wants the namespace.
-func TestScanJSONScopeCarriesNoDisplayLabel(t *testing.T) {
-	// sweepPageScope is what the terminal and the HTML page are captioned
-	// with. If the command ever hands that to scanJSON, the scope reads
-	// "Mixed · prod" — which is what this guards.
+// The document's subject comes from the scan's own scope, not from the caption
+// printed above the table. "Mixed · " is a cross-kind display label the summary
+// prints above itself, and handing that to the document is the regression this
+// guards — through the real RunE, since the wiring is where it would happen.
+func TestScanJSONSweepNamesTheBareNamespace(t *testing.T) {
 	if !strings.Contains(sweepPageScope("prod"), "Mixed") {
 		t.Fatal("sweepPageScope no longer carries the label this guards against")
 	}
-	document, err := scanJSON("prod", nil)
-	if err != nil {
-		t.Fatalf("scanJSON: %v", err)
+	sink := captureRender(t)
+	services, _ := scanHTMLServices(t, `{"Results":[]}`)
+	cmd := newScanCommand(services)
+	cmd.SetContext(stoppedContext())
+
+	if err := cmd.RunE(cmd, []string{
+		"--engine", "trivy", "--namespace", "prod", "--json",
+	}); err != nil {
+		t.Fatalf("RunE: %v", err)
 	}
-	var decoded struct {
-		Scope string `json:"scope"`
+
+	document := decodeJSON(t, sink.String())
+	if got := document["namespace"]; got != "prod" {
+		t.Errorf("namespace = %v, want the bare namespace", got)
 	}
-	if err := json.Unmarshal([]byte(document), &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if strings.Contains(sink.String(), "Mixed") {
+		t.Errorf("the caption's display label reached the document:\n%s", sink.String())
 	}
-	if decoded.Scope != "prod" {
-		t.Errorf("scope = %q, want the bare namespace", decoded.Scope)
+}
+
+// -A reaches the document as a boolean, not as the literal words "all
+// namespaces" — which is what the caption says, and what no consumer can tell
+// from a namespace actually called that.
+func TestScanJSONClusterWideSweepIsABoolean(t *testing.T) {
+	sink := captureRender(t)
+	services, _ := scanHTMLServices(t, `{"Results":[]}`)
+	cmd := newScanCommand(services)
+	cmd.SetContext(stoppedContext())
+
+	if err := cmd.RunE(cmd, []string{"--engine", "trivy", "-A", "--json"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	document := decodeJSON(t, sink.String())
+	if got := document["allNamespaces"]; got != true {
+		t.Errorf("allNamespaces = %v, want true", got)
+	}
+	if strings.Contains(sink.String(), render.AllNamespaces) {
+		t.Errorf("the caption's wording reached the document:\n%s", sink.String())
 	}
 }
 
