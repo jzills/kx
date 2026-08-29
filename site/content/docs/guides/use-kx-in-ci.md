@@ -96,13 +96,16 @@ cluster from an unreachable one.
 
 `--fail-on` is independent of how the findings are presented. It applies
 alongside `--json` and [`--html`](../browser-reports/) alike, so a job can
-serve a report and still fail on what is in it:
+publish a report and still fail on what is in it:
 
 ```bash
-kx diag -A --fail-on critical --html --no-open
+kx diag -A --fail-on critical --html --out diag.html
 ```
 
-The exit code lands once the server stops.
+`--out` writes the page and returns, so the gate runs and the file is there
+for an artifact step to pick up. Plain `--html` serves the report and blocks
+until Ctrl-C, which is right at a terminal and wrong in a pipeline — nothing
+sends Ctrl-C to a CI job, so it would hang until the runner killed it.
 
 {{% kx-note kind="warn" %}}
 `kx scan --full --fail-on` is refused rather than ignored. `--full` streams

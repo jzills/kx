@@ -32,6 +32,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `-n, --namespace string` | Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace |
 | `--no-limits` | Skip the CPU%/MEM% columns (one fewer kubectl call) |
 | `--no-open` | Don't open a browser automatically with --html |
+| `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve --html on (random free port by default) |
 
 ## Global options

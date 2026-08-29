@@ -29,6 +29,7 @@ kx tree [OPTIONS] [index]
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-index` | Skip assigning indexes to tree nodes and don't update state |
 | `--no-open` | Serve the HTML report without opening a browser |
+| `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
 
 ## Global options
