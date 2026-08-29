@@ -44,7 +44,7 @@ func reportOf(report diagnostics.Report) jsonReport {
 	findings := make([]jsonFinding, 0, len(report.Findings))
 	for _, finding := range report.Findings {
 		findings = append(findings, jsonFinding{
-			Severity: finding.Severity.String(),
+			Severity: finding.Severity.Token(),
 			Summary:  finding.Summary,
 		})
 	}
@@ -52,7 +52,7 @@ func reportOf(report diagnostics.Report) jsonReport {
 		Kind:      report.Kind,
 		Name:      report.Name,
 		Namespace: report.Namespace,
-		Verdict:   report.Verdict.String(),
+		Verdict:   report.Verdict.Token(),
 		Findings:  findings,
 	}
 }
@@ -109,16 +109,32 @@ type jsonImage struct {
 	Findings []jsonVulnerability `json:"findings"`
 }
 
+// scanSubject names what a scan covered: one indexed workload, or a sweep of
+// one namespace, or a sweep of every namespace.
+//
+// A struct rather than the display string this used to be. "Deployment/api"
+// made a consumer split a sentence to recover two fields kx already had, a
+// sweep's subject was a bare namespace in the same field, and -A spelled
+// itself as the literal words "all namespaces" — which no consumer can tell
+// from a namespace actually called that. kx diag names its subject with
+// fields; kx scan now names it with the same ones.
+type scanSubject struct {
+	Kind          kinds.Kind
+	Name          string
+	Namespace     string
+	AllNamespaces bool
+}
+
 // scanJSON serialises a scan's rows, the same ones the summary table and the
 // HTML report are built from.
-func scanJSON(scope string, rows []scanner.ImageScan) (string, error) {
+func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
 	images := make([]jsonImage, 0, len(rows))
 	for _, row := range rows {
 		findings := make([]jsonVulnerability, 0, len(row.Findings))
 		for _, finding := range row.Findings {
 			findings = append(findings, jsonVulnerability{
 				ID:        finding.ID,
-				Severity:  finding.Severity,
+				Severity:  severityToken(finding.Severity),
 				Package:   finding.Package,
 				Installed: finding.Installed,
 				FixedIn:   finding.FixedIn,
@@ -126,14 +142,45 @@ func scanJSON(scope string, rows []scanner.ImageScan) (string, error) {
 			})
 		}
 		images = append(images, jsonImage{
-			Image: row.Image, Error: row.Error, Counts: row.Counts, Findings: findings,
+			Image: row.Image, Error: row.Error,
+			Counts: countTokens(row.Counts), Findings: findings,
 		})
 	}
 	return encode(struct {
 		SchemaVersion int         `json:"schemaVersion"`
-		Scope         string      `json:"scope"`
+		Kind          kinds.Kind  `json:"kind,omitempty"`
+		Name          string      `json:"name,omitempty"`
+		Namespace     string      `json:"namespace,omitempty"`
+		AllNamespaces bool        `json:"allNamespaces,omitempty"`
 		Images        []jsonImage `json:"images"`
-	}{reportSchemaVersion, scope, images})
+	}{
+		reportSchemaVersion, subject.Kind, subject.Name,
+		subject.Namespace, subject.AllNamespaces, images,
+	})
+}
+
+// severityToken is the document spelling of a scanner's severity label.
+//
+// Lowercased here rather than in the scanner: scanner.Severities are the SARIF
+// labels Scout, Trivy and Grype all emit, and the terminal table and the HTML
+// report render them as they arrive. A document kx writes uses kx's own
+// spelling — the one --fail-on takes, and the one kx diag's verdicts already
+// use — so a severity read out of the JSON can be typed straight back at the
+// gate.
+func severityToken(severity string) string { return strings.ToLower(severity) }
+
+// countTokens re-keys a severity tally into the document's spelling. A nil
+// tally — an image whose scan failed — stays nil, so the field is omitted
+// rather than serialised as an empty object beside the error that explains it.
+func countTokens(counts map[string]int) map[string]int {
+	if counts == nil {
+		return nil
+	}
+	tokens := make(map[string]int, len(counts))
+	for severity, count := range counts {
+		tokens[severityToken(severity)] = count
+	}
+	return tokens
 }
 
 // encode renders a document indented, because a human reads this too — a
@@ -149,10 +196,11 @@ func encode(document any) (string, error) {
 // diagnosticThresholds are the verdicts --fail-on accepts.
 //
 // "warnings" is accepted alongside "warning" because that is what a verdict
-// prints as — on screen and in --json — so anyone who read one and typed it
-// back would otherwise be told it is invalid. The plural reads correctly as a
-// verdict ("Deployment/api · warnings") and wrongly as a threshold ("fail on
-// warnings or worse"), which is why both spellings exist rather than one.
+// prints as on screen, so anyone who read one and typed it back would
+// otherwise be told it is invalid. The plural reads correctly as a verdict
+// ("Deployment/api · warnings") and wrongly as a threshold ("fail on warnings
+// or worse"), which is why both spellings exist rather than one. The document
+// uses the singular — see Severity.Token.
 var diagnosticThresholds = map[string]diagnostics.Severity{
 	"warning":  diagnostics.Warning,
 	"warnings": diagnostics.Warning,
