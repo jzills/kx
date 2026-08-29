@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -731,5 +732,78 @@ func TestTopNodesAndGetNodesSaveTheSameNamespace(t *testing.T) {
 	}
 	if tops.saved[0].Namespace != "" {
 		t.Errorf("saved namespace = %q, want empty", tops.saved[0].Namespace)
+	}
+}
+
+// `kx top nodes -A` used to hand the user kubectl's own error —
+// "error: unknown shorthand flag: 'A' in -A / See 'kubectl top node --help'" —
+// for a flag kx registers, documents, and completes. A Node is not in a
+// namespace, so the flag can never apply; kx says so in its own voice, and
+// says it before spawning kubectl.
+func TestTopNodesRefusesScopeFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"nodes", "-A"}, {"nodes", "--all-namespaces"},
+		{"nodes", "-n", "prod"}, {"nodes", "--namespace", "prod"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			quietRender(t)
+			kube := &fakeKubectl{output: nodesOutput}
+			cmd := newTopCommand(topServices(t, kube))
+			cmd.SetArgs(args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("kx top nodes accepted a namespace flag")
+			}
+			if !strings.Contains(err.Error(), args[1]) {
+				t.Errorf("error = %q, want it to name %q", err, args[1])
+			}
+			if !strings.Contains(err.Error(), "Node") {
+				t.Errorf("error = %q, want it to name the kind it refused for", err)
+			}
+			if len(kube.calls) != 0 {
+				t.Errorf("reached kubectl with %v; the flag is refused first", kube.calls)
+			}
+		})
+	}
+}
+
+// Pods are namespaced, so kx top keeps forwarding both scope flags to kubectl
+// exactly as before — the guard is about Nodes, not about kx top.
+func TestTopPodsStillAcceptsScopeFlags(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"-A"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -A: %v", err)
+	}
+	if len(kube.calls) == 0 {
+		t.Fatal("kx top -A never reached kubectl")
+	}
+	if got := joinArgs(kube.calls[0]); !strings.Contains(got, "-A") {
+		t.Errorf("first call = %q, want -A forwarded to kubectl", got)
+	}
+}
+
+// kx top nodes with no scope flag is the common path and stays untouched.
+func TestTopNodesWithoutScopeFlagsStillLists(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: nodesOutput}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"nodes"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top nodes: %v", err)
+	}
+	if len(kube.calls) == 0 {
+		t.Fatal("kx top nodes never reached kubectl")
 	}
 }

@@ -386,3 +386,132 @@ func TestGetWatchStillAcceptsOneIndex(t *testing.T) {
 		t.Error("no watch was opened for a single index")
 	}
 }
+
+// A namespace-scope flag on a cluster-scoped kind is a contradiction, and kx
+// refuses it the way it already refuses one beside an index.
+//
+// It used to be worse than meaningless. kubectl ignores -A for a cluster-scoped
+// kind and returns a table with no NAMESPACE column, which is exactly the shape
+// Execute treats as unplaceable — so `kx get nodes -A` printed raw, unnumbered
+// kubectl output and saved nothing, silently leaving whatever listing was in
+// state resolving the indexes underneath it. `kx get pods` then `kx get nodes
+// -A` then `kx describe 1` described a pod, under a table of nodes.
+func TestGetClusterScopedRefusesScopeFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"-A"}, {"--all-namespaces"}, {"-n", "prod"}, {"--namespace", "prod"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			quietRender(t)
+			kube := &fakeKubectl{output: clusterScopedNodesTable}
+			services := switchServices(t, kube)
+
+			err := runGet(services, "nodes", args, getOptions{})
+			if err == nil {
+				t.Fatal("runGet accepted a namespace flag on a cluster-scoped kind")
+			}
+			if !strings.Contains(err.Error(), args[0]) {
+				t.Errorf("error = %q, want it to name %q", err, args[0])
+			}
+			if !strings.Contains(err.Error(), "Node") {
+				t.Errorf("error = %q, want it to name the kind it refused for", err)
+			}
+			if len(kube.calls) != 0 {
+				t.Errorf("reached kubectl with %v; the flag is refused before the cluster is read", kube.calls)
+			}
+		})
+	}
+}
+
+// The refusal must not cost the listing that made kx worth using: a
+// cluster-scoped kind with no scope flag still lists, numbers and saves.
+func TestGetClusterScopedWithoutScopeFlagsStillIndexes(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: clusterScopedNodesTable}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "nodes", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+	current, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries := current.Resources.Entries()
+	if len(entries) != 2 {
+		t.Fatalf("saved %d resources, want 2: %+v", len(entries), entries)
+	}
+	if entries[0].Name != "node-a" || entries[0].Kind != kinds.Node {
+		t.Errorf("first entry = %+v, want node-a/Node", entries[0])
+	}
+}
+
+// Namespaced kinds are untouched — -A is the flag half of kx's index model and
+// a guard that caught it would break every spanning listing.
+func TestGetNamespacedStillAcceptsScopeFlags(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{
+		output: "NAMESPACE   NAME       READY   STATUS    RESTARTS   AGE\n" +
+			"default     api-7d8f   1/1     Running   0          5d",
+	}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+	if len(kube.calls) != 1 {
+		t.Fatalf("made %d kubectl calls, want 1", len(kube.calls))
+	}
+}
+
+// A kind kx cannot place — a CRD with no discovery cache — keeps today's
+// behaviour rather than being refused on a guess. Refusing on "not known to be
+// namespaced" would reject -A for every custom resource on a machine whose
+// discovery cache has not been populated.
+func TestGetUnknownKindStillAcceptsScopeFlags(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{
+		output: "NAMESPACE   NAME   AGE\ndefault     gw-a   1d",
+	}
+	services := switchServices(t, kube)
+
+	err := runGet(services, "gateways.gateway.networking.k8s.io", []string{"-A"}, getOptions{})
+	if err != nil {
+		t.Fatalf("runGet refused an unplaceable kind: %v", err)
+	}
+}
+
+// Resolving indexes from a cluster-scoped listing must not scope the relist to
+// a namespace, or the guard would fire on kx's own argv. `kx get nodes 1` is a
+// relist, not a scope request.
+//
+// Asserted on the argv rather than only on the absence of an error: the guard
+// reads the same slice the relist appends to, so "no -n was added" and "the
+// relist was not refused" are the same fact, and the argv is the half that
+// still fails if either the backfill or the append condition regresses.
+func TestGetClusterScopedRelistByIndexIsNotScopedToANamespace(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: clusterScopedNodesTable}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "nodes", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	if err := runGet(services, "nodes", []string{"1"}, getOptions{}); err != nil {
+		t.Fatalf("relist by index was refused: %v", err)
+	}
+
+	if len(kube.calls) != 2 {
+		t.Fatalf("made %d kubectl calls, want 2 (listing then relist): %v", len(kube.calls), kube.calls)
+	}
+	relist := joinArgs(kube.calls[1])
+	if !strings.Contains(relist, "node-a") {
+		t.Fatalf("relist = %q, want it to name the resolved node", relist)
+	}
+	if strings.Contains(relist, "-n ") {
+		t.Errorf("relist = %q, want no namespace flag — a Node is not in one", relist)
+	}
+}
+
+const clusterScopedNodesTable = "NAME      STATUS   ROLES           AGE   VERSION\n" +
+	"node-a    Ready    control-plane   1d    v1.34.3\n" +
+	"node-b    Ready    <none>          1d    v1.34.3"

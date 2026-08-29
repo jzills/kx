@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/jzills/kx/internal/index"
@@ -264,6 +265,56 @@ func resourcesFrom(entries []index.Entry, kind kinds.Kind) state.Resources {
 		})
 	}
 	return state.NewOrderedResources(resources)
+}
+
+// scopeFlagIn reports the namespace-scope flag present in argv, spelled the way
+// it was typed so a refusal quotes back what the user actually wrote, or "" when
+// there is none.
+//
+// -A's presence is read through extractBool rather than by scanning for the
+// token, so "--all-namespaces=false" — a request for the ordinary
+// single-namespace listing, not for a scope — is correctly absent.
+func scopeFlagIn(args []string) string {
+	if present, _ := extractBool(args, "--all-namespaces", "-A"); present {
+		return firstSpelling(args, "--all-namespaces", "-A")
+	}
+	if hasFlag(args, "--namespace", "-n") {
+		return firstSpelling(args, "--namespace", "-n")
+	}
+	return ""
+}
+
+// firstSpelling names which of several spellings of one flag appears first in
+// argv, without whatever value was attached to it. The attached-value form is
+// recognised for shorthands only ("-nprod"), matching hasFlag.
+func firstSpelling(args []string, names ...string) string {
+	for _, arg := range args {
+		for _, name := range names {
+			attachedShorthand := len(name) == 2 &&
+				len(arg) > len(name) && strings.HasPrefix(arg, name)
+			if arg == name || strings.HasPrefix(arg, name+"=") || attachedShorthand {
+				return name
+			}
+		}
+	}
+	return names[0]
+}
+
+// clusterScopedScopeError refuses a namespace flag on a kind that has no
+// namespace for it to name.
+//
+// Refused rather than forwarded, which is the same call kx already makes for a
+// scope flag beside an index: kubectl accepts both and answers about something
+// other than what was asked. Silently forwarding -A was worse here than
+// meaningless — kubectl returns a table with no NAMESPACE column, which is the
+// shape GetCommand.Execute treats as unplaceable, so the listing printed
+// unnumbered and saved nothing while the previous listing's indexes stayed
+// live underneath it.
+func clusterScopedScopeError(flag, resource string) error {
+	return fmt.Errorf(
+		"'%s' cannot be combined with %s — they live outside any namespace, so "+
+			"there is no scope to set. Drop the flag.",
+		flag, kinds.PluralDisplay(resource))
 }
 
 // clusterScoped reports whether a resource spelling names a kind that lives
