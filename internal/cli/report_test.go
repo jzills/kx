@@ -58,16 +58,22 @@ func TestDiagnosticJSONCarriesTheFindingsInOrder(t *testing.T) {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
 
-	var decoded struct {
-		Verdict  string `json:"verdict"`
-		Findings []struct {
-			Severity string `json:"severity"`
-			Summary  string `json:"summary"`
-		} `json:"findings"`
+	var document struct {
+		Resources []struct {
+			Verdict  string `json:"verdict"`
+			Findings []struct {
+				Severity string `json:"severity"`
+				Summary  string `json:"summary"`
+			} `json:"findings"`
+		} `json:"resources"`
 	}
-	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+	if err := json.Unmarshal([]byte(out), &document); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	if len(document.Resources) != 1 {
+		t.Fatalf("resources = %d, want the one that was diagnosed", len(document.Resources))
+	}
+	decoded := document.Resources[0]
 	if decoded.Verdict != "critical" {
 		t.Errorf("verdict = %q, want critical", decoded.Verdict)
 	}
@@ -389,12 +395,17 @@ func TestDiagnosticJSONUsesTheSingularSeverityToken(t *testing.T) {
 	}
 	document := decodeJSON(t, out)
 
-	if got := document["verdict"]; got != "warning" {
+	resources, ok := document["resources"].([]any)
+	if !ok || len(resources) != 1 {
+		t.Fatalf("resources = %v, want the one that was diagnosed", document["resources"])
+	}
+	resource := resources[0].(map[string]any)
+	if got := resource["verdict"]; got != "warning" {
 		t.Errorf("verdict = %v, want warning", got)
 	}
-	findings, ok := document["findings"].([]any)
+	findings, ok := resource["findings"].([]any)
 	if !ok || len(findings) != 1 {
-		t.Fatalf("findings = %v, want one", document["findings"])
+		t.Fatalf("findings = %v, want one", resource["findings"])
 	}
 	if got := findings[0].(map[string]any)["severity"]; got != "warning" {
 		t.Errorf("finding severity = %v, want warning", got)
@@ -566,5 +577,70 @@ func TestTreeAndTopShareTheSubjectVocabulary(t *testing.T) {
 			assertSameSubject(t, decodeJSON(t, out), decodeJSON(t, swept),
 				"namespace", "allNamespaces")
 		})
+	}
+}
+
+// kx diag emits one shape whether it was pointed at an index or a namespace,
+// so a pipeline reads `.resources[]` for both. It used to emit the report bare
+// at the top level for an index and a list for a sweep, leaving a consumer to
+// branch on which it was looking at — while kx scan, kx tree and kx top each
+// have one shape whatever they were pointed at.
+func TestDiagnosticJSONHasOneShapeIndexedOrSwept(t *testing.T) {
+	indexed, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Critical,
+	})
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	swept, err := triageJSON(render.TriageResult{
+		Namespace: "prod", Checked: 3, Healthy: 2,
+		All: []diagnostics.Report{{Kind: kinds.Pod, Name: "web"}},
+	})
+	if err != nil {
+		t.Fatalf("triageJSON: %v", err)
+	}
+
+	for _, field := range []string{"schemaVersion", "checked", "healthy", "resources"} {
+		if _, present := decodeJSON(t, indexed)[field]; !present {
+			t.Errorf("indexed document has no %q:\n%s", field, indexed)
+		}
+		if _, present := decodeJSON(t, swept)[field]; !present {
+			t.Errorf("swept document has no %q:\n%s", field, swept)
+		}
+	}
+	// The findings must not also still hang off the top level, or the old
+	// shape is merely buried rather than gone.
+	for _, field := range []string{"verdict", "findings"} {
+		if _, present := decodeJSON(t, indexed)[field]; present {
+			t.Errorf("indexed document still carries a top-level %q:\n%s", field, indexed)
+		}
+	}
+}
+
+// An indexed run is a sweep of one, and counts itself that way — including
+// healthy, which is what tells a reader the single resource was fine without
+// their having to interpret a verdict string.
+func TestDiagnosticJSONCountsAnIndexedRunAsASweepOfOne(t *testing.T) {
+	for _, testCase := range []struct {
+		verdict diagnostics.Severity
+		healthy int
+	}{
+		{diagnostics.OK, 1},
+		{diagnostics.Warning, 0},
+		{diagnostics.Critical, 0},
+	} {
+		out, err := diagnosticJSON(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: testCase.verdict,
+		})
+		if err != nil {
+			t.Fatalf("diagnosticJSON: %v", err)
+		}
+		document := decodeJSON(t, out)
+		if got := document["checked"]; got != float64(1) {
+			t.Errorf("%v: checked = %v, want 1", testCase.verdict, got)
+		}
+		if got := document["healthy"]; got != float64(testCase.healthy) {
+			t.Errorf("%v: healthy = %v, want %d", testCase.verdict, got, testCase.healthy)
+		}
 	}
 }

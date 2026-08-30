@@ -25,6 +25,10 @@ kx diag -n prod --json | jq '.resources[] | select(.verdict == "critical") | .na
 kx scan -n prod --json | jq '.images[] | select(.counts.critical > 0)'
 ```
 
+`kx diag` emits one shape whether it was pointed at an index or a namespace,
+so that first expression reads `kx diag 1 --json` too — an indexed run is a
+sweep of one, and counts itself that way.
+
 It is built from the same values the terminal and `--html` render, so the
 three views cannot disagree about what is wrong. A sweep serialises every
 resource regardless of `--full`: that flag governs how much of a table fits on
