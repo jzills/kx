@@ -378,3 +378,37 @@ func TestOutNeedsHTML(t *testing.T) {
 		t.Errorf("error = %q, want it to name --out and --html", err)
 	}
 }
+
+// --json and --html are refused together on every command that has both.
+// kx diag and kx scan already said so; kx tree and kx top now have the pair.
+func TestJSONAndHTMLAreRefusedTogetherEverywhere(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--json", "--html"})
+			if err == nil {
+				t.Fatalf("kx %s --json --html was accepted", command)
+			}
+			if !strings.Contains(err.Error(), "--json") ||
+				!strings.Contains(err.Error(), "--html") {
+				t.Errorf("error = %q, want it to name both flags", err)
+			}
+		})
+	}
+}
+
+// --json is registered on both new commands, so it reaches --help and
+// completion rather than working invisibly.
+func TestJSONFlagIsRegisteredOnTreeAndTop(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	for _, name := range []string{"tree", "top"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("find %s: %v", name, err)
+		}
+		if cmd.Flags().Lookup("json") == nil {
+			t.Errorf("--json is not registered on kx %s", name)
+		}
+	}
+}

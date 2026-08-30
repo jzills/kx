@@ -9,6 +9,8 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/tree"
+	"github.com/jzills/kx/internal/web"
 )
 
 func decodeJSON(t *testing.T, document string) map[string]any {
@@ -448,5 +450,121 @@ func TestScanJSONSeveritiesAreValidThresholds(t *testing.T) {
 		if _, err := scanThresholdBreached(nil, token); err != nil {
 			t.Errorf("--fail-on %q: %v — that is how the document spells it", token, err)
 		}
+	}
+}
+
+// An ownership graph is the most machine-shaped thing kx produces, and it was
+// browser-only. The document names each node with fields, not with the label
+// the terminal draws — "rs/web-7d8f" is display text, and making a consumer
+// split it back apart is the mistake kx scan's "scope" string already made.
+func TestTreeJSONNamesNodesStructurally(t *testing.T) {
+	root := &tree.Node{Label: "Deployment/web", Kind: "Deployment", Name: "web", Index: 1}
+	rs := root.AddResource("rs/web-7d8f", "", "ReplicaSet", "web-7d8f", 2)
+	pod := rs.AddResource("pod/web-7d8f-abc", "", "Pod", "web-7d8f-abc", 3)
+	pod.AddContainer("container: app", "", "app")
+
+	out, err := treeJSON(scanSubject{Namespace: "prod"}, []*tree.Node{root})
+	if err != nil {
+		t.Fatalf("treeJSON: %v", err)
+	}
+	// Anchored to the JSON string form, not a bare token: a label leaking
+	// through would appear as a quoted value.
+	for _, label := range []string{`"rs/web-7d8f"`, `"pod/web-7d8f-abc"`, `"container: app"`} {
+		if strings.Contains(out, label) {
+			t.Errorf("display label %s reached the document:\n%s", label, out)
+		}
+	}
+
+	var decoded struct {
+		Roots []jsonTreeNode `json:"roots"`
+	}
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(decoded.Roots) != 1 {
+		t.Fatalf("roots = %d, want 1", len(decoded.Roots))
+	}
+	replicaSet := decoded.Roots[0].Children[0]
+	if replicaSet.Kind != "ReplicaSet" || replicaSet.Name != "web-7d8f" || replicaSet.Index != 2 {
+		t.Errorf("replicaset node = %+v, want ReplicaSet/web-7d8f at index 2", replicaSet)
+	}
+	// A container is part of a pod, not a resource of its own, and takes no
+	// index — so it carries a name and no kind.
+	container := replicaSet.Children[0].Children[0]
+	if container.Kind != "" || container.Name != "app" {
+		t.Errorf("container node = %+v, want a bare name", container)
+	}
+}
+
+// One root or eight, a consumer parses the document the same way. kx scan
+// already takes that view of its images.
+func TestTreeJSONAlwaysCarriesARootList(t *testing.T) {
+	out, err := treeJSON(scanSubject{AllNamespaces: true}, nil)
+	if err != nil {
+		t.Fatalf("treeJSON: %v", err)
+	}
+	document := decodeJSON(t, out)
+	if _, present := document["roots"]; !present {
+		t.Errorf("no roots list in an empty forest:\n%s", out)
+	}
+	if got := document["allNamespaces"]; got != true {
+		t.Errorf("allNamespaces = %v, want true", got)
+	}
+}
+
+// A percentage is a number, and "not known" is null rather than zero: a pod
+// with no limit set has no percentage, and reporting 0 would read as idle.
+func TestTopJSONPercentagesAreNumbersOrNull(t *testing.T) {
+	out, err := topJSON(scanSubject{Namespace: "prod"}, "pods", []web.TopRow{
+		{Index: 1, Name: "web", CPU: "5m", Memory: "64Mi",
+			CPUPct: web.Usage{Known: true, Pct: 12}, MemPct: web.Usage{}},
+	})
+	if err != nil {
+		t.Fatalf("topJSON: %v", err)
+	}
+	var decoded struct {
+		Resource string `json:"resource"`
+		Rows     []struct {
+			CPUPct    *int `json:"cpuPercent"`
+			MemoryPct *int `json:"memoryPercent"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Resource != "pods" {
+		t.Errorf("resource = %q, want pods — a node's percentage means capacity, a pod's means limits", decoded.Resource)
+	}
+	row := decoded.Rows[0]
+	if row.CPUPct == nil || *row.CPUPct != 12 {
+		t.Errorf("cpuPercent = %v, want 12", row.CPUPct)
+	}
+	if row.MemoryPct != nil {
+		t.Errorf("memoryPercent = %v, want null for a pod with no limit", *row.MemoryPct)
+	}
+	if strings.Contains(out, `"12%"`) {
+		t.Errorf("the table's cell text reached the document:\n%s", out)
+	}
+}
+
+// kx tree and kx top join the vocabulary kx diag and kx scan already share, so
+// one pipeline reads all four the same way.
+func TestTreeAndTopShareTheSubjectVocabulary(t *testing.T) {
+	swept, err := triageJSON(render.TriageResult{AllNamespaces: true})
+	if err != nil {
+		t.Fatalf("triageJSON: %v", err)
+	}
+	for name, build := range map[string]func() (string, error){
+		"tree": func() (string, error) { return treeJSON(scanSubject{AllNamespaces: true}, nil) },
+		"top":  func() (string, error) { return topJSON(scanSubject{AllNamespaces: true}, "pods", nil) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := build()
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			assertSameSubject(t, decodeJSON(t, out), decodeJSON(t, swept),
+				"namespace", "allNamespaces")
+		})
 	}
 }

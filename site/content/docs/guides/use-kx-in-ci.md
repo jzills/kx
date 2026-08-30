@@ -6,7 +6,9 @@ weight: 8
 
 `kx diag` and `kx scan` both sweep a namespace and print a table. In a
 pipeline nothing reads the table, and both would exit 0 whatever they found.
-Two flags change that.
+Two flags change that. (`kx tree` and `kx top` take `--json` too, for the
+ownership graph and the usage listing; only the two that produce findings take
+`--fail-on`.)
 
 ```bash
 kx diag -A --fail-on critical    # 0 if the cluster is healthy, 2 if not
@@ -42,8 +44,9 @@ underneath that is worse than one it can check for.
 }
 ```
 
-Both commands name their subject with the same fields, so a pipeline that
-reads one does not have to learn a second shape to read the other. A sweep
+All four commands that emit `--json` name their subject with the same fields,
+so a pipeline that reads one does not have to learn a second shape to read the
+others. A sweep
 carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run carries
 `kind`, `name` and `namespace`:
 
@@ -56,6 +59,18 @@ carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run carries
   "images": [ … ]
 }
 ```
+
+`kx tree --json` names every node with `kind` and `name` rather than the
+`rs/web-7d8f` label the terminal draws, carries the same `index` the tree
+printed, and always returns a `roots` list — one entry for an indexed resource
+or a single namespace, one per namespace for `-A`. A pod's containers appear
+as children with a name and no kind, because a container is part of a pod
+rather than a resource of its own.
+
+`kx top --json` reports percentages as numbers, and as `null` where there is
+none — a pod with no limit set has no percentage, and `0` would read as idle.
+Its `resource` field says whether the listing was pods or nodes, since a pod's
+percentage is against its limits and a node's against its capacity.
 
 Severities are lower case throughout — `critical`, `high`, `medium`, `low` for
 image findings, `critical`, `warning`, `healthy` for verdicts — which is

@@ -283,3 +283,51 @@ func TestUnindexedTreeRecordsNothing(t *testing.T) {
 		t.Errorf("root index = %d, want 0 when unindexed", node.Index)
 	}
 }
+
+// Every node the walk builds carries the kind and name beside its label, or
+// --json has to parse "rs/web-7d8f" back apart to recover what the walk
+// already knew. Containers are the one exception: they are not resources, so
+// they carry a name and no kind.
+func TestTreeNodesCarryKindAndName(t *testing.T) {
+	b := builder(
+		&appsv1.Deployment{ObjectMeta: meta("web", "d1")},
+		&appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "rs1", owner("d1"))},
+		podWith("web-abc-1", "p1", []string{"app"}, owner("rs1")),
+	)
+	root, _, err := b.BuildResource(context.Background(), kinds.Deployment, "web", ns, true)
+	if err != nil {
+		t.Fatalf("BuildResource: %v", err)
+	}
+
+	seen := 0
+	var walk func(*tree.Node)
+	walk = func(node *tree.Node) {
+		seen++
+		if strings.HasPrefix(node.Label, "container: ") {
+			if node.Kind != "" {
+				t.Errorf("container %q carries kind %q, want none — it is not a resource",
+					node.Label, node.Kind)
+			}
+			if node.Name == "" {
+				t.Errorf("container %q carries no name", node.Label)
+			}
+		} else {
+			if node.Kind == "" || node.Name == "" {
+				t.Errorf("node %q carries kind=%q name=%q, want both",
+					node.Label, node.Kind, node.Name)
+			}
+			// The fields and the label must describe the same resource, or
+			// --json and the drawn tree would disagree about what a row is.
+			if !strings.HasSuffix(node.Label, "/"+node.Name) {
+				t.Errorf("node %q disagrees with its own Name %q", node.Label, node.Name)
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	if seen < 4 {
+		t.Fatalf("walked %d nodes, want deployment, replicaset, pod and container", seen)
+	}
+}

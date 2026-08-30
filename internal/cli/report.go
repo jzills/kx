@@ -9,6 +9,8 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/tree"
+	"github.com/jzills/kx/internal/web"
 )
 
 // reportSchemaVersion is the version of the --json shapes below.
@@ -254,4 +256,104 @@ func scanThresholdBreached(rows []scanner.ImageScan, value string) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+// jsonTreeNode is one node of an ownership graph.
+//
+// Kind and Name rather than the Label the terminal draws, for the same reason
+// kx scan's subject stopped being a display string: a consumer must not have
+// to split "rs/web-7d8f" back apart to recover two fields the graph walk
+// already had. Index is the number kx tree printed, so a document and a
+// terminal agree about which row `kx logs 4` acts on; it is absent for an
+// unindexed walk (--no-index) and for containers, which take no index.
+//
+// A container carries a name and no kind, because it is part of a pod rather
+// than a resource of its own.
+type jsonTreeNode struct {
+	Kind     string         `json:"kind,omitempty"`
+	Name     string         `json:"name"`
+	Index    int            `json:"index,omitempty"`
+	Children []jsonTreeNode `json:"children,omitempty"`
+}
+
+func treeNodeOf(node *tree.Node) jsonTreeNode {
+	converted := jsonTreeNode{Kind: node.Kind, Name: node.Name, Index: node.Index}
+	for _, child := range node.Children {
+		converted.Children = append(converted.Children, treeNodeOf(child))
+	}
+	return converted
+}
+
+// treeJSON serialises an ownership graph — one root for an indexed resource or
+// a single namespace, several for an -A forest.
+//
+// Always a list, even for the one-root shapes, so a consumer parses every kx
+// tree document the same way. kx scan already takes that view of its images.
+func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
+	converted := make([]jsonTreeNode, 0, len(roots))
+	for _, root := range roots {
+		if root != nil {
+			converted = append(converted, treeNodeOf(root))
+		}
+	}
+	return encode(struct {
+		SchemaVersion int            `json:"schemaVersion"`
+		Kind          string         `json:"kind,omitempty"`
+		Name          string         `json:"name,omitempty"`
+		Namespace     string         `json:"namespace,omitempty"`
+		AllNamespaces bool           `json:"allNamespaces,omitempty"`
+		Roots         []jsonTreeNode `json:"roots"`
+	}{
+		reportSchemaVersion, string(subject.Kind), subject.Name,
+		subject.Namespace, subject.AllNamespaces, converted,
+	})
+}
+
+// jsonTopRow is one pod's or node's usage.
+//
+// The percentages are numbers, not the "12%" cells the table prints, and a
+// pointer so "not known" is null rather than zero — a pod with no limit set
+// has no percentage, and reporting that as 0% would read as idle.
+type jsonTopRow struct {
+	Index     int    `json:"index,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	CPU       string `json:"cpu"`
+	Memory    string `json:"memory"`
+	CPUPct    *int   `json:"cpuPercent"`
+	MemoryPct *int   `json:"memoryPercent"`
+}
+
+// topJSON serialises a usage listing, built from the same rows the table and
+// the HTML page render.
+//
+// Resource names what was listed — "pods" or "nodes" — because the two have
+// different percentage meanings: a pod's is against its limits, a node's
+// against its capacity, and nothing else in the document says which.
+func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
+	converted := make([]jsonTopRow, 0, len(rows))
+	for _, row := range rows {
+		converted = append(converted, jsonTopRow{
+			Index: row.Index, Name: row.Name, Namespace: row.Namespace,
+			CPU: row.CPU, Memory: row.Memory,
+			CPUPct: percentOf(row.CPUPct), MemoryPct: percentOf(row.MemPct),
+		})
+	}
+	return encode(struct {
+		SchemaVersion int          `json:"schemaVersion"`
+		Resource      string       `json:"resource"`
+		Namespace     string       `json:"namespace,omitempty"`
+		AllNamespaces bool         `json:"allNamespaces,omitempty"`
+		Rows          []jsonTopRow `json:"rows"`
+	}{
+		reportSchemaVersion, resource,
+		subject.Namespace, subject.AllNamespaces, converted,
+	})
+}
+
+func percentOf(usage web.Usage) *int {
+	if !usage.Known {
+		return nil
+	}
+	return &usage.Pct
 }
