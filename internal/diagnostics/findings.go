@@ -11,17 +11,19 @@ import (
 )
 
 // SupportedKinds are the kinds kx diag can analyse.
-var SupportedKinds = map[kinds.Kind]bool{
-	kinds.Node:                  true,
-	kinds.Deployment:            true,
-	kinds.StatefulSet:           true,
-	kinds.DaemonSet:             true,
-	kinds.Pod:                   true,
-	kinds.Job:                   true,
-	kinds.Service:               true,
-	kinds.PersistentVolumeClaim: true,
-	kinds.CronJob:               true,
-	kinds.Ingress:               true,
+var SupportedKinds = kinds.Set{
+	// In the order kx diag's own help names them, since the same list is now
+	// printed by the error a wrong kind gets.
+	kinds.Deployment,
+	kinds.StatefulSet,
+	kinds.DaemonSet,
+	kinds.Job,
+	kinds.CronJob,
+	kinds.Service,
+	kinds.PersistentVolumeClaim,
+	kinds.Ingress,
+	kinds.Pod,
+	kinds.Node,
 }
 
 const restartWarnThreshold = 5

@@ -285,8 +285,8 @@ func TestCopyRejectsAnIndexedNonPod(t *testing.T) {
 	if err == nil {
 		t.Fatal("copied from a Deployment index, want an error")
 	}
-	if err.Error() != "cp is only supported for pods." {
-		t.Errorf("err = %q, want the pod-only message", err.Error())
+	if err.Error() != "kx cp does not support 'Deployment' — only Pods." {
+		t.Errorf("err = %q, want it to name Deployment and Pods", err.Error())
 	}
 	if len(kubectl.interactive) != 0 {
 		t.Error("kubectl was called for a rejected kind")
@@ -596,7 +596,8 @@ func TestLogsRejectsUnsupportedKind(t *testing.T) {
 	err := LogsCommand{
 		Kubectl: &recordingKubectl{}, State: workload("cm", kinds.ConfigMap), Status: noStatus,
 	}.Execute(1, nil)
-	want := "logs are not supported for 'ConfigMap'."
+	want := "kx logs does not support 'ConfigMap' — only Pods, Deployments, " +
+		"StatefulSets, DaemonSets and Services."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
@@ -1024,8 +1025,9 @@ func TestDebugRejectsNonPods(t *testing.T) {
 	if err == nil {
 		t.Fatal("debug on a Deployment succeeded")
 	}
-	if !strings.Contains(err.Error(), "pods") {
-		t.Errorf("err = %q, want it to name the restriction", err)
+	if !strings.Contains(err.Error(), "'Deployment'") ||
+		!strings.Contains(err.Error(), "only Pods") {
+		t.Errorf("err = %q, want it to name Deployment and Pods", err)
 	}
 }
 
@@ -1261,8 +1263,9 @@ func TestExecStillRefusesAKindKubectlCannotExecInto(t *testing.T) {
 			t.Errorf("%s: Execute succeeded, want a refusal", kind)
 			continue
 		}
-		if !strings.Contains(err.Error(), "exec is not supported") {
-			t.Errorf("%s: err = %q, want an unsupported-kind message", kind, err)
+		if !strings.Contains(err.Error(), "kx exec does not support") ||
+			!strings.Contains(err.Error(), string(kind)) {
+			t.Errorf("%s: err = %q, want an unsupported-kind message naming it", kind, err)
 		}
 	}
 }
@@ -1282,5 +1285,76 @@ func TestExecChecksStalenessAgainstTheResolvedKind(t *testing.T) {
 	}
 	if stale.Kind != kinds.Deployment {
 		t.Errorf("stale kind = %q, want Deployment", stale.Kind)
+	}
+}
+
+// Every "wrong kind for this command" refusal names two things: the kind the
+// index actually resolved to, and the kinds the command does work on.
+//
+// The codebase had each half without the other — "scale is not supported for
+// 'Pod'." named the first, "cp is only supported for pods." named the second —
+// so which fact you got depended on which command you happened to type. Driven
+// over the real commands rather than over unsupportedKindError, which would
+// only prove the helper agrees with itself.
+func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T) {
+	const wrong = kinds.ConfigMap
+	refusals := map[string]func() error{
+		"scale": func() error {
+			_, err := ScaleCommand{State: workload("cm", wrong)}.Execute(1, 2)
+			return err
+		},
+		"rollout": func() error {
+			_, err := RolloutCommand{State: workload("cm", wrong)}.Execute("status", 1)
+			return err
+		},
+		"port-forward": func() error {
+			return PortForwardCommand{State: workload("cm", wrong)}.Execute(1, "80", nil)
+		},
+		"exec": func() error {
+			return ExecCommand{State: workload("cm", wrong)}.Execute(1, nil, nil)
+		},
+		"logs": func() error {
+			return LogsCommand{
+				Kubectl: &recordingKubectl{}, State: workload("cm", wrong), Status: noStatus,
+			}.Execute(1, nil)
+		},
+		"scan": func() error {
+			_, err := ScanCommand{State: workload("cm", wrong), Status: noStatus}.Execute(1, "trivy")
+			return err
+		},
+	}
+
+	for command, refuse := range refusals {
+		t.Run(command, func(t *testing.T) {
+			err := refuse()
+			if err == nil {
+				t.Fatalf("kx %s accepted a %s", command, wrong)
+			}
+			message := err.Error()
+			if !strings.Contains(message, "'"+string(wrong)+"'") {
+				t.Errorf("err = %q, want it to name the kind the index resolved to", message)
+			}
+			if !strings.Contains(message, " — only ") {
+				t.Errorf("err = %q, want it to name the kinds %s does support", message, command)
+			}
+			if !strings.HasSuffix(message, ".") {
+				t.Errorf("err = %q, want the register's terminal period", message)
+			}
+		})
+	}
+}
+
+// The supported list is generated from the same set the guard checks, so a
+// kind can never be advertised as supported and then refused.
+func TestUnsupportedKindMessageListsTheSetTheGuardUses(t *testing.T) {
+	_, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(1, 2)
+	if err == nil {
+		t.Fatal("scale accepted a ConfigMap")
+	}
+	for _, supported := range scalableKinds {
+		if !strings.Contains(err.Error(), kinds.PluralDisplay(string(supported))) {
+			t.Errorf("err = %q, want it to name %s, which scalableKinds accepts",
+				err, supported)
+		}
 	}
 }

@@ -759,7 +759,7 @@ func TestNodeConditionOutranksThePodRollup(t *testing.T) {
 }
 
 func TestNodeIsASupportedKind(t *testing.T) {
-	if !SupportedKinds[kinds.Node] {
+	if !SupportedKinds.Has(kinds.Node) {
 		t.Error("Node is not a supported diagnostic kind")
 	}
 }

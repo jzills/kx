@@ -17,10 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scannableKinds = map[kinds.Kind]bool{
-	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
-	kinds.StatefulSet: true, kinds.DaemonSet: true, kinds.Job: true,
-	kinds.CronJob: true,
+var scannableKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet, kinds.Job, kinds.CronJob,
 }
 
 // namespaceScanKinds are the workload kinds swept for a namespace-level scan,
@@ -76,8 +75,8 @@ func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !scannableKinds[kind] {
-		return nil, fmt.Errorf("scan is not supported for '%s'.", kind)
+	if !scannableKinds.Has(kind) {
+		return nil, unsupportedKindError("scan", kind, scannableKinds)
 	}
 	// Validate the engine and its availability before hitting the cluster, so a
 	// typo or a missing scanner fails fast with one clear message rather than
