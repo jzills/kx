@@ -26,6 +26,7 @@ kx tree [OPTIONS] [index]
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it |
 | `--html` | Render the tree as HTML and serve it in a browser |
+| `--json` | Print the ownership graph as JSON instead of a tree |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-index` | Skip assigning indexes to tree nodes and don't update state |
 | `--no-open` | Serve the HTML report without opening a browser |

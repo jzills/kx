@@ -12,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -805,5 +806,53 @@ func TestTopNodesWithoutScopeFlagsStillLists(t *testing.T) {
 	}
 	if len(kube.calls) == 0 {
 		t.Fatal("kx top nodes never reached kubectl")
+	}
+}
+
+// -A overwrites the namespace with the caption's own words just before
+// rendering, so a document built from it would read
+// `"namespace": "all namespaces"` — a display string no consumer can tell from
+// a namespace genuinely called that. It is the boolean that carries the scope.
+func TestTopAllNamespacesJSONIsABooleanNotACaption(t *testing.T) {
+	sink := captureRender(t)
+	kube := &fakeKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"-A", "--json"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -A --json: %v", err)
+	}
+	document := decodeJSON(t, sink.String())
+	if got := document["allNamespaces"]; got != true {
+		t.Errorf("allNamespaces = %v, want true", got)
+	}
+	if _, present := document["namespace"]; present {
+		t.Errorf("a spanning listing named a single namespace:\n%s", sink.String())
+	}
+	if strings.Contains(sink.String(), render.AllNamespaces) {
+		t.Errorf("the caption's wording reached the document:\n%s", sink.String())
+	}
+}
+
+// A Node is cluster-scoped, so its listing names no namespace at all.
+func TestTopNodesJSONNamesNoNamespace(t *testing.T) {
+	sink := captureRender(t)
+	kube := &fakeKubectl{output: nodesOutput}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"nodes", "--json"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top nodes --json: %v", err)
+	}
+	document := decodeJSON(t, sink.String())
+	if _, present := document["namespace"]; present {
+		t.Errorf("a node listing named a namespace:\n%s", sink.String())
+	}
+	if got := document["resource"]; got != "nodes" {
+		t.Errorf("resource = %v, want nodes", got)
 	}
 }

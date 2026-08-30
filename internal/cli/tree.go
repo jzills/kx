@@ -173,6 +173,13 @@ func newTreeCommand(services Services) *cobra.Command {
 
 			namespaceFlag, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
+			asJSON, _ := cmd.Flags().GetBool("json")
+
+			if asJSON && html {
+				return errors.New(
+					"'--json' cannot be combined with '--html' — one is for a " +
+						"machine and the other for a browser.")
+			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
@@ -218,6 +225,14 @@ func newTreeCommand(services Services) *cobra.Command {
 					if err := command.save(resources, "", indexed, true); err != nil {
 						return err
 					}
+					if asJSON {
+						document, err := treeJSON(scanSubject{AllNamespaces: true}, roots)
+						if err != nil {
+							return err
+						}
+						render.Raw(document)
+						return nil
+					}
 					render.ScopeBanner("Namespace", render.AllNamespaces, "")
 					for i, root := range roots {
 						if i > 0 {
@@ -247,12 +262,23 @@ func newTreeCommand(services Services) *cobra.Command {
 				if namespace == "" {
 					namespace = services.Kubectl.CurrentNamespace()
 				}
-				render.ScopeBanner("Namespace", namespace, "")
+				if !asJSON {
+					render.ScopeBanner("Namespace", namespace, "")
+				}
 				stop := render.Status("resolving ownership graph")
 				node, err := command.ExecuteNamespace(ctx, namespace, indexed)
 				stop()
 				if err != nil {
 					return err
+				}
+				if asJSON {
+					document, err := treeJSON(
+						scanSubject{Namespace: namespace}, []*tree.Node{node})
+					if err != nil {
+						return err
+					}
+					render.Raw(document)
+					return nil
 				}
 				render.Tree(node)
 				if !htmlOpts.Enabled {
@@ -283,16 +309,35 @@ func newTreeCommand(services Services) *cobra.Command {
 			var scope string
 			if kind == kinds.Namespace {
 				scope = scopeCaption("Namespace", name)
-				render.ScopeBanner("Namespace", name, "")
+				if !asJSON {
+					render.ScopeBanner("Namespace", name, "")
+				}
 			} else {
 				scope = scopeCaption(string(kind)+"/"+name, namespace)
-				render.Banner(string(kind), name, namespace, "")
+				if !asJSON {
+					render.Banner(string(kind), name, namespace, "")
+				}
 			}
 			stop := render.Status("resolving ownership graph")
 			node, err := command.Execute(ctx, index, indexed)
 			stop()
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				// A Namespace index graphs that namespace, so it is the scope
+				// rather than the subject — the same distinction kx scan draws
+				// between an indexed workload and a swept namespace.
+				subject := scanSubject{Kind: kind, Name: name, Namespace: namespace}
+				if kind == kinds.Namespace {
+					subject = scanSubject{Namespace: name}
+				}
+				document, err := treeJSON(subject, []*tree.Node{node})
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return nil
 			}
 			render.Tree(node)
 			if !htmlOpts.Enabled {
@@ -313,6 +358,8 @@ func newTreeCommand(services Services) *cobra.Command {
 			return deliverPage(ctx, page, htmlOpts)
 		},
 	}
+	cmd.Flags().Bool("json", false,
+		"Print the ownership graph as JSON instead of a tree")
 	cmd.Flags().Bool("no-index", false,
 		"Skip assigning indexes to tree nodes and don't update state")
 	cmd.Flags().StringP("namespace", "n", "",

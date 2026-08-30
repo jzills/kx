@@ -114,6 +114,7 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 			noLimits, rest := extractBool(rest, "--no-limits")
+			asJSON, rest := extractBool(rest, "--json")
 			html, rest := extractBool(rest, "--html")
 			noOpen, rest := extractBool(rest, "--no-open")
 			out, rest, err := extractString(rest, "--out", "")
@@ -135,6 +136,11 @@ func newTopCommand(services Services) *cobra.Command {
 			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
 				return err
+			}
+			if asJSON && html {
+				return errors.New(
+					"'--json' cannot be combined with '--html' — one is for a " +
+						"machine and the other for a browser.")
 			}
 
 			// A leading non-flag token names the resource type, mirroring
@@ -203,6 +209,29 @@ func newTopCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				// namespace is the caption's by this point: an -A listing has
+				// had it overwritten with the words "all namespaces" just
+				// above, and putting that in a document is what kx scan's
+				// "scope" used to do — indistinguishable from a namespace
+				// genuinely called that. The boolean carries the scope instead.
+				//
+				// A node listing needs no guard of its own: ExecuteNodes
+				// returns an empty namespace because a Node is cluster-scoped,
+				// so there is nothing here to blank.
+				subject := scanSubject{
+					Namespace: namespace, AllNamespaces: scopedAllNamespaces,
+				}
+				if scopedAllNamespaces {
+					subject.Namespace = ""
+				}
+				document, err := topJSON(subject, resourceLabel, topPageRows(output))
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return nil
+			}
 			render.IndexedTable(output, resourceLabel, namespace)
 			if !htmlOpts.Enabled {
 				return nil
@@ -227,6 +256,7 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
+	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")
 	cmd.Flags().Bool("html", false, "Render the listing as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0, "Port to serve --html on (random free port by default)")
 	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")

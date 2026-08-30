@@ -28,6 +28,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 |---|---|
 | `-A, --all-namespaces` | List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace |
 | `--html` | Render the listing as HTML and serve it in a browser |
+| `--json` | Print the listing as JSON instead of a table |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace |
 | `--no-limits` | Skip the CPU%/MEM% columns (one fewer kubectl call) |

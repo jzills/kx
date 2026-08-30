@@ -84,10 +84,10 @@ type collector struct {
 func (c *collector) add(parent *tree.Node, style, prefix, name string, kind kinds.Kind) *tree.Node {
 	label := prefix + "/" + name
 	if !c.indexed {
-		return parent.Add(label, style)
+		return parent.AddResource(label, style, string(kind), name, 0)
 	}
 	c.resources = append(c.resources, Resource{Name: name, Kind: kind, Namespace: c.namespace})
-	return parent.AddIndexed(label, style, c.offset+len(c.resources))
+	return parent.AddResource(label, style, string(kind), name, c.offset+len(c.resources))
 }
 
 func ownedBy(meta metav1.ObjectMeta, uid types.UID) bool {
@@ -105,7 +105,10 @@ func (b Builder) BuildResource(
 ) (*tree.Node, []Resource, error) {
 	c := &collector{indexed: indexed, namespace: namespace}
 
-	root := &tree.Node{Label: string(kind) + "/" + name, Style: theme.Header}
+	root := &tree.Node{
+		Label: string(kind) + "/" + name, Style: theme.Header,
+		Kind: string(kind), Name: name,
+	}
 	if indexed {
 		// The root is itself indexable, and numbers first.
 		c.resources = append(c.resources, Resource{Name: name, Kind: kind, Namespace: namespace})
@@ -295,7 +298,7 @@ func addPodsForOwner(uid types.UID, pods []corev1.Pod, parent *tree.Node, c *col
 
 func addContainers(pod *corev1.Pod, parent *tree.Node) {
 	for _, container := range pod.Spec.Containers {
-		parent.Add("container: "+container.Name, theme.Muted)
+		parent.AddContainer("container: "+container.Name, theme.Muted, container.Name)
 	}
 }
 
@@ -456,7 +459,10 @@ func (b Builder) BuildNamespace(
 	sortRoots(roots, order)
 
 	c := &collector{indexed: indexed, namespace: namespace, offset: startAt}
-	root := &tree.Node{Label: "Namespace/" + namespace, Style: theme.Header}
+	root := &tree.Node{
+		Label: "Namespace/" + namespace, Style: theme.Header,
+		Kind: string(kinds.Namespace), Name: namespace,
+	}
 	if len(roots) == 0 {
 		root.Add("(no workloads)", theme.Muted)
 		return root, c.resources, nil
