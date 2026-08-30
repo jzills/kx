@@ -76,3 +76,19 @@ do not name one — `Nodes · 1 item`, not `Nodes · prod · 1 item`. The same i
 true of PersistentVolumes, StorageClasses, ClusterRoles, CRDs and Namespaces
 themselves. Nodes also stay out of a namespace sweep and out of `-A`; you
 reach one by index, from `kx get nodes` or `kx top nodes`.
+
+## Getting onto the node
+
+`kx debug` takes a Node index too, and does something different from what it
+does to a pod: kubectl creates a privileged pod on that node, with the host's
+filesystem mounted at `/host` and the host namespaces joined.
+
+```bash
+kx get nodes
+kx debug 1                      # a shell on the node
+kx debug 1 -- ls /host/var/log  # or one command
+```
+
+That is how to reach a kubelet, a container runtime, or the node's own logs
+when the reason a node is unhealthy is not visible through the API. The debug
+pod outlives the shell — kubectl names it on exit, and it is yours to delete.

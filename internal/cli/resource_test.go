@@ -1013,8 +1013,8 @@ func TestDebugAttachesAnEphemeralContainer(t *testing.T) {
 	}
 }
 
-// The same restriction kx exec carries, and for the same reason: an ephemeral
-// container attaches to a running pod, and nothing else is one.
+// A Pod takes an ephemeral container and a Node takes a debug pod of its own.
+// Nothing else is either, so nothing else is debuggable.
 func TestDebugRejectsNonPods(t *testing.T) {
 	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Deployment}
 
@@ -1026,8 +1026,8 @@ func TestDebugRejectsNonPods(t *testing.T) {
 		t.Fatal("debug on a Deployment succeeded")
 	}
 	if !strings.Contains(err.Error(), "'Deployment'") ||
-		!strings.Contains(err.Error(), "only Pods") {
-		t.Errorf("err = %q, want it to name Deployment and Pods", err)
+		!strings.Contains(err.Error(), "only Pods and Nodes") {
+		t.Errorf("err = %q, want it to name Deployment, Pods and Nodes", err)
 	}
 }
 
@@ -1356,5 +1356,85 @@ func TestUnsupportedKindMessageListsTheSetTheGuardUses(t *testing.T) {
 			t.Errorf("err = %q, want it to name %s, which scalableKinds accepts",
 				err, supported)
 		}
+	}
+}
+
+// Debugging a node is a different operation wearing the same name: kubectl
+// creates a privileged pod on the node rather than attaching a container to
+// one. It is addressed node/NAME, and takes no -n — a Node is cluster-scoped,
+// so state records no namespace for one, and kubectl places the debug pod in
+// the context's current namespace rather than in one kx would have to invent.
+func TestDebugOnANodeTargetsTheNode(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "node-a", kind: kinds.Node}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug", "-it", "node/node-a", "--image=busybox"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "-n ") {
+		t.Errorf("args = %q, want no namespace flag — a Node is not in one", got)
+	}
+	// --target is what the pod path adds after a container lookup. A node has
+	// no container to share a namespace with, so neither the flag nor the
+	// lookup that finds it belongs here.
+	if strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no --target for a node", got)
+	}
+	if len(kubectl.runs) != 0 {
+		t.Errorf("ran %v — a node needs no container lookup", kubectl.runs)
+	}
+}
+
+// Refused rather than forwarded, so the message names the combination kx
+// understands instead of leaving kubectl to reject a flag pairing kx chose.
+func TestDebugOnANodeRefusesTarget(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "node-a", kind: kinds.Node}
+
+	err := DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}.Execute(1, nil, []string{"--target", "app"})
+
+	if err == nil {
+		t.Fatal("--target was accepted for a node")
+	}
+	if !strings.Contains(err.Error(), "--target") ||
+		!strings.Contains(err.Error(), "Node") {
+		t.Errorf("err = %q, want it to name --target and Node", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran %v — the refusal comes before kubectl", kubectl.interactive)
+	}
+}
+
+// The pod path is untouched: it still addresses the pod bare, scopes it to the
+// namespace state recorded, and looks a container up to share a namespace with.
+func TestDebugOnAPodIsUnchangedByTheNodePath(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\n"}
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug -it web", "-n prod", "--target=app"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "node/") {
+		t.Errorf("args = %q, want a pod addressed bare", got)
 	}
 }

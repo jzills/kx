@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -514,11 +515,20 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 	if err != nil {
 		return err
 	}
-	if kind != kinds.Pod {
-		return unsupportedKindError("debug", kind, kinds.Set{kinds.Pod})
+	if kind != kinds.Pod && kind != kinds.Node {
+		return unsupportedKindError("debug", kind, kinds.Set{kinds.Pod, kinds.Node})
 	}
 
-	args := []string{"debug", "-it", name, "-n", namespace}
+	args := []string{"debug", "-it"}
+	if kind == kinds.Node {
+		// node/NAME, and no -n. A Node is cluster-scoped, so state records no
+		// namespace for one; kubectl puts the debug pod in the context's
+		// current namespace, which is a better answer than a namespace kx
+		// would have to invent.
+		args = append(args, "node/"+name)
+	} else {
+		args = append(args, name, "-n", namespace)
+	}
 	// An explicit --image is the user overriding their own default for one
 	// run; passing the configured one as well would hand kubectl two.
 	//
@@ -534,12 +544,29 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 	if image == "" {
 		args = append(args, "--image="+c.Image)
 	}
-	target, err := c.target(name, namespace, extraArgs)
-	if err != nil {
-		return err
-	}
-	if target != "" {
-		args = append(args, "--target="+target)
+	// --target names a container to share a process namespace with. Debugging
+	// a node creates a pod of its own rather than joining one, so there is no
+	// container for it to name — refused rather than forwarded, since kubectl
+	// would reject it with a message about a flag combination kx chose.
+	if kind == kinds.Node {
+		explicit, _, err := extractString(extraArgs, "--target", "")
+		if err != nil {
+			return err
+		}
+		if explicit != "" {
+			return errors.New(
+				"'--target' cannot be combined with a Node — it names a container " +
+					"to share a process namespace with, and debugging a node " +
+					"creates a pod of its own rather than joining one.")
+		}
+	} else {
+		target, err := c.target(name, namespace, extraArgs)
+		if err != nil {
+			return err
+		}
+		if target != "" {
+			args = append(args, "--target="+target)
+		}
 	}
 	args = append(args, extraArgs...)
 	if len(command) > 0 {
@@ -555,7 +582,7 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way — the same shape describe and exec use.
-		return forwardExit(c.Kubectl, kinds.Pod, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }
