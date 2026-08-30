@@ -379,7 +379,7 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "debug <index> [kubectl flags] [-- command...]",
 		SuggestFor: []string{"ephemeral", "troubleshoot", "inspect"},
-		Short:      "Attach an ephemeral debug container to an indexed pod, for images with no shell.",
+		Short:      "Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host).",
 		Long: "Attaches a container carrying its own shell to a running pod, which is how " +
 			"to get inside an image that has none — distroless or scratch, where kx exec " +
 			"can only report that it found no shell. The pod is not restarted and what it " +
@@ -389,8 +389,16 @@ func newDebugCommand(services Services) *cobra.Command {
 			"pod's container when there is only one, so its filesystem is reachable at " +
 			"/proc/1/root; name one with --target when the pod has several.\n\n" +
 			"Kubernetes keeps an ephemeral container on the pod's spec for as long as the " +
-			"pod lives — there is no removing one, only replacing the pod.",
-		Example:            "  kx debug 1\n  kx debug 1 --image alpine\n  kx debug 1 -- ls /proc/1/root",
+			"pod lives — there is no removing one, only replacing the pod.\n\n" +
+			"A Node index — from kx get nodes or kx top nodes — debugs the node instead, " +
+			"which is a different operation wearing the same name: kubectl creates a new " +
+			"privileged pod on that node, in the current namespace, with the host's " +
+			"filesystem mounted at /host and the host namespaces joined. Use it to reach " +
+			"a kubelet, a container runtime, or the node's own logs. That pod outlives the " +
+			"shell — kubectl names it on exit, and it is yours to delete. --target does not " +
+			"apply, since there is no container to share a namespace with.",
+		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
+			"  kx debug 1 -- ls /proc/1/root\n  kx debug 1 -- ls /host/var/log",
 		Args:               cobra.MinimumNArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -424,7 +432,7 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd.Flags().String("image", "",
 		"Image for the debug container (default: the debug_image config key)")
 	cmd.Flags().String("target", "",
-		"Container to share a process namespace with, for a pod with several")
+		"Container to share a process namespace with, for a pod with several; not for nodes")
 	return cmd
 }
 

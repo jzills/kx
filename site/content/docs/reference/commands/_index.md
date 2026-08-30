@@ -17,7 +17,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx context [<index>]`](context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | [`kx cordon <index>...`](cordon/) | Mark one or more indexed Nodes unschedulable. |
 | [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](cp/) | Copy files to or from an indexed pod via kubectl cp. |
-| [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](debug/) | Attach an ephemeral debug container to an indexed pod, for images with no shell. |
+| [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
 | [`kx delete <index>... [--yes/-y]`](delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](describe/) | Show full kubectl describe output for one or more indexed resources. |
 | [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
