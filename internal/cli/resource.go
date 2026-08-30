@@ -99,9 +99,7 @@ func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
 	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
 }
 
-var scalableKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true, kinds.ReplicaSet: true,
-}
+var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}
 
 // ScaleCommand sets the replica count on an indexed workload.
 type ScaleCommand struct {
@@ -114,8 +112,8 @@ func (c ScaleCommand) Execute(index, replicas int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !scalableKinds[kind] {
-		return "", fmt.Errorf("scale is not supported for '%s'.", kind)
+	if !scalableKinds.Has(kind) {
+		return "", unsupportedKindError("scale", kind, scalableKinds)
 	}
 	_, err = c.Kubectl.Run([]string{
 		"scale", string(kind) + "/" + name,
@@ -131,9 +129,7 @@ func (c ScaleCommand) Execute(index, replicas int) (string, error) {
 	return fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun), nil
 }
 
-var rolloutKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true, kinds.DaemonSet: true,
-}
+var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}
 
 // rolloutActions are the kubectl rollout subcommands kx exposes, in the order
 // help and completion list them. `status` blocks until the rollout settles, so
@@ -186,8 +182,8 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !rolloutKinds[kind] {
-		return "", fmt.Errorf("rollout is not supported for '%s'.", kind)
+	if !rolloutKinds.Has(kind) {
+		return "", unsupportedKindError("rollout", kind, rolloutKinds)
 	}
 	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
 	if interactiveRolloutActions[action] {
@@ -203,9 +199,9 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	return c.Kubectl.Run(args)
 }
 
-var portForwardKinds = map[kinds.Kind]bool{
-	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
-	kinds.StatefulSet: true, kinds.DaemonSet: true, kinds.Service: true,
+var portForwardKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
 }
 
 // PortForwardCommand forwards a local port to an indexed resource.
@@ -219,8 +215,8 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 	if err != nil {
 		return err
 	}
-	if !portForwardKinds[kind] {
-		return fmt.Errorf("port-forward is not supported for '%s'.", kind)
+	if !portForwardKinds.Has(kind) {
+		return unsupportedKindError("port-forward", kind, portForwardKinds)
 	}
 	args := append([]string{
 		"port-forward", string(kind) + "/" + name, port, "-n", namespace,
@@ -297,17 +293,22 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 		return "", nil, err
 	}
 	if kind != kinds.Pod {
-		return "", nil, fmt.Errorf("cp is only supported for pods.")
+		return "", nil, unsupportedKindError("cp", kind, kinds.Set{kinds.Pod})
 	}
 	return namespace + "/" + name + ":" + path, &resolvedPod{Name: name, Namespace: namespace}, nil
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read
 // from a single pod.
-var aggregateLogKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true,
-	kinds.DaemonSet: true, kinds.Service: true,
+var aggregateLogKinds = kinds.Set{
+	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
 }
+
+// logKinds is every kind kx logs accepts: a Pod read directly, plus the
+// workloads whose pods are aggregated. Derived from aggregateLogKinds rather
+// than written out again, so the error cannot name a kind the switch below
+// rejects.
+var logKinds = append(kinds.Set{kinds.Pod}, aggregateLogKinds...)
 
 // LogsCommand streams logs for an indexed resource.
 type LogsCommand struct {
@@ -334,7 +335,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		}
 		return nil
 
-	case aggregateLogKinds[kind]:
+	case aggregateLogKinds.Has(kind):
 		selector, err := c.selector(name, namespace, kind)
 		if err != nil {
 			return err
@@ -354,7 +355,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("logs are not supported for '%s'.", kind)
+		return unsupportedKindError("logs", kind, logKinds)
 	}
 }
 
@@ -414,9 +415,9 @@ type ExecCommand struct {
 // kubectl resolves a Service to an endpoint for port-forward but has no
 // equivalent for exec, so kx refuses it here rather than letting kubectl
 // produce a worse message.
-var execKinds = map[kinds.Kind]bool{
-	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
-	kinds.StatefulSet: true, kinds.DaemonSet: true,
+var execKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet,
 }
 
 // execTarget is how an indexed resource is named to kubectl exec.
@@ -437,8 +438,8 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	if err != nil {
 		return err
 	}
-	if !execKinds[kind] {
-		return fmt.Errorf("exec is not supported for '%s'.", kind)
+	if !execKinds.Has(kind) {
+		return unsupportedKindError("exec", kind, execKinds)
 	}
 	target := execTarget(kind, name)
 
@@ -514,7 +515,7 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 		return err
 	}
 	if kind != kinds.Pod {
-		return fmt.Errorf("debug is only supported for pods.")
+		return unsupportedKindError("debug", kind, kinds.Set{kinds.Pod})
 	}
 
 	args := []string{"debug", "-it", name, "-n", namespace}

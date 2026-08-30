@@ -30,8 +30,13 @@ func TestCordonRefusesANonNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: succeeded on a Deployment", verb)
 		}
-		if !strings.Contains(err.Error(), verb+" is only supported for nodes") {
-			t.Errorf("%s: err = %q, want a nodes-only message", verb, err)
+		// Both halves: the kind the index actually resolved to, and the kinds
+		// the command does work on. Naming only the second left the user to
+		// work out what index 1 had been, which is the one fact an index model
+		// takes away from them.
+		if !strings.Contains(err.Error(), "'Deployment'") ||
+			!strings.Contains(err.Error(), "only Nodes") {
+			t.Errorf("%s: err = %q, want it to name Deployment and Nodes", verb, err)
 		}
 	}
 }
@@ -145,8 +150,9 @@ func TestDrainRefusesANonNode(t *testing.T) {
 		Confirm: func(string) error { return nil },
 	}
 	err := command.Execute(1, true, nil)
-	if err == nil || !strings.Contains(err.Error(), "drain is only supported for nodes") {
-		t.Errorf("err = %v, want a nodes-only message", err)
+	if err == nil || !strings.Contains(err.Error(), "'Deployment'") ||
+		!strings.Contains(err.Error(), "only Nodes") {
+		t.Errorf("err = %v, want it to name Deployment and Nodes", err)
 	}
 }
 
@@ -261,8 +267,13 @@ func TestCordonRefusesAMixedBatchBeforeActingOnAnyOfIt(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: a batch containing a Deployment was accepted", verb)
 		}
-		if !strings.Contains(err.Error(), verb+" is only supported for nodes") {
-			t.Errorf("%s: err = %q, want a nodes-only message", verb, err)
+		// Both halves: the kind the index actually resolved to, and the kinds
+		// the command does work on. Naming only the second left the user to
+		// work out what index 1 had been, which is the one fact an index model
+		// takes away from them.
+		if !strings.Contains(err.Error(), "'Deployment'") ||
+			!strings.Contains(err.Error(), "only Nodes") {
+			t.Errorf("%s: err = %q, want it to name Deployment and Nodes", verb, err)
 		}
 		if len(kubectl.runs) != 0 {
 			t.Errorf("%s: ran %v — the batch must not half-apply", verb, kubectl.runs)

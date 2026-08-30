@@ -541,7 +541,7 @@ func TestSupportedKindsCoversEveryKindSweepEmits(t *testing.T) {
 	// kx diag <index> refuses a kind outside SupportedKinds, so a kind the sweep
 	// can put on screen but the detail view rejects is a dead end for the user.
 	for key, data := range indexed {
-		if !SupportedKinds[data.Kind] {
+		if !SupportedKinds.Has(data.Kind) {
 			t.Errorf("sweep emitted %s, which SupportedKinds rejects", key)
 		}
 	}

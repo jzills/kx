@@ -307,3 +307,43 @@ func EnsureKind(index int, name string, kind, expected Kind, state PreviousListe
 		index, kind, name, expected, strings.ToLower(string(expected)), back,
 	)
 }
+
+// Set is an ordered set of kinds — the kinds one command works on, in the
+// order its help and its errors name them.
+//
+// A slice rather than the map[Kind]bool these used to be. Membership was all
+// the maps were for, but the same list also has to be *printed* now that an
+// "unsupported kind" error says which kinds are supported, and map iteration
+// is randomized: a map cannot name the same kinds in the same order twice, so
+// the message would differ between runs and could not be pinned by a test.
+type Set []Kind
+
+// Has reports whether the set contains a kind. Linear, over a handful of
+// entries — which is every caller.
+func (s Set) Has(kind Kind) bool {
+	for _, member := range s {
+		if member == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// List renders the set the way a sentence names it: "Pods", "Pods and
+// Deployments", "Pods, Deployments and StatefulSets".
+//
+// Plurals come from PluralDisplay, so "Ingress" reads as "Ingresses" rather
+// than the "Ingresss" a bare +"s" would produce.
+func (s Set) List() string {
+	names := make([]string, 0, len(s))
+	for _, kind := range s {
+		names = append(names, PluralDisplay(string(kind)))
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}

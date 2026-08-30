@@ -31,8 +31,9 @@ func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
-	if !diagnostics.SupportedKinds[kind] {
-		return diagnostics.Report{}, fmt.Errorf("diagnostic is not supported for '%s'.", kind)
+	if !diagnostics.SupportedKinds.Has(kind) {
+		return diagnostics.Report{}, unsupportedKindError(
+			"diagnostic", kind, diagnostics.SupportedKinds)
 	}
 	data, err := c.Diagnostics.Gather(ctx, kind, name, namespace)
 	if err != nil {

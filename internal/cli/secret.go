@@ -203,7 +203,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 		if options.HasKey {
 			value, ok := secret.Values[options.Key]
 			if !ok {
-				return fmt.Errorf("No key '%s' in %s/%s", options.Key, expected, name)
+				return fmt.Errorf("No key '%s' in %s/%s.", options.Key, expected, name)
 			}
 			// Raw and unwrapped so the value stays substitutable in shell.
 			return writeValue(value)

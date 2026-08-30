@@ -28,7 +28,7 @@ func (c NodeCommand) Execute(index int) (string, error) {
 		return "", err
 	}
 	if kind != kinds.Node {
-		return "", fmt.Errorf("%s is only supported for nodes.", c.Verb)
+		return "", unsupportedKindError(c.Verb, kind, kinds.Set{kinds.Node})
 	}
 	// No -n: a Node is cluster-scoped, and kubectl cordon takes no namespace.
 	if _, err := c.Kubectl.Run([]string{c.Verb, name}); err != nil {
@@ -70,7 +70,7 @@ func (c DrainCommand) Execute(index int, yes bool, extraArgs []string) error {
 		return err
 	}
 	if kind != kinds.Node {
-		return fmt.Errorf("drain is only supported for nodes.")
+		return unsupportedKindError("drain", kind, kinds.Set{kinds.Node})
 	}
 	// Asked before the prompt, and before the drain, because a drain streams
 	// rather than captures: kubectl's own "not found" goes straight to the
@@ -213,7 +213,7 @@ func validateNodeIndexes(resolver IndexResolver, indexes []int, verb string) err
 			return err
 		}
 		if kind != kinds.Node {
-			return fmt.Errorf("%s is only supported for nodes.", verb)
+			return unsupportedKindError(verb, kind, kinds.Set{kinds.Node})
 		}
 	}
 	return nil

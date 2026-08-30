@@ -317,6 +317,27 @@ func clusterScopedScopeError(flag, resource string) error {
 		flag, kinds.PluralDisplay(resource))
 }
 
+// unsupportedKindError refuses a command for the kind an index resolved to,
+// naming both what was selected and what the command does work on.
+//
+// Both halves matter, and the codebase had each of them without the other.
+// "scale is not supported for 'Pod'." said what you picked but not what to
+// pick instead; "cp is only supported for pods." said the opposite and left
+// you to work out what index 1 had been. An index is a number, so the kind it
+// resolved to is precisely the fact the user does not have in front of them —
+// and "then which kinds does this work on" is the question the first form
+// always provoked.
+// Phrased "kx X does not support" rather than "X is not supported for",
+// which is what most of these said, because one command is named for a plural:
+// "logs is not supported" is wrong and "logs are not supported" cannot be
+// generated from the same template as "scale is". Naming the command as kx
+// spells it takes the copula out of the sentence and reads correctly for all
+// twelve.
+func unsupportedKindError(command string, kind kinds.Kind, supported kinds.Set) error {
+	return fmt.Errorf("kx %s does not support '%s' — only %s.",
+		command, kind, supported.List())
+}
+
 // clusterScoped reports whether a resource spelling names a kind that lives
 // outside any namespace.
 //
