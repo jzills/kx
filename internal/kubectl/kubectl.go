@@ -120,6 +120,18 @@ func translate(err error) error {
 
 // Run captures stdout, returning the trimmed stderr as the error on a non-zero
 // exit so the caller can render kubectl's own message.
+// Error is a failure kubectl itself reported: its stderr, verbatim.
+//
+// Typed so a caller can tell "kubectl said this" from "something else said
+// this". kubectl offers no exit code that distinguishes a missing resource, so
+// kx has to read the message — and reading a message is only safe when it is
+// certain whose message it is. cli.IsNotFound requires this type for exactly
+// that reason: "grype not found on PATH" contains the same words kubectl uses
+// for a vanished pod, and nothing but the type can tell them apart.
+type Error struct{ Stderr string }
+
+func (e Error) Error() string { return e.Stderr }
+
 func (e Exec) Run(args []string) (string, error) {
 	cmd := e.command(args)
 	var stdout, stderr strings.Builder
@@ -135,7 +147,7 @@ func (e Exec) Run(args []string) (string, error) {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return "", errors.New(strings.TrimSpace(stderr.String()))
+		return "", Error{Stderr: strings.TrimSpace(stderr.String())}
 	}
 	if err != nil {
 		return "", translate(err)

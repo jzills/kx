@@ -307,7 +307,7 @@ func TestDecodeMissingKeyNamesTheKey(t *testing.T) {
 // a flat failure — the explicit type is what routes it into the refresh path.
 func TestDecodeNotFoundBecomesStale(t *testing.T) {
 	quietRender(t)
-	kube := &fakeKubectl{err: errors.New(`Error from server (NotFound): secrets "db-creds" not found`)}
+	kube := &fakeKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): secrets "db-creds" not found`}}
 	services := secretServices(t, kube, kinds.Secret)
 
 	err := decodeSecrets(services, "secret", []int{1}, nil, decodeOptions())

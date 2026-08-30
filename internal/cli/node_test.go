@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	kube "github.com/jzills/kx/internal/kubectl"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -67,7 +68,7 @@ func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 // A vanished node is reported as stale so the caller can relist, rather than
 // as whatever kubectl said about a name that is no longer there.
 func TestCordonReportsAVanishedNodeAsStale(t *testing.T) {
-	kubectl := &recordingKubectl{err: errors.New(`Error from server (NotFound): nodes "node-a" not found`), probeCode: 1}
+	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}, probeCode: 1}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
 	_, err := command.Execute(1)
 
@@ -307,7 +308,7 @@ func TestCordonAppliesAWholeNodeBatch(t *testing.T) {
 // and it asked "Evict all pods from Node/node-a?" about a node that had not
 // existed for a while before saying so.
 func TestDrainReportsAVanishedNodeAsStale(t *testing.T) {
-	kubectl := &recordingKubectl{err: errors.New(`Error from server (NotFound): nodes "node-a" not found`)}
+	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}}
 	asked := false
 	command := DrainCommand{
 		Kubectl: kubectl, State: node("node-a"),
