@@ -60,11 +60,45 @@ func reportOf(report diagnostics.Report) jsonReport {
 }
 
 // diagnosticJSON serialises one resource's report.
+//
+// The same shape a sweep produces, with one entry in it. kx diag used to emit
+// the report bare at the top level here and a resources list for a sweep, so a
+// consumer had to branch on which one it was looking at — while kx scan, kx
+// tree and kx top each have one shape whatever they were pointed at. An
+// indexed run is a sweep of one, and saying so costs a wrapper and buys a
+// pipeline that reads `.resources[]` for both.
 func diagnosticJSON(report diagnostics.Report) (string, error) {
-	return encode(struct {
-		SchemaVersion int `json:"schemaVersion"`
-		jsonReport
-	}{reportSchemaVersion, reportOf(report)})
+	healthy := 0
+	if report.Verdict == diagnostics.OK {
+		healthy = 1
+	}
+	return encode(diagnosticDocument{
+		SchemaVersion: reportSchemaVersion,
+		Kind:          report.Kind,
+		Name:          report.Name,
+		Namespace:     report.Namespace,
+		Checked:       1,
+		Healthy:       healthy,
+		Resources:     []jsonReport{reportOf(report)},
+	})
+}
+
+// diagnosticDocument is the one shape kx diag --json emits, indexed or swept.
+//
+// Kind and Name are the subject an index named, and are absent for a sweep,
+// which is about a namespace rather than a resource — the same distinction kx
+// scan and kx tree draw between an indexed run and a swept one. The resource
+// itself still appears in Resources, so nothing has to read the subject to
+// find the findings.
+type diagnosticDocument struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	Kind          kinds.Kind   `json:"kind,omitempty"`
+	Name          string       `json:"name,omitempty"`
+	Namespace     string       `json:"namespace,omitempty"`
+	AllNamespaces bool         `json:"allNamespaces,omitempty"`
+	Checked       int          `json:"checked"`
+	Healthy       int          `json:"healthy"`
+	Resources     []jsonReport `json:"resources"`
 }
 
 // triageJSON serialises a sweep.
@@ -81,17 +115,13 @@ func triageJSON(result render.TriageResult) (string, error) {
 	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute
 	// blanks it before Sweep runs, since there is no single namespace the
 	// listing came from.
-	namespace := result.Namespace
-	return encode(struct {
-		SchemaVersion int          `json:"schemaVersion"`
-		Namespace     string       `json:"namespace,omitempty"`
-		AllNamespaces bool         `json:"allNamespaces,omitempty"`
-		Checked       int          `json:"checked"`
-		Healthy       int          `json:"healthy"`
-		Resources     []jsonReport `json:"resources"`
-	}{
-		reportSchemaVersion, namespace, result.AllNamespaces,
-		result.Checked, result.Healthy, resources,
+	return encode(diagnosticDocument{
+		SchemaVersion: reportSchemaVersion,
+		Namespace:     result.Namespace,
+		AllNamespaces: result.AllNamespaces,
+		Checked:       result.Checked,
+		Healthy:       result.Healthy,
+		Resources:     resources,
 	})
 }
 
