@@ -24,7 +24,7 @@ func TestIsNotFoundRecognizesKubectlMessages(t *testing.T) {
 		`pods "nginx" not found`,
 	}
 	for _, message := range found {
-		if !IsNotFound(errors.New(message)) {
+		if !IsNotFound(kubectl.Error{Stderr: message}) {
 			t.Errorf("IsNotFound(%q) = false, want true", message)
 		}
 	}
@@ -34,9 +34,16 @@ func TestIsNotFoundRecognizesKubectlMessages(t *testing.T) {
 		`Unable to connect to the server: dial tcp: i/o timeout`,
 	}
 	for _, message := range other {
-		if IsNotFound(errors.New(message)) {
+		if IsNotFound(kubectl.Error{Stderr: message}) {
 			t.Errorf("IsNotFound(%q) = true, want false", message)
 		}
+	}
+
+	// The same words, from something that is not kubectl. Only the type tells
+	// them apart, which is why IsNotFound demands one.
+	notKubectl := errors.New(`pods "nginx" not found`)
+	if IsNotFound(notKubectl) {
+		t.Errorf("IsNotFound(%q) = true for an error kubectl never produced", notKubectl)
 	}
 	if IsNotFound(nil) {
 		t.Error("IsNotFound(nil) = true, want false")
@@ -346,15 +353,15 @@ func TestEnsureExists(t *testing.T) {
 	}
 }
 
-// IsNotFound matches the bare substring "not found", which it has to: kubectl
-// offers no exit code that distinguishes a missing resource. scanner's own
-// "grype not found on PATH" reads the same to it.
+// The wording still collides — scanner.NotFoundError reads "grype not found on
+// PATH", which is the same words kubectl uses for a vanished pod — and it no
+// longer matters, because IsNotFound requires the error to be kubectl's before
+// it reads a word of it.
 //
-// #269 guarded the one call site where that collided. The collision is in the
-// wording, so it exists wherever the two errors meet — here, a scanner that
-// vanished between kx scan's preflight and the scan, which surfaces from
-// Capture rather than from EnsureAvailable. Left alone, kx printed the install
-// message and then "Run 'kx get <resource>' to refresh the list."
+// #269 guarded one call site, and the fix after it excluded the type at
+// another. The Fatalf below is what keeps this test honest: it fails loudly if
+// the wording ever stops colliding, since then the test would be passing for a
+// reason other than the one it names.
 func TestAMissingScannerIsNotStaleState(t *testing.T) {
 	err := scanner.NotFoundError{Binary: "grype"}
 	if !strings.Contains(err.Error(), "not found") {
@@ -362,6 +369,28 @@ func TestAMissingScannerIsNotStaleState(t *testing.T) {
 	}
 	if isStale(err) {
 		t.Error("a missing scanner binary was treated as a vanished resource")
+	}
+}
+
+// The general form of the same property: nothing that is not kubectl's error
+// can be read as a vanished resource, whatever it happens to say. Each of
+// these was a live bug or one waiting to happen while IsNotFound read the
+// substring off any error at all.
+func TestOnlyKubectlsOwnErrorCanBeStale(t *testing.T) {
+	for _, err := range []error{
+		scanner.NotFoundError{Binary: "trivy"},
+		errors.New(`Error from server (NotFound): pods "web" not found`),
+		fmt.Errorf("reading config: %w", errors.New("theme not found")),
+		errors.New("no such file or directory: kubeconfig not found"),
+	} {
+		if isStale(err) {
+			t.Errorf("isStale(%q) = true for an error kubectl never produced", err)
+		}
+	}
+	// And the one that is kubectl's still is, so the guard above is not simply
+	// refusing everything.
+	if !isStale(kubectl.Error{Stderr: `Error from server (NotFound): pods "web" not found`}) {
+		t.Error("kubectl's own not-found error stopped being stale")
 	}
 }
 
@@ -375,7 +404,7 @@ func TestAWrappedMissingScannerIsNotStaleState(t *testing.T) {
 // A real vanished resource still relists, so the exclusion above is not simply
 // switching staleness off.
 func TestAVanishedResourceIsStillStaleState(t *testing.T) {
-	if !isStale(errors.New(`Error from server (NotFound): pods "nginx" not found`)) {
+	if !isStale(kubectl.Error{Stderr: `Error from server (NotFound): pods "nginx" not found`}) {
 		t.Error("a vanished pod was not treated as stale")
 	}
 }

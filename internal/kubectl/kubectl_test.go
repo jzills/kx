@@ -183,3 +183,41 @@ func TestUnsetContextIsCachedToo(t *testing.T) {
 		t.Errorf("spawned kubectl %d times for 3 reads, want 1", got)
 	}
 }
+
+// Run must return kubectl's stderr as a typed Error, not a bare one.
+//
+// The type is what lets cli.IsNotFound read the message at all: "not found" is
+// not a rare phrase, and a marker list cannot be made safe on an arbitrary
+// error — scanner.NotFoundError says "grype not found on PATH" about something
+// that was never a resource. Every caller-side test constructs the type
+// directly, so without this one the production wiring could go back to
+// errors.New and nothing would notice.
+func TestRunReturnsATypedErrorCarryingStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH-shimmed test double assumes a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "kubectl")
+	// What kubectl actually prints for a pod that is not there, on stderr,
+	// with a non-zero exit.
+	const stderr = `Error from server (NotFound): pods "nginx" not found`
+	body := "#!/bin/sh\necho '" + stderr + "' >&2\nexit 1\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := Exec{}.Run([]string{"get", "pod", "nginx"})
+	if err == nil {
+		t.Fatal("Run succeeded on a non-zero exit")
+	}
+	var reported Error
+	if !errors.As(err, &reported) {
+		t.Fatalf("err is %T, want a kubectl.Error — the type is what makes the "+
+			"message safe to read", err)
+	}
+	if reported.Stderr != stderr {
+		t.Errorf("Stderr = %q, want kubectl's own message verbatim", reported.Stderr)
+	}
+}
