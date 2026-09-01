@@ -234,6 +234,11 @@ func TestLastLineFallsBackWhenStderrIsEmpty(t *testing.T) {
 }
 
 func TestImagesNoun(t *testing.T) {
+	// 0 reads "no images found" rather than "0 images" — the same register kx
+	// get, kx top and kx diag use for an empty result.
+	if got := imagesNoun(0); got != "no images found" {
+		t.Errorf("imagesNoun(0) = %q", got)
+	}
 	if got := imagesNoun(1); got != "1 image" {
 		t.Errorf("imagesNoun(1) = %q", got)
 	}
@@ -262,8 +267,8 @@ func TestScanRejectsANonNumericIndex(t *testing.T) {
 	}
 }
 
-// The selector, the banner label and the empty-result message all describe the
-// same scope and have to agree; they live on one type for that reason.
+// The selector and the banner label both describe the same scope and have to
+// agree; they live on one type for that reason.
 func TestScanScopeDescribesOneNamespace(t *testing.T) {
 	scope := scanScope{Namespace: "prod"}
 	if got := strings.Join(scope.selector(), " "); got != "-n prod" {
@@ -271,9 +276,6 @@ func TestScanScopeDescribesOneNamespace(t *testing.T) {
 	}
 	if got := scope.label(); got != "prod" {
 		t.Errorf("label = %q, want the namespace", got)
-	}
-	if got := scope.emptyMessage(); !strings.Contains(got, "'prod'") {
-		t.Errorf("emptyMessage = %q, want it to name the namespace", got)
 	}
 }
 
@@ -285,9 +287,6 @@ func TestScanScopeDescribesAllNamespaces(t *testing.T) {
 	// The literal string kx get -A already prints for the same scope.
 	if got := scope.label(); got != "all namespaces" {
 		t.Errorf("label = %q, want %q", got, "all namespaces")
-	}
-	if got := scope.emptyMessage(); !strings.Contains(got, "any namespace") {
-		t.Errorf("emptyMessage = %q, want it to cover every namespace", got)
 	}
 }
 
@@ -334,17 +333,41 @@ func TestCollectAllNamespacesUsesTheClusterWideSelector(t *testing.T) {
 	}
 }
 
-// An empty sweep names the scope it searched, so the message is actionable.
-func TestCollectReportsAnEmptyScope(t *testing.T) {
+// A sweep that finds no workloads is not an error — kx diag treats an empty
+// namespace the same way, and a pipeline running `kx scan -n staging` on a
+// namespace nothing has been deployed to yet should not fail the build for it.
+func TestCollectOnAnEmptyScopeSucceeds(t *testing.T) {
 	kubectl := &fakeKubectl{output: `{"items":[]}`}
 	command := ScanCommand{Kubectl: kubectl, Scanner: &fakeScanner{}, Status: noStatus}
 
-	_, err := command.Collect(scanScope{All: true}, "scout")
-	if err == nil {
-		t.Fatal("an empty sweep succeeded")
+	images, err := command.Collect(scanScope{All: true}, "scout")
+	if err != nil {
+		t.Fatalf("Collect on an empty scope: %v", err)
 	}
-	if !strings.Contains(err.Error(), "any namespace") {
-		t.Errorf("err = %v, want it to name the scope", err)
+	if len(images) != 0 {
+		t.Errorf("images = %v, want none", images)
+	}
+}
+
+// The end-to-end regression: `kx scan -n <empty>` used to exit 1 — the only
+// one of kx get/top/diag/scan that treated "nothing there" as a failure.
+// Driven through RunE, not just Collect, so the fix is pinned all the way to
+// the exit code a pipeline actually sees.
+func TestScanOnAnEmptyNamespaceSucceeds(t *testing.T) {
+	sink := captureRender(t)
+	services := Services{
+		Kubectl: &fakeKubectl{namespace: "prod", output: `{"items":[]}`},
+		State:   &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config:  config.Default(),
+		Scanner: &fakeScanner{},
+	}
+	cmd := newScanCommand(services)
+
+	if err := cmd.RunE(cmd, []string{"--namespace", "empty"}); err != nil {
+		t.Fatalf("kx scan -n empty: %v, want nil — an empty namespace is not a failure", err)
+	}
+	if !strings.Contains(sink.String(), "no images found") {
+		t.Errorf("output = %q, want it to say nothing was found", sink.String())
 	}
 }
 

@@ -166,16 +166,16 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 	if !table.Indexable() {
 		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
-		// stderr) shows the zero-count caption instead of silence.
+		// stderr) shows the empty caption instead of silence.
 		if strings.TrimSpace(table.Raw) != "" {
 			r.Raw(table.Raw)
 			return
 		}
-		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
+		r.emptyListing(resourceType, namespace)
 		return
 	}
 	if len(table.Rows) == 0 {
-		r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(0))
+		r.emptyListing(resourceType, namespace)
 		return
 	}
 
@@ -183,6 +183,15 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.Table(columns, cells)
+}
+
+// emptyListing captions a listing that resolved to nothing. "none found"
+// rather than itemLabel(0)'s "0 items": a bare zero count reads as silence,
+// where kubectl's own "No resources found in X namespace" at least says
+// nothing was there — this says the same thing without repeating the
+// namespace the caption already carries a segment for.
+func (r *Renderer) emptyListing(resourceType, namespace string) {
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, "none found")
 }
 
 // styledColumnsAndCells applies status/usage-percentage styling and

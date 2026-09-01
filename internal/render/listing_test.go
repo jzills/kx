@@ -65,11 +65,24 @@ func TestIndexedTablePrintsNonTabularOutputVerbatim(t *testing.T) {
 }
 
 // Genuinely empty stdout is not an error — kubectl sends "No resources found"
-// to stderr — so the caption reports a count rather than printing nothing.
+// to stderr — so the caption says nothing was found rather than printing
+// nothing itself.
 func TestIndexedTableCaptionsAnEmptyListing(t *testing.T) {
 	out := capture(func(r *Renderer) { r.IndexedTable(index.Table{}, "pods", "prod") })
 
-	if !strings.Contains(out, "0 items") {
-		t.Errorf("output = %q, want a zero-count caption", out)
+	if !strings.Contains(out, "none found") {
+		t.Errorf("output = %q, want an empty-listing caption", out)
+	}
+}
+
+// A table whose Rows the parser returned empty (as opposed to non-tabular,
+// genuinely empty stdout above) hits the other empty branch — both must
+// caption the same way rather than one falling back to a bare zero count.
+func TestIndexedTableCaptionsAnEmptyParsedTable(t *testing.T) {
+	table := index.Table{Headers: []string{"NAME", "STATUS"}}
+	out := capture(func(r *Renderer) { r.IndexedTable(table, "pods", "prod") })
+
+	if !strings.Contains(out, "none found") {
+		t.Errorf("output = %q, want an empty-listing caption", out)
 	}
 }

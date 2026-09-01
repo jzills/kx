@@ -46,7 +46,7 @@ func (r *Renderer) Triage(result TriageResult) {
 		scope = AllNamespaces
 	}
 	if result.Checked == 0 {
-		r.Caption("Mixed", scope, "0 checked")
+		r.Caption("Mixed", scope, "nothing to check")
 		return
 	}
 	if len(result.Reports) == 0 {

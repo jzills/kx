@@ -150,8 +150,8 @@ func TestTriageFullAllNamespacesClaimsNothingIsHidden(t *testing.T) {
 
 func TestTriageEmptyNamespace(t *testing.T) {
 	out := capture(func(r *Renderer) { r.Triage(TriageResult{Namespace: "prod"}) })
-	if !strings.Contains(out, "0 checked") {
-		t.Errorf("output = %q", out)
+	if !strings.Contains(out, "nothing to check") {
+		t.Errorf("output = %q, want a caption saying nothing was there to check", out)
 	}
 }
 
