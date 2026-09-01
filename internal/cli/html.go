@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -28,14 +29,40 @@ type htmlOptions struct {
 	Out string
 }
 
+// impliedHTML reports whether an HTML report was asked for — directly with
+// --html, or implicitly by naming where to write one with --out. --out
+// already says "HTML" in its own name and description ("Write the HTML
+// report to this file..."), so `kx diag --out report.html` on its own is not
+// a different request from `kx diag --html --out report.html` — it is the
+// same request spelled with one flag instead of two, and every command reads
+// html through this rather than the bare flag so the two spellings can never
+// disagree about what they asked for.
+func impliedHTML(html bool, out string) bool {
+	return html || out != ""
+}
+
+// htmlFlagName names whichever flag actually asked for an HTML report, for a
+// conflict error where that flag is on one side. Called only once
+// impliedHTML(html, out) is already known true, so html itself decides it:
+// --html directly, or --out when that was what implied it — never a flag the
+// caller did not type.
+func htmlFlagName(html bool) string {
+	if html {
+		return "--html"
+	}
+	return "--out"
+}
+
 // validate refuses the flags that only configure --html's server when no HTML
-// was asked for.
+// was asked for — neither directly with --html nor implicitly with --out,
+// which every caller is expected to have already folded into Enabled via
+// impliedHTML by the time this runs.
 //
-// Both were accepted and dropped on the floor: `kx diag --port 9090` printed a
-// table and said nothing about the port it had ignored. kx refuses every other
-// contradictory combination it can see — '--json' with '--html', '--full' with
-// '--fail-on', a scope flag beside an index — and a flag that configures a
-// server nobody asked to start is the same mistake, told the same way.
+// The Out-without-Enabled case stays checked even though it should be
+// unreachable through that convention: refusing it loudly is what makes a
+// caller that forgets impliedHTML fail a test immediately, rather than
+// silently writing nothing — the exact "flag accepted and dropped on the
+// floor" bug --port and --no-open are refused here for.
 //
 // portSet and noOpenSet are passed rather than read off the struct because
 // zero is a legitimate --port (it means "pick a free one"), so the value
@@ -48,7 +75,9 @@ func (o htmlOptions) validate(portSet, noOpenSet bool) error {
 		case noOpenSet:
 			return htmlOnlyFlagError("--no-open", "it configures the report's server")
 		case o.Out != "":
-			return htmlOnlyFlagError("--out", "it says where the report is written")
+			return errors.New(
+				"internal error: htmlOptions.Out is set without Enabled — the " +
+					"caller must derive Enabled from impliedHTML(html, out).")
 		}
 		return nil
 	}

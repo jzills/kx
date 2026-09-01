@@ -490,6 +490,19 @@ func TestScanRejectsFullWithHTML(t *testing.T) {
 	}
 }
 
+// --out implies --html, so --full is exactly as incoherent alongside it — and
+// the error names --out, the flag actually typed, not --html.
+func TestScanRejectsFullWithOut(t *testing.T) {
+	cmd := newScanCommand(argvServices(t))
+	err := cmd.RunE(cmd, []string{"1", "--full", "--out", filepath.Join(t.TempDir(), "r.html")})
+	if err == nil {
+		t.Fatal("--full with --out was accepted")
+	}
+	if !strings.Contains(err.Error(), "--full") || !strings.Contains(err.Error(), "--out") {
+		t.Errorf("error %q, want it to name --full and --out (not --html, which was never typed)", err)
+	}
+}
+
 // --no-open is extracted before --port, so a typo'd --no-open literal in
 // RunE would leave the token "--no-open" in argv for the following
 // extractString(rest, "--port", "") call to swallow as --port's own value,

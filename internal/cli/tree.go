@@ -165,7 +165,8 @@ func newTreeCommand(services Services) *cobra.Command {
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
 			out, _ := cmd.Flags().GetString("out")
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
+			wantsHTML := impliedHTML(html, out)
+			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
 				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
 				return err
@@ -175,10 +176,10 @@ func newTreeCommand(services Services) *cobra.Command {
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
 			asJSON, _ := cmd.Flags().GetBool("json")
 
-			if asJSON && html {
-				return errors.New(
-					"'--json' cannot be combined with '--html' — one is for a " +
-						"machine and the other for a browser.")
+			if asJSON && wantsHTML {
+				return fmt.Errorf(
+					"'--json' cannot be combined with '%s' — one is for a "+
+						"machine and the other for a browser.", htmlFlagName(html))
 			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {

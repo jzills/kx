@@ -457,15 +457,16 @@ func newScanCommand(services Services) *cobra.Command {
 						"Invalid value for '--port': '%s' is not a valid int.", portText)
 				}
 			}
-			if full && html {
-				return errors.New(
-					"'--full' cannot be combined with '--html' — the HTML report " +
-						"already carries every finding.")
+			wantsHTML := impliedHTML(html, out)
+			if full && wantsHTML {
+				return fmt.Errorf(
+					"'--full' cannot be combined with '%s' — the HTML report "+
+						"already carries every finding.", htmlFlagName(html))
 			}
-			if asJSON && html {
-				return errors.New(
-					"'--json' cannot be combined with '--html' — one is for a " +
-						"machine and the other for a browser.")
+			if asJSON && wantsHTML {
+				return fmt.Errorf(
+					"'--json' cannot be combined with '%s' — one is for a "+
+						"machine and the other for a browser.", htmlFlagName(html))
 			}
 			if asJSON && full {
 				return errors.New(
@@ -489,7 +490,7 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 			}
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
+			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
 				return err
 			}

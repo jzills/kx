@@ -223,6 +223,11 @@ gathered to build the table you'd see without `--html`.
 `--no-open` skips launching a browser — the URL still prints, so you can
 open it yourself.
 
+`--out <path>` writes the page to a file instead of serving it — the one
+case where a report does reach disk. It implies `--html` on its own, so
+`kx diag --out report.html` is the whole command; `--port` and `--no-open`
+configure a server this doesn't start, so they're refused alongside it.
+
 ## Use kx in CI
 
 `kx diag` and `kx scan` both take `--json`, printing the same analysis as a
@@ -236,17 +241,21 @@ sweeps every workload kind in every namespace and **exits 2** if anything is
 critical; `kx scan -A --fail-on high` does the same for image vulnerabilities.
 
 ```bash
-kx diag -A --fail-on critical          # 0 if the cluster is healthy, 2 if not
+kx diag -A --fail-on critical                        # 0 if the cluster is healthy, 2 if not
 kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
-kx diag -A --fail-on critical --html   # publishes the report *and* fails the build
+kx diag -A --fail-on critical --out report.html       # publishes the report *and* fails the build
 ```
 
 The gate is independent of how the findings are presented: `--fail-on` applies
-alongside `--json` and `--html` alike, so a pipeline can publish a report and
-still fail on what's in it. With `--html` the exit code lands once the server
-stops. The one combination that can't work is `kx scan --full --fail-on`, and
-it's refused rather than ignored — `--full` streams the scanner's own report,
-which kx never parses, so there would be nothing for the gate to read.
+alongside `--json` and `--html`/`--out` alike, so a pipeline can publish a
+report and still fail on what's in it. Use `--out` rather than bare `--html`
+in CI: `--html` on its own serves the page and blocks until Ctrl-C, which a
+pipeline never sends, so the gate after it never runs. `--out` writes the
+file and returns immediately, and it implies `--html` on its own — no need
+for both flags. The one combination that can't work is `kx scan --full
+--fail-on`, and it's refused rather than ignored — `--full` streams the
+scanner's own report, which kx never parses, so there would be nothing for
+the gate to read.
 
 The exit code is **2, not 1**, deliberately: kx exits 1 for its own failures, so
 a pipeline can tell "the cluster is sick" — the check working — from "kx

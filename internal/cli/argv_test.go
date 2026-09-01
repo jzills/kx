@@ -366,16 +366,42 @@ func TestOutRefusesTheServedOnlyFlags(t *testing.T) {
 	}
 }
 
-// --out is an --html flag like the others, so on its own it is refused the
-// same way --port is.
-func TestOutNeedsHTML(t *testing.T) {
-	quietRender(t)
-	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--out", "r.html"})
-	if err == nil {
-		t.Fatal("kx diag --out was accepted with no --html")
+// --out already says "HTML" in its own name and description ("Write the HTML
+// report to this file..."), so on its own it is not refused for lacking
+// --html — it implies it, the same way --html --out already worked. Driven
+// across all four commands: two parse this flag by hand and two let cobra do
+// it, and the fix has to hold in both wirings.
+func TestOutAloneImpliesHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			err := Execute(NewRoot(argvServices(t), "test"), []string{command, "--out", path})
+			if err != nil && strings.Contains(err.Error(), "only applies with") {
+				t.Errorf("kx %s --out was refused for lacking --html: %v", command, err)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "--out") || !strings.Contains(err.Error(), "--html") {
-		t.Errorf("error = %q, want it to name --out and --html", err)
+}
+
+// --json and --out are exactly as contradictory as --json and --html — --out
+// implies --html, so this is the same conflict spelled with one flag instead
+// of two — and the error names --out, the flag actually typed, not --html.
+func TestJSONAndOutAreRefusedTogetherEverywhere(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--json", "--out", path})
+			if err == nil {
+				t.Fatalf("kx %s --json --out was accepted", command)
+			}
+			if !strings.Contains(err.Error(), "--json") ||
+				!strings.Contains(err.Error(), "--out") {
+				t.Errorf("error = %q, want it to name --json and --out (not --html, which was never typed)", err)
+			}
+		})
 	}
 }
 
