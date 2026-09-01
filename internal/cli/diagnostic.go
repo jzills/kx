@@ -185,16 +185,17 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			out, _ := cmd.Flags().GetString("out")
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen, Out: out}
+			wantsHTML := impliedHTML(html, out)
+			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
 				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
 				return err
 			}
 
-			if asJSON && html {
-				return errors.New(
-					"'--json' cannot be combined with '--html' — one is for a " +
-						"machine and the other for a browser.")
+			if asJSON && wantsHTML {
+				return fmt.Errorf(
+					"'--json' cannot be combined with '%s' — one is for a "+
+						"machine and the other for a browser.", htmlFlagName(html))
 			}
 			// Unlike kx scan's, this pair is redundant rather than impossible:
 			// a document always carries every swept resource, so --full has

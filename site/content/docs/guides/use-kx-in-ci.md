@@ -118,13 +118,15 @@ alongside `--json` and [`--html`](../browser-reports/) alike, so a job can
 publish a report and still fail on what is in it:
 
 ```bash
-kx diag -A --fail-on critical --html --out diag.html
+kx diag -A --fail-on critical --out diag.html
 ```
 
 `--out` writes the page and returns, so the gate runs and the file is there
-for an artifact step to pick up. Plain `--html` serves the report and blocks
-until Ctrl-C, which is right at a terminal and wrong in a pipeline — nothing
-sends Ctrl-C to a CI job, so it would hang until the runner killed it.
+for an artifact step to pick up — and it implies `--html` on its own, so
+there is no need to pass both. Plain `--html` without `--out` serves the
+report and blocks until Ctrl-C, which is right at a terminal and wrong in a
+pipeline — nothing sends Ctrl-C to a CI job, so it would hang until the
+runner killed it.
 
 {{% kx-note kind="warn" %}}
 `kx scan --full --fail-on` is refused rather than ignored. `--full` streams
