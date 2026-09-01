@@ -122,7 +122,7 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 		Short:   short,
 		Long:    long,
 		Example: "  kx " + verb + " 1\n  kx " + verb + " 1 3\n  kx " + verb + " 1..3",
-		Args:    cobra.MinimumNArgs(1),
+		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {

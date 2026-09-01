@@ -210,7 +210,7 @@ func newGetCommand(services Services) *cobra.Command {
 			"for either to name, so kx refuses them rather than listing something " +
 			"other than what was asked for.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
-		Args:    cobra.MinimumNArgs(1),
+		Args:    minArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for
 		// why cobra can't do this.

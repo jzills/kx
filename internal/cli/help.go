@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -387,6 +388,54 @@ func argSpelling(arg Arg) string {
 		name += "..."
 	}
 	return name
+}
+
+// minArgs builds a cobra.PositionalArgs validator that requires at least n
+// positional arguments, reporting a shortfall in kx's own voice rather than
+// cobra's "requires at least N arg(s), only received M" — generated from the
+// command's own Use string, so it can't say something --help doesn't.
+func minArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) >= n {
+			return nil
+		}
+		return requiredArgsError(cmd)
+	}
+}
+
+// exactArgs is minArgs' counterpart for a command whose argument count is
+// fixed rather than open-ended. Both a shortfall and an overflow report the
+// same message: either way, RunE did not get what the Use string promises,
+// and cp/drain/port-forward's hand-written arity errors don't distinguish
+// the two either.
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == n {
+			return nil
+		}
+		return requiredArgsError(cmd)
+	}
+}
+
+// requiredArgsError names a command's required arguments the way its own
+// Usage line already spells them, so `kx describe` with no index answers
+// "kx describe requires <index>... — see 'kx describe --help' for usage."
+// rather than cobra's generic arity message. Only the required prefix is
+// named — an optional argument past it, like exec's trailing command, isn't
+// what's missing.
+func requiredArgsError(cmd *cobra.Command) error {
+	var required []string
+	for _, arg := range ParseUse(cmd.Use).Args {
+		if !arg.Required {
+			break
+		}
+		required = append(required, argSpelling(arg))
+	}
+	path := cmd.CommandPath()
+	return fmt.Errorf(
+		"%s requires %s — see '%s --help' for usage.",
+		path, strings.Join(required, " "), path,
+	)
 }
 
 // CommandOrder returns the command names in the order the root help screen

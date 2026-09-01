@@ -197,6 +197,96 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 	}
 }
 
+// requiredArgsError is generated from a command's own Use string, so its
+// wording is exercised here directly rather than through a full command tree
+// — only the required prefix is named, an optional trailing argument (exec's
+// command, get's index) is left out because it isn't what's missing.
+func TestRequiredArgsErrorNamesOnlyTheRequiredPrefix(t *testing.T) {
+	cases := []struct {
+		use  string
+		want string
+	}{
+		{"describe <index>... [kubectl flags]", "kx describe requires <index>... — see 'kx describe --help' for usage."},
+		{"get <resource> [index]... [kubectl flags]", "kx get requires <resource> — see 'kx get --help' for usage."},
+		{"scale <index> <replicas>", "kx scale requires <index> <replicas> — see 'kx scale --help' for usage."},
+		{"rollout <action> <index>", "kx rollout requires <action> <index> — see 'kx rollout --help' for usage."},
+		{"exec <index> [kubectl flags] [-- command...]", "kx exec requires <index> — see 'kx exec --help' for usage."},
+		{"label <index> [key=value...]", "kx label requires <index> — see 'kx label --help' for usage."},
+	}
+	for _, tc := range cases {
+		// CommandPath climbs the parent chain, so a bare command reports just
+		// its own name ("describe") rather than "kx describe" — give it the
+		// same root every registered command actually has.
+		root := &cobra.Command{Use: "kx"}
+		cmd := &cobra.Command{Use: tc.use}
+		root.AddCommand(cmd)
+
+		got := requiredArgsError(cmd).Error()
+		if got != tc.want {
+			t.Errorf("requiredArgsError(%q) = %q, want %q", tc.use, got, tc.want)
+		}
+	}
+}
+
+// minArgs and exactArgs must actually gate RunE, not just build a nicer
+// message nobody sees: a satisfied count returns nil, an unsatisfied one
+// returns the generated error.
+func TestMinArgsAndExactArgsGateOnCount(t *testing.T) {
+	cmd := &cobra.Command{Use: "describe <index>..."}
+	validate := minArgs(1)
+	if err := validate(cmd, []string{"1"}); err != nil {
+		t.Errorf("minArgs(1) with one arg: %v, want nil", err)
+	}
+	if err := validate(cmd, nil); err == nil {
+		t.Error("minArgs(1) with zero args returned nil, want an error")
+	}
+
+	scale := &cobra.Command{Use: "scale <index> <replicas>"}
+	exact := exactArgs(2)
+	if err := exact(scale, []string{"1", "3"}); err != nil {
+		t.Errorf("exactArgs(2) with two args: %v, want nil", err)
+	}
+	for _, args := range [][]string{nil, {"1"}, {"1", "3", "extra"}} {
+		if err := exact(scale, args); err == nil {
+			t.Errorf("exactArgs(2) with %v returned nil, want an error", args)
+		}
+	}
+}
+
+// Every command that requires a fixed or minimum number of arguments must
+// answer a shortfall in kx's own voice, generated from its own Use string —
+// not cobra's "requires at least N arg(s), only received M". Explicit rather
+// than discovered from the tree, so a command quietly reverting to
+// cobra.MinimumNArgs/ExactArgs directly is a failing assertion here instead
+// of a silent regression back to cobra's wording.
+func TestMissingRequiredArgsSpeakInKxsVoiceNotCobras(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	for _, name := range []string{
+		"describe", "logs", "edit", "exec", "debug", "delete", "scale",
+		"rollout", "yaml", "labels", "annotations", "label", "annotate",
+		"events", "cordon", "uncordon", "get",
+	} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%q): %v", name, err)
+		}
+		if cmd.Args == nil {
+			t.Fatalf("%q has no Args validator", name)
+		}
+		got := cmd.Args(cmd, nil)
+		if got == nil {
+			t.Fatalf("kx %s accepted zero arguments", name)
+		}
+		want := "kx " + name + " requires "
+		if !strings.HasPrefix(got.Error(), want) {
+			t.Errorf("kx %s error = %q, want it to start with %q", name, got.Error(), want)
+		}
+		if strings.Contains(got.Error(), "arg(s)") {
+			t.Errorf("kx %s error = %q, still speaks in cobra's voice", name, got.Error())
+		}
+	}
+}
+
 // The README's command table marks repeatable arguments, and the ellipsis sits
 // either inside the brackets or after them depending on the spelling — both
 // mean the same thing, and missing either understates the command.
