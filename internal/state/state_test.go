@@ -422,7 +422,7 @@ func TestNavigateTo(t *testing.T) {
 		save(t, service, State{Resources: pods(name), Namespace: "default"})
 	}
 
-	cases := map[int]string{1: "one", 2: "two", 0: "one", 99: "three"}
+	cases := map[int]string{1: "one", 2: "two", 3: "three"}
 	for position, want := range cases {
 		state, err := service.NavigateTo(position)
 		if err != nil {
@@ -431,6 +431,33 @@ func TestNavigateTo(t *testing.T) {
 		if state.Names()[0] != want {
 			t.Errorf("NavigateTo(%d) = %q, want %q", position, state.Names()[0], want)
 		}
+	}
+}
+
+// A position outside the stack must be refused rather than clamped to the
+// nearest end: unlike Navigate's delta, a position is a number the caller
+// typed, and clamping it silently jumps to an entry other than the one asked
+// for. Covers both directions and the boundary the old clamp treated as
+// in-range.
+func TestNavigateToRefusesAnOutOfRangePosition(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"one", "two", "three"} {
+		save(t, service, State{Resources: pods(name), Namespace: "default"})
+	}
+
+	for _, position := range []int{0, -1, 4, 99} {
+		if _, err := service.NavigateTo(position); err == nil {
+			t.Errorf("NavigateTo(%d) succeeded, want an out-of-range error", position)
+		}
+	}
+
+	// Refusing must not move the cursor.
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Names()[0] != "three" {
+		t.Errorf("cursor moved after a refused NavigateTo: Load() = %q", loaded.Names()[0])
 	}
 }
 
@@ -480,6 +507,31 @@ func TestDropOnlyEntryFails(t *testing.T) {
 
 	if _, err := service.Drop(1); err == nil {
 		t.Error("Drop succeeded on the only entry, want an error")
+	}
+}
+
+// A position outside the stack must be refused rather than clamped to the
+// nearest end — the old clamp() call turned `kx state drop 99` into "delete
+// the last entry" instead of reporting that position 99 doesn't exist.
+func TestDropRefusesAnOutOfRangePosition(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"one", "two", "three"} {
+		save(t, service, State{Resources: pods(name), Namespace: "default"})
+	}
+
+	for _, position := range []int{0, -1, 4, 99} {
+		if _, err := service.Drop(position); err == nil {
+			t.Errorf("Drop(%d) succeeded, want an out-of-range error", position)
+		}
+	}
+
+	// Refusing must not remove anything.
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — a refused Drop dropped an entry", len(history.States))
 	}
 }
 

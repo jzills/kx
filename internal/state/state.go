@@ -565,6 +565,20 @@ func clamp(value, high int) int {
 	return value
 }
 
+// positionOutOfRange reports a `kx state`/`kx state drop` position that names
+// no entry in the history stack, in the same "is out of range" grammar
+// index.Resolve uses for a listing index.
+func positionOutOfRange(position, count int) error {
+	label := "entries"
+	if count == 1 {
+		label = "entry"
+	}
+	return fmt.Errorf(
+		"Position %d is out of range — history has %d %s (run 'kx state --all' to view).",
+		position, count, label,
+	)
+}
+
 // Navigate moves the cursor by delta, clamped to the stack.
 func (s *Service) Navigate(delta int) (State, error) {
 	history, err := s.loadHistory()
@@ -581,7 +595,14 @@ func (s *Service) Navigate(delta int) (State, error) {
 	return backfilled(history.States[history.Cursor]), nil
 }
 
-// NavigateTo moves the cursor to a 1-based position, clamped to the stack.
+// NavigateTo moves the cursor to a 1-based position.
+//
+// Unlike Navigate, a position out of range is refused rather than clamped:
+// Navigate's delta comes from `kx back`/`kx forward` stepping past an end
+// they can't see, where clamping is the right answer, but a position is a
+// number the caller typed — usually copied from `kx state --all` — and
+// clamping a wrong one to the nearest end would silently jump somewhere the
+// caller never asked for.
 func (s *Service) NavigateTo(position int) (State, error) {
 	history, err := s.loadHistory()
 	if err != nil {
@@ -590,7 +611,10 @@ func (s *Service) NavigateTo(position int) (State, error) {
 	if len(history.States) == 0 {
 		return State{}, ErrNoState
 	}
-	history.Cursor = clamp(position-1, len(history.States)-1)
+	if position < 1 || position > len(history.States) {
+		return State{}, positionOutOfRange(position, len(history.States))
+	}
+	history.Cursor = position - 1
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
 	}
@@ -599,6 +623,10 @@ func (s *Service) NavigateTo(position int) (State, error) {
 
 // Drop removes the entry at a 1-based position, keeping the cursor pointing at
 // the same entry where possible.
+//
+// The position is refused when it names no entry, for the same reason
+// NavigateTo refuses one: it is a number the caller typed, and clamping it to
+// the nearest end would drop a different entry than the one asked for.
 func (s *Service) Drop(position int) (History, error) {
 	history, err := s.loadHistory()
 	if err != nil {
@@ -610,7 +638,10 @@ func (s *Service) Drop(position int) (History, error) {
 	if len(history.States) == 1 {
 		return History{}, errors.New("Cannot drop the only state entry.")
 	}
-	i := clamp(position-1, len(history.States)-1)
+	if position < 1 || position > len(history.States) {
+		return History{}, positionOutOfRange(position, len(history.States))
+	}
+	i := position - 1
 	history.States = append(history.States[:i], history.States[i+1:]...)
 	if i < history.Cursor {
 		history.Cursor--
