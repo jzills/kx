@@ -434,7 +434,7 @@ func TestDiagSweepWithHTMLStillPrintsTheTerminalTriage(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(sink.String(), "checked") {
+	if !strings.Contains(sink.String(), "nothing to check") {
 		t.Errorf("terminal output = %q, want the triage caption to still print with --html set", sink.String())
 	}
 }
@@ -486,7 +486,7 @@ func TestDiagSweepWithoutHTMLStillPrintsTheTerminalTriage(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(sink.String(), "checked") {
+	if !strings.Contains(sink.String(), "nothing to check") {
 		t.Errorf("terminal output = %q, want the triage caption to print with --html left off", sink.String())
 	}
 	if strings.Contains(sink.String(), "serving at") {

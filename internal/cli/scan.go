@@ -27,9 +27,8 @@ var scannableKinds = kinds.Set{
 const namespaceScanKinds = "deployments,statefulsets,daemonsets,cronjobs,jobs,pods"
 
 // scanScope is the namespace selection for a sweep: one namespace, or all of
-// them. The kubectl selector, the banner label and the empty-result message
-// all have to agree about the scope, so they live together rather than being
-// rebuilt at each call site.
+// them. The kubectl selector and the banner label have to agree about the
+// scope, so they live together rather than being rebuilt at each call site.
 //
 // An empty Namespace does not mean "all" — client-go spells it that way and
 // diag's Sweep relies on it, but here the whole bug being fixed is a scope
@@ -52,13 +51,6 @@ func (s scanScope) label() string {
 		return render.AllNamespaces
 	}
 	return s.Namespace
-}
-
-func (s scanScope) emptyMessage() string {
-	if s.All {
-		return "no container images found in any namespace."
-	}
-	return fmt.Sprintf("no container images found in namespace '%s'.", s.Namespace)
 }
 
 // ScanCommand resolves container images and hands them to a scanner.
@@ -103,7 +95,11 @@ func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
 	return images, nil
 }
 
-// Collect resolves the unique images across every workload in scope.
+// Collect resolves the unique images across every workload in scope. A scope
+// with no workloads is not an error — it means nothing to scan, the same way
+// kx diag treats a namespace sweep that finds nothing to check: the caller
+// renders a zero-count summary rather than kx exiting on a namespace that
+// simply has no workloads in it yet.
 func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	if _, err := c.EnsureAvailable(engine); err != nil {
 		return nil, err
@@ -129,11 +125,7 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	for _, item := range list.Items {
 		images = append(images, imagesOf(item)...)
 	}
-	images = dedupe(images)
-	if len(images) == 0 {
-		return nil, errors.New(scope.emptyMessage())
-	}
-	return images, nil
+	return dedupe(images), nil
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so
@@ -383,10 +375,17 @@ func dedupe(images []string) []string {
 }
 
 func imagesNoun(count int) string {
-	if count == 1 {
+	switch count {
+	case 0:
+		// Matches the "none found"/"nothing to check" register kx get, kx
+		// top, and kx diag use for an empty result, rather than a bare "0
+		// images" that reads as silence with a number attached.
+		return "no images found"
+	case 1:
 		return "1 image"
+	default:
+		return strconv.Itoa(count) + " images"
 	}
-	return strconv.Itoa(count) + " images"
 }
 
 // scanPage builds the HTML page from the same rows the terminal summary
@@ -630,7 +629,13 @@ func newScanCommand(services Services) *cobra.Command {
 				render.Raw(document)
 				return scanGate(rows, failOn)
 			}
-			render.ScanSummary(rows)
+			// Nothing to summarize: the banner above already said so
+			// ("no images found"), matching kx diag's own empty sweep, which
+			// prints its caption and no table rather than a header row over
+			// nothing.
+			if len(rows) > 0 {
+				render.ScanSummary(rows)
+			}
 			// The gate is the tail of every path, not the alternative to one.
 			// Publishing a report and failing the build are not in conflict:
 			// --html says where the findings go, --fail-on says what they mean.
