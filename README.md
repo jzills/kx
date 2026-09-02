@@ -258,15 +258,19 @@ listing.
 
 ## Use kx in CI
 
-`kx diag` and `kx scan` both take `--json`, printing the same analysis as a
-machine-readable document instead of a table — every swept resource, healthy
-ones included, and every CVE behind the counts. It carries a `schemaVersion`,
-and it's built from the same values the terminal and `--html` render, so the
-three views can't disagree.
+`kx diag`, `kx scan`, `kx tree` and `kx top` all take `--json`, printing the
+same analysis as a machine-readable document instead of a table — every swept
+resource, healthy ones included, and every CVE behind the counts. Each carries
+a `schemaVersion` and names its subject in fields rather than in a sentence, so
+a consumer never has to split `Deployment/api` back apart. They're built from
+the same values the terminal and `--html` render, so the three views can't
+disagree.
 
-`--fail-on <severity>` turns either into a gate. `kx diag -A --fail-on critical`
-sweeps every workload kind in every namespace and **exits 2** if anything is
-critical; `kx scan -A --fail-on high` does the same for image vulnerabilities.
+`--fail-on <severity>` turns the two that produce verdicts into a gate.
+`kx diag -A --fail-on critical` sweeps every workload kind in every namespace
+and **exits 2** if anything is critical; `kx scan -A --fail-on high` does the
+same for image vulnerabilities. `kx tree` and `kx top` have no `--fail-on`:
+neither produces a verdict there would be anything to gate on.
 
 ```bash
 kx diag -A --fail-on critical                        # 0 if the cluster is healthy, 2 if not
