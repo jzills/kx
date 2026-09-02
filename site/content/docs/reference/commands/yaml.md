@@ -6,7 +6,7 @@ description: "Print the raw YAML manifest for one or more indexed resources; --s
 weight: 27
 ---
 
-Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.
+Prints the raw YAML manifest for one or more indexed resources. --show fetches the same full manifest and narrows it client-side to the named top-level fields, so it works with anything kubectl's own YAML output has.
 
 ## Usage
 

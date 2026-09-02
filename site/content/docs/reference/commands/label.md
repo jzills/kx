@@ -6,7 +6,7 @@ description: "Set or remove labels on an indexed resource."
 weight: 15
 ---
 
-Set or remove labels on an indexed resource.
+Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key.
 
 ## Usage
 

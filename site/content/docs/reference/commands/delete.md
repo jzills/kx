@@ -6,7 +6,7 @@ description: "Delete one or more indexed resources (prompts for confirmation unl
 weight: 7
 ---
 
-Delete one or more indexed resources (prompts for confirmation unless --yes).
+Deletes one or more indexed resources, confirming each one individually — so declining one doesn't take the rest with it — unless --yes skips every prompt.
 
 ## Usage
 

@@ -32,9 +32,9 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace |
 | `--no-limits` | Skip the CPU%/MEM% columns (one fewer kubectl call) |
-| `--no-open` | Don't open a browser automatically with --html |
+| `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
-| `--port int` | Port to serve --html on (random free port by default) |
+| `--port int` | Port to serve the HTML report on; 0 picks a free one |
 
 ## Global options
 

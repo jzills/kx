@@ -272,8 +272,8 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 		"yaml":        newYamlCommand(services),
 		"describe":    newDescribeCommand(services),
 		"events":      newEventsCommand(services),
-		"labels":      newMetadataReadCommand(services, "labels", "", "labels", "LABEL", true),
-		"annotations": newMetadataReadCommand(services, "annotations", "", "annotations", "ANNOTATION", false),
+		"labels":      newMetadataReadCommand(services, "labels", "", "", "labels", "LABEL", true),
+		"annotations": newMetadataReadCommand(services, "annotations", "", "", "annotations", "ANNOTATION", false),
 		"logs":        newLogsCommand(services),
 	}
 	for name, cmd := range commands {

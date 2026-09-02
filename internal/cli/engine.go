@@ -55,8 +55,10 @@ func resolveEngine(argument string) (string, error) {
 
 func newEngineCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "engine [name]",
-		Short:   "List available scan engines or persist a default choice by name or index.",
+		Use:   "engine [name]",
+		Short: "List available scan engines or persist a default choice by name or index.",
+		Long: "Lists available scan engines. A name, or the row number from that listing, " +
+			"persists a choice as the default kx scan uses.",
 		Example: "  kx engine\n  kx engine trivy",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

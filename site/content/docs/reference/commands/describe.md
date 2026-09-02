@@ -6,7 +6,7 @@ description: "Show full kubectl describe output for one or more indexed resource
 weight: 8
 ---
 
-Show full kubectl describe output for one or more indexed resources.
+Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.
 
 Unrecognized flags are passed through to kubectl.
 

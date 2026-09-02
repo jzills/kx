@@ -193,6 +193,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 		Use:                "describe <index>... [kubectl flags]",
 		SuggestFor:         []string{"detail", "details"},
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
+		Long:               "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
 		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
@@ -322,6 +323,7 @@ func newEditCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "edit <index> [kubectl flags]",
 		Short:              "Open an indexed resource in your editor via kubectl edit.",
+		Long:               "Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.",
 		Example:            "  kx edit 2",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
@@ -442,8 +444,10 @@ func newDeleteCommand(services Services) *cobra.Command {
 		Use:        "delete <index>...",
 		SuggestFor: []string{"rm", "remove", "destroy"},
 		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example:    "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
-		Args:       minArgs(1),
+		Long: "Deletes one or more indexed resources, confirming each one individually " +
+			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
+		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -476,8 +480,10 @@ func newDeleteCommand(services Services) *cobra.Command {
 
 func newScaleCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "scale <index> <replicas>",
-		Short:   "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
+		Use:   "scale <index> <replicas>",
+		Short: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
+		Long: "Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. " +
+			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.",
 		Example: "  kx scale 1 3",
 		Args:    exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -506,6 +512,8 @@ func newRolloutCommand(services Services) *cobra.Command {
 		Use: "rollout <action> <index>",
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
+		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
+			"live and blocks until the rollout settles; the other actions run and return immediately.",
 		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
 		// left `kx rollout status <TAB>` offering filenames instead of the
@@ -536,7 +544,9 @@ func newPortForwardCommand(services Services) *cobra.Command {
 		Use:        "port-forward <index> <port> [kubectl flags]",
 		SuggestFor: []string{"pf", "portforward", "proxy"},
 		Short:      "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
-		Example:    "  kx port-forward 1 8080:80",
+		Long: "Forwards a local port to an indexed resource. Given a workload rather than a Pod, " +
+			"kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.",
+		Example: "  kx port-forward 1 8080:80",
 		// No Args validator: cobra's arity check runs against the
 		// unstripped argv, before passthrough can pull --help out of it —
 		// `kx port-forward --help` is a single argument, which used to fail
@@ -567,6 +577,8 @@ func newCopyCommand(services Services) *cobra.Command {
 		Use:        "cp <src> <dest> [kubectl flags]",
 		SuggestFor: []string{"copy"},
 		Short:      "Copy files to or from an indexed pod via kubectl cp.",
+		Long: "Copies files to or from an indexed pod via kubectl cp. Either side of the copy " +
+			"can name a path inside the pod as index:path.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
 			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
 		// No Args validator: cobra's arity check runs against the
@@ -603,8 +615,11 @@ func newYamlCommand(services Services) *cobra.Command {
 		Use:        "yaml <index>...",
 		SuggestFor: []string{"manifest", "spec"},
 		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example:    "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
-		Args:       minArgs(1),
+		Long: "Prints the raw YAML manifest for one or more indexed resources. --show fetches the " +
+			"same full manifest and narrows it client-side to the named top-level fields, so it " +
+			"works with anything kubectl's own YAML output has.",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
+		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -650,11 +665,12 @@ func newYamlCommand(services Services) *cobra.Command {
 	return cmd
 }
 
-func newMetadataReadCommand(services Services, use, short, field, header string, selector bool) *cobra.Command {
+func newMetadataReadCommand(services Services, use, short, long, field, header string, selector bool) *cobra.Command {
 	var asSelector bool
 	cmd := &cobra.Command{
 		Use:     use + " <index>...",
 		Short:   short,
+		Long:    long,
 		Args:    minArgs(1),
 		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -703,7 +719,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 	return cmd
 }
 
-func newMetadataWriteCommand(services Services, verb, field, short string) *cobra.Command {
+func newMetadataWriteCommand(services Services, verb, field, short, long string) *cobra.Command {
 	var (
 		removes   []string
 		overwrite bool
@@ -711,6 +727,7 @@ func newMetadataWriteCommand(services Services, verb, field, short string) *cobr
 	cmd := &cobra.Command{
 		Use:     verb + " <index> [key=value...]",
 		Short:   short,
+		Long:    long,
 		Args:    minArgs(1),
 		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -917,10 +934,11 @@ func newStateCommand(services Services) *cobra.Command {
 	return cmd
 }
 
-func newNavigateCommand(services Services, use, short string, delta int) *cobra.Command {
+func newNavigateCommand(services Services, use, short, long string, delta int) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
 		Short: short,
+		Long:  long,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entry, err := services.State.Navigate(delta)
@@ -941,8 +959,10 @@ func newNavigateCommand(services Services, use, short string, delta int) *cobra.
 func newDropCommand(services Services, prefix string) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:     "drop <position>",
-		Short:   "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Use:   "drop <position>",
+		Short: "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Long: "Removes a history entry by position, or clears the whole stack — including the " +
+			"namespace and context slots — with --all.",
 		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

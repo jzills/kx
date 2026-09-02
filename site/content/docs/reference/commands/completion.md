@@ -6,8 +6,7 @@ description: "Generate a shell completion script for kx (bash, zsh, fish, powers
 weight: 31
 ---
 
-Generate the autocompletion script for kx for the specified shell.
-See each sub-command's help for details on how to use the generated script.
+Generates a shell completion script for kx. See each subcommand's own --help for how to install it.
 
 ## Usage
 

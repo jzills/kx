@@ -6,7 +6,7 @@ description: "Show labels for one or more indexed resources; --selector formats 
 weight: 16
 ---
 
-Show labels for one or more indexed resources; --selector formats output as a label selector.
+Shows every label on one or more indexed resources, one table per resource. --selector reformats the same data as a copy-pastable label selector.
 
 ## Usage
 

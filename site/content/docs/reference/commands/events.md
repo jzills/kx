@@ -6,7 +6,7 @@ description: "Show Kubernetes events for one or more indexed resources."
 weight: 12
 ---
 
-Show Kubernetes events for one or more indexed resources.
+Shows Kubernetes events recorded against the exact object each index names — unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.
 
 ## Usage
 
