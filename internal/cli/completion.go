@@ -32,23 +32,21 @@ type completer func(services Services, toComplete string) []string
 // completes it. A command whose argument means something narrower registers
 // "<command>.<arg>", which wins over the bare name.
 var argCompleters = map[string]completer{
-	"index":            completeIndex,
-	"namespace.index":  completeNamespaceSlot,
-	"context.index":    completeContextSlot,
-	"position":         completePosition,
-	"resource":         completeKind,
-	"top.resource":     completeTopResource,
-	"action":           completeRolloutAction,
-	"theme.name":       completeTheme,
-	"engine.name":      completeEngine,
-	"replicas":         nil, // A number kx cannot guess.
-	"port":             nil, // Likewise, and it is a mapping, not a port.
-	"key=value":        nil,
-	"command":          nil, // Runs in the pod; local paths would be wrong.
-	"src":              completePath,
-	"dest":             completePath,
-	"secret.index":     completeIndex,
-	"diagnostic.index": completeIndex,
+	"index":           completeIndex,
+	"namespace.index": completeNamespaceSlot,
+	"context.index":   completeContextSlot,
+	"position":        completePosition,
+	"resource":        completeKind,
+	"top.resource":    completeTopResource,
+	"action":          completeRolloutAction,
+	"theme.name":      completeTheme,
+	"engine.name":     completeEngine,
+	"replicas":        nil, // A number kx cannot guess.
+	"port":            nil, // Likewise, and it is a mapping, not a port.
+	"key=value":       nil,
+	"command":         nil, // Runs in the pod; local paths would be wrong.
+	"src":             completePath,
+	"dest":            completePath,
 }
 
 // completePath is the one case where the shell's own file completion is the
