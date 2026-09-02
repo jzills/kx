@@ -105,6 +105,13 @@ func environment() []render.HelpItem {
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
+	// KX_STATE lives beside KX_CONFIG here rather than in config.Settings():
+	// it names state.File's path, and state doesn't import config (nor
+	// should it, just to list one env var) — this is the one place that
+	// already imports both.
+	items = append(items, render.HelpItem{
+		Name: "KX_STATE", Doc: "State file path, instead of ~/.kx/state.json",
+	})
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	return items
 }

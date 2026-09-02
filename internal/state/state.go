@@ -271,7 +271,16 @@ func NewService(maxHistory int) *Service {
 
 // File returns the default state file path, mirroring config.File so the help
 // screen can name both without hardcoding either.
+//
+// KX_STATE overrides it. Two terminals otherwise share one history — list
+// pods in one, deployments in the other, and the first shell's `kx delete 3`
+// resolves against whichever listing happened last — and there was no way to
+// give a shell its own state short of the Service.Path field, reachable only
+// from Go. This is the same escape hatch KX_CONFIG gives config.File.
 func File() (string, error) {
+	if path, ok := os.LookupEnv("KX_STATE"); ok && path != "" {
+		return path, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate home directory: %w", err)

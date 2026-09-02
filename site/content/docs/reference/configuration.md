@@ -38,12 +38,18 @@ Nothing here is required — kx runs on the defaults with no config file at all.
 
 ## Paths
 
-| Path | Contents |
-| --- | --- |
-| `~/.kx/config.toml` | The keys above. |
-| `~/.kx/state.json` | Saved listings and the history cursor; see [state](../../concepts/state/). |
+| Path | Environment | Contents |
+| --- | --- | --- |
+| `~/.kx/config.toml` | `KX_CONFIG` | The keys above. |
+| `~/.kx/state.json` | `KX_STATE` | Saved listings and the history cursor; see [state](../../concepts/state/). |
 
-`kx --version` prints both, resolved, along with the version and build.
+`KX_CONFIG` and `KX_STATE` point kx at a different file entirely, rather than
+overriding one key the way the settings table above does — useful for a
+terminal or CI job that wants its own config or history instead of sharing
+the one in `~/.kx`. Neither can be set from inside the file it names, so
+there's no `config.toml` equivalent for them.
+
+`kx --version` prints both paths, resolved, along with the version and build.
 
 ## Also honoured
 

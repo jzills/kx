@@ -11,6 +11,36 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 )
 
+// KX_STATE redirects File() itself — the one thing Service.Path can't stand
+// in for, since a caller with no Path relies on File() to find ~/.kx by
+// default. Without this, two shells always shared one history: list pods in
+// one, deployments in the other, and the first shell's next index-taking
+// command resolves against whichever listing happened last.
+func TestFileHonorsKXStateOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom.json")
+	t.Setenv("KX_STATE", path)
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if got != path {
+		t.Errorf("File() = %q, want %q", got, path)
+	}
+}
+
+// An empty KX_STATE must fall back to the default rather than trying to open
+// "" as a path.
+func TestFileEmptyKXStateFallsBackToDefault(t *testing.T) {
+	t.Setenv("KX_STATE", "")
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if !strings.HasSuffix(got, filepath.Join(".kx", "state.json")) {
+		t.Errorf("File() = %q, want the default ~/.kx/state.json path", got)
+	}
+}
+
 func newTestService(t *testing.T, maxHistory int) *Service {
 	t.Helper()
 	service := NewService(maxHistory)

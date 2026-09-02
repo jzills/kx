@@ -56,10 +56,15 @@ the same thing.
 
 ## The files kx owns
 
-| Path | Contents |
-| --- | --- |
-| `~/.kx/config.toml` | The settings above. |
-| `~/.kx/state.json` | Saved listings and the cursor; see [state](../state/). |
+| Path | Environment | Contents |
+| --- | --- | --- |
+| `~/.kx/config.toml` | `KX_CONFIG` | The settings above. |
+| `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor; see [state](../state/). |
+
+`KX_CONFIG` and `KX_STATE` point kx at a different file entirely, for a
+terminal or CI job that wants its own config or history rather than sharing
+the one in `~/.kx` — unlike the settings table above, neither can be set
+from inside the file it names.
 
 Both paths are printed by `kx --version` and on the root `kx --help` screen.
 Neither is required to exist — `kx` runs on defaults without them.
