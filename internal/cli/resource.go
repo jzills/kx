@@ -166,6 +166,20 @@ func rolloutActionNames() []string {
 	return names
 }
 
+// joinAnd lists names the way kinds.Set.List() already lists kinds: "a, b and
+// c", never a bare comma-separated run. A local copy rather than a shared
+// export — kinds.Set.List() prints kinds specifically (through
+// PluralDisplay), and this prints whatever the caller already has strings for.
+func joinAnd(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 var interactiveRolloutActions = map[string]bool{"status": true}
 
 // RolloutCommand drives kubectl rollout for an indexed workload.
@@ -177,7 +191,8 @@ type RolloutCommand struct {
 // Execute returns the captured output, or "" for actions that stream directly.
 func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	if !isRolloutAction(action) {
-		return "", fmt.Errorf("unknown rollout action '%s'.", action)
+		return "", fmt.Errorf("kx rollout does not support '%s' — only %s.",
+			action, joinAnd(rolloutActionNames()))
 	}
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {

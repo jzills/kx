@@ -77,7 +77,9 @@ func (c MetadataWriteCommand) Execute(
 	index int, setKeys []string, sets map[string]string, removes []string, overwrite bool,
 ) (string, error) {
 	if len(sets) == 0 && len(removes) == 0 {
-		return "", fmt.Errorf("nothing to set or remove")
+		return "", fmt.Errorf(
+			"kx %s needs key=value to set, or --remove to name a key to drop — neither was given.",
+			c.Verb)
 	}
 
 	name, namespace, kind, err := c.State.Fields(index)
