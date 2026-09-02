@@ -27,7 +27,7 @@ func decodeJSON(t *testing.T, document string) map[string]any {
 func TestDiagnosticJSONCarriesASchemaVersion(t *testing.T) {
 	out, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
-	})
+	}, 1)
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -37,6 +37,67 @@ func TestDiagnosticJSONCarriesASchemaVersion(t *testing.T) {
 	// deliberately changing this line too.
 	if got := decodeJSON(t, out)["schemaVersion"]; got != float64(1) {
 		t.Errorf("schemaVersion = %v, want 1", got)
+	}
+}
+
+// kx diag --json used to drop the indexes the same run had just assigned to
+// state, unlike kx top --json and kx tree --json, which both carry index on
+// every row — so a pipeline that found a critical verdict in the document had
+// no number to hand a human for `kx diag <index>`. The indexed case's index
+// is simply the one the caller resolved it from.
+func TestDiagnosticJSONCarriesTheIndexItWasResolvedFrom(t *testing.T) {
+	out, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
+	}, 4)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	var document struct {
+		Resources []struct {
+			Index int `json:"index"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(out), &document); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(document.Resources) != 1 || document.Resources[0].Index != 4 {
+		t.Errorf("resources = %v, want one entry with index 4", document.Resources)
+	}
+}
+
+// A sweep's document must carry the same index numbers TriageCommand.Execute
+// just saved to state, in the same order (severity-sorted, most severe
+// first) — so `kx diag 2` after reading the document reaches the resource
+// the document's second entry described, not some other one.
+func TestTriageJSONCarriesEachResourcesIndex(t *testing.T) {
+	out, err := triageJSON(render.TriageResult{
+		Namespace: "prod",
+		All: []diagnostics.Report{
+			{Kind: kinds.Pod, Name: "critical-one", Verdict: diagnostics.Critical},
+			{Kind: kinds.Pod, Name: "warning-one", Verdict: diagnostics.Warning},
+			{Kind: kinds.Pod, Name: "healthy-one", Verdict: diagnostics.OK},
+		},
+	})
+	if err != nil {
+		t.Fatalf("triageJSON: %v", err)
+	}
+	var document struct {
+		Resources []struct {
+			Name  string `json:"name"`
+			Index int    `json:"index"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(out), &document); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := map[string]int{"critical-one": 1, "warning-one": 2, "healthy-one": 3}
+	if len(document.Resources) != len(want) {
+		t.Fatalf("resources = %v, want %d entries", document.Resources, len(want))
+	}
+	for _, resource := range document.Resources {
+		if resource.Index != want[resource.Name] {
+			t.Errorf("%s: index = %d, want %d", resource.Name, resource.Index, want[resource.Name])
+		}
 	}
 }
 
@@ -53,7 +114,7 @@ func TestDiagnosticJSONCarriesTheFindingsInOrder(t *testing.T) {
 			},
 		}},
 	})
-	out, err := diagnosticJSON(report)
+	out, err := diagnosticJSON(report, 1)
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -341,7 +402,7 @@ func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
 		}
 		diagnosed, err := diagnosticJSON(diagnostics.Report{
 			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
-		})
+		}, 1)
 		if err != nil {
 			t.Fatalf("diagnosticJSON: %v", err)
 		}
@@ -389,7 +450,7 @@ func TestDiagnosticJSONUsesTheSingularSeverityToken(t *testing.T) {
 		Verdict:  diagnostics.Warning,
 		Findings: []diagnostics.Finding{{Severity: diagnostics.Warning, Summary: "hot"}},
 	}
-	out, err := diagnosticJSON(report)
+	out, err := diagnosticJSON(report, 1)
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -588,7 +649,7 @@ func TestTreeAndTopShareTheSubjectVocabulary(t *testing.T) {
 func TestDiagnosticJSONHasOneShapeIndexedOrSwept(t *testing.T) {
 	indexed, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Critical,
-	})
+	}, 1)
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -631,7 +692,7 @@ func TestDiagnosticJSONCountsAnIndexedRunAsASweepOfOne(t *testing.T) {
 	} {
 		out, err := diagnosticJSON(diagnostics.Report{
 			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: testCase.verdict,
-		})
+		}, 1)
 		if err != nil {
 			t.Fatalf("diagnosticJSON: %v", err)
 		}

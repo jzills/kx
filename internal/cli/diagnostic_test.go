@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -491,6 +492,56 @@ func TestDiagSweepWithoutHTMLStillPrintsTheTerminalTriage(t *testing.T) {
 	}
 	if strings.Contains(sink.String(), "serving at") {
 		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
+	}
+}
+
+// Driven through RunE with real state, not just the JSON builder directly:
+// a unit test of diagnosticJSON alone cannot see whether the command wires
+// the index it just resolved through to it, or drops it on the floor — the
+// same "a test that calls the helpers directly agrees with itself; only real
+// argv proves the wiring" lesson this codebase already has elsewhere.
+func TestDiagJSONIndexedRunCarriesTheRealIndex(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t,
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "prod"}},
+	)
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "api", Kind: kinds.Deployment},
+			{Name: "web", Kind: kinds.Deployment},
+			{Name: "cache", Kind: kinds.Deployment},
+		}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("json", "true"); err != nil {
+		t.Fatalf("set --json: %v", err)
+	}
+
+	// Index 3, deliberately not 1: a wiring bug that hardcodes or drops the
+	// index would still pass a test that only ever asked for the first entry.
+	if err := cmd.RunE(cmd, []string{"3"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	var document struct {
+		Resources []struct {
+			Name  string `json:"name"`
+			Index int    `json:"index"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(sink.Bytes(), &document); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, sink.String())
+	}
+	if len(document.Resources) != 1 || document.Resources[0].Index != 3 {
+		t.Errorf("resources = %v, want one entry with index 3", document.Resources)
+	}
+	if document.Resources[0].Name != "cache" {
+		t.Errorf("resources[0].name = %q, want cache (index 3's resource)", document.Resources[0].Name)
 	}
 }
 
