@@ -32,17 +32,26 @@ type jsonFinding struct {
 }
 
 type jsonReport struct {
-	Kind      kinds.Kind    `json:"kind"`
-	Name      string        `json:"name"`
-	Namespace string        `json:"namespace,omitempty"`
-	Verdict   string        `json:"verdict"`
-	Findings  []jsonFinding `json:"findings"`
+	Kind      kinds.Kind `json:"kind"`
+	Name      string     `json:"name"`
+	Namespace string     `json:"namespace,omitempty"`
+	// Index is the number this resource was assigned in state, so a
+	// consumer that finds something worth acting on can name it — `kx diag
+	// 4` — without a second listing. The same convention kx tree --json
+	// already uses for jsonTreeNode.Index: present because a sweep indexes
+	// every resource it saves, so it is never the zero value in practice,
+	// but omitempty rather than required in case a future caller builds one
+	// from something that isn't state-backed.
+	Index    int           `json:"index,omitempty"`
+	Verdict  string        `json:"verdict"`
+	Findings []jsonFinding `json:"findings"`
 }
 
 // reportOf converts one analysed resource, keeping the findings in the order
 // they were sorted into so the JSON and the terminal cannot disagree about
-// which one is the headline.
-func reportOf(report diagnostics.Report) jsonReport {
+// which one is the headline. index is the 1-based position state.Save
+// assigned it, or 0 when the caller has none to give.
+func reportOf(report diagnostics.Report, index int) jsonReport {
 	findings := make([]jsonFinding, 0, len(report.Findings))
 	for _, finding := range report.Findings {
 		findings = append(findings, jsonFinding{
@@ -54,12 +63,15 @@ func reportOf(report diagnostics.Report) jsonReport {
 		Kind:      report.Kind,
 		Name:      report.Name,
 		Namespace: report.Namespace,
+		Index:     index,
 		Verdict:   report.Verdict.Token(),
 		Findings:  findings,
 	}
 }
 
-// diagnosticJSON serialises one resource's report.
+// diagnosticJSON serialises one resource's report. index is the one the
+// caller resolved it from, so the document names the same number `kx diag
+// <index>` was just run with.
 //
 // The same shape a sweep produces, with one entry in it. kx diag used to emit
 // the report bare at the top level here and a resources list for a sweep, so a
@@ -67,7 +79,7 @@ func reportOf(report diagnostics.Report) jsonReport {
 // tree and kx top each have one shape whatever they were pointed at. An
 // indexed run is a sweep of one, and saying so costs a wrapper and buys a
 // pipeline that reads `.resources[]` for both.
-func diagnosticJSON(report diagnostics.Report) (string, error) {
+func diagnosticJSON(report diagnostics.Report, index int) (string, error) {
 	healthy := 0
 	if report.Verdict == diagnostics.OK {
 		healthy = 1
@@ -79,7 +91,7 @@ func diagnosticJSON(report diagnostics.Report) (string, error) {
 		Namespace:     report.Namespace,
 		Checked:       1,
 		Healthy:       healthy,
-		Resources:     []jsonReport{reportOf(report)},
+		Resources:     []jsonReport{reportOf(report, index)},
 	})
 }
 
@@ -108,8 +120,11 @@ type diagnosticDocument struct {
 // a machine. The HTML report takes the same view for the same reason.
 func triageJSON(result render.TriageResult) (string, error) {
 	resources := make([]jsonReport, 0, len(result.All))
-	for _, report := range result.All {
-		resources = append(resources, reportOf(report))
+	// 1-based position in result.All, matching the index TriageCommand.Execute
+	// just saved to state in this same order — so a finding in the document
+	// and the number `kx diag <index>` would show it under are one figure.
+	for position, report := range result.All {
+		resources = append(resources, reportOf(report, position+1))
 	}
 
 	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute
