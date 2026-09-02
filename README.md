@@ -30,10 +30,11 @@
 - [Usage](#usage)
   - [Commands](#commands)
   - [Triage a namespace](#triage-a-namespace)
+  - [Take a node out of service](#take-a-node-out-of-service)
   - [Read a Secret in plaintext](#read-a-secret-in-plaintext)
   - [Scan images for vulnerabilities](#scan-images-for-vulnerabilities)
   - [View reports in a browser](#view-reports-in-a-browser)
-  - [Use kx in CI](#use-kx-in-ci)
+- [Use kx in CI](#use-kx-in-ci)
 - [History](#history)
 - [Configuration](#configuration)
 - [Themes](#themes)
@@ -228,6 +229,33 @@ case where a report does reach disk. It implies `--html` on its own, so
 `kx diag --out report.html` is the whole command; `--port` and `--no-open`
 configure a server this doesn't start, so they're refused alongside it.
 
+#### `kx diag --html`
+
+A namespace sweep's severity-sorted findings, filterable and sortable by
+any column, with a group-by for larger sweeps.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
+</div>
+
+#### `kx scan --html`
+
+Per-image severity counts up top; the CVE table below groups by image and
+expands each row into its full detail.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
+</div>
+
+#### `kx tree --html`
+
+The ownership graph as a collapsible tree, indexed like every other kx
+listing.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
+</div>
+
 ## Use kx in CI
 
 `kx diag` and `kx scan` both take `--json`, printing the same analysis as a
@@ -262,33 +290,6 @@ a pipeline can tell "the cluster is sick" — the check working — from "kx
 couldn't reach the cluster", which means the check never ran. An image whose
 scan failed breaches every threshold for the same reason: an image kx couldn't
 read hasn't been shown to be clean.
-
-#### `kx diag --html`
-
-A namespace sweep's severity-sorted findings, filterable and sortable by
-any column, with a group-by for larger sweeps.
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
-</div>
-
-#### `kx scan --html`
-
-Per-image severity counts up top; the CVE table below groups by image and
-expands each row into its full detail.
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
-</div>
-
-#### `kx tree --html`
-
-The ownership graph as a collapsible tree, indexed like every other kx
-listing.
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
-</div>
 
 ## History
 
