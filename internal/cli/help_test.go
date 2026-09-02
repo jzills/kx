@@ -669,6 +669,43 @@ func TestEveryCommandHasItsOwnLongDescription(t *testing.T) {
 	walk(root)
 }
 
+// A flag that changes what kx emits — a different format, or a different exit
+// code — is one a reader has to discover before they can use it, and seeing
+// the name in the Options block doesn't teach the spelling in context.
+//
+// The Options block is generated from the registered flags and so cannot
+// drift. Example strings are hand-written literals and did: --json, --html,
+// --out and --fail-on all shipped (#307-#309, #316) without reaching the
+// Examples of any of the four commands that take them, while the README gave
+// them a whole "Use kx in CI" section. #217 fixed the same class of drift
+// once already.
+//
+// Keyed by flag rather than by command on purpose: registering one of these on
+// a new command demands an example there too, rather than this list needing to
+// be told the command exists.
+var exampleWorthyFlags = []string{"json", "html", "out", "fail-on"}
+
+func TestOutputShapingFlagsAppearInExamples(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, name := range exampleWorthyFlags {
+			if cmd.Flags().Lookup(name) == nil {
+				continue
+			}
+			if !strings.Contains(cmd.Example, "--"+name) {
+				t.Errorf("%s takes --%s, but no Example shows it:\n%s",
+					cmd.CommandPath(), name, cmd.Example)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
 func TestEveryArgumentIsDocumented(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 

@@ -55,6 +55,8 @@ kx scan [OPTIONS] [index] [scanner flags]
 kx scan
 kx scan 1
 kx scan -n prod
-kx scan -A
 kx scan 1 --full
+kx scan --html
+kx scan -A --json
+kx scan -A --fail-on high --out report.html
 ```
