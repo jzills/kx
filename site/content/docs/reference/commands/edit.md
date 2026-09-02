@@ -6,7 +6,7 @@ description: "Open an indexed resource in your editor via kubectl edit."
 weight: 11
 ---
 
-Open an indexed resource in your editor via kubectl edit.
+Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.
 
 Unrecognized flags are passed through to kubectl.
 

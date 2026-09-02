@@ -47,8 +47,10 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 
 func newEventsCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "events <index>...",
-		Short:   "Show Kubernetes events for one or more indexed resources.",
+		Use:   "events <index>...",
+		Short: "Show Kubernetes events for one or more indexed resources.",
+		Long: "Shows Kubernetes events recorded against the exact object each index names — " +
+			"unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.",
 		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3\n  kx events 3..",
 		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -259,8 +261,8 @@ func newTopCommand(services Services) *cobra.Command {
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
 	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")
 	cmd.Flags().Bool("html", false, "Render the listing as HTML and serve it in a browser")
-	cmd.Flags().Int("port", 0, "Port to serve --html on (random free port by default)")
-	cmd.Flags().Bool("no-open", false, "Don't open a browser automatically with --html")
+	cmd.Flags().Int("port", 0, "Port to serve the HTML report on; 0 picks a free one")
+	cmd.Flags().Bool("no-open", false, "Serve the HTML report without opening a browser")
 	cmd.Flags().String("out", "", "Write the HTML report to this file instead of serving it in a browser")
 	// Pure kubectl passthrough, parsed by hand like every other flag here —
 	// registered only so they appear in --help instead of vanishing.

@@ -58,8 +58,10 @@ func resolveTheme(argument string) (string, error) {
 
 func newThemeCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "theme [name]",
-		Short:   "List available color themes or persist a choice by name or index.",
+		Use:   "theme [name]",
+		Short: "List available color themes or persist a choice by name or index.",
+		Long: "Lists available color themes with a preview of each. A name, or the row " +
+			"number from that listing, persists a choice to config.",
 		Example: "  kx theme\n  kx theme dracula",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

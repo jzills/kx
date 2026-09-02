@@ -6,7 +6,7 @@ description: "Copy files to or from an indexed pod via kubectl cp."
 weight: 5
 ---
 
-Copy files to or from an indexed pod via kubectl cp.
+Copies files to or from an indexed pod via kubectl cp. Either side of the copy can name a path inside the pod as index:path.
 
 Unrecognized flags are passed through to kubectl.
 

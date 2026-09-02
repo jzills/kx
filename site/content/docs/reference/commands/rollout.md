@@ -6,7 +6,7 @@ description: "Run a rollout action (status, restart, pause, resume, history, und
 weight: 20
 ---
 
-Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.
+Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams live and blocks until the rollout settles; the other actions run and return immediately.
 
 ## Usage
 

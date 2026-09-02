@@ -6,7 +6,7 @@ description: "Show annotations for one or more indexed resources."
 weight: 2
 ---
 
-Show annotations for one or more indexed resources.
+Shows every annotation on one or more indexed resources, one table per resource.
 
 ## Usage
 

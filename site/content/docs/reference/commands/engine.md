@@ -6,7 +6,7 @@ description: "List available scan engines or persist a default choice by name or
 weight: 29
 ---
 
-List available scan engines or persist a default choice by name or index.
+Lists available scan engines. A name, or the row number from that listing, persists a choice as the default kx scan uses.
 
 ## Usage
 

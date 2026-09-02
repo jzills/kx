@@ -6,7 +6,7 @@ description: "Set or remove annotations on an indexed resource."
 weight: 1
 ---
 
-Set or remove annotations on an indexed resource.
+Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key.
 
 ## Usage
 
