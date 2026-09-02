@@ -67,3 +67,21 @@ func Namespace() string {
 	}
 	return namespace
 }
+
+// CurrentContext reports the kubeconfig's current context, or "" when none is
+// set — a kubeconfig with no current context is a legitimate setup, not a
+// failure to report.
+//
+// A local file read and YAML parse, same as Namespace above — no subprocess,
+// unlike shelling out to `kubectl config current-context`. Uses the same
+// loading rules (KUBECONFIG, the default file list) kubectl itself does, so
+// the answer can't disagree with what a kubectl command run right after it
+// would use.
+func CurrentContext() (string, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	raw, err := rules.Load()
+	if err != nil {
+		return "", err
+	}
+	return raw.CurrentContext, nil
+}

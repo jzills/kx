@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -92,45 +91,63 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 	}
 }
 
-// contextShim installs a "kubectl" double that answers current-context from a
-// file, so a test can change the answer the way `config use-context` would and
-// count how often the double was actually consulted.
-func contextShim(t *testing.T) (dir, contextFile, callsFile string) {
-	t.Helper()
-	dir = t.TempDir()
-	contextFile = filepath.Join(dir, "context")
-	callsFile = filepath.Join(dir, "calls")
-	if err := os.WriteFile(contextFile, []byte("staging\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	body := "#!/bin/sh\n" +
-		"if [ \"$1\" = config ] && [ \"$2\" = current-context ]; then\n" +
-		"  echo current >> " + callsFile + "\n" +
-		"  cat " + contextFile + "\n" +
-		"elif [ \"$1\" = config ] && [ \"$2\" = use-context ]; then\n" +
-		"  printf '%s\\n' \"$3\" > " + contextFile + "\n" +
-		"fi\n"
-	shim(t, dir, body)
-	return dir, contextFile, callsFile
+// minimalKubeconfig is a syntactically real kubeconfig — enough for
+// clientcmd to parse it, never enough to reach a cluster with it. current
+// names the current-context field; empty means the kubeconfig has none.
+func minimalKubeconfig(current string) string {
+	return "apiVersion: v1\n" +
+		"kind: Config\n" +
+		"current-context: " + current + "\n" +
+		"contexts:\n" +
+		"- name: staging\n" +
+		"  context: {cluster: c, user: u}\n" +
+		"- name: production\n" +
+		"  context: {cluster: c, user: u}\n" +
+		"clusters:\n" +
+		"- name: c\n" +
+		"  cluster: {server: https://example.invalid}\n" +
+		"users:\n" +
+		"- name: u\n" +
+		"  user: {}\n"
 }
 
-func contextCalls(t *testing.T, callsFile string) int {
+// writeKubeconfig installs a real kubeconfig file and points KUBECONFIG at
+// it, so CurrentContext (which now reads the file directly, no subprocess)
+// has something to parse.
+func writeKubeconfig(t *testing.T, current string) string {
 	t.Helper()
-	data, err := os.ReadFile(callsFile)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0
-	}
-	if err != nil {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(minimalKubeconfig(current)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return len(strings.Fields(string(data)))
+	t.Setenv("KUBECONFIG", path)
+	return path
+}
+
+// shimUseContext installs a "kubectl" double whose only real behavior is
+// `config use-context <name>`, rewriting current-context in $KUBECONFIG —
+// inherited from the test's own environment, since exec.Command passes it
+// through unless told otherwise. Exercising kx's actual switch path (Run,
+// not a direct call into unexported cache internals) is what proves
+// changesContext's detection actually fires on it.
+func shimUseContext(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	body := "#!/bin/sh\n" +
+		"if [ \"$1\" = config ] && [ \"$2\" = use-context ]; then\n" +
+		"  sed -i \"s/^current-context:.*/current-context: $3/\" \"$KUBECONFIG\"\n" +
+		"fi\n"
+	shim(t, dir, body)
 }
 
 // Every index resolution checks the context — kx refuses an index counted in
-// another cluster — and each check shelled out. `kx labels 1 2 3` spawned nine
-// `kubectl config current-context` processes against three doing the work.
+// another cluster — and each check used to shell out: `kx labels 1 2 3`
+// spawned nine `kubectl config current-context` processes against three
+// doing the work. Proven here by editing the kubeconfig file directly after
+// the first read: a cache that actually held would not see it, where a
+// CurrentContext that quietly went back to reading the file every time would.
 func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
-	_, _, calls := contextShim(t)
+	path := writeKubeconfig(t, "staging")
 	client := New()
 
 	for range 5 {
@@ -139,8 +156,11 @@ func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
 		}
 	}
 
-	if got := contextCalls(t, calls); got != 1 {
-		t.Errorf("spawned kubectl %d times for 5 reads, want 1", got)
+	if err := os.WriteFile(path, []byte(minimalKubeconfig("production")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.CurrentContext(); got != "staging" {
+		t.Errorf("CurrentContext() = %q after an external file edit, want the cached staging", got)
 	}
 }
 
@@ -148,7 +168,8 @@ func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
 // process, and a listing saved after that switch belongs to the new context.
 // Caching without invalidating would stamp it with the one just left.
 func TestSwitchingContextDropsTheCachedValue(t *testing.T) {
-	_, _, calls := contextShim(t)
+	shimUseContext(t)
+	writeKubeconfig(t, "staging")
 	client := New()
 
 	if got := client.CurrentContext(); got != "staging" {
@@ -161,19 +182,13 @@ func TestSwitchingContextDropsTheCachedValue(t *testing.T) {
 	if got := client.CurrentContext(); got != "production" {
 		t.Errorf("CurrentContext() = %q after switching, want production", got)
 	}
-	if got := contextCalls(t, calls); got != 2 {
-		t.Errorf("spawned kubectl %d times, want 2 — one per side of the switch", got)
-	}
 }
 
 // A kubeconfig with no current context is a legitimate setup, and "none set"
-// is as worth remembering as a name — re-asking spawned a subprocess to be
-// told the same thing.
+// is as worth remembering as a name — re-asking used to spawn a subprocess to
+// be told the same thing.
 func TestUnsetContextIsCachedToo(t *testing.T) {
-	_, contextFile, calls := contextShim(t)
-	if err := os.WriteFile(contextFile, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeKubeconfig(t, "")
 	client := New()
 
 	for range 3 {
@@ -181,8 +196,12 @@ func TestUnsetContextIsCachedToo(t *testing.T) {
 			t.Fatalf("CurrentContext() = %q, want empty", got)
 		}
 	}
-	if got := contextCalls(t, calls); got != 1 {
-		t.Errorf("spawned kubectl %d times for 3 reads, want 1", got)
+
+	if err := os.WriteFile(path, []byte(minimalKubeconfig("staging")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.CurrentContext(); got != "" {
+		t.Errorf("CurrentContext() = %q after an external file edit, want the cached empty value", got)
 	}
 }
 
