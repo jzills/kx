@@ -56,4 +56,7 @@ kx diagnostic
 kx diagnostic 1
 kx diagnostic -n prod
 kx diagnostic -A
+kx diagnostic --html
+kx diagnostic -A --json
+kx diagnostic -A --fail-on critical --out report.html
 ```

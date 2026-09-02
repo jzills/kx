@@ -46,6 +46,8 @@ kx tree [OPTIONS] [index]
 kx tree
 kx tree 1
 kx tree --no-index
-kx tree -n prod
 kx tree -A
+kx tree -n prod --html
+kx tree --json
+kx tree --out tree.html
 ```

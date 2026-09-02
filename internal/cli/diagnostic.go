@@ -173,8 +173,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.",
-		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n  kx " + use + " -A",
-		Args:    cobra.MaximumNArgs(1),
+		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
+			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
+			"  kx " + use + " -A --fail-on critical --out report.html",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")

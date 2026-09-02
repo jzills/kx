@@ -414,7 +414,9 @@ func newScanCommand(services Services) *cobra.Command {
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
 			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
 			"Run 'kx engine' to see or change the default.",
-		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan 1 --full\n" +
+			"  kx scan --html\n  kx scan -A --json\n" +
+			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)

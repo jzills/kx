@@ -50,4 +50,7 @@ kx top
 kx top nodes
 kx top -m web
 kx top --no-limits
+kx top --html
+kx top --json
+kx top --out top.html
 ```
