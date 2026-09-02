@@ -285,11 +285,26 @@ type PreviousLister interface {
 	PreviousLists(kind Kind) bool
 }
 
+// ListCommand names the command that relists a kind, in the plural spelling
+// every other kx surface uses.
+//
+// `kx get pods`, not `kx get pod`. Both work — kubectl takes either — but the
+// singular appeared nowhere else in kx, and the sentences this is spliced into
+// already name the kind in the plural two words later ("to relist Pods").
+//
+// Built from PluralDisplay rather than by suffixing here: that already carries
+// the irregulars ("Ingress" -> "Ingresses") and resolves a CRD's plural
+// through discovery, so this is a lowering of a spelling kx already computes
+// rather than a second rule that would have to learn the same exceptions.
+func ListCommand(kind Kind) string {
+	return "kx get " + strings.ToLower(PluralDisplay(string(kind)))
+}
+
 // EnsureKind rejects an index that resolved to something other than expected.
 //
 // Every command that resolves an index against a kind reports the mismatch in
 // this one shape, and the relist hint always names the canonical kind rather
-// than whatever shorthand was typed — `kx get deployment`, never `kx get deploy`.
+// than whatever shorthand was typed — `kx get deployments`, never `kx get deploy`.
 //
 // Given a state service, an entry one step back that does list expected adds
 // the `kx back` clause: relisting re-runs kubectl, while the listing the index
@@ -303,8 +318,8 @@ func EnsureKind(index int, name string, kind, expected Kind, state PreviousListe
 		back = fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
 	}
 	return fmt.Errorf(
-		"Index %d is %s/%s, not %s — run 'kx get %s' to relist%s.",
-		index, kind, name, expected, strings.ToLower(string(expected)), back,
+		"Index %d is %s/%s, not %s — run '%s' to relist%s.",
+		index, kind, name, expected, ListCommand(expected), back,
 	)
 }
 

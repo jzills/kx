@@ -78,9 +78,31 @@ func TestEnsureKindMismatchNamesCanonicalKind(t *testing.T) {
 	if err == nil {
 		t.Fatal("EnsureKind on a mismatch succeeded, want an error")
 	}
-	want := "Index 3 is Pod/nginx-abc, not Deployment — run 'kx get deployment' to relist."
+	want := "Index 3 is Pod/nginx-abc, not Deployment — run 'kx get deployments' to relist."
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// The relist hint is spelled the way every other kx surface spells a listing.
+//
+// `kx get pods`, not `kx get pod`. Both work — kubectl takes either — but the
+// singular appears nowhere else: the help screen's examples, the README and
+// every command's Example say the plural, and the sentence this hint sits in
+// already names the kind in the plural two words later ("to relist Pods").
+func TestListCommandUsesThePluralSpelling(t *testing.T) {
+	cases := map[Kind]string{
+		Pod:                   "kx get pods",
+		Deployment:            "kx get deployments",
+		Secret:                "kx get secrets",
+		Ingress:               "kx get ingresses",
+		PersistentVolumeClaim: "kx get persistentvolumeclaims",
+		Node:                  "kx get nodes",
+	}
+	for kind, want := range cases {
+		if got := ListCommand(kind); got != want {
+			t.Errorf("ListCommand(%s) = %q, want %q", kind, got, want)
+		}
 	}
 }
 

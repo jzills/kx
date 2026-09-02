@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -799,7 +798,7 @@ func (s *Service) FieldsExpecting(
 ) (name, namespace string, err error) {
 	// The relist command is spelled the way EnsureKind spells it, so all three
 	// failures point at the same place.
-	relist := "kx get " + strings.ToLower(string(expected))
+	relist := kinds.ListCommand(expected)
 	plural := kinds.PluralDisplay(string(expected))
 
 	current, err := s.Load()
@@ -886,7 +885,7 @@ func listCommandFor(kind kinds.Kind) string {
 	case kinds.Context:
 		return "kx contexts"
 	default:
-		return "kx get " + strings.ToLower(string(kind))
+		return kinds.ListCommand(kind)
 	}
 }
 
