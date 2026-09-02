@@ -108,6 +108,16 @@ func wrapText(text string, width int) []string {
 	return lines
 }
 
+// minDocWidth is the narrowest the description column is allowed to get.
+//
+// The name column grows to fit its longest name, which is right while names
+// are identifiers kx chose — a flag, a command, a KX_* variable. The Files
+// block's two names are paths the caller chose, and KX_CONFIG/KX_STATE can
+// point anywhere, so one long path used to widen the column past the whole
+// screen and push every description off the right edge. A name wider than the
+// budget now takes a line of its own instead of moving everyone's column.
+const minDocWidth = 24
+
 // itemBlock renders a titled name/description list, wrapping each description
 // into the column the names leave behind so a long one stacks under itself
 // rather than running off the terminal.
@@ -119,15 +129,26 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 	if len(items) == 0 {
 		return
 	}
+	width := r.helpWidth()
+	// The widest name column this screen can afford before names start costing
+	// descriptions their room. Never narrower than the caller's minimum, which
+	// is a deliberate constant (rootNameWidth, commandNameWidth) and not
+	// something a cramped terminal should be allowed to undercut — that would
+	// change the layout for every narrow terminal to fix a case none of them
+	// have.
+	budget := width - 2*len(gutter) - minDocWidth
+	if budget < minWidth {
+		budget = minWidth
+	}
 	nameWidth := minWidth
 	for _, item := range items {
-		if len(item.Name) > nameWidth {
+		if len(item.Name) > nameWidth && len(item.Name) <= budget {
 			nameWidth = len(item.Name)
 		}
 	}
 
 	indent := len(gutter) + nameWidth + len(gutter)
-	docWidth := r.helpWidth() - indent
+	docWidth := width - indent
 
 	r.Blank()
 	// An empty title is a block that continues the one above it — the examples
@@ -136,8 +157,19 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 		r.line(r.style(theme.Header, title))
 	}
 	for _, item := range items {
-		name := gutter + r.style(theme.Body, padName(item.Name, nameWidth)) + gutter
 		wrapped := wrapText(item.Doc, docWidth)
+		// A name too wide for the column takes a line of its own, and its
+		// description follows in the column the rest of the block uses. The
+		// name is printed whole: wrapText already leaves a long word unbroken
+		// because a split one can't be pasted, and a path is that case.
+		if len(item.Name) > nameWidth {
+			r.line(gutter + r.style(theme.Body, item.Name))
+			for _, line := range wrapped {
+				r.line(strings.Repeat(" ", indent) + r.style(theme.Muted, line))
+			}
+			continue
+		}
+		name := gutter + r.style(theme.Body, padName(item.Name, nameWidth)) + gutter
 		if len(wrapped) == 0 {
 			r.line(strings.TrimRight(name, " "))
 			continue
