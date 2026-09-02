@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/jzills/kx/internal/k8s"
 )
 
 const missingKubectl = "kubectl not found on PATH — install kubectl " +
@@ -239,34 +241,33 @@ func (e Exec) Probe(args []string) int {
 
 // CurrentNamespace reports the active namespace, falling back to "default".
 //
-// Best-effort: no kubeconfig or no current context exits non-zero. The
-// namespace is only a label here, so a failure must not become a command error.
+// Reads the kubeconfig directly (k8s.Namespace) rather than shelling out to
+// `kubectl config view`: the answer is a plain field in the file, no auth or
+// credential-exec plugin involved, so it's the one lookup this package can
+// answer itself without handing kubeconfig resolution to kubectl the way
+// every actual resource operation still does. Best-effort here for the same
+// reason it was as a subprocess: the namespace is only a label, so a failure
+// must not become a command error.
 func (e Exec) CurrentNamespace() string {
-	out, err := e.Run([]string{"config", "view", "--minify", "-o", "jsonpath={..namespace}"})
-	if err != nil {
-		return "default"
-	}
-	if ns := strings.TrimSpace(out); ns != "" {
-		return ns
-	}
-	return "default"
+	return k8s.Namespace()
 }
 
 // CurrentContext reports the active context, or "" when none is set, so context
 // listing still works instead of failing.
 //
+// Reads the kubeconfig directly (k8s.CurrentContext) for the same reason
+// CurrentNamespace does — a plain field, no auth involved — rather than
+// shelling out to `kubectl config current-context`.
+//
 // Memoised for the life of the process, and dropped again when kx switches the
 // context itself — see contextCache. A kubeconfig with no current context
 // caches the empty answer too: "none set" is as worth remembering as a name,
-// and re-asking spawned a subprocess to be told the same thing.
+// and re-reading the file spent work to be told the same thing.
 func (e Exec) CurrentContext() string {
 	if value, known := e.context.get(); known {
 		return value
 	}
-	value := ""
-	if out, err := e.Run([]string{"config", "current-context"}); err == nil {
-		value = strings.TrimSpace(out)
-	}
+	value, _ := k8s.CurrentContext()
 	e.context.set(value)
 	return value
 }
