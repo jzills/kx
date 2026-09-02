@@ -142,11 +142,6 @@ func (c ScanCommand) EnsureAvailable(name string) (scanner.Engine, error) {
 	// the absent case here as well is what makes every engine report the way
 	// Docker Scout always has: its preflight runs `docker`, which is present
 	// and merely answers "unknown command", so it never took the other path.
-	//
-	// It also keeps the failure out of the stale-state machinery: isStale
-	// falls back to IsNotFound, which matches a bare "not found" anywhere in
-	// an error, and NotFoundError's own wording ("grype not found on PATH")
-	// contains it.
 	var notFound scanner.NotFoundError
 	if err != nil && !errors.As(err, &notFound) {
 		return nil, err
