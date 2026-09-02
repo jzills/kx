@@ -3,7 +3,7 @@
 package index
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
@@ -16,19 +16,23 @@ type Resolver interface {
 	Names() []string
 }
 
+// ErrOutOfRange reports an index that names no row in the listing it was
+// counted against.
+//
+// A sentinel rather than a sentence. This package sees an ordered list of
+// names and nothing else — not the kind they are, not which of the three
+// listings (the cursor's, a slot's, one the caller named a kind for) the
+// caller is resolving against — so every message it could write is vaguer
+// than the one the caller can write. It used to write "current state has 29
+// items" while state's own two failures said "the current listing has 29
+// Pods"; the wording lives with the facts now. Match with errors.Is.
+var ErrOutOfRange = errors.New("index out of range")
+
 // Resolve maps a 1-based index onto the nth resource name in state.
 func Resolve(state Resolver, index int) (string, error) {
 	names := state.Names()
-	count := len(names)
-	if index < 1 || index > count {
-		label := "items"
-		if count == 1 {
-			label = "item"
-		}
-		return "", fmt.Errorf(
-			"Index %d is out of range — current state has %d %s (run 'kx state' to view).",
-			index, count, label,
-		)
+	if index < 1 || index > len(names) {
+		return "", ErrOutOfRange
 	}
 	return names[index-1], nil
 }
