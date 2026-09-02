@@ -106,4 +106,6 @@ if the schema changes under an existing install, `kx` resets the file rather
 than migrating it — the cost is re-running one listing, and the alternative is
 migration code for a cache.
 
-`kx --version` prints the path, in case yours is somewhere else.
+`KX_STATE` points at a different file, for a terminal or CI job that wants its
+own history instead of sharing the one in `~/.kx`. `kx --version` prints the
+path actually in use, in case yours is somewhere else.

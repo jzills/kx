@@ -294,6 +294,8 @@ listing.
 
 `kx` maintains a history of up to 10 `kx get` results in `~/.kx/state.json`. A cursor tracks your current position; index-based commands resolve against the entry at the cursor. `kx state --all` lists the history, `kx state <position>` jumps to an entry, `kx state back`/`kx state forward` step through it, and `kx state drop <position>` removes one (`kx state drop --all` clears everything, including the namespace/context slots below). The older `kx back`/`kx forward`/`kx drop` spellings still work too.
 
+`KX_STATE` points kx at a different state file, for a terminal (or a CI job) that wants its own history instead of sharing the one in `~/.kx`.
+
 Each entry records the kubeconfig context it was listed in, since a resource name means nothing without the cluster it was read from. `kx state` names it beside the namespace; `kx state --all` captions the table with it, or gives it a column when the history spans more than one.
 
 Switching contexts therefore retires the indexes you had. Rather than resolve them against the new cluster — where the same name is a different resource — `kx` refuses, names both contexts, and re-runs the listing here so there are usable numbers on screen: `kx get pods` in staging, `kx context 2`, then `kx delete 1` deletes nothing and relists. `kx ns <index>` is refused the same way and tells you to run `kx ns`, since a namespace listing is per-cluster too. `kx context <index>` is the one exception — contexts live in kubeconfig rather than in any cluster, so switching back always works.
@@ -316,6 +318,8 @@ To operate on a namespace rather than switch to it, list it like any other resou
 | `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`, `grype`). |
 
 Styled output is emitted only when stdout is a terminal — piped or redirected output is plain text, so `kx get pods | grep worker` stays clean. The [`NO_COLOR`](https://no-color.org/) convention is honored as well.
+
+`KX_CONFIG` points kx at a config file other than `~/.kx/config.toml`, for the same reason `KX_STATE` exists — see [History](#history).
 
 ## Themes
 
