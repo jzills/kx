@@ -742,7 +742,7 @@ func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 		for _, want := range []string{
 			"Index 2 is out of range",
 			"the current listing has 1 Service",
-			"kx get namespace",
+			"kx get namespaces",
 			"Namespaces",
 		} {
 			if !strings.Contains(err.Error(), want) {
@@ -758,7 +758,7 @@ func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 		if err == nil {
 			t.Fatal("resolved against no state")
 		}
-		if !strings.Contains(err.Error(), "kx get deployment") {
+		if !strings.Contains(err.Error(), "kx get deployments") {
 			t.Errorf("err = %q, want it to name the deployment relist", err)
 		}
 		if strings.Contains(err.Error(), "<resource>") {
