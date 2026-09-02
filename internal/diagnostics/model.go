@@ -203,6 +203,22 @@ type PodPhaseCounts struct {
 // right place to be told about something that finished days ago.
 func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Unknown }
 
+// Active is the pods the node is still expected to be running: everything
+// except the ones that have terminated.
+//
+// This is Stalled's denominator, and has to be. Stalled excludes Succeeded and
+// Failed for the reasons above; a ratio whose numerator excludes them but
+// whose denominator counts them is false to anyone who checks. A node with 23
+// running, 5 failed and 1 pending reported "1/29 pods not running" when six of
+// the 29 were not running. It reports "1/24" now, and 23 of those 24 are
+// indeed running.
+//
+// Summed from the parts rather than subtracted from Total, which podPhaseCounts
+// guarantees comes to the same thing: a phase Kubernetes does not name is
+// counted as Unknown rather than dropped, so these three are exactly the
+// non-terminated pods.
+func (c PodPhaseCounts) Active() int { return c.Running + c.Pending + c.Unknown }
+
 // NodeHealth is a Node's conditions, whether it has been cordoned, and what is
 // scheduled on it.
 type NodeHealth struct {

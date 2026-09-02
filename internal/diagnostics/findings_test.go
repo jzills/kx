@@ -813,11 +813,48 @@ func TestNodeRollupStillCountsPendingAndUnknown(t *testing.T) {
 		Kind: kinds.Node, Name: "node-a",
 		Node: &NodeHealth{
 			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
-			Pods:       PodPhaseCounts{Total: 40, Running: 37, Pending: 2, Unknown: 1, Failed: 5},
+			Pods:       PodPhaseCounts{Total: 45, Running: 37, Pending: 2, Unknown: 1, Failed: 5},
 		},
 	})
 	if !hasSummaryContaining(report.Findings, "3/40 pods not running") {
 		t.Errorf("findings = %v, want the pending and unknown pods counted and the failed ones not",
 			summaries(report.Findings))
+	}
+}
+
+// The ratio's two halves have to count the same pods.
+//
+// Stalled excludes terminated pods on purpose — see PodPhaseCounts.Stalled —
+// so the denominator has to exclude them too. The live shape this was found
+// in: a node with 23 running, 5 failed and 1 pending reported "1/29 pods not
+// running" while kubectl showed 6 of the 29 not running. 24 pods are still
+// expected to be running there and 23 of them are, which is what "1/24" says.
+func TestNodeRollupDenominatorExcludesTerminatedPods(t *testing.T) {
+	report := BuildReport(Data{
+		Kind: kinds.Node, Name: "node-a",
+		Node: &NodeHealth{
+			Conditions: []NodeCondition{{Type: "Ready", Status: "True"}},
+			Pods:       PodPhaseCounts{Total: 29, Running: 23, Failed: 5, Pending: 1},
+		},
+	})
+	if !hasSummaryContaining(report.Findings, "1/24 pods not running") {
+		t.Errorf("findings = %v,\n  want the terminated pods out of the denominator",
+			summaries(report.Findings))
+	}
+	if hasSummaryContaining(report.Findings, "1/29") {
+		t.Errorf("findings = %v,\n  want the denominator to exclude the 5 failed pods",
+			summaries(report.Findings))
+	}
+}
+
+// Active is Stalled's denominator, so it is the same question asked of the
+// whole tally: which pods is this node still supposed to be running?
+func TestActiveCountsOnlyPodsStillExpectedToRun(t *testing.T) {
+	counts := PodPhaseCounts{Total: 29, Running: 23, Failed: 5, Pending: 1}
+	if got := counts.Active(); got != 24 {
+		t.Errorf("Active() = %d, want 24 — 29 pods less the 5 that terminated", got)
+	}
+	if got := counts.Stalled(); got != 1 {
+		t.Errorf("Stalled() = %d, want 1", got)
 	}
 }

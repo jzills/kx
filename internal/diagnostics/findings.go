@@ -160,9 +160,12 @@ func nodeFindings(node NodeHealth) []Finding {
 	// stalled pods is broken for the reason the condition names, and the pods
 	// are downstream of it. The count points at kubectl rather than listing
 	// hundreds of pods that would not fit a diagnosis.
+	//
+	// Against Active, not Total: the two halves of the ratio have to count the
+	// same pods, and Stalled leaves the terminated ones out.
 	if stalled := node.Pods.Stalled(); stalled > 0 {
 		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
-			"%d/%d pods not running (%s)", stalled, node.Pods.Total, phaseBreakdown(node.Pods))})
+			"%d/%d pods not running (%s)", stalled, node.Pods.Active(), phaseBreakdown(node.Pods))})
 	}
 	return findings
 }
