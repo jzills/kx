@@ -727,6 +727,38 @@ func TestPreviousListsOnMissingStateIsFalse(t *testing.T) {
 // used to be reported without reference to the kind asked for: an out-of-range
 // index described whatever listing was current, and an empty history said to
 // run `kx get <resource>` for a command that knew the resource.
+// Every index failure in this package is one sentence with one shape: what
+// went wrong, what the listing actually holds, and where to look.
+//
+// Fields used to borrow index.Resolve's wording, which says "current state has
+// 29 items" because the index package cannot see kinds — so the path every
+// ordinary command takes gave the vaguest of the three messages while its two
+// siblings named the kind.
+func TestFieldsOutOfRangeNamesWhatTheListingHolds(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api", "web"}, kinds.Pod),
+		Namespace: "prod",
+	})
+
+	_, _, _, err := service.Fields(9)
+	if err == nil {
+		t.Fatal("index 9 of a 2-item listing resolved")
+	}
+	for _, want := range []string{
+		"Index 9 is out of range",
+		"the current listing has 2 Pods",
+		"run 'kx state' to view",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "items") {
+		t.Errorf("err = %q, want the kind named rather than \"items\"", err)
+	}
+}
+
 func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 	t.Run("out of range names the current listing and the relist", func(t *testing.T) {
 		service := newTestService(t, 10)

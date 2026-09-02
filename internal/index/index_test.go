@@ -1,6 +1,7 @@
 package index
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -369,13 +370,13 @@ func TestResolveOutOfRange(t *testing.T) {
 	}
 }
 
-// The message is asserted because it is the user-facing contract, and it
-// singularizes on a one-item state.
-func TestResolveOutOfRangeMessage(t *testing.T) {
+// Resolve reports an out-of-range index as a sentinel, leaving the sentence to
+// the caller — which knows the kind, the scope and the relist command, and so
+// can say something this package cannot.
+func TestResolveOutOfRangeIsASentinel(t *testing.T) {
 	_, err := Resolve(fakeResolver{names: []string{"only"}}, 5)
-	want := "Index 5 is out of range — current state has 1 item (run 'kx state' to view)."
-	if err == nil || err.Error() != want {
-		t.Errorf("error = %v, want %q", err, want)
+	if !errors.Is(err, ErrOutOfRange) {
+		t.Errorf("err = %v, want ErrOutOfRange", err)
 	}
 }
 

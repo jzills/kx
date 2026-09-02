@@ -575,7 +575,7 @@ func clamp(value, high int) int {
 
 // positionOutOfRange reports a `kx state`/`kx state drop` position that names
 // no entry in the history stack, in the same "is out of range" grammar
-// index.Resolve uses for a listing index.
+// outOfRange uses for a listing index.
 func positionOutOfRange(position, count int) error {
 	label := "entries"
 	if count == 1 {
@@ -584,6 +584,20 @@ func positionOutOfRange(position, count int) error {
 	return fmt.Errorf(
 		"Position %d is out of range — history has %d %s (run 'kx state --all' to view).",
 		position, count, label,
+	)
+}
+
+// outOfRange reports an index that names no row in the entry it was counted
+// against, in the same grammar positionOutOfRange uses for a history position.
+//
+// The generic form, for Fields: it has no kind to relist — the entry may span
+// kinds, which a tree walk and a triage sweep both produce — so it points at
+// `kx state` the way an out-of-range position does. FieldsExpecting and
+// FieldsNamed have a kind and name the relist instead.
+func outOfRange(idx int, entry State) error {
+	return fmt.Errorf(
+		"Index %d is out of range — the current listing has %s (run 'kx state' to view).",
+		idx, describeCurrent(entry),
 	)
 }
 
@@ -716,7 +730,7 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", outOfRange(idx, current)
 	}
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
@@ -951,9 +965,9 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 
 	name, err = index.Resolve(entry, idx)
 	if err != nil {
-		// index.Resolve says "current state", which would be wrong here: the
-		// count comes from the slot, not from whatever the cursor is on, and
-		// relisting is what fixes it.
+		// index.Resolve returns only a sentinel; the count named here comes
+		// from the slot, not from whatever the cursor is on, so this writes
+		// its own sentence rather than deferring to a generic one.
 		return "", "", fmt.Errorf(
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)
