@@ -118,8 +118,6 @@ func translate(err error) error {
 	return err
 }
 
-// Run captures stdout, returning the trimmed stderr as the error on a non-zero
-// exit so the caller can render kubectl's own message.
 // Error is a failure kubectl itself reported: its stderr, verbatim.
 //
 // Typed so a caller can tell "kubectl said this" from "something else said
@@ -132,6 +130,8 @@ type Error struct{ Stderr string }
 
 func (e Error) Error() string { return e.Stderr }
 
+// Run captures stdout, returning the trimmed stderr as the error on a non-zero
+// exit so the caller can render kubectl's own message.
 func (e Exec) Run(args []string) (string, error) {
 	cmd := e.command(args)
 	var stdout, stderr strings.Builder
@@ -216,7 +216,7 @@ func (e Exec) Watch(args []string, onLine func(line string) error) error {
 	waitErr := cmd.Wait()
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
-		return errors.New(strings.TrimSpace(stderr.String()))
+		return Error{Stderr: strings.TrimSpace(stderr.String())}
 	}
 	if waitErr != nil {
 		return translate(waitErr)

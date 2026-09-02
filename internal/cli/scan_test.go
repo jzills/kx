@@ -155,11 +155,10 @@ func TestEnsureAvailableReportsTheEngineWhenTheBinaryIsAbsent(t *testing.T) {
 }
 
 // The absent-binary message must not read as a missing Kubernetes resource.
-// isStale falls back to IsNotFound, which matches the bare substring "not
-// found" anywhere in an error — so NotFoundError's "trivy not found on PATH"
-// sent a scanner-availability failure down the stale-state path and appended "Run
-// 'kx get <resource>' to refresh the list." to it, advice that has nothing to
-// do with an uninstalled scanner and no bearing on a sweep with no index.
+// IsNotFound requires a kubectl.Error before it matches anything, and
+// scanner.NotFoundError isn't one — so "grype not found on PATH" never
+// triggers the stale-state relist ("Run 'kx get <resource>' to refresh the
+// list."), whatever words it happens to contain.
 func TestEnsureAvailableAbsentBinaryIsNotMistakenForStaleState(t *testing.T) {
 	command := ScanCommand{
 		Scanner: &fakeScanner{probeErr: scanner.NotFoundError{Binary: "grype"}},

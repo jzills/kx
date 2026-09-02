@@ -12,6 +12,22 @@ import (
 	"time"
 )
 
+// shim installs a "kubectl" double in dir that runs body when invoked, and
+// skips the calling test on Windows, where the double's POSIX shell doesn't
+// exist. dir is the caller's own t.TempDir() rather than one shim creates,
+// so a body that references its own directory — a PID file, a call-count
+// file — can be built before the double is installed.
+func shim(t *testing.T, dir, body string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH-shimmed test double assumes a POSIX shell")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // onLine returning an error must not leave the subprocess running behind
 // it. Watch backs `kubectl get --watch`, which never exits on its own, so
 // anything short of killing the process here means the Wait() that follows
@@ -23,13 +39,8 @@ import (
 // PATH is shimmed with a "kubectl" double rather than talking to a cluster,
 // keeping this hermetic.
 func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH-shimmed test double assumes a POSIX shell")
-	}
-
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
-	script := filepath.Join(dir, "kubectl")
 	// Stands in for `kubectl get --watch` against an idle cluster: records
 	// its own PID, prints the one line Watch will read, then — like the
 	// real thing — never exits on its own. `exec sleep` replaces the shell
@@ -39,10 +50,7 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 	// it orphaned keeps the stderr pipe open underneath it, hanging this
 	// test on an artifact of the double rather than the thing under test.
 	body := "#!/bin/sh\necho \"$$\" > " + pidFile + "\necho header\nexec sleep 300\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	shim(t, dir, body)
 
 	done := make(chan error, 1)
 	go func() {
@@ -89,9 +97,6 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 // count how often the double was actually consulted.
 func contextShim(t *testing.T) (dir, contextFile, callsFile string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH-shimmed test double assumes a POSIX shell")
-	}
 	dir = t.TempDir()
 	contextFile = filepath.Join(dir, "context")
 	callsFile = filepath.Join(dir, "calls")
@@ -105,10 +110,7 @@ func contextShim(t *testing.T) (dir, contextFile, callsFile string) {
 		"elif [ \"$1\" = config ] && [ \"$2\" = use-context ]; then\n" +
 		"  printf '%s\\n' \"$3\" > " + contextFile + "\n" +
 		"fi\n"
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	shim(t, dir, body)
 	return dir, contextFile, callsFile
 }
 
@@ -193,24 +195,40 @@ func TestUnsetContextIsCachedToo(t *testing.T) {
 // directly, so without this one the production wiring could go back to
 // errors.New and nothing would notice.
 func TestRunReturnsATypedErrorCarryingStderr(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH-shimmed test double assumes a POSIX shell")
-	}
-
 	dir := t.TempDir()
-	script := filepath.Join(dir, "kubectl")
 	// What kubectl actually prints for a pod that is not there, on stderr,
 	// with a non-zero exit.
 	const stderr = `Error from server (NotFound): pods "nginx" not found`
-	body := "#!/bin/sh\necho '" + stderr + "' >&2\nexit 1\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	shim(t, dir, "#!/bin/sh\necho '"+stderr+"' >&2\nexit 1\n")
 
 	_, err := Exec{}.Run([]string{"get", "pod", "nginx"})
 	if err == nil {
 		t.Fatal("Run succeeded on a non-zero exit")
+	}
+	var reported Error
+	if !errors.As(err, &reported) {
+		t.Fatalf("err is %T, want a kubectl.Error — the type is what makes the "+
+			"message safe to read", err)
+	}
+	if reported.Stderr != stderr {
+		t.Errorf("Stderr = %q, want kubectl's own message verbatim", reported.Stderr)
+	}
+}
+
+// Watch must carry the same typed Error Run does, for the same reason:
+// cli.IsNotFound requires the type to tell "kubectl said this" from
+// "something else said this", and a bare errors.New here — which this was,
+// until now — makes Watch's failures invisible to it. Every caller-side test
+// constructs the type directly, so without this one the production wiring
+// could go back to errors.New and nothing would notice.
+func TestWatchReturnsATypedErrorCarryingStderr(t *testing.T) {
+	dir := t.TempDir()
+	const stderr = `Error from server (NotFound): pods "nginx" not found`
+	shim(t, dir, "#!/bin/sh\necho '"+stderr+"' >&2\nexit 1\n")
+
+	err := Exec{}.Watch(nil, func(string) error { return nil })
+	if err == nil {
+		t.Fatal("Watch succeeded on a non-zero exit")
 	}
 	var reported Error
 	if !errors.As(err, &reported) {
