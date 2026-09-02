@@ -107,6 +107,8 @@ func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 	}
 }
 
+// The error used to be a bare "nothing to set or remove" — no subject, no
+// remedy, no closing period, alone among kx's refusals in that respect.
 func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	_, err := MetadataWriteCommand{
@@ -117,6 +119,11 @@ func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	}
 	if len(kubectl.runs) != 0 {
 		t.Error("called kubectl with nothing to do")
+	}
+	for _, want := range []string{"kx label", "key=value", "--remove"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
 	}
 }
 

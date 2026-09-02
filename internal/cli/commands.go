@@ -487,7 +487,8 @@ func newScaleCommand(services Services) *cobra.Command {
 			}
 			replicas, err := strconv.Atoi(args[1])
 			if err != nil {
-				return fmt.Errorf("'%s' is not a replica count", args[1])
+				return fmt.Errorf(
+					"Invalid value for 'replicas': '%s' is not a valid int.", args[1])
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(index, replicas)

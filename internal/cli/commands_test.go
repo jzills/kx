@@ -830,6 +830,22 @@ func TestNamespaceListingCaptionsTheCurrentNamespace(t *testing.T) {
 	}
 }
 
+// The error used to say only "'notanumber' is not a replica count" — no
+// remedy, no closing period, and a different vocabulary than every other bad
+// positional argument kx parses, which all say "Invalid value for 'name':
+// 'value' is not a valid int."
+func TestScaleRejectsANonNumericReplicaCount(t *testing.T) {
+	cmd := newScaleCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "notanumber"})
+	if err == nil {
+		t.Fatal("kx scale 1 notanumber was accepted")
+	}
+	want := "Invalid value for 'replicas': 'notanumber' is not a valid int."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
 // The caption tracks the kubeconfig rather than the listing, so switching and
 // listing again says where the caller is now.
 func TestNamespaceListingCaptionFollowsASwitch(t *testing.T) {

@@ -502,11 +502,20 @@ func TestRolloutNonStatusIsCaptured(t *testing.T) {
 	}
 }
 
+// The error used to say only "unknown rollout action 'explode'." — kx
+// describes what's wrong on every other refusal it can (unsupportedKindError
+// names what a command does support), and this named nothing, despite
+// rolloutActionNames already existing for exactly this.
 func TestRolloutRejectsUnknownAction(t *testing.T) {
 	_, err := RolloutCommand{Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment)}.
 		Execute("explode", 1)
 	if err == nil {
 		t.Fatal("accepted an unknown rollout action")
+	}
+	for _, want := range []string{"kx rollout", "explode", "status", "restart", "pause", "resume", "history", "undo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
 	}
 }
 

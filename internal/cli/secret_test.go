@@ -254,7 +254,7 @@ func TestDecodeGuards(t *testing.T) {
 		{
 			name: "--decode on a non-Secret kind", kind: kinds.Pod, res: "pods",
 			indexes: []int{1}, options: decodeOptions(),
-			want: "--decode only applies to Secrets",
+			want: "'--decode' cannot be combined with Pods",
 		},
 		{
 			name: "--key with several indexes", kind: kinds.Secret, res: "secret",
