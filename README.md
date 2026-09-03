@@ -65,6 +65,8 @@ standalone binary takes a few seconds while Gatekeeper scans it — run
 
 ## Quickstart
 
+A kx session at a glance — one listing, then everything after it by number:
+
 ```bash
 kx get pods    # lists pods, numbering each row
 kx logs 3      # the third pod
