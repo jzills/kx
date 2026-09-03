@@ -11,6 +11,36 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 )
 
+// KX_STATE redirects File() itself — the one thing Service.Path can't stand
+// in for, since a caller with no Path relies on File() to find ~/.kx by
+// default. Without this, two shells always shared one history: list pods in
+// one, deployments in the other, and the first shell's next index-taking
+// command resolves against whichever listing happened last.
+func TestFileHonorsKXStateOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom.json")
+	t.Setenv("KX_STATE", path)
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if got != path {
+		t.Errorf("File() = %q, want %q", got, path)
+	}
+}
+
+// An empty KX_STATE must fall back to the default rather than trying to open
+// "" as a path.
+func TestFileEmptyKXStateFallsBackToDefault(t *testing.T) {
+	t.Setenv("KX_STATE", "")
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if !strings.HasSuffix(got, filepath.Join(".kx", "state.json")) {
+		t.Errorf("File() = %q, want the default ~/.kx/state.json path", got)
+	}
+}
+
 func newTestService(t *testing.T, maxHistory int) *Service {
 	t.Helper()
 	service := NewService(maxHistory)
@@ -422,7 +452,7 @@ func TestNavigateTo(t *testing.T) {
 		save(t, service, State{Resources: pods(name), Namespace: "default"})
 	}
 
-	cases := map[int]string{1: "one", 2: "two", 0: "one", 99: "three"}
+	cases := map[int]string{1: "one", 2: "two", 3: "three"}
 	for position, want := range cases {
 		state, err := service.NavigateTo(position)
 		if err != nil {
@@ -431,6 +461,33 @@ func TestNavigateTo(t *testing.T) {
 		if state.Names()[0] != want {
 			t.Errorf("NavigateTo(%d) = %q, want %q", position, state.Names()[0], want)
 		}
+	}
+}
+
+// A position outside the stack must be refused rather than clamped to the
+// nearest end: unlike Navigate's delta, a position is a number the caller
+// typed, and clamping it silently jumps to an entry other than the one asked
+// for. Covers both directions and the boundary the old clamp treated as
+// in-range.
+func TestNavigateToRefusesAnOutOfRangePosition(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"one", "two", "three"} {
+		save(t, service, State{Resources: pods(name), Namespace: "default"})
+	}
+
+	for _, position := range []int{0, -1, 4, 99} {
+		if _, err := service.NavigateTo(position); err == nil {
+			t.Errorf("NavigateTo(%d) succeeded, want an out-of-range error", position)
+		}
+	}
+
+	// Refusing must not move the cursor.
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Names()[0] != "three" {
+		t.Errorf("cursor moved after a refused NavigateTo: Load() = %q", loaded.Names()[0])
 	}
 }
 
@@ -480,6 +537,31 @@ func TestDropOnlyEntryFails(t *testing.T) {
 
 	if _, err := service.Drop(1); err == nil {
 		t.Error("Drop succeeded on the only entry, want an error")
+	}
+}
+
+// A position outside the stack must be refused rather than clamped to the
+// nearest end — the old clamp() call turned `kx state drop 99` into "delete
+// the last entry" instead of reporting that position 99 doesn't exist.
+func TestDropRefusesAnOutOfRangePosition(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"one", "two", "three"} {
+		save(t, service, State{Resources: pods(name), Namespace: "default"})
+	}
+
+	for _, position := range []int{0, -1, 4, 99} {
+		if _, err := service.Drop(position); err == nil {
+			t.Errorf("Drop(%d) succeeded, want an out-of-range error", position)
+		}
+	}
+
+	// Refusing must not remove anything.
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — a refused Drop dropped an entry", len(history.States))
 	}
 }
 
@@ -645,6 +727,38 @@ func TestPreviousListsOnMissingStateIsFalse(t *testing.T) {
 // used to be reported without reference to the kind asked for: an out-of-range
 // index described whatever listing was current, and an empty history said to
 // run `kx get <resource>` for a command that knew the resource.
+// Every index failure in this package is one sentence with one shape: what
+// went wrong, what the listing actually holds, and where to look.
+//
+// Fields used to borrow index.Resolve's wording, which says "current state has
+// 29 items" because the index package cannot see kinds — so the path every
+// ordinary command takes gave the vaguest of the three messages while its two
+// siblings named the kind.
+func TestFieldsOutOfRangeNamesWhatTheListingHolds(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api", "web"}, kinds.Pod),
+		Namespace: "prod",
+	})
+
+	_, _, _, err := service.Fields(9)
+	if err == nil {
+		t.Fatal("index 9 of a 2-item listing resolved")
+	}
+	for _, want := range []string{
+		"Index 9 is out of range",
+		"the current listing has 2 Pods",
+		"run 'kx state' to view",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "items") {
+		t.Errorf("err = %q, want the kind named rather than \"items\"", err)
+	}
+}
+
 func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 	t.Run("out of range names the current listing and the relist", func(t *testing.T) {
 		service := newTestService(t, 10)
@@ -660,7 +774,7 @@ func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 		for _, want := range []string{
 			"Index 2 is out of range",
 			"the current listing has 1 Service",
-			"kx get namespace",
+			"kx get namespaces",
 			"Namespaces",
 		} {
 			if !strings.Contains(err.Error(), want) {
@@ -676,7 +790,7 @@ func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 		if err == nil {
 			t.Fatal("resolved against no state")
 		}
-		if !strings.Contains(err.Error(), "kx get deployment") {
+		if !strings.Contains(err.Error(), "kx get deployments") {
 			t.Errorf("err = %q, want it to name the deployment relist", err)
 		}
 		if strings.Contains(err.Error(), "<resource>") {
@@ -1439,5 +1553,165 @@ func TestUnscopedEntryStillDefaults(t *testing.T) {
 	}
 	if loaded.Namespace != "default" {
 		t.Errorf("Namespace = %q, want default", loaded.Namespace)
+	}
+}
+
+// An entry with no namespace used to be "corrected" to "default" on load, so
+// a cluster-scoped listing that deliberately recorded none got one invented
+// for it — kx get nodes then described Node/x as living in "default".
+//
+// The scope is recovered from the kinds the entry already records rather than
+// from a new field: every resource carries its Kind, and a listing whose sole
+// kind is cluster-scoped has no namespace by definition.
+func TestClusterScopedEntryKeepsItsEmptyNamespace(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"node-a"}, kinds.Node),
+		Namespace: "",
+	})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty — a Node listing has no namespace", loaded.Namespace)
+	}
+
+	_, namespace, kind, err := service.Fields(1)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if namespace != "" {
+		t.Errorf("Fields namespace = %q, want empty", namespace)
+	}
+	if kind != kinds.Node {
+		t.Errorf("Fields kind = %q, want Node", kind)
+	}
+}
+
+// The backfill still applies to a namespaced listing that recorded none, which
+// is what it was written for.
+func TestNamespacedEntryWithNoNamespaceStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: ""})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default", loaded.Namespace)
+	}
+}
+
+// A mixed-kind entry — a tree walk, a triage sweep — has no sole kind to read
+// a scope from, so it keeps the backfill rather than having one guessed.
+func TestMixedKindEntryStillDefaults(t *testing.T) {
+	service := newTestService(t, 10)
+	mixed := NewOrderedResources([]Resource{
+		{Name: "web", Kind: kinds.Deployment},
+		{Name: "web-abc", Kind: kinds.Pod},
+	})
+	save(t, service, State{Resources: mixed, Namespace: ""})
+
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Namespace != "default" {
+		t.Errorf("Namespace = %q, want default for a mixed-kind entry", loaded.Namespace)
+	}
+}
+
+// countingSource records how often the discovery fallback was consulted, and
+// answers "don't know" — the shape a cache that has never heard of a kind has.
+type countingSource struct{ namespacedCalls int }
+
+func (c *countingSource) Resolve(string) (kinds.Kind, string, bool) { return "", "", false }
+func (c *countingSource) Namespaced(kinds.Kind) (bool, bool) {
+	c.namespacedCalls++
+	return false, false
+}
+
+// The namespace backfill asks kinds.Namespaced, which falls through to the
+// discovery cache for any kind outside kx's static tables — every CRD, and a
+// stale cache means network round-trips per API group.
+//
+// It used to run over every entry in the stack on every load, and Load runs on
+// every index-resolving command. So one listing of a cluster-scoped custom
+// resource anywhere in history made `kx describe 1` against a pod listing wait
+// on discovery before it could reach kubectl.
+func TestLoadDoesNotConsultDiscoveryForOtherHistoryEntries(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	// Written straight to disk rather than through Save, which loads the stack
+	// and writes it back: that round trip would persist whatever the backfill
+	// decided about the CRD entry, and the assertion below would then pass for
+	// the wrong reason on either implementation.
+	if err := service.saveHistory(History{
+		Cursor: 1,
+		States: []State{
+			// A CRD listing with no namespace: the entry that reaches the
+			// discovery fallback.
+			{Resources: NewResources([]string{"web-gateway"}, kinds.Kind("Gateway"))},
+			// The pod listing on top, which is what the cursor points at.
+			{Resources: NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod"},
+		},
+	}); err != nil {
+		t.Fatalf("write the stack: %v", err)
+	}
+
+	source := &countingSource{}
+	kinds.SetShorthandSource(source)
+	t.Cleanup(func() { kinds.SetShorthandSource(nil) })
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "prod" {
+		t.Errorf("namespace = %q, want prod", current.Namespace)
+	}
+	if source.namespacedCalls != 0 {
+		t.Errorf("Load consulted discovery %d time(s) for an entry it did not return",
+			source.namespacedCalls)
+	}
+}
+
+// The entry being read still gets the backfill, so the saving above is in what
+// is skipped rather than in the answer.
+func TestLoadStillBackfillsTheEntryItReturns(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := service.Save(State{
+		Resources: NewResources([]string{"nginx"}, kinds.Pod),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "default" {
+		t.Errorf("namespace = %q, want the backfilled default", current.Namespace)
+	}
+}
+
+// A cluster-scoped listing keeps its empty namespace — #271, which the
+// backfill has to keep honouring wherever it now runs.
+func TestLoadLeavesAClusterScopedListingWithoutANamespace(t *testing.T) {
+	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := service.Save(State{
+		Resources: NewResources([]string{"node-a"}, kinds.Node),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if current.Namespace != "" {
+		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", current.Namespace)
 	}
 }

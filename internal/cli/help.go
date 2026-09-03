@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,10 +27,10 @@ var helpSections = []struct {
 	Commands []string
 }{
 	{"Resources", []string{
-		"annotate", "annotations", "context", "cp", "debug", "delete", "describe",
-		"diagnostic", "edit", "events", "exec", "get", "label", "labels",
-		"logs", "namespace", "port-forward", "rollout", "scale", "scan",
-		"secret", "top", "tree", "yaml",
+		"annotate", "annotations", "context", "cordon", "cp", "debug", "delete",
+		"describe", "diagnostic", "drain", "edit", "events", "exec", "get",
+		"label", "labels", "logs", "namespace", "port-forward", "rollout",
+		"scale", "scan", "secret", "top", "tree", "uncordon", "yaml",
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
@@ -104,6 +105,13 @@ func environment() []render.HelpItem {
 	for _, setting := range config.Settings() {
 		items = append(items, render.HelpItem{Name: setting.Env, Doc: setting.Doc})
 	}
+	// KX_STATE lives beside KX_CONFIG here rather than in config.Settings():
+	// it names state.File's path, and state doesn't import config (nor
+	// should it, just to list one env var) — this is the one place that
+	// already imports both.
+	items = append(items, render.HelpItem{
+		Name: "KX_STATE", Doc: "State file path, instead of ~/.kx/state.json",
+	})
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	return items
 }
@@ -389,6 +397,54 @@ func argSpelling(arg Arg) string {
 	return name
 }
 
+// minArgs builds a cobra.PositionalArgs validator that requires at least n
+// positional arguments, reporting a shortfall in kx's own voice rather than
+// cobra's "requires at least N arg(s), only received M" — generated from the
+// command's own Use string, so it can't say something --help doesn't.
+func minArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) >= n {
+			return nil
+		}
+		return requiredArgsError(cmd)
+	}
+}
+
+// exactArgs is minArgs' counterpart for a command whose argument count is
+// fixed rather than open-ended. Both a shortfall and an overflow report the
+// same message: either way, RunE did not get what the Use string promises,
+// and cp/drain/port-forward's hand-written arity errors don't distinguish
+// the two either.
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == n {
+			return nil
+		}
+		return requiredArgsError(cmd)
+	}
+}
+
+// requiredArgsError names a command's required arguments the way its own
+// Usage line already spells them, so `kx describe` with no index answers
+// "kx describe requires <index>... — see 'kx describe --help' for usage."
+// rather than cobra's generic arity message. Only the required prefix is
+// named — an optional argument past it, like exec's trailing command, isn't
+// what's missing.
+func requiredArgsError(cmd *cobra.Command) error {
+	var required []string
+	for _, arg := range ParseUse(cmd.Use).Args {
+		if !arg.Required {
+			break
+		}
+		required = append(required, argSpelling(arg))
+	}
+	path := cmd.CommandPath()
+	return fmt.Errorf(
+		"%s requires %s — see '%s --help' for usage.",
+		path, strings.Join(required, " "), path,
+	)
+}
+
 // CommandOrder returns the command names in the order the root help screen
 // lists them, which is the order the README's command table uses too.
 func CommandOrder() []string {
@@ -398,6 +454,39 @@ func CommandOrder() []string {
 	}
 	return names
 }
+
+// Section is one group of the root help screen: a heading and the commands
+// under it.
+type Section struct {
+	Title    string
+	Commands []string
+}
+
+// HelpSections returns the groups CommandOrder flattens.
+//
+// Exported for the site's command reference, which lists the same commands in
+// the same groups. CommandOrder alone would have made the docs invent their own
+// grouping, and a second editorial opinion about which commands belong together
+// is exactly what helpSections exists to prevent.
+func HelpSections() []Section {
+	sections := make([]Section, 0, len(helpSections))
+	for _, section := range helpSections {
+		// Copied rather than aliased: helpSections is package state, and a
+		// caller ranging over the slice it gets back should not be able to
+		// reorder the help screen by writing to it.
+		commands := append([]string(nil), section.Commands...)
+		sections = append(sections, Section{Title: section.Title, Commands: commands})
+	}
+	return sections
+}
+
+// HelpFor returns the structured help for one command — the same data
+// `kx <command> --help` renders.
+//
+// Exported so tools/gen-site-docs can write a documentation page from what the
+// binary actually accepts, rather than from a hand-kept list of flags that
+// drifts the first time one is added.
+func HelpFor(cmd *cobra.Command) render.CommandHelp { return commandHelp(cmd) }
 
 // Execute runs the command tree, resolving a bare kind spelling to `kx get`.
 //

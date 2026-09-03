@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -189,6 +190,251 @@ func TestLegacyTopLevelHistoryCommandsAreHidden(t *testing.T) {
 		}
 		if !cmd.Hidden {
 			t.Errorf("kx %s is not hidden, want it hidden (kx state %s is now canonical)", name, name)
+		}
+	}
+}
+
+// --port and --no-open configure the server --html starts. Without --html they
+// were accepted and dropped: `kx diag --port 9090` printed a table and said
+// nothing about the port it had ignored. kx refuses every other contradiction
+// it can see, and this is the same mistake.
+//
+// Driven through real argv across all four commands, because two of them parse
+// these flags by hand and two let cobra do it — the bug was in the wiring, not
+// in one command.
+func TestHTMLOnlyFlagsNeedHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		for _, flag := range [][]string{{"--port", "9090"}, {"--no-open"}} {
+			t.Run(command+" "+flag[0], func(t *testing.T) {
+				quietRender(t)
+				argv := append([]string{command}, flag...)
+				err := Execute(NewRoot(argvServices(t), "test"), argv)
+				if err == nil {
+					t.Fatalf("kx %v was accepted with no --html", argv)
+				}
+				if !strings.Contains(err.Error(), flag[0]) ||
+					!strings.Contains(err.Error(), "--html") {
+					t.Errorf("error = %q, want it to name %q and --html", err, flag[0])
+				}
+			})
+		}
+	}
+}
+
+// The flags still work for what they are for. Asserted by the error kx gets
+// *past* them to — no cluster in tests — rather than by success, which these
+// commands cannot reach here.
+func TestHTMLOnlyFlagsAreAcceptedWithHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			argv := []string{command, "--html", "--port", "9090", "--no-open"}
+			err := Execute(NewRoot(argvServices(t), "test"), argv)
+			if err != nil && strings.Contains(err.Error(), "only applies with") {
+				t.Errorf("kx %v was refused: %v", argv, err)
+			}
+		})
+	}
+}
+
+// --no-limits skips the extra kubectl call that fetches each pod's limits.
+// kubectl reports a node's own percentages against its capacity in the same
+// call, so on nodes the flag had nothing to skip and did nothing at all.
+func TestTopNodesRefusesNoLimits(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"top", "nodes", "--no-limits"})
+	if err == nil {
+		t.Fatal("kx top nodes accepted --no-limits")
+	}
+	if !strings.Contains(err.Error(), "--no-limits") {
+		t.Errorf("error = %q, want it to name the flag", err)
+	}
+}
+
+// Pods are what --no-limits is for, so it keeps working there.
+func TestTopPodsStillAcceptsNoLimits(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"top", "--no-limits"})
+	if err != nil && strings.Contains(err.Error(), "--no-limits") {
+		t.Errorf("kx top --no-limits was refused: %v", err)
+	}
+}
+
+// kx scan already refuses --json with --full. kx diag accepted the pair and
+// ignored the second: a document always carries every swept resource, so
+// --full has nothing to add to one. Refused rather than ignored, so a flag
+// that changes nothing never looks as though it did.
+func TestDiagnosticRefusesJSONWithFull(t *testing.T) {
+	quietRender(t)
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--json", "--full"})
+	if err == nil {
+		t.Fatal("kx diag accepted --json with --full")
+	}
+	for _, want := range []string{"--json", "--full"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q", err, want)
+		}
+	}
+}
+
+// Each still works alone: --full is the sweep's own display flag, and --json
+// is the document. Only together are they contradictory.
+func TestDiagnosticAcceptsJSONAndFullSeparately(t *testing.T) {
+	for _, flag := range []string{"--json", "--full"} {
+		t.Run(flag, func(t *testing.T) {
+			quietRender(t)
+			err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", flag})
+			if err != nil && strings.Contains(err.Error(), "cannot be combined") {
+				t.Errorf("kx diag %s was refused on its own: %v", flag, err)
+			}
+		})
+	}
+}
+
+// --html serves and blocks until Ctrl-C, which a pipeline never sends. The CI
+// guide's own recipe — publish a report and fail on what is in it — therefore
+// hung until the runner killed the job. --out writes the page and returns, so
+// the gate that follows can actually be reached.
+func TestHTMLOutWritesTheReportAndReturns(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			// A command that reaches the cluster fails in tests, so this
+			// asserts on the flag plumbing: --out must not be refused, and
+			// must not be mistaken for a served-report flag.
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--html", "--out", path})
+			if err != nil && strings.Contains(err.Error(), "--out") {
+				t.Errorf("kx %s --html --out was refused: %v", command, err)
+			}
+		})
+	}
+}
+
+// The page actually reaches the file, through the real delivery path.
+//
+// An already-cancelled context, so a regression that serves instead of writing
+// fails here rather than hanging until the test binary's own timeout: servePage
+// returns as soon as the context is done, leaving nothing on disk to read back.
+func TestDeliverPageWritesToOut(t *testing.T) {
+	quietRender(t)
+	path := filepath.Join(t.TempDir(), "report.html")
+	page := []byte("<!doctype html><title>kx</title>")
+
+	if err := deliverPage(stoppedContext(), page, htmlOptions{Enabled: true, Out: path}); err != nil {
+		t.Fatalf("deliverPage: %v", err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !bytes.Equal(written, page) {
+		t.Errorf("wrote %q, want the rendered page", written)
+	}
+}
+
+// A path kx cannot write is reported rather than swallowed — a CI job that
+// pointed --out at a directory that does not exist must fail, not pass having
+// published nothing.
+func TestDeliverPageReportsAnUnwritableOut(t *testing.T) {
+	quietRender(t)
+	path := filepath.Join(t.TempDir(), "no-such-directory", "report.html")
+
+	if err := deliverPage(stoppedContext(), nil, htmlOptions{Enabled: true, Out: path}); err == nil {
+		t.Fatal("deliverPage reported success for a path it could not write")
+	}
+}
+
+// --out replaces the server; --port and --no-open configure one. Together they
+// describe something that is not happening, so kx says so — the same call it
+// makes for those two flags without --html at all.
+func TestOutRefusesTheServedOnlyFlags(t *testing.T) {
+	for _, flag := range [][]string{{"--port", "9090"}, {"--no-open"}} {
+		t.Run(flag[0], func(t *testing.T) {
+			quietRender(t)
+			argv := append([]string{"diag", "--html", "--out", "r.html"}, flag...)
+			err := Execute(NewRoot(argvServices(t), "test"), argv)
+			if err == nil {
+				t.Fatalf("kx %v was accepted", argv)
+			}
+			if !strings.Contains(err.Error(), flag[0]) ||
+				!strings.Contains(err.Error(), "--out") {
+				t.Errorf("error = %q, want it to name %q and --out", err, flag[0])
+			}
+		})
+	}
+}
+
+// --out already says "HTML" in its own name and description ("Write the HTML
+// report to this file..."), so on its own it is not refused for lacking
+// --html — it implies it, the same way --html --out already worked. Driven
+// across all four commands: two parse this flag by hand and two let cobra do
+// it, and the fix has to hold in both wirings.
+func TestOutAloneImpliesHTML(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			err := Execute(NewRoot(argvServices(t), "test"), []string{command, "--out", path})
+			if err != nil && strings.Contains(err.Error(), "only applies with") {
+				t.Errorf("kx %s --out was refused for lacking --html: %v", command, err)
+			}
+		})
+	}
+}
+
+// --json and --out are exactly as contradictory as --json and --html — --out
+// implies --html, so this is the same conflict spelled with one flag instead
+// of two — and the error names --out, the flag actually typed, not --html.
+func TestJSONAndOutAreRefusedTogetherEverywhere(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			path := filepath.Join(t.TempDir(), "report.html")
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--json", "--out", path})
+			if err == nil {
+				t.Fatalf("kx %s --json --out was accepted", command)
+			}
+			if !strings.Contains(err.Error(), "--json") ||
+				!strings.Contains(err.Error(), "--out") {
+				t.Errorf("error = %q, want it to name --json and --out (not --html, which was never typed)", err)
+			}
+		})
+	}
+}
+
+// --json and --html are refused together on every command that has both.
+// kx diag and kx scan already said so; kx tree and kx top now have the pair.
+func TestJSONAndHTMLAreRefusedTogetherEverywhere(t *testing.T) {
+	for _, command := range []string{"diag", "scan", "tree", "top"} {
+		t.Run(command, func(t *testing.T) {
+			quietRender(t)
+			err := Execute(NewRoot(argvServices(t), "test"),
+				[]string{command, "--json", "--html"})
+			if err == nil {
+				t.Fatalf("kx %s --json --html was accepted", command)
+			}
+			if !strings.Contains(err.Error(), "--json") ||
+				!strings.Contains(err.Error(), "--html") {
+				t.Errorf("error = %q, want it to name both flags", err)
+			}
+		})
+	}
+}
+
+// --json is registered on both new commands, so it reaches --help and
+// completion rather than working invisibly.
+func TestJSONFlagIsRegisteredOnTreeAndTop(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	for _, name := range []string{"tree", "top"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("find %s: %v", name, err)
+		}
+		if cmd.Flags().Lookup("json") == nil {
+			t.Errorf("--json is not registered on kx %s", name)
 		}
 	}
 }

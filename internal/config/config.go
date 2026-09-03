@@ -66,6 +66,13 @@ type Setting struct {
 // TestSettingsDocumentsEveryEnvOverride keeps this in step with Load: an
 // override the loader honours but this list omits is one a user can only find
 // by reading the source.
+//
+// KX_CONFIG has no Key: it names which file Load reads config from, so it
+// can't itself be a setting inside that file — File() reads it directly,
+// never through Load. Listed here anyway, empty Key and all, so it appears
+// in the same Environment block as every other KX_* variable rather than
+// being findable only by reading the source, which is the whole reason this
+// list exists.
 func Settings() []Setting {
 	return []Setting{
 		{"theme", "KX_THEME", "Color theme for all output; see kx theme"},
@@ -74,11 +81,19 @@ func Settings() []Setting {
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
 		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
+		{"", "KX_CONFIG", "Config file path, instead of ~/.kx/config.toml"},
 	}
 }
 
 // File returns the config file path.
+//
+// KX_CONFIG overrides it — read directly rather than through Load's usual
+// KX_* mechanism, since the config file's own path can't be a setting inside
+// the config file it names.
 func File() (string, error) {
+	if path, ok := os.LookupEnv("KX_CONFIG"); ok && path != "" {
+		return path, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate home directory: %w", err)

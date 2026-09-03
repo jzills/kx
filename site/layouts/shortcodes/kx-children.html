@@ -1,0 +1,27 @@
+{{- /*
+  The pages below this one, as a grid of cards.
+
+      {{< kx-children >}}
+
+  Read from the content tree rather than written out, so a section index
+  cannot list a page that was renamed or miss one that was added — the same
+  reason the command reference is generated. Title and description come from
+  each child's front matter.
+
+  Not Hextra's own {{< cards >}}: those are styled against fixed grays and a
+  hardcoded border, and would be the one block on the page that ignores the
+  reader's palette.
+*/ -}}
+{{- $children := where (union .Page.Sections .Page.RegularPages) "Params.sidebar.exclude" "!=" true -}}
+{{- with sort $children "Weight" -}}
+<div class="kx-children">
+  {{- range . }}
+  <a class="kx-child" href="{{ .RelPermalink }}">
+    <span class="kx-child__title">{{ .LinkTitle }}</span>
+    {{- with .Description }}
+    <span class="kx-child__body">{{ . }}</span>
+    {{- end }}
+  </a>
+  {{- end }}
+</div>
+{{- end -}}

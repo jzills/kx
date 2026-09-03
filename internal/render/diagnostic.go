@@ -48,7 +48,16 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	}
 	// Built by hand rather than through Caption, so the verdict keeps its own
 	// colour inside the muted banner.
-	r.line(r.style(theme.Muted, string(report.Kind)+"/"+report.Name+" · "+report.Namespace+" · ") + extra)
+	// The namespace segment is dropped when there isn't one rather than left
+	// as an empty gap between separators — a Node is cluster-scoped, and
+	// "Node/x ·  · healthy" reads as a missing value rather than an absent
+	// one. Caption drops empty parts for the same reason; this line builds its
+	// own prefix because the verdict is styled separately.
+	prefix := string(report.Kind) + "/" + report.Name + " · "
+	if report.Namespace != "" {
+		prefix += report.Namespace + " · "
+	}
+	r.line(r.style(theme.Muted, prefix) + extra)
 
 	r.Blank()
 	// Section headers align with the pod table's content, which pads by two.

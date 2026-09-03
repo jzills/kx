@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -33,6 +34,11 @@ type Services struct {
 	// renderer's own Confirm reads os.Stdin, which under `go test` is closed
 	// and therefore always declines.
 	Confirm func(string) error
+	// Scanner runs the vulnerability scanner. Injected for the same reason as
+	// Confirm: kx scan built an ExecService inline, so every test of that
+	// command stopped at the argument guards rather than reaching what the
+	// command does with what it scanned.
+	Scanner scanner.Service
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
@@ -42,6 +48,16 @@ func (s Services) confirm() func(string) error {
 		return s.Confirm
 	}
 	return render.Confirm
+}
+
+// scannerService is the scanner runner, falling back to the real one for the
+// same reason confirm does. Named for the field rather than the package, which
+// is already spelled `scanner` here.
+func (s Services) scannerService() scanner.Service {
+	if s.Scanner != nil {
+		return s.Scanner
+	}
+	return scanner.ExecService{}
 }
 
 // NewServices builds the production service set from the loaded config.
@@ -109,8 +125,10 @@ func NewRoot(services Services, version string) *cobra.Command {
 
 	stateCmd := newStateCommand(services)
 	stateCmd.AddCommand(
-		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
-		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.",
+			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
+			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
 		newDropCommand(services, "kx state drop"),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
@@ -119,8 +137,10 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// registered and fully working — just hidden from --help and the README
 	// table — so existing scripts and muscle memory don't break.
 	for _, cmd := range []*cobra.Command{
-		newNavigateCommand(services, "back", "Navigate to the previous kx get result.", -1),
-		newNavigateCommand(services, "forward", "Navigate to the next kx get result.", +1),
+		newNavigateCommand(services, "back", "Navigate to the previous kx get result.",
+			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
+		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
+			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
 		newDropCommand(services, "kx drop"),
 	} {
 		cmd.Hidden = true
@@ -133,7 +153,10 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newEditCommand(services),
 		newExecCommand(services),
 		newDebugCommand(services),
+		newCordonCommand(services, "cordon"),
+		newCordonCommand(services, "uncordon"),
 		newDeleteCommand(services),
+		newDrainCommand(services),
 		newScaleCommand(services),
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
@@ -144,10 +167,21 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newSecretCommand(services, "secret", []string{"secrets"}),
 		newEventsCommand(services),
 		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
-		newMetadataReadCommand(services, "labels", "Show labels for one or more indexed resources; --selector formats output as a label selector.", "labels", "LABEL", true),
-		newMetadataReadCommand(services, "annotations", "Show annotations for one or more indexed resources.", "annotations", "ANNOTATION", false),
-		newMetadataWriteCommand(services, "label", "labels", "Set or remove labels on an indexed resource."),
-		newMetadataWriteCommand(services, "annotate", "annotations", "Set or remove annotations on an indexed resource."),
+		newMetadataReadCommand(services, "labels",
+			"Show labels for one or more indexed resources; --selector formats output as a label selector.",
+			"Shows every label on one or more indexed resources, one table per resource. "+
+				"--selector reformats the same data as a copy-pastable label selector.",
+			"labels", "LABEL", true),
+		newMetadataReadCommand(services, "annotations",
+			"Show annotations for one or more indexed resources.",
+			"Shows every annotation on one or more indexed resources, one table per resource.",
+			"annotations", "ANNOTATION", false),
+		newMetadataWriteCommand(services, "label", "labels",
+			"Set or remove labels on an indexed resource.",
+			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key."),
+		newMetadataWriteCommand(services, "annotate", "annotations",
+			"Set or remove annotations on an indexed resource.",
+			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key."),
 		newSwitchCommand(services, "namespace", "ns", "List namespaces, or switch to an indexed one; alias: kx ns.", false),
 		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.", true),
 	} {
@@ -173,6 +207,8 @@ func installCompletion(root *cobra.Command) {
 		return
 	}
 	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
+	completion.Long = "Generates a shell completion script for kx. See each subcommand's " +
+		"own --help for how to install it."
 	completion.Example = "  kx completion zsh > \"${fpath[1]}/_kx\"\n  source <(kx completion bash)"
 }
 
@@ -185,9 +221,13 @@ func newGetCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"list", "ls", "ps"},
 		Short:      "List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).",
 		Long: "Fetches resources with kubectl and assigns each row an index.\n\n" +
-			"`-n <namespace>`, label selectors and output flags all work as usual.",
+			"`-n <namespace>`, label selectors and output flags all work as usual.\n\n" +
+			"A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a " +
+			"cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace " +
+			"for either to name, so kx refuses them rather than listing something " +
+			"other than what was asked for.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
-		Args:    cobra.MinimumNArgs(1),
+		Args:    minArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
 		// own flags, which are removed by hand below. See passthrough.go for
 		// why cobra can't do this.

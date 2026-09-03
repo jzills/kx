@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
@@ -15,10 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scannableKinds = map[kinds.Kind]bool{
-	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
-	kinds.StatefulSet: true, kinds.DaemonSet: true, kinds.Job: true,
-	kinds.CronJob: true,
+var scannableKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet, kinds.Job, kinds.CronJob,
 }
 
 // namespaceScanKinds are the workload kinds swept for a namespace-level scan,
@@ -26,9 +27,8 @@ var scannableKinds = map[kinds.Kind]bool{
 const namespaceScanKinds = "deployments,statefulsets,daemonsets,cronjobs,jobs,pods"
 
 // scanScope is the namespace selection for a sweep: one namespace, or all of
-// them. The kubectl selector, the banner label and the empty-result message
-// all have to agree about the scope, so they live together rather than being
-// rebuilt at each call site.
+// them. The kubectl selector and the banner label have to agree about the
+// scope, so they live together rather than being rebuilt at each call site.
 //
 // An empty Namespace does not mean "all" — client-go spells it that way and
 // diag's Sweep relies on it, but here the whole bug being fixed is a scope
@@ -53,13 +53,6 @@ func (s scanScope) label() string {
 	return s.Namespace
 }
 
-func (s scanScope) emptyMessage() string {
-	if s.All {
-		return "no container images found in any namespace."
-	}
-	return fmt.Sprintf("no container images found in namespace '%s'.", s.Namespace)
-}
-
 // ScanCommand resolves container images and hands them to a scanner.
 type ScanCommand struct {
 	Kubectl kubectl.Service
@@ -74,8 +67,8 @@ func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !scannableKinds[kind] {
-		return nil, fmt.Errorf("scan is not supported for '%s'.", kind)
+	if !scannableKinds.Has(kind) {
+		return nil, unsupportedKindError("scan", kind, scannableKinds)
 	}
 	// Validate the engine and its availability before hitting the cluster, so a
 	// typo or a missing scanner fails fast with one clear message rather than
@@ -102,7 +95,11 @@ func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
 	return images, nil
 }
 
-// Collect resolves the unique images across every workload in scope.
+// Collect resolves the unique images across every workload in scope. A scope
+// with no workloads is not an error — it means nothing to scan, the same way
+// kx diag treats a namespace sweep that finds nothing to check: the caller
+// renders a zero-count summary rather than kx exiting on a namespace that
+// simply has no workloads in it yet.
 func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	if _, err := c.EnsureAvailable(engine); err != nil {
 		return nil, err
@@ -128,11 +125,7 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	for _, item := range list.Items {
 		images = append(images, imagesOf(item)...)
 	}
-	images = dedupe(images)
-	if len(images) == 0 {
-		return nil, errors.New(scope.emptyMessage())
-	}
-	return images, nil
+	return dedupe(images), nil
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so
@@ -143,10 +136,17 @@ func (c ScanCommand) EnsureAvailable(name string) (scanner.Engine, error) {
 		return nil, err
 	}
 	code, err := c.Scanner.Probe(engine.PreflightArgv())
-	if err != nil {
+	// An absent binary and a preflight that runs and fails are the same
+	// condition to a user — the scanner isn't usable — and the engine's own
+	// message is the only one that names the CLI and where to get it. Routing
+	// the absent case here as well is what makes every engine report the way
+	// Docker Scout always has: its preflight runs `docker`, which is present
+	// and merely answers "unknown command", so it never took the other path.
+	var notFound scanner.NotFoundError
+	if err != nil && !errors.As(err, &notFound) {
 		return nil, err
 	}
-	if code != 0 {
+	if err != nil || code != 0 {
 		return nil, fmt.Errorf("%s", engine.UnavailableMessage())
 	}
 	return engine, nil
@@ -161,46 +161,135 @@ func (c ScanCommand) ScanImage(engineName, image string, extra []string) (int, e
 	return c.Scanner.Scan(engine.PassthroughArgv(image, extra))
 }
 
+// scanWorkers bounds how many scanners run at once.
+//
+// Two, and deliberately not one per CPU. A scanner unpacks an image and walks
+// every package in it, so what limits it is memory, not cores: Grype peaks
+// around 325MB of RSS per image. Measured on a 16-core machine with 7GB of RAM,
+// sweeping this project's test namespace with Grype:
+//
+//	workers   round 1   round 2
+//	      1       58s       13s
+//	      2        6s        6s
+//	      4        7s       16s
+//
+// Four is faster than serial when there is memory to spare and slower than
+// serial when there is not — 1.3GB of scanners on a box with 2GB free spends
+// the difference in reclaim. Two beat both, consistently, and it is the number
+// that degrades gracefully on a machine smaller than the one it was tuned on.
+// The measurements are noisy (serial ranged 13s to 58s across identical runs)
+// but the ordering held.
+//
+// Fixed rather than a flag because nobody has needed to tune it; a knob can be
+// added when someone does.
+const scanWorkers = 2
+
 // Summarize scans each image and rolls the results into severity counts.
 //
-// A failure is recorded on its row rather than aborting: one unpullable image
-// shouldn't cost the results for every other image in the namespace.
-func (c ScanCommand) Summarize(engineName string, images []string) ([]scanner.ImageScan, error) {
+// Images are scanned concurrently: a sweep is almost entirely spent waiting on
+// a scanner, and doing them one at a time made a real cluster's worth of images
+// a minutes-long wait for work that overlaps freely. Results are written by
+// position rather than appended, so the rows come back in the order the images
+// were resolved in whatever order the scans finish — the table is indexed by
+// position, and callers pin that order.
+//
+// onScanned, if given, is called once per image as it completes, from the
+// scanning goroutine — it is what turns the spinner into a count, and must be
+// safe to call concurrently.
+//
+// A scanner failure is recorded on its row rather than aborting: one unpullable
+// image shouldn't cost the results for every other image in the namespace. A
+// failure that is not the scanner's exit code — the binary missing — still
+// aborts, reporting the earliest image's error, which is the one the serial
+// version stopped on.
+func (c ScanCommand) Summarize(
+	engineName string, images []string, onScanned func(),
+) ([]scanner.ImageScan, error) {
 	engine, err := scanner.GetEngine(engineName)
 	if err != nil {
 		return nil, err
 	}
 
-	rows := make([]scanner.ImageScan, 0, len(images))
-	for _, image := range images {
-		stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
-		if err != nil {
-			return nil, err
+	rows := make([]scanner.ImageScan, len(images))
+	failures := make([]error, len(images))
+
+	// A fixed pool draining a channel of positions, rather than a goroutine per
+	// image parked on a semaphore. The bound is scanWorkers either way, but a
+	// namespace sweep resolves hundreds of unique images, and the semaphore
+	// shape launched a goroutine for every one of them — all but two spending
+	// the whole sweep blocked on a slot, for nothing. Making the pool the
+	// structure also means the bound is not something each goroutine has to
+	// remember to take.
+	positions := make(chan int)
+	var group sync.WaitGroup
+	for range min(scanWorkers, len(images)) {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for position := range positions {
+				// Each position is handled by exactly one worker, so the two
+				// slices are written without overlap and neither needs a lock.
+				rows[position], failures[position] = c.scanImage(engine, images[position])
+				if onScanned != nil {
+					onScanned()
+				}
+			}
+		}()
+	}
+	for position := range images {
+		positions <- position
+	}
+	close(positions)
+	group.Wait()
+
+	// In order, so the reported failure is the same one a serial sweep would
+	// have stopped on rather than whichever goroutine happened to finish first.
+	for _, failure := range failures {
+		if failure != nil {
+			return nil, failure
 		}
-		if code != 0 {
-			rows = append(rows, scanner.ImageScan{Image: image, Error: lastLine(stderr)})
-			continue
-		}
-		findings, err := engine.ParseFindings(stdout)
-		if err != nil {
-			rows = append(rows, scanner.ImageScan{Image: image, Error: "unparseable output"})
-			continue
-		}
-		rows = append(rows, scanner.ImageScan{
-			Image:    image,
-			Counts:   scanner.CountBySeverity(findings),
-			Findings: findings,
-		})
 	}
 	return rows, nil
 }
 
+// scanImage is one image's scan. The error return is reserved for a failure
+// that is not the scanner's own verdict; anything the scanner reported lands on
+// the row.
+func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.ImageScan, error) {
+	stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
+	if err != nil {
+		return scanner.ImageScan{}, err
+	}
+	if code != 0 {
+		return scanner.ImageScan{Image: image, Error: lastLine(stderr)}, nil
+	}
+	findings, err := engine.ParseFindings(stdout)
+	if err != nil {
+		return scanner.ImageScan{Image: image, Error: "unparseable output"}, nil
+	}
+	return scanner.ImageScan{
+		Image:    image,
+		Counts:   scanner.CountBySeverity(findings),
+		Findings: findings,
+	}, nil
+}
+
+// ansiEscape matches the CSI sequences a scanner uses to colour its own
+// output. Grype colours stderr; its reset lands mid-cell in kx's summary
+// table, ending kx's styling early and printing the escape's tail as text.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
+
 // lastLine is the most specific part of a scanner's error output; the earlier
 // lines are usually progress noise.
+//
+// Styling is stripped rather than preserved: the string is bound for a cell kx
+// styles itself, and a scanner's own colours cannot know what they are landing
+// in. A line that was nothing but escapes is treated as empty, so the fallback
+// covers it instead of a cell rendering blank.
 func lastLine(text string) string {
 	var last string
 	for _, line := range strings.Split(text, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
+		if trimmed := strings.TrimSpace(ansiEscape.ReplaceAllString(line, "")); trimmed != "" {
 			last = trimmed
 		}
 	}
@@ -281,10 +370,17 @@ func dedupe(images []string) []string {
 }
 
 func imagesNoun(count int) string {
-	if count == 1 {
+	switch count {
+	case 0:
+		// Matches the "none found"/"nothing to check" register kx get, kx
+		// top, and kx diag use for an empty result, rather than a bare "0
+		// images" that reads as silence with a number attached.
+		return "no images found"
+	case 1:
 		return "1 image"
+	default:
+		return strconv.Itoa(count) + " images"
 	}
-	return strconv.Itoa(count) + " images"
 }
 
 // scanPage builds the HTML page from the same rows the terminal summary
@@ -311,13 +407,16 @@ func newScanCommand(services Services) *cobra.Command {
 			"or a whole namespace when no index is given (-n to pick one, -A for every " +
 			"namespace); prints a severity summary table " +
 			"by default, or the raw scanner output with --full. Requires the CLI for the " +
-			"selected scan engine (Docker Scout by default, https://docs.docker.com/scout/; " +
-			"or Trivy via --engine trivy, https://trivy.dev/ — see kx engine).",
+			"selected scan engine (Docker Scout by default; Trivy or Grype via " +
+			"--engine — see kx engine).",
 		Long: "Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.\n\n" +
 			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
+			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
 			"Run 'kx engine' to see or change the default.",
-		Example:            "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -A\n  kx scan 1 --full",
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan 1 --full\n" +
+			"  kx scan --html\n  kx scan -A --json\n" +
+			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -333,7 +432,17 @@ func newScanCommand(services Services) *cobra.Command {
 			}
 			full, rest := extractBool(rest, "--full")
 			html, rest := extractBool(rest, "--html")
+			asJSON, rest := extractBool(rest, "--json")
+			failOn, rest, err := extractString(rest, "--fail-on", "")
+			if err != nil {
+				return err
+			}
 			noOpen, rest := extractBool(rest, "--no-open")
+			out, rest, err := extractString(rest, "--out", "")
+			if err != nil {
+				return err
+			}
+			hasPort := hasFlag(rest, "--port", "")
 			portText, rest, err := extractString(rest, "--port", "")
 			if err != nil {
 				return err
@@ -345,12 +454,43 @@ func newScanCommand(services Services) *cobra.Command {
 						"Invalid value for '--port': '%s' is not a valid int.", portText)
 				}
 			}
-			if full && html {
-				return errors.New(
-					"'--full' cannot be combined with '--html' — the HTML report " +
-						"already carries every finding.")
+			wantsHTML := impliedHTML(html, out)
+			if full && wantsHTML {
+				return fmt.Errorf(
+					"'--full' cannot be combined with '%s' — the HTML report "+
+						"already carries every finding.", htmlFlagName(html))
 			}
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			if asJSON && wantsHTML {
+				return fmt.Errorf(
+					"'--json' cannot be combined with '%s' — one is for a "+
+						"machine and the other for a browser.", htmlFlagName(html))
+			}
+			if asJSON && full {
+				return errors.New(
+					"'--json' cannot be combined with '--full' — --full streams " +
+						"the scanner's own report, which kx does not parse.")
+			}
+			// Same reason, one step further: a gate needs findings, and --full
+			// leaves kx with none to read. Refused rather than quietly ignored,
+			// which is what this did — a pipeline that added --full went green
+			// whatever the scan turned up, and nothing said the gate had gone.
+			if full && failOn != "" {
+				return errors.New(
+					"'--full' cannot be combined with '--fail-on' — --full streams " +
+						"the scanner's own report, which kx does not parse, so the " +
+						"gate has nothing to read.")
+			}
+			// Validated up front so a typo fails before any image is scanned
+			// rather than after every one of them has been.
+			if failOn != "" {
+				if _, err := scanThresholdBreached(nil, failOn); err != nil {
+					return err
+				}
+			}
+			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
+			if err := htmlOpts.validate(hasPort, noOpen); err != nil {
+				return err
+			}
 
 			// Presence is checked before extractString consumes the flag:
 			// `-n ""` is a namespace flag the guards below still have to see,
@@ -369,7 +509,7 @@ func newScanCommand(services Services) *cobra.Command {
 			command := ScanCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
-				Scanner: scanner.ExecService{},
+				Scanner: services.scannerService(),
 				Status:  render.Status,
 			}
 
@@ -408,6 +548,11 @@ func newScanCommand(services Services) *cobra.Command {
 			// reading "scan · Mixed · prod" says less than "scan · prod".
 			// kx diag titles itself the same way.
 			var pageScope, pageTitle string
+			// subject is what --json says the scan was about. Built beside the
+			// page labels rather than derived from them: those are display
+			// strings, and the whole point of the struct is that a machine
+			// never has to read one.
+			var subject scanSubject
 			var images []string
 			if len(indexArgs) == 0 {
 				scope := scanScope{Namespace: namespace, All: all}
@@ -425,9 +570,15 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+				if !asJSON {
+					render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()
+				subject = scanSubject{AllNamespaces: scope.All}
+				if !scope.All {
+					subject.Namespace = scope.Namespace
+				}
 			} else {
 				index, err := parseIndex("index", indexArgs[0])
 				if err != nil {
@@ -441,9 +592,12 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+				if !asJSON {
+					render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
+				subject = scanSubject{Kind: kind, Name: name, Namespace: resourceNamespace}
 			}
 
 			if full {
@@ -459,30 +613,51 @@ func newScanCommand(services Services) *cobra.Command {
 				return nil
 			}
 
-			stop := render.Status("scanning")
-			rows, err := command.Summarize(engine, images)
+			advance, stop := render.Progress("scanning", len(images))
+			rows, err := command.Summarize(engine, images, advance)
 			stop()
 			if err != nil {
 				return err
 			}
-			render.ScanSummary(rows)
-			if !htmlOpts.Enabled {
-				return nil
+			if asJSON {
+				document, err := scanJSON(subject, rows)
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return scanGate(rows, failOn)
 			}
-			indexArg := ""
-			if len(indexArgs) > 0 {
-				indexArg = indexArgs[0]
+			// Nothing to summarize: the banner above already said so
+			// ("no images found"), matching kx diag's own empty sweep, which
+			// prints its caption and no table rather than a header row over
+			// nothing.
+			if len(rows) > 0 {
+				render.ScanSummary(rows)
 			}
-			meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-				invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
-			if err != nil {
-				return err
+			// The gate is the tail of every path, not the alternative to one.
+			// Publishing a report and failing the build are not in conflict:
+			// --html says where the findings go, --fail-on says what they mean.
+			if htmlOpts.Enabled {
+				indexArg := ""
+				if len(indexArgs) > 0 {
+					indexArg = indexArgs[0]
+				}
+				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
+					invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderScan(scanPage(pageScope, rows, meta))
+				if err != nil {
+					return err
+				}
+				// After the server stops, so Ctrl-C ends the command with the
+				// exit code the scan earned rather than the server's nil.
+				if err := deliverPage(cmd.Context(), page, htmlOpts); err != nil {
+					return err
+				}
 			}
-			page, err := web.RenderScan(scanPage(pageScope, rows, meta))
-			if err != nil {
-				return err
-			}
-			return servePage(cmd.Context(), page, htmlOpts)
+			return scanGate(rows, failOn)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
@@ -500,5 +675,30 @@ func newScanCommand(services Services) *cobra.Command {
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().String("out", "",
+		"Write the HTML report to this file instead of serving it in a browser")
+	cmd.Flags().Bool("json", false,
+		"Print the severity counts and every finding as JSON instead of a table")
+	cmd.Flags().String("fail-on", "",
+		"Exit 2 when any image carries a vulnerability at this severity or worse "+
+			"(critical, high, medium, low)")
 	return cmd
+}
+
+// scanGate turns a scan into an exit code when --fail-on asked for one.
+//
+// SilentError because the summary has already been printed: this is the exit
+// code, not a second error message.
+func scanGate(rows []scanner.ImageScan, failOn string) error {
+	if failOn == "" {
+		return nil
+	}
+	breached, err := scanThresholdBreached(rows, failOn)
+	if err != nil {
+		return err
+	}
+	if !breached {
+		return nil
+	}
+	return SilentError{Code: findingsExitCode}
 }

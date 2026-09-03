@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -271,7 +270,16 @@ func NewService(maxHistory int) *Service {
 
 // File returns the default state file path, mirroring config.File so the help
 // screen can name both without hardcoding either.
+//
+// KX_STATE overrides it. Two terminals otherwise share one history — list
+// pods in one, deployments in the other, and the first shell's `kx delete 3`
+// resolves against whichever listing happened last — and there was no way to
+// give a shell its own state short of the Service.Path field, reachable only
+// from Go. This is the same escape hatch KX_CONFIG gives config.File.
 func File() (string, error) {
+	if path, ok := os.LookupEnv("KX_STATE"); ok && path != "" {
+		return path, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate home directory: %w", err)
@@ -365,9 +373,14 @@ func (s *Service) loadHistory() (History, error) {
 		// an unrecorded one, and "default" would caption an all-namespace
 		// listing with a namespace it never came from — then resolve every one
 		// of its indexes into that namespace.
-		if state.Namespace == "" && !state.AllNamespaces {
-			state.Namespace = "default"
-		}
+		//
+		// Nor a cluster-scoped listing, for the third reason an entry can
+		// legitimately carry no namespace: there is no namespace to carry.
+		//
+		// The backfill itself is applied by backfilled(), at the point an
+		// entry is read, rather than here over the whole stack. See its own
+		// comment: deciding it here put a discovery round-trip on every state
+		// load, for entries most commands never look at.
 		history.States = append(history.States, state)
 	}
 	for kind, entry := range raw.Named {
@@ -508,11 +521,47 @@ func (s *Service) Load() (State, error) {
 	if len(history.States) == 0 {
 		return State{}, ErrNoState
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
 // LoadHistory returns the whole stack.
-func (s *Service) LoadHistory() (History, error) { return s.loadHistory() }
+//
+// Every entry backfilled, because the views built on this one render each
+// entry's scope. That is the walk Load no longer does — paid by the commands
+// that actually show the whole stack rather than by every index lookup.
+func (s *Service) LoadHistory() (History, error) {
+	history, err := s.loadHistory()
+	if err != nil {
+		return History{}, err
+	}
+	for i := range history.States {
+		history.States[i] = backfilled(history.States[i])
+	}
+	return history, nil
+}
+
+// backfilled defaults an entry's namespace, for the entry being read.
+//
+// An entry can legitimately carry no namespace three ways — a spanning
+// listing, a cluster-scoped one, and a context slot — and loadHistory's own
+// comment says which is which. Only the fourth case, a namespace that was
+// never recorded, takes the default.
+//
+// Applied here rather than in loadHistory because the cluster-scoped test asks
+// kinds.Namespaced, which falls through to the discovery cache for any kind
+// outside kx's static tables — every CRD. loadHistory ran it over every entry
+// in the stack, and runs on every index-resolving command, so one listing of a
+// cluster-scoped custom resource anywhere in history made `kx describe 1`
+// against a pod listing block on a discovery round-trip before it could reach
+// kubectl. Reading it here costs that lookup only when the entry being read is
+// the one that needs it — and a command working with that listing pays for
+// discovery anyway.
+func backfilled(entry State) State {
+	if entry.Namespace == "" && !entry.AllNamespaces && !clusterScopedEntry(entry) {
+		entry.Namespace = "default"
+	}
+	return entry
+}
 
 func clamp(value, high int) int {
 	if value < 0 {
@@ -522,6 +571,34 @@ func clamp(value, high int) int {
 		return high
 	}
 	return value
+}
+
+// positionOutOfRange reports a `kx state`/`kx state drop` position that names
+// no entry in the history stack, in the same "is out of range" grammar
+// outOfRange uses for a listing index.
+func positionOutOfRange(position, count int) error {
+	label := "entries"
+	if count == 1 {
+		label = "entry"
+	}
+	return fmt.Errorf(
+		"Position %d is out of range — history has %d %s (run 'kx state --all' to view).",
+		position, count, label,
+	)
+}
+
+// outOfRange reports an index that names no row in the entry it was counted
+// against, in the same grammar positionOutOfRange uses for a history position.
+//
+// The generic form, for Fields: it has no kind to relist — the entry may span
+// kinds, which a tree walk and a triage sweep both produce — so it points at
+// `kx state` the way an out-of-range position does. FieldsExpecting and
+// FieldsNamed have a kind and name the relist instead.
+func outOfRange(idx int, entry State) error {
+	return fmt.Errorf(
+		"Index %d is out of range — the current listing has %s (run 'kx state' to view).",
+		idx, describeCurrent(entry),
+	)
 }
 
 // Navigate moves the cursor by delta, clamped to the stack.
@@ -537,10 +614,17 @@ func (s *Service) Navigate(delta int) (State, error) {
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
-// NavigateTo moves the cursor to a 1-based position, clamped to the stack.
+// NavigateTo moves the cursor to a 1-based position.
+//
+// Unlike Navigate, a position out of range is refused rather than clamped:
+// Navigate's delta comes from `kx back`/`kx forward` stepping past an end
+// they can't see, where clamping is the right answer, but a position is a
+// number the caller typed — usually copied from `kx state --all` — and
+// clamping a wrong one to the nearest end would silently jump somewhere the
+// caller never asked for.
 func (s *Service) NavigateTo(position int) (State, error) {
 	history, err := s.loadHistory()
 	if err != nil {
@@ -549,15 +633,22 @@ func (s *Service) NavigateTo(position int) (State, error) {
 	if len(history.States) == 0 {
 		return State{}, ErrNoState
 	}
-	history.Cursor = clamp(position-1, len(history.States)-1)
+	if position < 1 || position > len(history.States) {
+		return State{}, positionOutOfRange(position, len(history.States))
+	}
+	history.Cursor = position - 1
 	if err := s.saveHistory(history); err != nil {
 		return State{}, err
 	}
-	return history.States[history.Cursor], nil
+	return backfilled(history.States[history.Cursor]), nil
 }
 
 // Drop removes the entry at a 1-based position, keeping the cursor pointing at
 // the same entry where possible.
+//
+// The position is refused when it names no entry, for the same reason
+// NavigateTo refuses one: it is a number the caller typed, and clamping it to
+// the nearest end would drop a different entry than the one asked for.
 func (s *Service) Drop(position int) (History, error) {
 	history, err := s.loadHistory()
 	if err != nil {
@@ -569,7 +660,10 @@ func (s *Service) Drop(position int) (History, error) {
 	if len(history.States) == 1 {
 		return History{}, errors.New("Cannot drop the only state entry.")
 	}
-	i := clamp(position-1, len(history.States)-1)
+	if position < 1 || position > len(history.States) {
+		return History{}, positionOutOfRange(position, len(history.States))
+	}
+	i := position - 1
 	history.States = append(history.States[:i], history.States[i+1:]...)
 	if i < history.Cursor {
 		history.Cursor--
@@ -636,7 +730,7 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", outOfRange(idx, current)
 	}
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
@@ -653,6 +747,21 @@ func (s *Service) Count() (int, error) {
 		return 0, err
 	}
 	return current.Resources.Len(), nil
+}
+
+// clusterScopedEntry reports whether every resource in an entry is of one kind
+// that lives outside any namespace.
+//
+// Unknown counts as namespaced: a kind kx cannot place must not have its
+// namespace stripped on the strength of a guess, and leaving the backfill in
+// place is what kx did for every kind before it could tell.
+func clusterScopedEntry(entry State) bool {
+	kind := soleKind(entry)
+	if kind == "" {
+		return false
+	}
+	namespaced, known := kinds.Namespaced(kind)
+	return known && !namespaced
 }
 
 // soleKind returns the kind every resource in an entry shares, or "" when the
@@ -703,7 +812,7 @@ func (s *Service) FieldsExpecting(
 ) (name, namespace string, err error) {
 	// The relist command is spelled the way EnsureKind spells it, so all three
 	// failures point at the same place.
-	relist := "kx get " + strings.ToLower(string(expected))
+	relist := kinds.ListCommand(expected)
 	plural := kinds.PluralDisplay(string(expected))
 
 	current, err := s.Load()
@@ -790,7 +899,7 @@ func listCommandFor(kind kinds.Kind) string {
 	case kinds.Context:
 		return "kx contexts"
 	default:
-		return "kx get " + strings.ToLower(string(kind))
+		return kinds.ListCommand(kind)
 	}
 }
 
@@ -856,9 +965,9 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 
 	name, err = index.Resolve(entry, idx)
 	if err != nil {
-		// index.Resolve says "current state", which would be wrong here: the
-		// count comes from the slot, not from whatever the cursor is on, and
-		// relisting is what fixes it.
+		// index.Resolve returns only a sentinel; the count named here comes
+		// from the slot, not from whatever the cursor is on, so this writes
+		// its own sentence rather than deferring to a generic one.
 		return "", "", fmt.Errorf(
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)

@@ -106,6 +106,12 @@ var pluralDisplay = map[Kind]string{
 // to today's behavior.
 type ShorthandSource interface {
 	Resolve(spelling string) (kind Kind, plural string, ok bool)
+	// Namespaced reports whether a kind is namespaced, and whether the
+	// source knows. "Don't know" is distinct from "cluster-scoped": a
+	// discovery cache that is missing, stale or partial must leave the
+	// caller on its existing behaviour rather than have kx decide a
+	// namespaced resource has no namespace.
+	Namespaced(kind Kind) (namespaced, known bool)
 }
 
 var shorthandSource ShorthandSource
@@ -118,6 +124,56 @@ var shorthandSource ShorthandSource
 // source.
 func SetShorthandSource(source ShorthandSource) {
 	shorthandSource = source
+}
+
+// clusterScoped are the kinds kx names itself that live outside any namespace.
+//
+// Only the kinds in the Kind constants above: the full set on a real cluster
+// runs to thirty-odd and grows with every CRD, which is exactly why the
+// discovery cache is the primary source. This table exists so the kinds kx
+// hard-codes are still answered correctly with no cache at all — a fresh
+// machine, or a kubeconfig kubectl has never populated one for.
+//
+// Context is not here. It is not a Kubernetes kind and never reaches a
+// namespace question; kx already special-cases it everywhere it matters.
+var clusterScoped = map[Kind]bool{
+	Node:      true,
+	Namespace: true,
+}
+
+// namespacedKinds are the kinds kx names itself that live inside one. Written
+// out rather than derived as "everything not in clusterScoped", so a kind
+// added to the constants above without a scope is reported unknown instead of
+// silently assumed namespaced.
+var namespacedKinds = map[Kind]bool{
+	Pod: true, Deployment: true, ReplicaSet: true, StatefulSet: true,
+	DaemonSet: true, CronJob: true, Service: true, HorizontalPodAutoscaler: true,
+	Ingress: true, ConfigMap: true, Secret: true, Job: true,
+	PersistentVolumeClaim: true,
+}
+
+// Namespaced reports whether a kind lives inside a namespace, and whether that
+// is known at all.
+//
+// The static table is consulted first so a stale or partial discovery cache
+// can never make kx treat a Pod as cluster-scoped. Anything kx does not name
+// itself — every CRD — is answered by the installed source, which reads the
+// scope kubectl already recorded per resource.
+//
+// The third answer, "not known", matters as much as the other two: it is what
+// a caller gets for a CRD with no discovery cache, and it must leave existing
+// behaviour alone rather than guess.
+func Namespaced(kind Kind) (namespaced, known bool) {
+	if namespacedKinds[kind] {
+		return true, true
+	}
+	if clusterScoped[kind] {
+		return false, true
+	}
+	if shorthandSource == nil {
+		return false, false
+	}
+	return shorthandSource.Namespaced(kind)
 }
 
 // Spelling is one recognized resource spelling and the kind it maps to.
@@ -229,11 +285,26 @@ type PreviousLister interface {
 	PreviousLists(kind Kind) bool
 }
 
+// ListCommand names the command that relists a kind, in the plural spelling
+// every other kx surface uses.
+//
+// `kx get pods`, not `kx get pod`. Both work — kubectl takes either — but the
+// singular appeared nowhere else in kx, and the sentences this is spliced into
+// already name the kind in the plural two words later ("to relist Pods").
+//
+// Built from PluralDisplay rather than by suffixing here: that already carries
+// the irregulars ("Ingress" -> "Ingresses") and resolves a CRD's plural
+// through discovery, so this is a lowering of a spelling kx already computes
+// rather than a second rule that would have to learn the same exceptions.
+func ListCommand(kind Kind) string {
+	return "kx get " + strings.ToLower(PluralDisplay(string(kind)))
+}
+
 // EnsureKind rejects an index that resolved to something other than expected.
 //
 // Every command that resolves an index against a kind reports the mismatch in
 // this one shape, and the relist hint always names the canonical kind rather
-// than whatever shorthand was typed — `kx get deployment`, never `kx get deploy`.
+// than whatever shorthand was typed — `kx get deployments`, never `kx get deploy`.
 //
 // Given a state service, an entry one step back that does list expected adds
 // the `kx back` clause: relisting re-runs kubectl, while the listing the index
@@ -247,7 +318,47 @@ func EnsureKind(index int, name string, kind, expected Kind, state PreviousListe
 		back = fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
 	}
 	return fmt.Errorf(
-		"Index %d is %s/%s, not %s — run 'kx get %s' to relist%s.",
-		index, kind, name, expected, strings.ToLower(string(expected)), back,
+		"Index %d is %s/%s, not %s — run '%s' to relist%s.",
+		index, kind, name, expected, ListCommand(expected), back,
 	)
+}
+
+// Set is an ordered set of kinds — the kinds one command works on, in the
+// order its help and its errors name them.
+//
+// A slice rather than the map[Kind]bool these used to be. Membership was all
+// the maps were for, but the same list also has to be *printed* now that an
+// "unsupported kind" error says which kinds are supported, and map iteration
+// is randomized: a map cannot name the same kinds in the same order twice, so
+// the message would differ between runs and could not be pinned by a test.
+type Set []Kind
+
+// Has reports whether the set contains a kind. Linear, over a handful of
+// entries — which is every caller.
+func (s Set) Has(kind Kind) bool {
+	for _, member := range s {
+		if member == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// List renders the set the way a sentence names it: "Pods", "Pods and
+// Deployments", "Pods, Deployments and StatefulSets".
+//
+// Plurals come from PluralDisplay, so "Ingress" reads as "Ingresses" rather
+// than the "Ingresss" a bare +"s" would produce.
+func (s Set) List() string {
+	names := make([]string, 0, len(s))
+	for _, kind := range s {
+		names = append(names, PluralDisplay(string(kind)))
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }

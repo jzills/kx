@@ -15,6 +15,13 @@ repos:
         pass_filenames: false
         files: '\.go$'
 
+      - id: check-file-size
+        name: Reject oversized files
+        language: system
+        # Unlike the generators below, this one reads the files being committed
+        # rather than the command tree, so it takes filenames.
+        entry: scripts/check_file_size.sh
+
       - id: gen-command-table
         name: Regenerate README command table
         language: system
@@ -43,5 +50,16 @@ repos:
         # is coloured from the registry the terminal and --html reports use,
         # and exits non-zero when it rewrites the generated files.
         entry: go run ./tools/gen-site-theme
+        pass_filenames: false
+        always_run: true
+
+      - id: gen-site-docs
+        name: Regenerate site command reference
+        language: system
+        # The site's per-command pages, from the same command tree the README
+        # table is built from — so a flag added to a command reaches both
+        # without anyone remembering to write it down twice. Non-zero on
+        # rewrite, like the hooks above.
+        entry: go run ./tools/gen-site-docs
         pass_filenames: false
         always_run: true

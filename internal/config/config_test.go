@@ -17,6 +17,34 @@ func writeConfig(t *testing.T, contents string) Loader {
 	return Loader{Path: path}
 }
 
+// KX_CONFIG redirects File() itself — the one thing Loader.Path can't stand
+// in for, since a caller with no Path relies on File() to find ~/.kx by
+// default. Without this, two shells always shared one config.toml.
+func TestFileHonorsKXConfigOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "custom.toml")
+	t.Setenv("KX_CONFIG", path)
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if got != path {
+		t.Errorf("File() = %q, want %q", got, path)
+	}
+}
+
+// An empty KX_CONFIG must fall back to the default rather than trying to open
+// "" as a path — the same rule os.LookupEnv's ok/empty distinction exists for.
+func TestFileEmptyKXConfigFallsBackToDefault(t *testing.T) {
+	t.Setenv("KX_CONFIG", "")
+	got, err := File()
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	if !strings.HasSuffix(got, filepath.Join(".kx", "config.toml")) {
+		t.Errorf("File() = %q, want the default ~/.kx/config.toml path", got)
+	}
+}
+
 func TestDefaultsWhenNoFile(t *testing.T) {
 	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
 	cfg, err := loader.Load()

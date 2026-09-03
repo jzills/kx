@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -284,8 +285,8 @@ func TestCopyRejectsAnIndexedNonPod(t *testing.T) {
 	if err == nil {
 		t.Fatal("copied from a Deployment index, want an error")
 	}
-	if err.Error() != "cp is only supported for pods." {
-		t.Errorf("err = %q, want the pod-only message", err.Error())
+	if err.Error() != "kx cp does not support 'Deployment' — only Pods." {
+		t.Errorf("err = %q, want it to name Deployment and Pods", err.Error())
 	}
 	if len(kubectl.interactive) != 0 {
 		t.Error("kubectl was called for a rejected kind")
@@ -501,11 +502,20 @@ func TestRolloutNonStatusIsCaptured(t *testing.T) {
 	}
 }
 
+// The error used to say only "unknown rollout action 'explode'." — kx
+// describes what's wrong on every other refusal it can (unsupportedKindError
+// names what a command does support), and this named nothing, despite
+// rolloutActionNames already existing for exactly this.
 func TestRolloutRejectsUnknownAction(t *testing.T) {
 	_, err := RolloutCommand{Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment)}.
 		Execute("explode", 1)
 	if err == nil {
 		t.Fatal("accepted an unknown rollout action")
+	}
+	for _, want := range []string{"kx rollout", "explode", "status", "restart", "pause", "resume", "history", "undo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
 	}
 }
 
@@ -595,18 +605,10 @@ func TestLogsRejectsUnsupportedKind(t *testing.T) {
 	err := LogsCommand{
 		Kubectl: &recordingKubectl{}, State: workload("cm", kinds.ConfigMap), Status: noStatus,
 	}.Execute(1, nil)
-	want := "logs are not supported for 'ConfigMap'."
+	want := "kx logs does not support 'ConfigMap' — only Pods, Deployments, " +
+		"StatefulSets, DaemonSets and Services."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
-	}
-}
-
-func TestExecRejectsNonPod(t *testing.T) {
-	err := ExecCommand{
-		Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment), Shells: []string{"sh"},
-	}.Execute(1, nil, nil)
-	if err == nil {
-		t.Fatal("exec'd into a Deployment, want an error")
 	}
 }
 
@@ -1020,8 +1022,8 @@ func TestDebugAttachesAnEphemeralContainer(t *testing.T) {
 	}
 }
 
-// The same restriction kx exec carries, and for the same reason: an ephemeral
-// container attaches to a running pod, and nothing else is one.
+// A Pod takes an ephemeral container and a Node takes a debug pod of its own.
+// Nothing else is either, so nothing else is debuggable.
 func TestDebugRejectsNonPods(t *testing.T) {
 	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Deployment}
 
@@ -1032,8 +1034,9 @@ func TestDebugRejectsNonPods(t *testing.T) {
 	if err == nil {
 		t.Fatal("debug on a Deployment succeeded")
 	}
-	if !strings.Contains(err.Error(), "pods") {
-		t.Errorf("err = %q, want it to name the restriction", err)
+	if !strings.Contains(err.Error(), "'Deployment'") ||
+		!strings.Contains(err.Error(), "only Pods and Nodes") {
+		t.Errorf("err = %q, want it to name Deployment, Pods and Nodes", err)
 	}
 }
 
@@ -1196,5 +1199,251 @@ func TestDebugReportsAMalformedTargetFlag(t *testing.T) {
 	}
 	if len(kubectl.interactive) != 0 {
 		t.Errorf("ran kubectl anyway: %v", kubectl.interactive)
+	}
+}
+
+// kx logs aggregates across a workload's pods and kx port-forward takes one
+// directly, but kx exec alone answered "only supported for pods" — so the one
+// command people reach for most needed an index kx had just made harder to
+// get. kubectl resolves TYPE/NAME to a pod itself, the same way port-forward
+// already relies on.
+func TestExecAcceptsAWorkload(t *testing.T) {
+	for _, kind := range []kinds.Kind{
+		kinds.Deployment, kinds.ReplicaSet, kinds.StatefulSet, kinds.DaemonSet,
+	} {
+		kubectl := &recordingKubectl{probeCode: 0}
+		err := ExecCommand{
+			Kubectl: kubectl, State: workload("web", kind), Shells: []string{"sh"},
+		}.Execute(1, []string{"ls"}, nil)
+		if err != nil {
+			t.Fatalf("%s: Execute: %v", kind, err)
+		}
+		want := string(kind) + "/web"
+		last := kubectl.interactive[len(kubectl.interactive)-1]
+		if !slices.Contains(last, want) {
+			t.Errorf("%s: kubectl args = %v, want the target spelled %q", kind, last, want)
+		}
+	}
+}
+
+// A Pod is still addressed by bare name, not Pod/name. Both work in kubectl,
+// but the bare form is what every other pod-only command already sends and
+// what the existing tests pin.
+func TestExecStillAddressesAPodByName(t *testing.T) {
+	kubectl := &recordingKubectl{probeCode: 0}
+	if err := (ExecCommand{
+		Kubectl: kubectl, State: pod("nginx"), Shells: []string{"sh"},
+	}).Execute(1, []string{"ls"}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	args := kubectl.interactive[len(kubectl.interactive)-1]
+	if slices.Contains(args, "Pod/nginx") {
+		t.Errorf("kubectl args = %v, want the bare pod name", args)
+	}
+	if !slices.Contains(args, "nginx") {
+		t.Errorf("kubectl args = %v, want the pod named", args)
+	}
+}
+
+// The shell probe has to name the same target the session will, or kx probes
+// one thing and execs into another.
+func TestExecProbesTheSameTargetItExecsInto(t *testing.T) {
+	kubectl := &recordingKubectl{probeCode: 0}
+	if err := (ExecCommand{
+		Kubectl: kubectl, State: workload("web", kinds.Deployment), Shells: []string{"sh"},
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, call := range append(append([][]string{}, kubectl.probes...), kubectl.interactive...) {
+		if !slices.Contains(call, "Deployment/web") {
+			t.Errorf("call %v does not name Deployment/web", call)
+		}
+	}
+}
+
+// Service is not in the allowlist: kubectl exec does not accept one, so kx
+// refuses it here rather than letting kubectl produce a worse message.
+func TestExecStillRefusesAKindKubectlCannotExecInto(t *testing.T) {
+	for _, kind := range []kinds.Kind{kinds.Service, kinds.ConfigMap, kinds.Node} {
+		err := ExecCommand{
+			Kubectl: &recordingKubectl{}, State: workload("thing", kind), Shells: []string{"sh"},
+		}.Execute(1, []string{"ls"}, nil)
+		if err == nil {
+			t.Errorf("%s: Execute succeeded, want a refusal", kind)
+			continue
+		}
+		if !strings.Contains(err.Error(), "kx exec does not support") ||
+			!strings.Contains(err.Error(), string(kind)) {
+			t.Errorf("%s: err = %q, want an unsupported-kind message naming it", kind, err)
+		}
+	}
+}
+
+// The staleness check has to ask about the resolved kind. Asked about a Pod
+// that never existed under that name, a vanished Deployment reported the wrong
+// thing — or nothing.
+func TestExecChecksStalenessAgainstTheResolvedKind(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := ExecCommand{
+		Kubectl: kubectl, State: workload("web", kinds.Deployment), Shells: []string{"sh"},
+	}.Execute(1, []string{"ls"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
+	}
+	if stale.Kind != kinds.Deployment {
+		t.Errorf("stale kind = %q, want Deployment", stale.Kind)
+	}
+}
+
+// Every "wrong kind for this command" refusal names two things: the kind the
+// index actually resolved to, and the kinds the command does work on.
+//
+// The codebase had each half without the other — "scale is not supported for
+// 'Pod'." named the first, "cp is only supported for pods." named the second —
+// so which fact you got depended on which command you happened to type. Driven
+// over the real commands rather than over unsupportedKindError, which would
+// only prove the helper agrees with itself.
+func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T) {
+	const wrong = kinds.ConfigMap
+	refusals := map[string]func() error{
+		"scale": func() error {
+			_, err := ScaleCommand{State: workload("cm", wrong)}.Execute(1, 2)
+			return err
+		},
+		"rollout": func() error {
+			_, err := RolloutCommand{State: workload("cm", wrong)}.Execute("status", 1)
+			return err
+		},
+		"port-forward": func() error {
+			return PortForwardCommand{State: workload("cm", wrong)}.Execute(1, "80", nil)
+		},
+		"exec": func() error {
+			return ExecCommand{State: workload("cm", wrong)}.Execute(1, nil, nil)
+		},
+		"logs": func() error {
+			return LogsCommand{
+				Kubectl: &recordingKubectl{}, State: workload("cm", wrong), Status: noStatus,
+			}.Execute(1, nil)
+		},
+		"scan": func() error {
+			_, err := ScanCommand{State: workload("cm", wrong), Status: noStatus}.Execute(1, "trivy")
+			return err
+		},
+	}
+
+	for command, refuse := range refusals {
+		t.Run(command, func(t *testing.T) {
+			err := refuse()
+			if err == nil {
+				t.Fatalf("kx %s accepted a %s", command, wrong)
+			}
+			message := err.Error()
+			if !strings.Contains(message, "'"+string(wrong)+"'") {
+				t.Errorf("err = %q, want it to name the kind the index resolved to", message)
+			}
+			if !strings.Contains(message, " — only ") {
+				t.Errorf("err = %q, want it to name the kinds %s does support", message, command)
+			}
+			if !strings.HasSuffix(message, ".") {
+				t.Errorf("err = %q, want the register's terminal period", message)
+			}
+		})
+	}
+}
+
+// The supported list is generated from the same set the guard checks, so a
+// kind can never be advertised as supported and then refused.
+func TestUnsupportedKindMessageListsTheSetTheGuardUses(t *testing.T) {
+	_, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(1, 2)
+	if err == nil {
+		t.Fatal("scale accepted a ConfigMap")
+	}
+	for _, supported := range scalableKinds {
+		if !strings.Contains(err.Error(), kinds.PluralDisplay(string(supported))) {
+			t.Errorf("err = %q, want it to name %s, which scalableKinds accepts",
+				err, supported)
+		}
+	}
+}
+
+// Debugging a node is a different operation wearing the same name: kubectl
+// creates a privileged pod on the node rather than attaching a container to
+// one. It is addressed node/NAME, and takes no -n — a Node is cluster-scoped,
+// so state records no namespace for one, and kubectl places the debug pod in
+// the context's current namespace rather than in one kx would have to invent.
+func TestDebugOnANodeTargetsTheNode(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "node-a", kind: kinds.Node}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug", "-it", "node/node-a", "--image=busybox"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "-n ") {
+		t.Errorf("args = %q, want no namespace flag — a Node is not in one", got)
+	}
+	// --target is what the pod path adds after a container lookup. A node has
+	// no container to share a namespace with, so neither the flag nor the
+	// lookup that finds it belongs here.
+	if strings.Contains(got, "--target") {
+		t.Errorf("args = %q, want no --target for a node", got)
+	}
+	if len(kubectl.runs) != 0 {
+		t.Errorf("ran %v — a node needs no container lookup", kubectl.runs)
+	}
+}
+
+// Refused rather than forwarded, so the message names the combination kx
+// understands instead of leaving kubectl to reject a flag pairing kx chose.
+func TestDebugOnANodeRefusesTarget(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := fakeResolver{name: "node-a", kind: kinds.Node}
+
+	err := DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}.Execute(1, nil, []string{"--target", "app"})
+
+	if err == nil {
+		t.Fatal("--target was accepted for a node")
+	}
+	if !strings.Contains(err.Error(), "--target") ||
+		!strings.Contains(err.Error(), "Node") {
+		t.Errorf("err = %q, want it to name --target and Node", err)
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Errorf("ran %v — the refusal comes before kubectl", kubectl.interactive)
+	}
+}
+
+// The pod path is untouched: it still addresses the pod bare, scopes it to the
+// namespace state recorded, and looks a container up to share a namespace with.
+func TestDebugOnAPodIsUnchangedByTheNodePath(t *testing.T) {
+	kubectl := &recordingKubectl{output: "app\n"}
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod}
+
+	if err := (DebugCommand{
+		Kubectl: kubectl, State: resolver, Image: "busybox",
+	}).Execute(1, nil, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got := joinArgs(kubectl.interactive[0])
+	for _, want := range []string{"debug -it web", "-n prod", "--target=app"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args = %q, want them to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "node/") {
+		t.Errorf("args = %q, want a pod addressed bare", got)
 	}
 }

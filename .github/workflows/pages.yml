@@ -15,7 +15,12 @@ on:
       - "assets/**"
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
+      - "tools/gen-site-docs/**"
+      - "tools/internal/cmddoc/**"
       - "internal/theme/**"
+      # The command reference is generated from the command tree, so a flag
+      # added to a command changes the site even when nothing under site/ moved.
+      - "internal/cli/**"
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
@@ -23,7 +28,12 @@ on:
       - "assets/**"
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
+      - "tools/gen-site-docs/**"
+      - "tools/internal/cmddoc/**"
       - "internal/theme/**"
+      # The command reference is generated from the command tree, so a flag
+      # added to a command changes the site even when nothing under site/ moved.
+      - "internal/cli/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -42,9 +52,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -62,10 +72,37 @@ jobs:
       # the README command table does.
       - name: Check the generated palette stylesheet is current
         run: |
-          go run ./tools/gen-site-theme || true
+          # Exit 1 is the generator saying it rewrote a file, which the diff
+          # below reports properly. Anything else is the generator failing,
+          # and must not be swallowed: a failure writes nothing, so the diff
+          # comes back clean and a bare `|| true` would report success.
+          go run ./tools/gen-site-theme || { status=$?; [ "$status" -eq 1 ] || exit "$status"; }
           if ! git diff --quiet -- site/assets/css/kx-themes.css site/data/kx_themes.json; then
             echo "::error::site palette files are stale — run 'go run ./tools/gen-site-theme' and commit the result"
             git diff -- site/assets/css/kx-themes.css site/data/kx_themes.json
+            exit 1
+          fi
+
+      # Same contract as the palette check above: the per-command pages are
+      # generated from internal/cli, so a flag added without regenerating would
+      # publish a reference that documents flags kx no longer has.
+      - name: Check the generated command reference is current
+        run: |
+          # No `|| true`, unlike the palette step above: gen-site-docs has no
+          # rewrote-a-file exit code to tolerate — it exits non-zero only on
+          # error. Swallowing that let a broken generator publish a stale
+          # reference and pass, since a run that writes nothing leaves the
+          # diff and the porcelain below both clean.
+          go run ./tools/gen-site-docs
+          if ! git diff --quiet -- site/content/docs/reference/commands; then
+            echo "::error::the site command reference is stale — run 'go run ./tools/gen-site-docs' and commit the result"
+            git diff --stat -- site/content/docs/reference/commands
+            exit 1
+          fi
+          # An added command writes a new file, which git diff does not see.
+          if [ -n "$(git status --porcelain -- site/content/docs/reference/commands)" ]; then
+            echo "::error::the site command reference gained or lost a page — run 'go run ./tools/gen-site-docs' and commit the result"
+            git status --porcelain -- site/content/docs/reference/commands
             exit 1
           fi
 
@@ -99,7 +136,7 @@ jobs:
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site/public
 
@@ -115,4 +152,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

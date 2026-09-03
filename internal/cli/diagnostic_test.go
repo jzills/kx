@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -433,7 +435,7 @@ func TestDiagSweepWithHTMLStillPrintsTheTerminalTriage(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(sink.String(), "checked") {
+	if !strings.Contains(sink.String(), "nothing to check") {
 		t.Errorf("terminal output = %q, want the triage caption to still print with --html set", sink.String())
 	}
 }
@@ -485,11 +487,61 @@ func TestDiagSweepWithoutHTMLStillPrintsTheTerminalTriage(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(sink.String(), "checked") {
+	if !strings.Contains(sink.String(), "nothing to check") {
 		t.Errorf("terminal output = %q, want the triage caption to print with --html left off", sink.String())
 	}
 	if strings.Contains(sink.String(), "serving at") {
 		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
+	}
+}
+
+// Driven through RunE with real state, not just the JSON builder directly:
+// a unit test of diagnosticJSON alone cannot see whether the command wires
+// the index it just resolved through to it, or drops it on the floor — the
+// same "a test that calls the helpers directly agrees with itself; only real
+// argv proves the wiring" lesson this codebase already has elsewhere.
+func TestDiagJSONIndexedRunCarriesTheRealIndex(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t,
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "prod"}},
+	)
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "api", Kind: kinds.Deployment},
+			{Name: "web", Kind: kinds.Deployment},
+			{Name: "cache", Kind: kinds.Deployment},
+		}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("json", "true"); err != nil {
+		t.Fatalf("set --json: %v", err)
+	}
+
+	// Index 3, deliberately not 1: a wiring bug that hardcodes or drops the
+	// index would still pass a test that only ever asked for the first entry.
+	if err := cmd.RunE(cmd, []string{"3"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	var document struct {
+		Resources []struct {
+			Name  string `json:"name"`
+			Index int    `json:"index"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(sink.Bytes(), &document); err != nil {
+		t.Fatalf("decode: %v\noutput: %s", err, sink.String())
+	}
+	if len(document.Resources) != 1 || document.Resources[0].Index != 3 {
+		t.Errorf("resources = %v, want one entry with index 3", document.Resources)
+	}
+	if document.Resources[0].Name != "cache" {
+		t.Errorf("resources[0].name = %q, want cache (index 3's resource)", document.Resources[0].Name)
 	}
 }
 
@@ -515,5 +567,99 @@ func TestDiagSingleWithoutHTMLStillPrintsTheTerminalReport(t *testing.T) {
 	}
 	if strings.Contains(sink.String(), "serving at") {
 		t.Errorf("terminal output = %q, want no serve announcement with --html left off", sink.String())
+	}
+}
+
+// unhealthyDeployment is a Deployment that wants replicas and has none ready,
+// which BuildReport rates Critical — the cheapest fixture that trips a gate.
+func unhealthyDeployment() *appsv1.Deployment {
+	replicas := int32(2)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+	}
+}
+
+// --fail-on is a gate for a pipeline and --html is how that pipeline publishes
+// what it found, so the two belong together. Returning servePage's result
+// *instead of* the gate's made them mutually exclusive: adding --html to a
+// green pipeline kept it green whatever the sweep turned up, with nothing
+// printed to say the gate had been dropped.
+//
+// Only driving RunE can see this. sweepGate and verdictGate were always
+// correct on their own; the defect was which of them the html branch returned.
+func TestDiagSweepWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(
+		diagnosticHTMLServices(t, unhealthyDeployment()), "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"namespace", "prod"}, {"html", "true"}, {"no-open", "true"},
+		{"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	var silent SilentError
+	err := cmd.RunE(cmd, nil)
+	if !errors.As(err, &silent) {
+		t.Fatalf("RunE = %v, want --fail-on to exit %d through the html branch", err, findingsExitCode)
+	}
+	if silent.Code != findingsExitCode {
+		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
+	}
+}
+
+// The other half of the gate: a clean sweep must still exit 0 with --html set.
+// Without this, the test above passes just as well against a gate that always
+// fires.
+func TestDiagSweepWithHTMLPassesACleanGate(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(diagnosticHTMLServices(t), "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"namespace", "prod"}, {"html", "true"}, {"no-open", "true"},
+		{"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Errorf("RunE = %v, want nil for a sweep with nothing to report", err)
+	}
+}
+
+// Same regression, single-resource branch: verdictGate has to survive --html
+// exactly as sweepGate does.
+func TestDiagSingleWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
+	quietRender(t)
+	services := diagnosticHTMLServices(t, unhealthyDeployment())
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{{Name: "web", Kind: kinds.Deployment}}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("prime state: %v", err)
+	}
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	cmd.SetContext(stoppedContext())
+	for _, flag := range [][2]string{
+		{"html", "true"}, {"no-open", "true"}, {"fail-on", "critical"},
+	} {
+		if err := cmd.Flags().Set(flag[0], flag[1]); err != nil {
+			t.Fatalf("set --%s: %v", flag[0], err)
+		}
+	}
+
+	var silent SilentError
+	err := cmd.RunE(cmd, []string{"1"})
+	if !errors.As(err, &silent) {
+		t.Fatalf("RunE = %v, want --fail-on to exit %d through the html branch", err, findingsExitCode)
+	}
+	if silent.Code != findingsExitCode {
+		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
 	}
 }

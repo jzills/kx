@@ -6,11 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// shim installs a "kubectl" double in dir that runs body when invoked, and
+// skips the calling test on Windows, where the double's POSIX shell doesn't
+// exist. dir is the caller's own t.TempDir() rather than one shim creates,
+// so a body that references its own directory — a PID file, a call-count
+// file — can be built before the double is installed.
+func shim(t *testing.T, dir, body string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH-shimmed test double assumes a POSIX shell")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
 
 // onLine returning an error must not leave the subprocess running behind
 // it. Watch backs `kubectl get --watch`, which never exits on its own, so
@@ -23,13 +38,8 @@ import (
 // PATH is shimmed with a "kubectl" double rather than talking to a cluster,
 // keeping this hermetic.
 func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH-shimmed test double assumes a POSIX shell")
-	}
-
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
-	script := filepath.Join(dir, "kubectl")
 	// Stands in for `kubectl get --watch` against an idle cluster: records
 	// its own PID, prints the one line Watch will read, then — like the
 	// real thing — never exits on its own. `exec sleep` replaces the shell
@@ -39,10 +49,7 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 	// it orphaned keeps the stderr pipe open underneath it, hanging this
 	// test on an artifact of the double rather than the thing under test.
 	body := "#!/bin/sh\necho \"$$\" > " + pidFile + "\necho header\nexec sleep 300\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	shim(t, dir, body)
 
 	done := make(chan error, 1)
 	go func() {
@@ -84,51 +91,63 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 	}
 }
 
-// contextShim installs a "kubectl" double that answers current-context from a
-// file, so a test can change the answer the way `config use-context` would and
-// count how often the double was actually consulted.
-func contextShim(t *testing.T) (dir, contextFile, callsFile string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("PATH-shimmed test double assumes a POSIX shell")
-	}
-	dir = t.TempDir()
-	contextFile = filepath.Join(dir, "context")
-	callsFile = filepath.Join(dir, "calls")
-	if err := os.WriteFile(contextFile, []byte("staging\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	body := "#!/bin/sh\n" +
-		"if [ \"$1\" = config ] && [ \"$2\" = current-context ]; then\n" +
-		"  echo current >> " + callsFile + "\n" +
-		"  cat " + contextFile + "\n" +
-		"elif [ \"$1\" = config ] && [ \"$2\" = use-context ]; then\n" +
-		"  printf '%s\\n' \"$3\" > " + contextFile + "\n" +
-		"fi\n"
-	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return dir, contextFile, callsFile
+// minimalKubeconfig is a syntactically real kubeconfig — enough for
+// clientcmd to parse it, never enough to reach a cluster with it. current
+// names the current-context field; empty means the kubeconfig has none.
+func minimalKubeconfig(current string) string {
+	return "apiVersion: v1\n" +
+		"kind: Config\n" +
+		"current-context: " + current + "\n" +
+		"contexts:\n" +
+		"- name: staging\n" +
+		"  context: {cluster: c, user: u}\n" +
+		"- name: production\n" +
+		"  context: {cluster: c, user: u}\n" +
+		"clusters:\n" +
+		"- name: c\n" +
+		"  cluster: {server: https://example.invalid}\n" +
+		"users:\n" +
+		"- name: u\n" +
+		"  user: {}\n"
 }
 
-func contextCalls(t *testing.T, callsFile string) int {
+// writeKubeconfig installs a real kubeconfig file and points KUBECONFIG at
+// it, so CurrentContext (which now reads the file directly, no subprocess)
+// has something to parse.
+func writeKubeconfig(t *testing.T, current string) string {
 	t.Helper()
-	data, err := os.ReadFile(callsFile)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0
-	}
-	if err != nil {
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(minimalKubeconfig(current)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return len(strings.Fields(string(data)))
+	t.Setenv("KUBECONFIG", path)
+	return path
+}
+
+// shimUseContext installs a "kubectl" double whose only real behavior is
+// `config use-context <name>`, rewriting current-context in $KUBECONFIG —
+// inherited from the test's own environment, since exec.Command passes it
+// through unless told otherwise. Exercising kx's actual switch path (Run,
+// not a direct call into unexported cache internals) is what proves
+// changesContext's detection actually fires on it.
+func shimUseContext(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	body := "#!/bin/sh\n" +
+		"if [ \"$1\" = config ] && [ \"$2\" = use-context ]; then\n" +
+		"  sed -i \"s/^current-context:.*/current-context: $3/\" \"$KUBECONFIG\"\n" +
+		"fi\n"
+	shim(t, dir, body)
 }
 
 // Every index resolution checks the context — kx refuses an index counted in
-// another cluster — and each check shelled out. `kx labels 1 2 3` spawned nine
-// `kubectl config current-context` processes against three doing the work.
+// another cluster — and each check used to shell out: `kx labels 1 2 3`
+// spawned nine `kubectl config current-context` processes against three
+// doing the work. Proven here by editing the kubeconfig file directly after
+// the first read: a cache that actually held would not see it, where a
+// CurrentContext that quietly went back to reading the file every time would.
 func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
-	_, _, calls := contextShim(t)
+	path := writeKubeconfig(t, "staging")
 	client := New()
 
 	for range 5 {
@@ -137,8 +156,11 @@ func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
 		}
 	}
 
-	if got := contextCalls(t, calls); got != 1 {
-		t.Errorf("spawned kubectl %d times for 5 reads, want 1", got)
+	if err := os.WriteFile(path, []byte(minimalKubeconfig("production")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.CurrentContext(); got != "staging" {
+		t.Errorf("CurrentContext() = %q after an external file edit, want the cached staging", got)
 	}
 }
 
@@ -146,7 +168,8 @@ func TestCurrentContextIsReadOncePerProcess(t *testing.T) {
 // process, and a listing saved after that switch belongs to the new context.
 // Caching without invalidating would stamp it with the one just left.
 func TestSwitchingContextDropsTheCachedValue(t *testing.T) {
-	_, _, calls := contextShim(t)
+	shimUseContext(t)
+	writeKubeconfig(t, "staging")
 	client := New()
 
 	if got := client.CurrentContext(); got != "staging" {
@@ -159,19 +182,13 @@ func TestSwitchingContextDropsTheCachedValue(t *testing.T) {
 	if got := client.CurrentContext(); got != "production" {
 		t.Errorf("CurrentContext() = %q after switching, want production", got)
 	}
-	if got := contextCalls(t, calls); got != 2 {
-		t.Errorf("spawned kubectl %d times, want 2 — one per side of the switch", got)
-	}
 }
 
 // A kubeconfig with no current context is a legitimate setup, and "none set"
-// is as worth remembering as a name — re-asking spawned a subprocess to be
-// told the same thing.
+// is as worth remembering as a name — re-asking used to spawn a subprocess to
+// be told the same thing.
 func TestUnsetContextIsCachedToo(t *testing.T) {
-	_, contextFile, calls := contextShim(t)
-	if err := os.WriteFile(contextFile, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeKubeconfig(t, "")
 	client := New()
 
 	for range 3 {
@@ -179,7 +196,65 @@ func TestUnsetContextIsCachedToo(t *testing.T) {
 			t.Fatalf("CurrentContext() = %q, want empty", got)
 		}
 	}
-	if got := contextCalls(t, calls); got != 1 {
-		t.Errorf("spawned kubectl %d times for 3 reads, want 1", got)
+
+	if err := os.WriteFile(path, []byte(minimalKubeconfig("staging")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.CurrentContext(); got != "" {
+		t.Errorf("CurrentContext() = %q after an external file edit, want the cached empty value", got)
+	}
+}
+
+// Run must return kubectl's stderr as a typed Error, not a bare one.
+//
+// The type is what lets cli.IsNotFound read the message at all: "not found" is
+// not a rare phrase, and a marker list cannot be made safe on an arbitrary
+// error — scanner.NotFoundError says "grype not found on PATH" about something
+// that was never a resource. Every caller-side test constructs the type
+// directly, so without this one the production wiring could go back to
+// errors.New and nothing would notice.
+func TestRunReturnsATypedErrorCarryingStderr(t *testing.T) {
+	dir := t.TempDir()
+	// What kubectl actually prints for a pod that is not there, on stderr,
+	// with a non-zero exit.
+	const stderr = `Error from server (NotFound): pods "nginx" not found`
+	shim(t, dir, "#!/bin/sh\necho '"+stderr+"' >&2\nexit 1\n")
+
+	_, err := Exec{}.Run([]string{"get", "pod", "nginx"})
+	if err == nil {
+		t.Fatal("Run succeeded on a non-zero exit")
+	}
+	var reported Error
+	if !errors.As(err, &reported) {
+		t.Fatalf("err is %T, want a kubectl.Error — the type is what makes the "+
+			"message safe to read", err)
+	}
+	if reported.Stderr != stderr {
+		t.Errorf("Stderr = %q, want kubectl's own message verbatim", reported.Stderr)
+	}
+}
+
+// Watch must carry the same typed Error Run does, for the same reason:
+// cli.IsNotFound requires the type to tell "kubectl said this" from
+// "something else said this", and a bare errors.New here — which this was,
+// until now — makes Watch's failures invisible to it. Every caller-side test
+// constructs the type directly, so without this one the production wiring
+// could go back to errors.New and nothing would notice.
+func TestWatchReturnsATypedErrorCarryingStderr(t *testing.T) {
+	dir := t.TempDir()
+	const stderr = `Error from server (NotFound): pods "nginx" not found`
+	shim(t, dir, "#!/bin/sh\necho '"+stderr+"' >&2\nexit 1\n")
+
+	err := Exec{}.Watch(nil, func(string) error { return nil })
+	if err == nil {
+		t.Fatal("Watch succeeded on a non-zero exit")
+	}
+	var reported Error
+	if !errors.As(err, &reported) {
+		t.Fatalf("err is %T, want a kubectl.Error — the type is what makes the "+
+			"message safe to read", err)
+	}
+	if reported.Stderr != stderr {
+		t.Errorf("Stderr = %q, want kubectl's own message verbatim", reported.Stderr)
 	}
 }

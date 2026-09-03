@@ -31,8 +31,9 @@ func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
-	if !diagnostics.SupportedKinds[kind] {
-		return diagnostics.Report{}, fmt.Errorf("diagnostic is not supported for '%s'.", kind)
+	if !diagnostics.SupportedKinds.Has(kind) {
+		return diagnostics.Report{}, unsupportedKindError(
+			"diagnostic", kind, diagnostics.SupportedKinds)
 	}
 	data, err := c.Diagnostics.Gather(ctx, kind, name, namespace)
 	if err != nil {
@@ -167,12 +168,15 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd := &cobra.Command{
 		Use:        use + " [index]",
 		SuggestFor: []string{"triage", "health", "why", "status"},
-		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, or Pod, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
+		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases:    aliases,
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
-			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.",
-		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n  kx " + use + " -A",
-		Args:    cobra.MaximumNArgs(1),
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
+			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.",
+		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
+			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
+			"  kx " + use + " -A --fail-on critical --out report.html",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
@@ -180,7 +184,41 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
-			htmlOpts := htmlOptions{Enabled: html, Port: port, NoOpen: noOpen}
+			out, _ := cmd.Flags().GetString("out")
+			asJSON, _ := cmd.Flags().GetBool("json")
+			failOn, _ := cmd.Flags().GetString("fail-on")
+			wantsHTML := impliedHTML(html, out)
+			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
+			if err := htmlOpts.validate(
+				cmd.Flags().Changed("port"), cmd.Flags().Changed("no-open")); err != nil {
+				return err
+			}
+
+			if asJSON && wantsHTML {
+				return fmt.Errorf(
+					"'--json' cannot be combined with '%s' — one is for a "+
+						"machine and the other for a browser.", htmlFlagName(html))
+			}
+			// Unlike kx scan's, this pair is redundant rather than impossible:
+			// a document always carries every swept resource, so --full has
+			// nothing to add to one. Refused rather than ignored all the same,
+			// so a flag that changes nothing never looks as though it did.
+			if asJSON && cmd.Flags().Changed("full") {
+				return errors.New(
+					"'--json' cannot be combined with '--full' — a document " +
+						"already carries every resource swept, healthy ones " +
+						"included, so '--full' has nothing to add to it.")
+			}
+			// Parsed up front so a typo fails before the cluster is read
+			// rather than after a report has already been printed.
+			var threshold diagnostics.Severity
+			if failOn != "" {
+				parsed, err := parseDiagnosticThreshold(failOn)
+				if err != nil {
+					return err
+				}
+				threshold = parsed
+			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
@@ -233,24 +271,40 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if err != nil {
 					return err
 				}
+				if asJSON {
+					document, err := triageJSON(result)
+					if err != nil {
+						return err
+					}
+					render.Raw(document)
+					return sweepGate(result, failOn, threshold)
+				}
 				render.Triage(result)
-				if !htmlOpts.Enabled {
-					return nil
+				// The gate is the tail of every path, not the alternative to
+				// one. --html says where the findings go; --fail-on says what
+				// they mean, and a sweep that found something critical means
+				// the same thing whether or not a browser was opened on it.
+				if htmlOpts.Enabled {
+					scope := namespace
+					if allNamespaces {
+						scope = render.AllNamespaces
+					}
+					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
+						invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
+					if err != nil {
+						return err
+					}
+					page, err := web.RenderDiag(sweepPage(result, meta))
+					if err != nil {
+						return err
+					}
+					// After the server stops, so Ctrl-C ends the command with
+					// the exit code the sweep earned rather than servePage's nil.
+					if err := deliverPage(ctx, page, htmlOpts); err != nil {
+						return err
+					}
 				}
-				scope := namespace
-				if allNamespaces {
-					scope = render.AllNamespaces
-				}
-				meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
-					invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
-				if err != nil {
-					return err
-				}
-				page, err := web.RenderDiag(sweepPage(result, meta))
-				if err != nil {
-					return err
-				}
-				return servePage(ctx, page, htmlOpts)
+				return sweepGate(result, failOn, threshold)
 			}
 
 			index, err := parseIndex("index", args[0])
@@ -265,21 +319,31 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				document, err := diagnosticJSON(report, index)
+				if err != nil {
+					return err
+				}
+				render.Raw(document)
+				return verdictGate(report.Verdict, failOn, threshold)
+			}
 			render.Diagnostic(report)
-			if !htmlOpts.Enabled {
-				return nil
+			if htmlOpts.Enabled {
+				meta, err := pageMeta(services.Config.Theme,
+					"diag · "+string(report.Kind)+"/"+report.Name,
+					invocation(use, args[0], portFlag(port)))
+				if err != nil {
+					return err
+				}
+				page, err := web.RenderDiag(resourcePage(report, meta))
+				if err != nil {
+					return err
+				}
+				if err := deliverPage(ctx, page, htmlOpts); err != nil {
+					return err
+				}
 			}
-			meta, err := pageMeta(services.Config.Theme,
-				"diag · "+string(report.Kind)+"/"+report.Name,
-				invocation(use, args[0], portFlag(port)))
-			if err != nil {
-				return err
-			}
-			page, err := web.RenderDiag(resourcePage(report, meta))
-			if err != nil {
-				return err
-			}
-			return servePage(ctx, page, htmlOpts)
+			return verdictGate(report.Verdict, failOn, threshold)
 		},
 	}
 	cmd.Flags().StringP("namespace", "n", "",
@@ -288,11 +352,47 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
+	cmd.Flags().Bool("json", false,
+		"Print the report as JSON instead of a table")
+	cmd.Flags().String("fail-on", "",
+		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,
 		"Render the report as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,
 		"Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false,
 		"Serve the HTML report without opening a browser")
+	cmd.Flags().String("out", "",
+		"Write the HTML report to this file instead of serving it in a browser")
 	return cmd
+}
+
+// verdictGate turns a verdict into an exit code when --fail-on asked for one.
+//
+// SilentError because the report has already been printed: this is the exit
+// code, not a second error message. Two rather than one, so a pipeline can tell
+// "the cluster is sick" from "kx itself failed", which is what kx exits 1 for.
+func verdictGate(verdict diagnostics.Severity, failOn string, threshold diagnostics.Severity) error {
+	if failOn == "" || verdict < threshold {
+		return nil
+	}
+	return SilentError{Code: findingsExitCode}
+}
+
+// sweepGate applies the same gate to a sweep, over the worst verdict in it.
+//
+// Every swept resource, not just the rows the table printed: --full governs
+// what fits on a screen, and a gate that changed answer with a display flag
+// would be a trap.
+func sweepGate(result render.TriageResult, failOn string, threshold diagnostics.Severity) error {
+	if failOn == "" {
+		return nil
+	}
+	worst := diagnostics.OK
+	for _, report := range result.All {
+		if report.Verdict > worst {
+			worst = report.Verdict
+		}
+	}
+	return verdictGate(worst, failOn, threshold)
 }

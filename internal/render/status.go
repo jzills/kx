@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jzills/kx/internal/theme"
@@ -43,6 +44,28 @@ func (r *Renderer) Status(message string) (stop func()) {
 // for the same reason, and because a caller who redirected the error stream
 // should not still get spinner frames on the real one.
 func (r *Renderer) status(message string, enabled bool, delay, interval time.Duration) func() {
+	return r.statusFunc(func() string { return message }, enabled, delay, interval)
+}
+
+// Progress is Status with a message that counts work as it completes:
+// "scanning 7/30" rather than a spinner that says only that something is
+// happening. advance marks one unit done and is safe to call from several
+// goroutines, which is the point — the work it counts runs concurrently.
+func (r *Renderer) Progress(label string, total int) (advance func(), stop func()) {
+	var done atomic.Int64
+	stop = r.statusFunc(func() string {
+		return fmt.Sprintf("%s %d/%d", label, done.Load(), total)
+	}, isTerminal(r.out), spinnerDelay, spinnerInterval)
+	return func() { done.Add(1) }, stop
+}
+
+// statusFunc is status with the message rebuilt on every frame, so a caller
+// can let it count. The message func is called from the painting goroutine
+// only, under no lock of its own — anything it reads must be safe to read
+// concurrently with the work being reported.
+func (r *Renderer) statusFunc(
+	message func() string, enabled bool, delay, interval time.Duration,
+) func() {
 	if !enabled {
 		return func() {}
 	}
@@ -75,7 +98,7 @@ func (r *Renderer) status(message string, enabled bool, delay, interval time.Dur
 				mu.Unlock()
 				return
 			}
-			fmt.Fprint(r.err, "\r"+r.style(theme.Muted, spinnerFrames[frame]+" "+message+"…"))
+			fmt.Fprint(r.err, "\r"+r.style(theme.Muted, spinnerFrames[frame]+" "+message()+"…"))
 			mu.Unlock()
 
 			frame = (frame + 1) % len(spinnerFrames)
@@ -135,7 +158,13 @@ func (r *Renderer) emphasizePaths(message string) string {
 	return strings.Join(words, " ")
 }
 
-func Status(message string) func()               { return current.Status(message) }
+func Status(message string) func() { return current.Status(message) }
+
+// Progress reports through the package-level renderer.
+func Progress(label string, total int) (advance func(), stop func()) {
+	return current.Progress(label, total)
+}
+
 func Banner(kind, name, namespace, extra string) { current.Banner(kind, name, namespace, extra) }
 func ScopeBanner(label, namespace, extra string) { current.ScopeBanner(label, namespace, extra) }
 func Blank()                                     { current.Blank() }

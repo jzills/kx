@@ -13,105 +13,24 @@
 {{- end }}
 
 {{- /*
-  Apply the stored (or default) palette, and the light/dark class it implies,
-  before the first paint.
+  The palette runtime, inlined so the stored palette lands before first paint.
 
   Hextra's own theme.js is a <head> script that runs just before this one; it
   unconditionally sets a "dark"/"light" class on <html> from
   site.Params.theme.default, and that part happens whether or not the toggle
-  is shown. Nothing sets data-kx-theme, which is ours, or corrects that class
-  for whichever kx palette is actually stored. This runs immediately after
-  theme.js, in the same head, so the correction lands before anything paints;
-  doing it only where the picker itself lives, far down the page, would show
+  is shown. Nothing there sets data-kx-theme, which is ours, or corrects that
+  class for whichever kx palette is actually stored. This runs immediately
+  after theme.js, in the same head, so the correction lands before anything
+  paints; doing it where a control lives, further down the page, would show
   the wrong navbar for as long as the rest of the page takes to load.
 
-  Setting the class here is not the end of it, though: Hextra also ships
-  assets/js/core/theme.js, a *body* script (unconditional — it runs whether
-  or not the toggle is displayed) that unconditionally reapplies a class from
-  localStorage["color-theme"] on every load, falling back to
-  site.Params.theme.default when that key is unset. Since we only ever write
-  to our own "kx-theme" key, that script found its key missing on every load
-  and reset the class straight back to the configured default a moment after
-  this script got it right — confirmed by watching the class flip via a
-  console trace. Writing color-theme here too, in the same value, means that
-  later script finds an answer already waiting and reapplies the same class
-  we set, rather than overriding it.
-
-  The name → mode lookup is generated from the same data the picker reads
-  (kx-themes.html), so a palette can't go missing from one and not the other.
+  Inline rather than <script src>: a deferred file cannot beat the paint, and
+  a blocking external file is a round trip for two kilobytes. Everything the
+  controls need is on window.kxTheme by the time they run — see
+  assets/js/kx-theme.js, which is also where the tab-icon repaint and the
+  Hextra "color-theme" bookkeeping now live.
 */ -}}
-{{- /*
-  The tab icon, painted from the chosen palette.
-
-  Hextra's favicons.html has already linked /favicon.svg by the time this
-  runs — it is partial 10 of that head, this is partial 80 — so there is an
-  element to repaint rather than one to invent.
-
-  The shapes are the generated mark, inlined here rather than redrawn in
-  JavaScript: a second copy of the letterforms is the drift internal/mark
-  exists to prevent. Only the fill changes, which is the one thing a palette
-  has an opinion about. The accents come from the same generated data the
-  picker and the stylesheet read, so a palette cannot colour the page one way
-  and the tab another.
-*/ -}}
-{{- $favicon := "" }}
-{{- with resources.Get "favicon.svg" }}
-  {{- $favicon = .Content }}
+{{- with resources.Get "js/kx-theme.js" }}
+  {{- $runtime := . | resources.ExecuteAsTemplate "js/kx-theme.js" $ }}
+  <script>{{ $runtime.Content | safeJS }}</script>
 {{- end }}
-<script>
-  (function () {
-    var ACCENTS = {};
-    {{- range hugo.Data.kx_themes }}
-    ACCENTS[{{ .name | jsonify | safeJS }}] = {{ .accent | jsonify | safeJS }};
-    {{- end }}
-    var FAVICON = {{ $favicon | jsonify | safeJS }};
-
-    // Exposed so the picker repaints through this table rather than keeping a
-    // second one; it is defined before the palette is applied below, so the
-    // first paint goes through the same path every later switch does.
-    window.kxPaintFavicon = function (name) {
-      var link = document.getElementById("favicon-svg");
-      var accent = ACCENTS[name];
-      if (!link || !FAVICON || !accent) {
-        return;
-      }
-      var painted = FAVICON.replace(/fill="[^"]*"/, 'fill="' + accent + '"');
-      link.setAttribute("href", "data:image/svg+xml," + encodeURIComponent(painted));
-    };
-  })();
-</script>
-<script>
-  (function () {
-    var MODES = {};
-    {{- range hugo.Data.kx_themes }}
-    {{/* jsonify alone still gets re-escaped as an opaque JS string by Hugo's
-         contextual auto-escaping inside <script>; safeJS is what tells it
-         this text is already valid JS and to leave it alone. */}}
-    MODES[{{ .name | jsonify | safeJS }}] = {{ .mode | jsonify | safeJS }};
-    {{- end }}
-    // Matches DEFAULT_THEME in kx-themes.html and defaultDark in
-    // tools/gen-site-theme.
-    var DEFAULT_THEME = "github-dark";
-
-    var stored = null;
-    try {
-      stored = localStorage.getItem("kx-theme");
-    } catch (e) {
-      /* Private browsing refuses storage; the default still applies. */
-    }
-
-    var name = stored || DEFAULT_THEME;
-    var mode = MODES[name] || "dark";
-    document.documentElement.setAttribute("data-kx-theme", name);
-    document.documentElement.classList.remove("light", "dark");
-    document.documentElement.classList.add(mode);
-    document.documentElement.style.colorScheme = mode;
-    window.kxPaintFavicon(name);
-    try {
-      localStorage.setItem("color-theme", mode);
-    } catch (e) {
-      /* Same private-browsing case as above; Hextra's body script will fall
-         back to the Hugo default too, matching whatever we just set. */
-    }
-  })();
-</script>

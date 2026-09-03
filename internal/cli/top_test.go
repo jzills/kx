@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -144,8 +146,11 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
-	if namespace != "prod" {
-		t.Errorf("namespace = %q, want prod", namespace)
+	// A Node is cluster-scoped: kx get nodes records no namespace for one, and
+	// kx top nodes must record the same, or the same index diagnoses differently
+	// depending on which command handed it out.
+	if namespace != "" {
+		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", namespace)
 	}
 	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
 		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
@@ -690,5 +695,164 @@ func TestTopRegistersNamespaceFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("--%s is not registered, so it will not appear in --help", name)
 		}
+	}
+}
+
+// kx diag's help offers `kx get nodes` and `kx top nodes` as two ways to reach
+// the same index, so the entry they save has to be the same entry. It was not:
+// #271 blanked the namespace on the get path only, and a Node indexed by
+// top carried whichever namespace the caller happened to be standing in.
+//
+// That is not just a caption. Gather is handed the saved namespace and filters
+// the node's warning events by it (diagnostics/service.go), and node events
+// live in `default` — so a node indexed by top diagnosed with every warning
+// event missing, while the same node indexed by get showed them.
+func TestTopNodesAndGetNodesSaveTheSameNamespace(t *testing.T) {
+	tops := &fakeState{}
+	if _, _, err := (TopCommand{
+		Kubectl: &scriptedKubectl{outputs: []string{nodesOutput}},
+		State:   tops, Index: indexService(),
+	}).ExecuteNodes("", nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+
+	gets := &fakeState{}
+	if _, _, err := (GetCommand{
+		Kubectl: &fakeKubectl{namespace: "prod", output: nodesOutput},
+		State:   gets, Index: indexService(),
+	}).Execute("nodes", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if len(tops.saved) != 1 || len(gets.saved) != 1 {
+		t.Fatalf("saved %d/%d entries, want 1 each", len(tops.saved), len(gets.saved))
+	}
+	if tops.saved[0].Namespace != gets.saved[0].Namespace {
+		t.Errorf("kx top nodes saved namespace %q, kx get nodes saved %q — the same index must resolve the same way",
+			tops.saved[0].Namespace, gets.saved[0].Namespace)
+	}
+	if tops.saved[0].Namespace != "" {
+		t.Errorf("saved namespace = %q, want empty", tops.saved[0].Namespace)
+	}
+}
+
+// `kx top nodes -A` used to hand the user kubectl's own error —
+// "error: unknown shorthand flag: 'A' in -A / See 'kubectl top node --help'" —
+// for a flag kx registers, documents, and completes. A Node is not in a
+// namespace, so the flag can never apply; kx says so in its own voice, and
+// says it before spawning kubectl.
+func TestTopNodesRefusesScopeFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"nodes", "-A"}, {"nodes", "--all-namespaces"},
+		{"nodes", "-n", "prod"}, {"nodes", "--namespace", "prod"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			quietRender(t)
+			kube := &fakeKubectl{output: nodesOutput}
+			cmd := newTopCommand(topServices(t, kube))
+			cmd.SetArgs(args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("kx top nodes accepted a namespace flag")
+			}
+			if !strings.Contains(err.Error(), args[1]) {
+				t.Errorf("error = %q, want it to name %q", err, args[1])
+			}
+			if !strings.Contains(err.Error(), "Node") {
+				t.Errorf("error = %q, want it to name the kind it refused for", err)
+			}
+			if len(kube.calls) != 0 {
+				t.Errorf("reached kubectl with %v; the flag is refused first", kube.calls)
+			}
+		})
+	}
+}
+
+// Pods are namespaced, so kx top keeps forwarding both scope flags to kubectl
+// exactly as before — the guard is about Nodes, not about kx top.
+func TestTopPodsStillAcceptsScopeFlags(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"-A"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -A: %v", err)
+	}
+	if len(kube.calls) == 0 {
+		t.Fatal("kx top -A never reached kubectl")
+	}
+	if got := joinArgs(kube.calls[0]); !strings.Contains(got, "-A") {
+		t.Errorf("first call = %q, want -A forwarded to kubectl", got)
+	}
+}
+
+// kx top nodes with no scope flag is the common path and stays untouched.
+func TestTopNodesWithoutScopeFlagsStillLists(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: nodesOutput}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"nodes"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top nodes: %v", err)
+	}
+	if len(kube.calls) == 0 {
+		t.Fatal("kx top nodes never reached kubectl")
+	}
+}
+
+// -A overwrites the namespace with the caption's own words just before
+// rendering, so a document built from it would read
+// `"namespace": "all namespaces"` — a display string no consumer can tell from
+// a namespace genuinely called that. It is the boolean that carries the scope.
+func TestTopAllNamespacesJSONIsABooleanNotACaption(t *testing.T) {
+	sink := captureRender(t)
+	kube := &fakeKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"-A", "--json"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -A --json: %v", err)
+	}
+	document := decodeJSON(t, sink.String())
+	if got := document["allNamespaces"]; got != true {
+		t.Errorf("allNamespaces = %v, want true", got)
+	}
+	if _, present := document["namespace"]; present {
+		t.Errorf("a spanning listing named a single namespace:\n%s", sink.String())
+	}
+	if strings.Contains(sink.String(), render.AllNamespaces) {
+		t.Errorf("the caption's wording reached the document:\n%s", sink.String())
+	}
+}
+
+// A Node is cluster-scoped, so its listing names no namespace at all.
+func TestTopNodesJSONNamesNoNamespace(t *testing.T) {
+	sink := captureRender(t)
+	kube := &fakeKubectl{output: nodesOutput}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetArgs([]string{"nodes", "--json"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top nodes --json: %v", err)
+	}
+	document := decodeJSON(t, sink.String())
+	if _, present := document["namespace"]; present {
+		t.Errorf("a node listing named a namespace:\n%s", sink.String())
+	}
+	if got := document["resource"]; got != "nodes" {
+		t.Errorf("resource = %v, want nodes", got)
 	}
 }

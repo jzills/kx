@@ -39,16 +39,32 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 		return Data{}, err
 	}
 
-	pods, err := s.Graph.ResolveWorkloadPods(ctx, kind, name, namespace)
-	if err != nil {
-		return Data{}, err
+	// Everything below is about a workload's own pods, and a Node has none in
+	// that sense — attachKindHealth already tallied what is scheduled on it,
+	// through the field selector the API server indexes.
+	//
+	// Run unguarded for a Node, this tail was three cluster-wide reads whose
+	// results were all discarded: ResolveWorkloadPods listed every pod in the
+	// cluster before falling to graph's `default: return nil, nil`, and
+	// usageLookup then fetched every pod's metrics to attach them to the empty
+	// slice that came back. On a large cluster that is tens of megabytes, and
+	// a timeout, for one node's conditions.
+	var pods []corev1.Pod
+	if kind != kinds.Node {
+		var err error
+		pods, err = s.Graph.ResolveWorkloadPods(ctx, kind, name, namespace)
+		if err != nil {
+			return Data{}, err
+		}
+		for i := range pods {
+			data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
+		}
+		attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
+		s.attachLogs(ctx, data.Pods, namespace)
 	}
-	for i := range pods {
-		data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
-	}
-	attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
-	s.attachLogs(ctx, data.Pods, namespace)
 
+	// Events are the exception: a Node's own warning events are the point of
+	// diagnosing one, so this read stays.
 	all, err := s.Events.Get(ctx, namespace)
 	if err != nil {
 		return Data{}, err
@@ -63,6 +79,32 @@ func (s Service) attachKindHealth(
 ) error {
 	get := metav1.GetOptions{}
 	switch kind {
+	case kinds.Node:
+		node, err := s.Client.CoreV1().Nodes().Get(ctx, name, get)
+		if err != nil {
+			return err
+		}
+		health := &NodeHealth{Unschedulable: node.Spec.Unschedulable}
+		for _, condition := range node.Status.Conditions {
+			health.Conditions = append(health.Conditions, NodeCondition{
+				Type:    string(condition.Type),
+				Status:  string(condition.Status),
+				Reason:  condition.Reason,
+				Message: condition.Message,
+			})
+		}
+		// Scoped by the field selector the API server indexes, so this asks
+		// for the node's own pods rather than listing the cluster and
+		// filtering. A failed read leaves the rollup empty rather than failing
+		// the diagnosis: the conditions above are the diagnosis, and the pod
+		// tally is context.
+		pods, err := s.Client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+			FieldSelector: "spec.nodeName=" + name,
+		})
+		if err == nil {
+			health.Pods = podPhaseCounts(pods.Items)
+		}
+		data.Node = health
 	case kinds.Deployment:
 		object, err := s.Client.AppsV1().Deployments(namespace).Get(ctx, name, get)
 		if err != nil {
@@ -373,4 +415,29 @@ func eventNamespace(event corev1.Event) string {
 		return event.InvolvedObject.Namespace
 	}
 	return event.Namespace
+}
+
+// podPhaseCounts tallies a node's pods by phase.
+//
+// A phase kubernetes does not name — an empty string on a pod the API server
+// has accepted but not yet placed — counts as Unknown rather than being
+// dropped, so Total always equals the sum of the parts and "N/M not running"
+// cannot exceed what is there.
+func podPhaseCounts(pods []corev1.Pod) PodPhaseCounts {
+	counts := PodPhaseCounts{Total: len(pods)}
+	for i := range pods {
+		switch pods[i].Status.Phase {
+		case corev1.PodRunning:
+			counts.Running++
+		case corev1.PodPending:
+			counts.Pending++
+		case corev1.PodFailed:
+			counts.Failed++
+		case corev1.PodSucceeded:
+			counts.Succeeded++
+		default:
+			counts.Unknown++
+		}
+	}
+	return counts
 }

@@ -469,3 +469,60 @@ func TestAllNamespacesWording(t *testing.T) {
 			"every -A caption, banner and page scope", AllNamespaces, "all namespaces")
 	}
 }
+
+// An apostrophe inside a word is prose, not a quote mark. Splitting on every
+// ' counted "scanner's" as one, which shifted the pairing for the rest of the
+// message: the tail was accented as though quoted, and a closing ' that was
+// never written got printed after it —
+//
+//	'--full' cannot be combined with '--fail-on' — … nothing to read.'
+//
+// Asserted on the plain-text rendering, since the defect is a character the
+// message does not contain rather than a styling choice.
+func TestAnApostropheInAWordIsNotAQuoteMark(t *testing.T) {
+	message := "'--json' cannot be combined with '--full' — --full streams " +
+		"the scanner's own report, which kx does not parse."
+
+	var buf bytes.Buffer
+	New(&buf, &buf, "github-dark", true).Error(message)
+
+	got := strings.TrimSuffix(buf.String(), "\n")
+	if want := "✗ " + message; got != want {
+		t.Errorf("Error rendered\n  %q\nwant\n  %q", got, want)
+	}
+}
+
+// The possessive survives in the styled rendering too, and the flags around it
+// are still accented — the fix must not simply stop quoting the message.
+func TestQuotedFlagsAreStillAccentedBesideAPossessive(t *testing.T) {
+	plain := styledCapture(t, "github-dark", func(r *Renderer) {
+		r.Error("'--json' cannot be combined with '--full' — kx does not parse the scanner's report.")
+	})
+	// Five: two around each quoted flag, and the possessive's own.
+	if got := strings.Count(plain, "'"); got != 5 {
+		t.Errorf("apostrophe count = %d, want 5: %q", got, plain)
+	}
+	if !strings.Contains(plain, "scanner's report.") {
+		t.Errorf("the possessive did not survive: %q", plain)
+	}
+	// Each flag closes its own styled run, which is what the accenting is for.
+	// Matched against the escape rather than a literal colour so a palette
+	// change does not rewrite this test.
+	for _, flag := range []string{"'--json'", "'--full'"} {
+		if !strings.Contains(plain, flag+esc) {
+			t.Errorf("%s was not accented as its own run: %q", flag, plain)
+		}
+	}
+}
+
+// A fragment that is genuinely quoted can contain spaces, so the rule cannot
+// be "no whitespace" — 'kx get pods' has to stay one accented span.
+func TestAMultiWordQuotedFragmentStaysOneSpan(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, &buf, "github-dark", true).Error("No state found. Run 'kx get pods' first.")
+
+	got := strings.TrimSuffix(buf.String(), "\n")
+	if want := "✗ No state found. Run 'kx get pods' first."; got != want {
+		t.Errorf("Error rendered\n  %q\nwant\n  %q", got, want)
+	}
+}

@@ -47,11 +47,11 @@ jobs:
       #
       # Not comparable to the 78% the Python suite gated at: that counted lines
       # and this counts statements. Packages with no test files (cmd/kx,
-      # internal/k8s, internal/kubectl, internal/tree, tools/) are in the
-      # denominator at 0%, so the number reflects the whole module.
+      # internal/tree, tools/) are in the denominator at 0%, so the number
+      # reflects the whole module.
       - name: Check coverage
         env:
-          FLOOR: "62.0"
+          FLOOR: "73.0"
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')"
           echo "total coverage: ${total}% (floor ${FLOOR}%)"
@@ -82,8 +82,16 @@ jobs:
       # This can fail on a PR that changed nothing relevant, when a CVE is newly
       # disclosed against a dependency already in the tree. That is the check
       # working: the fix is to bump the dependency, not to skip the run.
+      #
+      # The govulncheck binary is pinned like every other action and toolchain
+      # version here — it was the one @latest in an otherwise fully pinned
+      # pipeline. Pinning it costs nothing in freshness: the vulnerability
+      # database is fetched live from vuln.go.dev regardless of the scanner
+      # binary's own version, so this only removes the risk of a new
+      # govulncheck release changing behavior or breaking CI without warning.
+      # Bump deliberately, the same way CodeQL's action version is bumped.
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
   lint:
     name: Lint & format

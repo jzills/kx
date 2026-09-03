@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -99,9 +100,7 @@ func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
 	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
 }
 
-var scalableKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true, kinds.ReplicaSet: true,
-}
+var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}
 
 // ScaleCommand sets the replica count on an indexed workload.
 type ScaleCommand struct {
@@ -114,8 +113,8 @@ func (c ScaleCommand) Execute(index, replicas int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !scalableKinds[kind] {
-		return "", fmt.Errorf("scale is not supported for '%s'.", kind)
+	if !scalableKinds.Has(kind) {
+		return "", unsupportedKindError("scale", kind, scalableKinds)
 	}
 	_, err = c.Kubectl.Run([]string{
 		"scale", string(kind) + "/" + name,
@@ -131,9 +130,7 @@ func (c ScaleCommand) Execute(index, replicas int) (string, error) {
 	return fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun), nil
 }
 
-var rolloutKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true, kinds.DaemonSet: true,
-}
+var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}
 
 // rolloutActions are the kubectl rollout subcommands kx exposes, in the order
 // help and completion list them. `status` blocks until the rollout settles, so
@@ -169,6 +166,20 @@ func rolloutActionNames() []string {
 	return names
 }
 
+// joinAnd lists names the way kinds.Set.List() already lists kinds: "a, b and
+// c", never a bare comma-separated run. A local copy rather than a shared
+// export — kinds.Set.List() prints kinds specifically (through
+// PluralDisplay), and this prints whatever the caller already has strings for.
+func joinAnd(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 var interactiveRolloutActions = map[string]bool{"status": true}
 
 // RolloutCommand drives kubectl rollout for an indexed workload.
@@ -180,14 +191,15 @@ type RolloutCommand struct {
 // Execute returns the captured output, or "" for actions that stream directly.
 func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	if !isRolloutAction(action) {
-		return "", fmt.Errorf("unknown rollout action '%s'.", action)
+		return "", fmt.Errorf("kx rollout does not support '%s' — only %s.",
+			action, joinAnd(rolloutActionNames()))
 	}
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return "", err
 	}
-	if !rolloutKinds[kind] {
-		return "", fmt.Errorf("rollout is not supported for '%s'.", kind)
+	if !rolloutKinds.Has(kind) {
+		return "", unsupportedKindError("rollout", kind, rolloutKinds)
 	}
 	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
 	if interactiveRolloutActions[action] {
@@ -203,9 +215,9 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	return c.Kubectl.Run(args)
 }
 
-var portForwardKinds = map[kinds.Kind]bool{
-	kinds.Pod: true, kinds.Deployment: true, kinds.ReplicaSet: true,
-	kinds.StatefulSet: true, kinds.DaemonSet: true, kinds.Service: true,
+var portForwardKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
 }
 
 // PortForwardCommand forwards a local port to an indexed resource.
@@ -219,8 +231,8 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 	if err != nil {
 		return err
 	}
-	if !portForwardKinds[kind] {
-		return fmt.Errorf("port-forward is not supported for '%s'.", kind)
+	if !portForwardKinds.Has(kind) {
+		return unsupportedKindError("port-forward", kind, portForwardKinds)
 	}
 	args := append([]string{
 		"port-forward", string(kind) + "/" + name, port, "-n", namespace,
@@ -297,17 +309,22 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 		return "", nil, err
 	}
 	if kind != kinds.Pod {
-		return "", nil, fmt.Errorf("cp is only supported for pods.")
+		return "", nil, unsupportedKindError("cp", kind, kinds.Set{kinds.Pod})
 	}
 	return namespace + "/" + name + ":" + path, &resolvedPod{Name: name, Namespace: namespace}, nil
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read
 // from a single pod.
-var aggregateLogKinds = map[kinds.Kind]bool{
-	kinds.Deployment: true, kinds.StatefulSet: true,
-	kinds.DaemonSet: true, kinds.Service: true,
+var aggregateLogKinds = kinds.Set{
+	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
 }
+
+// logKinds is every kind kx logs accepts: a Pod read directly, plus the
+// workloads whose pods are aggregated. Derived from aggregateLogKinds rather
+// than written out again, so the error cannot name a kind the switch below
+// rejects.
+var logKinds = append(kinds.Set{kinds.Pod}, aggregateLogKinds...)
 
 // LogsCommand streams logs for an indexed resource.
 type LogsCommand struct {
@@ -334,7 +351,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		}
 		return nil
 
-	case aggregateLogKinds[kind]:
+	case aggregateLogKinds.Has(kind):
 		selector, err := c.selector(name, namespace, kind)
 		if err != nil {
 			return err
@@ -354,7 +371,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("logs are not supported for '%s'.", kind)
+		return unsupportedKindError("logs", kind, logKinds)
 	}
 }
 
@@ -410,17 +427,40 @@ type ExecCommand struct {
 	Shells []string
 }
 
+// execKinds are the kinds kubectl exec accepts. Deliberately not Service:
+// kubectl resolves a Service to an endpoint for port-forward but has no
+// equivalent for exec, so kx refuses it here rather than letting kubectl
+// produce a worse message.
+var execKinds = kinds.Set{
+	kinds.Pod, kinds.Deployment, kinds.ReplicaSet,
+	kinds.StatefulSet, kinds.DaemonSet,
+}
+
+// execTarget is how an indexed resource is named to kubectl exec.
+//
+// A Pod is addressed bare, which is what every other pod-only command already
+// sends and what kubectl has always taken. A workload is addressed TYPE/NAME,
+// and kubectl picks one of its pods — the same delegation PortForwardCommand
+// already relies on rather than resolving pods itself.
+func execTarget(kind kinds.Kind, name string) string {
+	if kind == kinds.Pod {
+		return name
+	}
+	return string(kind) + "/" + name
+}
+
 func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return err
 	}
-	if kind != kinds.Pod {
-		return fmt.Errorf("exec is only supported for pods.")
+	if !execKinds.Has(kind) {
+		return unsupportedKindError("exec", kind, execKinds)
 	}
+	target := execTarget(kind, name)
 
 	if len(command) > 0 {
-		args := append([]string{"exec", "-it", name, "-n", namespace}, extraArgs...)
+		args := append([]string{"exec", "-it", target, "-n", namespace}, extraArgs...)
 		args = append(args, "--")
 		args = append(args, command...)
 		// kubectl's own stderr is suppressed: a failing command inside the
@@ -431,7 +471,7 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
+			if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed
@@ -446,18 +486,18 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 	}
 
 	for _, shell := range c.Shells {
-		probe := append([]string{"exec", name, "-n", namespace}, extraArgs...)
+		probe := append([]string{"exec", target, "-n", namespace}, extraArgs...)
 		probe = append(probe, "--", shell, "-c", "exit 0")
 		if c.Kubectl.Probe(probe) != 0 {
 			continue
 		}
-		args := append([]string{"exec", "-it", name, "-n", namespace}, extraArgs...)
+		args := append([]string{"exec", "-it", target, "-n", namespace}, extraArgs...)
 		args = append(args, "--", shell)
 		_, err := c.Kubectl.RunInteractive(args, false)
 		return err
 	}
 
-	if err := ensureExists(c.Kubectl, kinds.Pod, name, namespace); err != nil {
+	if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
 		return err
 	}
 	return fmt.Errorf(
@@ -490,11 +530,20 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 	if err != nil {
 		return err
 	}
-	if kind != kinds.Pod {
-		return fmt.Errorf("debug is only supported for pods.")
+	if kind != kinds.Pod && kind != kinds.Node {
+		return unsupportedKindError("debug", kind, kinds.Set{kinds.Pod, kinds.Node})
 	}
 
-	args := []string{"debug", "-it", name, "-n", namespace}
+	args := []string{"debug", "-it"}
+	if kind == kinds.Node {
+		// node/NAME, and no -n. A Node is cluster-scoped, so state records no
+		// namespace for one; kubectl puts the debug pod in the context's
+		// current namespace, which is a better answer than a namespace kx
+		// would have to invent.
+		args = append(args, "node/"+name)
+	} else {
+		args = append(args, name, "-n", namespace)
+	}
 	// An explicit --image is the user overriding their own default for one
 	// run; passing the configured one as well would hand kubectl two.
 	//
@@ -510,12 +559,29 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 	if image == "" {
 		args = append(args, "--image="+c.Image)
 	}
-	target, err := c.target(name, namespace, extraArgs)
-	if err != nil {
-		return err
-	}
-	if target != "" {
-		args = append(args, "--target="+target)
+	// --target names a container to share a process namespace with. Debugging
+	// a node creates a pod of its own rather than joining one, so there is no
+	// container for it to name — refused rather than forwarded, since kubectl
+	// would reject it with a message about a flag combination kx chose.
+	if kind == kinds.Node {
+		explicit, _, err := extractString(extraArgs, "--target", "")
+		if err != nil {
+			return err
+		}
+		if explicit != "" {
+			return errors.New(
+				"'--target' cannot be combined with a Node — it names a container " +
+					"to share a process namespace with, and debugging a node " +
+					"creates a pod of its own rather than joining one.")
+		}
+	} else {
+		target, err := c.target(name, namespace, extraArgs)
+		if err != nil {
+			return err
+		}
+		if target != "" {
+			args = append(args, "--target="+target)
+		}
 	}
 	args = append(args, extraArgs...)
 	if len(command) > 0 {
@@ -531,7 +597,7 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way — the same shape describe and exec use.
-		return forwardExit(c.Kubectl, kinds.Pod, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code)
 	}
 	return nil
 }

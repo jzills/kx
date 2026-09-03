@@ -1,16 +1,12 @@
 {{- /*
-  The theme picker, rendered from data/kx_themes.json — which
-  tools/gen-site-theme writes from internal/theme, so this list is the same
-  one `kx theme` prints in the terminal and cannot drift from it.
+  The theme picker on the landing page, rendered from data/kx_themes.json —
+  which tools/gen-site-theme writes from internal/theme, so this list is the
+  same one `kx theme` prints in the terminal and cannot drift from it.
 
-  Each swatch sets two things on <html>: data-kx-theme, which our own CSS
-  ([data-kx-theme="name"] in kx-themes.css) reads for every --kx-* property
-  the page uses, and a "dark"/"light" class, which is a separate mechanism
-  Hextra's own chrome — the navbar, mainly — is styled against. Without the
-  second one, picking a light palette left the navbar dark: nothing was
-  driving the class Hextra's own dark: utilities key off. head-end.html
-  applies the same pairing before first paint, from the same generated data,
-  so there is no flash between the two.
+  Applying a palette is window.kxTheme's job (assets/js/kx-theme.js, inlined
+  by custom/head-end.html): what a click means to <html>, to the tab icon and
+  to localStorage is the same wherever it comes from, and the navbar's palette
+  menu is the other caller. This file is the swatch row and nothing else.
 */ -}}
 <div class="kx-themes" role="group" aria-label="Color theme">
   {{- range hugo.Data.kx_themes }}
@@ -18,7 +14,6 @@
     type="button"
     class="kx-themes__swatch"
     data-kx-theme-choice="{{ .name }}"
-    data-kx-mode="{{ .mode }}"
     aria-pressed="false"
   >
     <span
@@ -33,72 +28,28 @@
 
 <script>
   (function () {
-    var STORAGE_KEY = "kx-theme";
-    // Matches the default in head-end.html and defaultDark in
-    // tools/gen-site-theme. Clicking the active swatch returns here rather
-    // than clearing the attribute, so the page always has an explicit,
-    // known palette instead of falling through to CSS that was never meant
-    // to be the steady state.
-    var DEFAULT_THEME = "github-dark";
-    var root = document.documentElement;
     var buttons = document.querySelectorAll("[data-kx-theme-choice]");
-
-    function modeFor(name) {
-      var button = document.querySelector('[data-kx-theme-choice="' + name + '"]');
-      return (button && button.getAttribute("data-kx-mode")) || "dark";
-    }
-
-    function apply(name) {
-      var chosen = name || DEFAULT_THEME;
-      root.setAttribute("data-kx-theme", chosen);
-      // Hextra's own chrome reads this class, not data-kx-theme, and
-      // colorScheme keeps native form controls and scrollbars in step too —
-      // the same pairing Hextra's own toggle would have set.
-      var mode = modeFor(chosen);
-      root.classList.remove("light", "dark");
-      root.classList.add(mode);
-      root.style.colorScheme = mode;
-      // The tab icon is part of the palette too. head-end.html owns the
-      // name → accent table and the painting; this only says when.
-      window.kxPaintFavicon(chosen);
-      try {
-        // Hextra's own core/theme.js reapplies a class from this key on
-        // every load, unconditionally, falling back to the Hugo-configured
-        // default when it's unset — which is what kept resetting the class
-        // straight back after this script got it right. Keeping this key in
-        // step is what stops that.
-        localStorage.setItem("color-theme", mode);
-      } catch (e) {
-        /* Private browsing refuses storage; the choice still applies. */
-      }
-      buttons.forEach(function (button) {
-        button.setAttribute(
-          "aria-pressed",
-          button.getAttribute("data-kx-theme-choice") === chosen ? "true" : "false"
-        );
-      });
-    }
 
     buttons.forEach(function (button) {
       button.addEventListener("click", function () {
         var name = button.getAttribute("data-kx-theme-choice");
-        // Clicking the active palette resets to the default.
-        var next = root.getAttribute("data-kx-theme") === name ? DEFAULT_THEME : name;
-        try {
-          localStorage.setItem(STORAGE_KEY, next);
-        } catch (e) {
-          /* Private browsing refuses storage; the choice still applies. */
-        }
-        apply(next);
+        // Clicking the active palette resets to the default, rather than
+        // clearing the attribute: the page always has an explicit, known
+        // palette instead of falling through to CSS that was never meant to
+        // be the steady state.
+        window.kxTheme.choose(
+          window.kxTheme.current() === name ? window.kxTheme.fallback : name
+        );
       });
     });
 
-    var stored = null;
-    try {
-      stored = localStorage.getItem(STORAGE_KEY);
-    } catch (e) {
-      /* No stored choice is readable, so the default stands. */
-    }
-    apply(stored);
+    window.kxTheme.subscribe(function (active) {
+      buttons.forEach(function (button) {
+        button.setAttribute(
+          "aria-pressed",
+          button.getAttribute("data-kx-theme-choice") === active ? "true" : "false"
+        );
+      });
+    });
   })();
 </script>

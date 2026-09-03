@@ -197,6 +197,96 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 	}
 }
 
+// requiredArgsError is generated from a command's own Use string, so its
+// wording is exercised here directly rather than through a full command tree
+// — only the required prefix is named, an optional trailing argument (exec's
+// command, get's index) is left out because it isn't what's missing.
+func TestRequiredArgsErrorNamesOnlyTheRequiredPrefix(t *testing.T) {
+	cases := []struct {
+		use  string
+		want string
+	}{
+		{"describe <index>... [kubectl flags]", "kx describe requires <index>... — see 'kx describe --help' for usage."},
+		{"get <resource> [index]... [kubectl flags]", "kx get requires <resource> — see 'kx get --help' for usage."},
+		{"scale <index> <replicas>", "kx scale requires <index> <replicas> — see 'kx scale --help' for usage."},
+		{"rollout <action> <index>", "kx rollout requires <action> <index> — see 'kx rollout --help' for usage."},
+		{"exec <index> [kubectl flags] [-- command...]", "kx exec requires <index> — see 'kx exec --help' for usage."},
+		{"label <index> [key=value...]", "kx label requires <index> — see 'kx label --help' for usage."},
+	}
+	for _, tc := range cases {
+		// CommandPath climbs the parent chain, so a bare command reports just
+		// its own name ("describe") rather than "kx describe" — give it the
+		// same root every registered command actually has.
+		root := &cobra.Command{Use: "kx"}
+		cmd := &cobra.Command{Use: tc.use}
+		root.AddCommand(cmd)
+
+		got := requiredArgsError(cmd).Error()
+		if got != tc.want {
+			t.Errorf("requiredArgsError(%q) = %q, want %q", tc.use, got, tc.want)
+		}
+	}
+}
+
+// minArgs and exactArgs must actually gate RunE, not just build a nicer
+// message nobody sees: a satisfied count returns nil, an unsatisfied one
+// returns the generated error.
+func TestMinArgsAndExactArgsGateOnCount(t *testing.T) {
+	cmd := &cobra.Command{Use: "describe <index>..."}
+	validate := minArgs(1)
+	if err := validate(cmd, []string{"1"}); err != nil {
+		t.Errorf("minArgs(1) with one arg: %v, want nil", err)
+	}
+	if err := validate(cmd, nil); err == nil {
+		t.Error("minArgs(1) with zero args returned nil, want an error")
+	}
+
+	scale := &cobra.Command{Use: "scale <index> <replicas>"}
+	exact := exactArgs(2)
+	if err := exact(scale, []string{"1", "3"}); err != nil {
+		t.Errorf("exactArgs(2) with two args: %v, want nil", err)
+	}
+	for _, args := range [][]string{nil, {"1"}, {"1", "3", "extra"}} {
+		if err := exact(scale, args); err == nil {
+			t.Errorf("exactArgs(2) with %v returned nil, want an error", args)
+		}
+	}
+}
+
+// Every command that requires a fixed or minimum number of arguments must
+// answer a shortfall in kx's own voice, generated from its own Use string —
+// not cobra's "requires at least N arg(s), only received M". Explicit rather
+// than discovered from the tree, so a command quietly reverting to
+// cobra.MinimumNArgs/ExactArgs directly is a failing assertion here instead
+// of a silent regression back to cobra's wording.
+func TestMissingRequiredArgsSpeakInKxsVoiceNotCobras(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	for _, name := range []string{
+		"describe", "logs", "edit", "exec", "debug", "delete", "scale",
+		"rollout", "yaml", "labels", "annotations", "label", "annotate",
+		"events", "cordon", "uncordon", "get",
+	} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%q): %v", name, err)
+		}
+		if cmd.Args == nil {
+			t.Fatalf("%q has no Args validator", name)
+		}
+		got := cmd.Args(cmd, nil)
+		if got == nil {
+			t.Fatalf("kx %s accepted zero arguments", name)
+		}
+		want := "kx " + name + " requires "
+		if !strings.HasPrefix(got.Error(), want) {
+			t.Errorf("kx %s error = %q, want it to start with %q", name, got.Error(), want)
+		}
+		if strings.Contains(got.Error(), "arg(s)") {
+			t.Errorf("kx %s error = %q, still speaks in cobra's voice", name, got.Error())
+		}
+	}
+}
+
 // The README's command table marks repeatable arguments, and the ellipsis sits
 // either inside the brackets or after them depending on the spelling — both
 // mean the same thing, and missing either understates the command.
@@ -314,6 +404,39 @@ func TestListingCommandsDocumentWatch(t *testing.T) {
 	}
 }
 
+// The four --html commands must describe --port and --no-open identically —
+// kx top's own wording ("Port to serve --html on (random free port by
+// default)", "Don't open a browser automatically with --html") used to
+// differ from diag/scan/tree's, despite all four sharing one htmlOptions
+// type and one behavior.
+func TestHTMLFlagsAreDescribedTheSameWayEverywhere(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	descriptions := map[string]map[string]string{"--port": {}, "--no-open": {}}
+	for _, name := range []string{"diagnostic", "scan", "tree", "top"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", name, err)
+		}
+		for _, option := range commandHelp(cmd).Options {
+			flag, _, _ := strings.Cut(option.Name, " ")
+			if _, tracked := descriptions[flag]; tracked {
+				descriptions[flag][name] = option.Doc
+			}
+		}
+	}
+	for flag, byCommand := range descriptions {
+		var want string
+		for name, doc := range byCommand {
+			if want == "" {
+				want = doc
+			}
+			if doc != want {
+				t.Errorf("%s %s = %q, want %q (matching the other commands)", name, flag, doc, want)
+			}
+		}
+	}
+}
+
 func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	listed := map[string]bool{}
 	for _, section := range helpSections {
@@ -358,6 +481,25 @@ func TestCompletionAppearsOnTheRootScreen(t *testing.T) {
 		}
 	}
 	t.Error("completion is registered but absent from every root help section")
+}
+
+// kx completion used to keep cobra's own Long text — "Generate the
+// autocompletion script..." — the one screen in cobra's voice rather than
+// kx's, and it called the thing a "autocompletion script" where the root
+// screen calls it a "completion script".
+func TestCompletionHelpUsesKxsOwnVoice(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"completion"})
+	if err != nil {
+		t.Fatalf("root.Find(completion): %v", err)
+	}
+	doc := commandHelp(cmd).Doc
+	if strings.Contains(doc, "autocompletion") {
+		t.Errorf("completion --help = %q, still says \"autocompletion\" rather than kx's own \"completion script\"", doc)
+	}
+	if strings.Contains(doc, "sub-command") {
+		t.Errorf("completion --help = %q, still says \"sub-command\" (cobra's spelling) rather than \"subcommand\"", doc)
+	}
 }
 
 // The front page teaches the index workflow by example, so a renamed or
@@ -506,6 +648,64 @@ func TestRootHelpFooterCarriesNoURL(t *testing.T) {
 // which the Usage line above it already showed. Every argument any command
 // declares must now say what it is — a new command with a new argument name
 // fails here until argDocs describes it.
+// A command with no Long falls back to its Short in the description slot —
+// the same imperative one-liner used in the root listing, reading as
+// unfinished next to a sibling's full paragraph. help/completion/root are
+// cobra's own screens rather than kx commands and are exempt; every command
+// kx defines itself must have its own indicative-voice description.
+func TestEveryCommandHasItsOwnLongDescription(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if cmd != root && cmd.Name() != "help" && strings.TrimSpace(cmd.Long) == "" {
+			t.Errorf("%s has no Long description — it falls back to its Short, "+
+				"the imperative one-liner the root listing already shows", cmd.CommandPath())
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// A flag that changes what kx emits — a different format, or a different exit
+// code — is one a reader has to discover before they can use it, and seeing
+// the name in the Options block doesn't teach the spelling in context.
+//
+// The Options block is generated from the registered flags and so cannot
+// drift. Example strings are hand-written literals and did: --json, --html,
+// --out and --fail-on all shipped (#307-#309, #316) without reaching the
+// Examples of any of the four commands that take them, while the README gave
+// them a whole "Use kx in CI" section. #217 fixed the same class of drift
+// once already.
+//
+// Keyed by flag rather than by command on purpose: registering one of these on
+// a new command demands an example there too, rather than this list needing to
+// be told the command exists.
+var exampleWorthyFlags = []string{"json", "html", "out", "fail-on"}
+
+func TestOutputShapingFlagsAppearInExamples(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, name := range exampleWorthyFlags {
+			if cmd.Flags().Lookup(name) == nil {
+				continue
+			}
+			if !strings.Contains(cmd.Example, "--"+name) {
+				t.Errorf("%s takes --%s, but no Example shows it:\n%s",
+					cmd.CommandPath(), name, cmd.Example)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
 func TestEveryArgumentIsDocumented(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 

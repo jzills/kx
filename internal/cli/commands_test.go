@@ -272,8 +272,8 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 		"yaml":        newYamlCommand(services),
 		"describe":    newDescribeCommand(services),
 		"events":      newEventsCommand(services),
-		"labels":      newMetadataReadCommand(services, "labels", "", "labels", "LABEL", true),
-		"annotations": newMetadataReadCommand(services, "annotations", "", "annotations", "ANNOTATION", false),
+		"labels":      newMetadataReadCommand(services, "labels", "", "", "labels", "LABEL", true),
+		"annotations": newMetadataReadCommand(services, "annotations", "", "", "annotations", "ANNOTATION", false),
 		"logs":        newLogsCommand(services),
 	}
 	for name, cmd := range commands {
@@ -802,5 +802,64 @@ func TestDebugWithoutAnIndexSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "requires an index") {
 		t.Errorf("err = %q, want it to name the missing index", err)
+	}
+}
+
+// `kx ns` is a switch screen, and its caption answers "where am I now" —
+// the only place on that screen the answer appears. #271 made Namespace
+// cluster-scoped, which is right for `kx get namespaces` and silently emptied
+// this caption on the way past: `Namespaces · prod · 2 items` became
+// `Namespaces · 2 items`.
+//
+// Read live, per #240: a slot freezes when the listing is taken, and this has
+// to be right after a switch, not after the last `kx ns`.
+func TestNamespaceListingCaptionsTheCurrentNamespace(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable, namespace: "prod"}
+	services := switchServices(t, kube)
+	// After switchServices, which calls render.Configure and would discard it.
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+	// The caption line only — "prod" is also a row in the table below it.
+	caption := strings.SplitN(out.String(), "\n", 2)[0]
+	if !strings.Contains(caption, "prod") {
+		t.Errorf("caption = %q, want it to name the current namespace", caption)
+	}
+}
+
+// The error used to say only "'notanumber' is not a replica count" — no
+// remedy, no closing period, and a different vocabulary than every other bad
+// positional argument kx parses, which all say "Invalid value for 'name':
+// 'value' is not a valid int."
+func TestScaleRejectsANonNumericReplicaCount(t *testing.T) {
+	cmd := newScaleCommand(Services{})
+	err := cmd.RunE(cmd, []string{"1", "notanumber"})
+	if err == nil {
+		t.Fatal("kx scale 1 notanumber was accepted")
+	}
+	want := "Invalid value for 'replicas': 'notanumber' is not a valid int."
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// The caption tracks the kubeconfig rather than the listing, so switching and
+// listing again says where the caller is now.
+func TestNamespaceListingCaptionFollowsASwitch(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable, namespace: "staging"}
+	services := switchServices(t, kube)
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+	// staging is not one of the listed namespaces, so only the caption can
+	// be the source of it — the listing itself cannot satisfy this.
+	if !strings.Contains(out.String(), "staging") {
+		t.Errorf("output = %q, want the caption to name the namespace the caller moved to", out.String())
 	}
 }

@@ -254,7 +254,7 @@ func TestDecodeGuards(t *testing.T) {
 		{
 			name: "--decode on a non-Secret kind", kind: kinds.Pod, res: "pods",
 			indexes: []int{1}, options: decodeOptions(),
-			want: "--decode only applies to Secrets",
+			want: "'--decode' cannot be combined with Pods",
 		},
 		{
 			name: "--key with several indexes", kind: kinds.Secret, res: "secret",
@@ -307,7 +307,7 @@ func TestDecodeMissingKeyNamesTheKey(t *testing.T) {
 // a flat failure — the explicit type is what routes it into the refresh path.
 func TestDecodeNotFoundBecomesStale(t *testing.T) {
 	quietRender(t)
-	kube := &fakeKubectl{err: errors.New(`Error from server (NotFound): secrets "db-creds" not found`)}
+	kube := &fakeKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): secrets "db-creds" not found`}}
 	services := secretServices(t, kube, kinds.Secret)
 
 	err := decodeSecrets(services, "secret", []int{1}, nil, decodeOptions())

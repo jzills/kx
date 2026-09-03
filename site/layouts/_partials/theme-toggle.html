@@ -1,0 +1,174 @@
+{{- /*
+  Overrides Hextra's light/dark toggle with the kx palette menu.
+
+  Hextra's navbar has no extension point for a control of our own — it
+  switches on a fixed set of menu item types — but "theme-toggle" is one of
+  them, and the sidebar footer renders the same partial. Overriding the
+  partial therefore puts the palette menu in the navbar, in the sidebar and
+  in the mobile menu at once, without copying navbar.html and inheriting the
+  job of keeping that copy in step with upstream.
+
+  It replaces the toggle rather than sitting beside it because the two would
+  disagree: Hextra's knows light and dark, ours knows all ten palettes, two
+  of which are light. site.Params.theme.displayToggle now means "show the
+  palette menu".
+
+  Deliberately not reusing Hextra's .hextra-theme-toggle /
+  .hextra-theme-toggle-options class names. Its core/theme.js binds clicks on
+  ".hextra-theme-toggle-options button[role=menuitemradio]" and passes
+  dataset.item to a switchTheme() that coerces anything outside
+  ["light","dark"] to "system" — every kx palette name would land there. The
+  open/close behaviour those classes would buy is thirty lines; the coupling
+  is not worth it.
+
+  Applying a palette is window.kxTheme's job (assets/js/kx-theme.js, inlined
+  by custom/head-end.html), shared with the landing page's swatch row.
+*/ -}}
+{{- $params := . | default dict -}}
+{{- $hideLabel := $params.hideLabel -}}
+{{- $location := $params.location | default "bottom" -}}
+{{- $class := $params.class | default "hx:h-7 hx:px-2 hx:text-xs hx:font-medium hx:transition-colors" -}}
+{{- $label := (T "changeTheme") | default "Change theme" -}}
+
+<div class="kx-palette kx-palette--{{ $location }}">
+  <button
+    type="button"
+    class="kx-palette__button {{ $class }}"
+    title="{{ $label }}"
+    aria-label="{{ $label }}"
+    aria-expanded="false"
+    aria-haspopup="menu"
+  >
+    <span class="kx-palette__dot" aria-hidden="true"></span>
+    {{- if not $hideLabel }}<span class="kx-palette__name"></span>{{ end -}}
+    <svg class="kx-palette__chevron" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" width="12" height="12">
+      <path d="M5.5 7.5 10 12l4.5-4.5z" />
+    </svg>
+  </button>
+
+  <ul class="kx-palette__menu" role="menu" aria-label="{{ $label }}" hidden>
+    {{- range hugo.Data.kx_themes }}
+    <li role="none">
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked="false"
+        tabindex="-1"
+        class="kx-palette__option"
+        data-kx-palette="{{ .name }}"
+      >
+        <span
+          class="kx-palette__dot"
+          style="background: {{ .background }}; border-color: {{ .accent }};"
+          aria-hidden="true"
+        ></span>
+        <span class="kx-palette__label">{{ .name }}</span>
+        {{- /* A tick as well as the accent colour: mono draws its accent in
+               the body colour, so colour alone marks nothing there. */ -}}
+        <svg class="kx-palette__check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" width="13" height="13">
+          <path d="m4 10.5 4 4 8-9" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </li>
+    {{- end }}
+  </ul>
+</div>
+
+<script>
+  (function () {
+    // Every copy of the partial wires itself up. The navbar, the sidebar
+    // footer and the mobile menu can all be on the page at once, and they
+    // stay in step through kxTheme.subscribe rather than through each other.
+    document.querySelectorAll(".kx-palette").forEach(function (widget) {
+      if (widget.dataset.kxWired === "true") {
+        return;
+      }
+      widget.dataset.kxWired = "true";
+
+      var button = widget.querySelector(".kx-palette__button");
+      var menu = widget.querySelector(".kx-palette__menu");
+      var name = widget.querySelector(".kx-palette__name");
+      var dot = button.querySelector(".kx-palette__dot");
+      var options = Array.prototype.slice.call(
+        menu.querySelectorAll("[data-kx-palette]")
+      );
+
+      function setOpen(open) {
+        menu.hidden = !open;
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+
+      function close(refocus) {
+        setOpen(false);
+        if (refocus) {
+          button.focus();
+        }
+      }
+
+      button.addEventListener("click", function (event) {
+        event.preventDefault();
+        var opening = menu.hidden;
+        setOpen(opening);
+        if (opening) {
+          var checked = menu.querySelector('[aria-checked="true"]') || options[0];
+          if (checked) {
+            checked.focus();
+          }
+        }
+      });
+
+      options.forEach(function (option) {
+        option.addEventListener("click", function (event) {
+          event.preventDefault();
+          window.kxTheme.choose(option.getAttribute("data-kx-palette"));
+          close(true);
+        });
+      });
+
+      menu.addEventListener("keydown", function (event) {
+        var index = options.indexOf(document.activeElement);
+        switch (event.key) {
+          case "ArrowDown":
+            event.preventDefault();
+            options[(index + 1) % options.length].focus();
+            break;
+          case "ArrowUp":
+            event.preventDefault();
+            options[(index - 1 + options.length) % options.length].focus();
+            break;
+          case "Home":
+            event.preventDefault();
+            options[0].focus();
+            break;
+          case "End":
+            event.preventDefault();
+            options[options.length - 1].focus();
+            break;
+          case "Escape":
+            event.preventDefault();
+            close(true);
+            break;
+        }
+      });
+
+      document.addEventListener("click", function (event) {
+        if (!widget.contains(event.target)) {
+          close(false);
+        }
+      });
+
+      window.kxTheme.subscribe(function (active) {
+        if (name) {
+          name.textContent = active;
+        }
+        options.forEach(function (option) {
+          var chosen = option.getAttribute("data-kx-palette") === active;
+          option.setAttribute("aria-checked", chosen ? "true" : "false");
+          if (chosen) {
+            dot.setAttribute("style", option.querySelector(".kx-palette__dot").getAttribute("style"));
+          }
+        });
+      });
+    });
+  })();
+</script>

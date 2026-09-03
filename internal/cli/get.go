@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/jzills/kx/internal/index"
@@ -107,7 +108,18 @@ func (c GetCommand) Execute(
 	// An -A listing has no single namespace to record on the entry; each
 	// resource carries its own instead, read from the table's NAMESPACE column.
 	// The caller labels the scope.
-	if !allNamespaces(extraArgs) {
+	//
+	// A cluster-scoped kind has none to record either, for a different reason:
+	// there is no namespace to be in. Left to default, kx stamped whichever one
+	// the caller happened to be standing in onto every Node, PersistentVolume,
+	// StorageClass and CRD it listed, then printed it back as though it meant
+	// something — "Nodes · diagnostics · 1 item". Empty is what Caption already
+	// drops, so the scope segment disappears rather than lying.
+	//
+	// This is display and saved state only. kubectl ignores -n for a
+	// cluster-scoped resource, and accepts an empty one, so the commands that
+	// resolve these indexes need no change.
+	if !allNamespaces(extraArgs) && !clusterScoped(resource) {
 		namespace = extractNamespace(extraArgs)
 		if namespace == "" {
 			namespace = c.Kubectl.CurrentNamespace()
@@ -253,4 +265,88 @@ func resourcesFrom(entries []index.Entry, kind kinds.Kind) state.Resources {
 		})
 	}
 	return state.NewOrderedResources(resources)
+}
+
+// scopeFlagIn reports the namespace-scope flag present in argv, spelled the way
+// it was typed so a refusal quotes back what the user actually wrote, or "" when
+// there is none.
+//
+// -A's presence is read through extractBool rather than by scanning for the
+// token, so "--all-namespaces=false" — a request for the ordinary
+// single-namespace listing, not for a scope — is correctly absent.
+func scopeFlagIn(args []string) string {
+	if present, _ := extractBool(args, "--all-namespaces", "-A"); present {
+		return firstSpelling(args, "--all-namespaces", "-A")
+	}
+	if hasFlag(args, "--namespace", "-n") {
+		return firstSpelling(args, "--namespace", "-n")
+	}
+	return ""
+}
+
+// firstSpelling names which of several spellings of one flag appears first in
+// argv, without whatever value was attached to it. The attached-value form is
+// recognised for shorthands only ("-nprod"), matching hasFlag.
+func firstSpelling(args []string, names ...string) string {
+	for _, arg := range args {
+		for _, name := range names {
+			attachedShorthand := len(name) == 2 &&
+				len(arg) > len(name) && strings.HasPrefix(arg, name)
+			if arg == name || strings.HasPrefix(arg, name+"=") || attachedShorthand {
+				return name
+			}
+		}
+	}
+	return names[0]
+}
+
+// clusterScopedScopeError refuses a namespace flag on a kind that has no
+// namespace for it to name.
+//
+// Refused rather than forwarded, which is the same call kx already makes for a
+// scope flag beside an index: kubectl accepts both and answers about something
+// other than what was asked. Silently forwarding -A was worse here than
+// meaningless — kubectl returns a table with no NAMESPACE column, which is the
+// shape GetCommand.Execute treats as unplaceable, so the listing printed
+// unnumbered and saved nothing while the previous listing's indexes stayed
+// live underneath it.
+func clusterScopedScopeError(flag, resource string) error {
+	return fmt.Errorf(
+		"'%s' cannot be combined with %s — they live outside any namespace, so "+
+			"there is no scope to set. Drop the flag.",
+		flag, kinds.PluralDisplay(resource))
+}
+
+// unsupportedKindError refuses a command for the kind an index resolved to,
+// naming both what was selected and what the command does work on.
+//
+// Both halves matter, and the codebase had each of them without the other.
+// "scale is not supported for 'Pod'." said what you picked but not what to
+// pick instead; "cp is only supported for pods." said the opposite and left
+// you to work out what index 1 had been. An index is a number, so the kind it
+// resolved to is precisely the fact the user does not have in front of them —
+// and "then which kinds does this work on" is the question the first form
+// always provoked.
+// Phrased "kx X does not support" rather than "X is not supported for",
+// which is what most of these said, because one command is named for a plural:
+// "logs is not supported" is wrong and "logs are not supported" cannot be
+// generated from the same template as "scale is". Naming the command as kx
+// spells it takes the copula out of the sentence and reads correctly for all
+// twelve.
+func unsupportedKindError(command string, kind kinds.Kind, supported kinds.Set) error {
+	return fmt.Errorf("kx %s does not support '%s' — only %s.",
+		command, kind, supported.List())
+}
+
+// clusterScoped reports whether a resource spelling names a kind that lives
+// outside any namespace.
+//
+// A kind whose scope is unknown — a CRD on a machine with no discovery cache —
+// is treated as namespaced, which is what kx did for every kind before it
+// could tell. Guessing the other way would strip the namespace off a
+// namespaced CRD and leave every index resolving into the wrong place; being
+// wrong about a caption is the cheaper of the two failures.
+func clusterScoped(resource string) bool {
+	namespaced, known := kinds.Namespaced(kinds.Normalize(resource))
+	return known && !namespaced
 }

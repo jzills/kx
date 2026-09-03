@@ -193,8 +193,9 @@ func newDescribeCommand(services Services) *cobra.Command {
 		Use:                "describe <index>... [kubectl flags]",
 		SuggestFor:         []string{"detail", "details"},
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
+		Long:               "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
 		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
-		Args:               cobra.MinimumNArgs(1),
+		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -254,7 +255,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short:              "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long:               "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.",
 		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3\n  kx logs 3..",
-		Args:               cobra.MinimumNArgs(1),
+		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -322,8 +323,9 @@ func newEditCommand(services Services) *cobra.Command {
 	return &cobra.Command{
 		Use:                "edit <index> [kubectl flags]",
 		Short:              "Open an indexed resource in your editor via kubectl edit.",
+		Long:               "Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.",
 		Example:            "  kx edit 2",
-		Args:               cobra.MinimumNArgs(1),
+		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -347,12 +349,13 @@ func newEditCommand(services Services) *cobra.Command {
 
 func newExecCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:                "exec <index> [kubectl flags] [-- command...]",
-		SuggestFor:         []string{"sh", "shell", "bash", "ssh", "attach"},
-		Short:              "Open an interactive shell in an indexed pod (bash, falling back to sh).",
-		Long:               "Runs a command inside an indexed pod. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.",
+		Use:        "exec <index> [kubectl flags] [-- command...]",
+		SuggestFor: []string{"sh", "shell", "bash", "ssh", "attach"},
+		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
+		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
+			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
-		Args:               cobra.MinimumNArgs(1),
+		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -378,7 +381,7 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "debug <index> [kubectl flags] [-- command...]",
 		SuggestFor: []string{"ephemeral", "troubleshoot", "inspect"},
-		Short:      "Attach an ephemeral debug container to an indexed pod, for images with no shell.",
+		Short:      "Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host).",
 		Long: "Attaches a container carrying its own shell to a running pod, which is how " +
 			"to get inside an image that has none — distroless or scratch, where kx exec " +
 			"can only report that it found no shell. The pod is not restarted and what it " +
@@ -388,9 +391,17 @@ func newDebugCommand(services Services) *cobra.Command {
 			"pod's container when there is only one, so its filesystem is reachable at " +
 			"/proc/1/root; name one with --target when the pod has several.\n\n" +
 			"Kubernetes keeps an ephemeral container on the pod's spec for as long as the " +
-			"pod lives — there is no removing one, only replacing the pod.",
-		Example:            "  kx debug 1\n  kx debug 1 --image alpine\n  kx debug 1 -- ls /proc/1/root",
-		Args:               cobra.MinimumNArgs(1),
+			"pod lives — there is no removing one, only replacing the pod.\n\n" +
+			"A Node index — from kx get nodes or kx top nodes — debugs the node instead, " +
+			"which is a different operation wearing the same name: kubectl creates a new " +
+			"privileged pod on that node, in the current namespace, with the host's " +
+			"filesystem mounted at /host and the host namespaces joined. Use it to reach " +
+			"a kubelet, a container runtime, or the node's own logs. That pod outlives the " +
+			"shell — kubectl names it on exit, and it is yours to delete. --target does not " +
+			"apply, since there is no container to share a namespace with.",
+		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
+			"  kx debug 1 -- ls /proc/1/root\n  kx debug 1 -- ls /host/var/log",
+		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -423,7 +434,7 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd.Flags().String("image", "",
 		"Image for the debug container (default: the debug_image config key)")
 	cmd.Flags().String("target", "",
-		"Container to share a process namespace with, for a pod with several")
+		"Container to share a process namespace with, for a pod with several; not for nodes")
 	return cmd
 }
 
@@ -433,8 +444,10 @@ func newDeleteCommand(services Services) *cobra.Command {
 		Use:        "delete <index>...",
 		SuggestFor: []string{"rm", "remove", "destroy"},
 		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
-		Example:    "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
-		Args:       cobra.MinimumNArgs(1),
+		Long: "Deletes one or more indexed resources, confirming each one individually " +
+			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
+		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -467,10 +480,12 @@ func newDeleteCommand(services Services) *cobra.Command {
 
 func newScaleCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:     "scale <index> <replicas>",
-		Short:   "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
+		Use:   "scale <index> <replicas>",
+		Short: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
+		Long: "Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. " +
+			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.",
 		Example: "  kx scale 1 3",
-		Args:    cobra.ExactArgs(2),
+		Args:    exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			index, err := parseIndex("index", args[0])
 			if err != nil {
@@ -478,7 +493,8 @@ func newScaleCommand(services Services) *cobra.Command {
 			}
 			replicas, err := strconv.Atoi(args[1])
 			if err != nil {
-				return fmt.Errorf("'%s' is not a replica count", args[1])
+				return fmt.Errorf(
+					"Invalid value for 'replicas': '%s' is not a valid int.", args[1])
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(index, replicas)
@@ -496,11 +512,13 @@ func newRolloutCommand(services Services) *cobra.Command {
 		Use: "rollout <action> <index>",
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
+		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
+			"live and blocks until the rollout settles; the other actions run and return immediately.",
 		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
 		// left `kx rollout status <TAB>` offering filenames instead of the
 		// index it wants. installCompletions covers both positions.
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			index, err := parseIndex("index", args[1])
 			if err != nil {
@@ -526,7 +544,9 @@ func newPortForwardCommand(services Services) *cobra.Command {
 		Use:        "port-forward <index> <port> [kubectl flags]",
 		SuggestFor: []string{"pf", "portforward", "proxy"},
 		Short:      "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
-		Example:    "  kx port-forward 1 8080:80",
+		Long: "Forwards a local port to an indexed resource. Given a workload rather than a Pod, " +
+			"kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.",
+		Example: "  kx port-forward 1 8080:80",
 		// No Args validator: cobra's arity check runs against the
 		// unstripped argv, before passthrough can pull --help out of it —
 		// `kx port-forward --help` is a single argument, which used to fail
@@ -557,6 +577,8 @@ func newCopyCommand(services Services) *cobra.Command {
 		Use:        "cp <src> <dest> [kubectl flags]",
 		SuggestFor: []string{"copy"},
 		Short:      "Copy files to or from an indexed pod via kubectl cp.",
+		Long: "Copies files to or from an indexed pod via kubectl cp. Either side of the copy " +
+			"can name a path inside the pod as index:path.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
 			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
 		// No Args validator: cobra's arity check runs against the
@@ -593,8 +615,11 @@ func newYamlCommand(services Services) *cobra.Command {
 		Use:        "yaml <index>...",
 		SuggestFor: []string{"manifest", "spec"},
 		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Example:    "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
-		Args:       cobra.MinimumNArgs(1),
+		Long: "Prints the raw YAML manifest for one or more indexed resources. --show fetches the " +
+			"same full manifest and narrows it client-side to the named top-level fields, so it " +
+			"works with anything kubectl's own YAML output has.",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
+		Args:    minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
@@ -640,12 +665,13 @@ func newYamlCommand(services Services) *cobra.Command {
 	return cmd
 }
 
-func newMetadataReadCommand(services Services, use, short, field, header string, selector bool) *cobra.Command {
+func newMetadataReadCommand(services Services, use, short, long, field, header string, selector bool) *cobra.Command {
 	var asSelector bool
 	cmd := &cobra.Command{
 		Use:     use + " <index>...",
 		Short:   short,
-		Args:    cobra.MinimumNArgs(1),
+		Long:    long,
+		Args:    minArgs(1),
 		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
@@ -693,7 +719,7 @@ func newMetadataReadCommand(services Services, use, short, field, header string,
 	return cmd
 }
 
-func newMetadataWriteCommand(services Services, verb, field, short string) *cobra.Command {
+func newMetadataWriteCommand(services Services, verb, field, short, long string) *cobra.Command {
 	var (
 		removes   []string
 		overwrite bool
@@ -701,7 +727,8 @@ func newMetadataWriteCommand(services Services, verb, field, short string) *cobr
 	cmd := &cobra.Command{
 		Use:     verb + " <index> [key=value...]",
 		Short:   short,
-		Args:    cobra.MinimumNArgs(1),
+		Long:    long,
+		Args:    minArgs(1),
 		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			index, err := parseIndex("index", args[0])
@@ -805,7 +832,7 @@ func listSwitchTargets(services Services, isContext bool) error {
 	stop := render.Status("fetching namespaces")
 	// Slot only: `kx ns` is a switch listing, not work. `kx get ns` remains the
 	// way to put namespaces in history for `kx describe <n>` and friends.
-	output, namespace, err := GetCommand{
+	output, _, err := GetCommand{
 		Kubectl: services.Kubectl,
 		State:   slotOnly{writer: services.State},
 		Index:   services.Index,
@@ -814,7 +841,16 @@ func listSwitchTargets(services Services, isContext bool) error {
 	if err != nil {
 		return err
 	}
-	render.IndexedTable(output, "namespaces", namespace)
+	// Read live rather than taken from Execute, which returns the empty string
+	// a Namespace listing rightly records: a Namespace is cluster-scoped, and
+	// #271 stopped kx get namespaces claiming otherwise.
+	//
+	// The caption here was never describing the listed resources' scope though.
+	// On a switch screen it answers "where am I now", which is the whole point
+	// of the screen — and per #240 that answer lives in the kubeconfig, not in
+	// a slot that froze whenever the listing was taken. The contexts branch
+	// above takes its own caption the same way, and for the same reason.
+	render.IndexedTable(output, "namespaces", services.Kubectl.CurrentNamespace())
 	return nil
 }
 
@@ -898,10 +934,11 @@ func newStateCommand(services Services) *cobra.Command {
 	return cmd
 }
 
-func newNavigateCommand(services Services, use, short string, delta int) *cobra.Command {
+func newNavigateCommand(services Services, use, short, long string, delta int) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
 		Short: short,
+		Long:  long,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entry, err := services.State.Navigate(delta)
@@ -922,8 +959,10 @@ func newNavigateCommand(services Services, use, short string, delta int) *cobra.
 func newDropCommand(services Services, prefix string) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:     "drop <position>",
-		Short:   "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Use:   "drop <position>",
+		Short: "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
+		Long: "Removes a history entry by position, or clears the whole stack — including the " +
+			"namespace and context slots — with --all.",
 		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

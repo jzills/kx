@@ -80,6 +80,15 @@ func runGet(services Services, resource string, args []string, options getOption
 		return switchTo(services, "context", indexes[0], true)
 	}
 
+	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
+	// same call kx already makes for a scope flag beside an index. Checked
+	// after the contexts branch, which is not a Kubernetes kind and never
+	// reaches a namespace question, and before anything runs: the point of
+	// refusing is that nothing about the cluster is read on a contradiction.
+	if flag := scopeFlagIn(extra); flag != "" && clusterScoped(resource) {
+		return clusterScopedScopeError(flag, resource)
+	}
+
 	if options.Decode || options.HasKey {
 		return decodeSecrets(services, resource, indexes, extra, options)
 	}

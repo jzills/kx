@@ -171,7 +171,9 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 	}
 	expected := kinds.Normalize(resource)
 	if expected != kinds.Secret {
-		return fmt.Errorf("--decode only applies to Secrets, not %s", expected)
+		return fmt.Errorf(
+			"'--decode' cannot be combined with %s — only Secrets carry data to decode.",
+			kinds.PluralDisplay(string(expected)))
 	}
 	if options.HasKey && len(indexes) != 1 {
 		return fmt.Errorf("--key takes a single index")
@@ -203,7 +205,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 		if options.HasKey {
 			value, ok := secret.Values[options.Key]
 			if !ok {
-				return fmt.Errorf("No key '%s' in %s/%s", options.Key, expected, name)
+				return fmt.Errorf("No key '%s' in %s/%s.", options.Key, expected, name)
 			}
 			// Raw and unwrapped so the value stays substitutable in shell.
 			return writeValue(value)

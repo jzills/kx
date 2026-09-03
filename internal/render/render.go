@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jzills/kx/internal/index"
@@ -121,7 +122,7 @@ func (r *Renderer) Error(msg string) {
 // emphasizeQuoted accents 'single-quoted' fragments within an otherwise
 // uniformly styled message.
 func (r *Renderer) emphasizeQuoted(msg, base string) string {
-	parts := strings.Split(msg, "'")
+	parts := splitOnQuoteMarks(msg)
 	if len(parts) < 3 {
 		return r.style(base, msg)
 	}
@@ -135,6 +136,42 @@ func (r *Renderer) emphasizeQuoted(msg, base string) string {
 		out.WriteString(r.style(base, part))
 	}
 	return out.String()
+}
+
+// splitOnQuoteMarks splits a message on the apostrophes that open or close a
+// quoted fragment, leaving the ones inside a word where they are.
+//
+// An apostrophe between two letters is prose — "the scanner's own report",
+// "kubectl's output" — and splitting on it counted a quote mark that was never
+// written. That shifted the pairing for everything after it: the tail of the
+// message was accented as though quoted, and a closing ' the message does not
+// contain was printed at the end of it:
+//
+//	'--full' cannot be combined with '--fail-on' — … nothing to read.'
+//
+// The delimiters cannot be told apart by what they enclose, since a genuine
+// fragment can hold spaces ('kx get pods'); it is what surrounds them that
+// says which is which.
+func splitOnQuoteMarks(msg string) []string {
+	runes := []rune(msg)
+	var parts []string
+	var current strings.Builder
+	for i, r := range runes {
+		if r == '\'' && !withinWord(runes, i) {
+			parts = append(parts, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	return append(parts, current.String())
+}
+
+// withinWord reports whether the rune at i has a letter on both sides, which
+// is what makes an apostrophe part of a word rather than a quote mark.
+func withinWord(runes []rune, i int) bool {
+	return i > 0 && i+1 < len(runes) &&
+		unicode.IsLetter(runes[i-1]) && unicode.IsLetter(runes[i+1])
 }
 
 // Caption prints the muted "·"-joined context line above a listing, skipping

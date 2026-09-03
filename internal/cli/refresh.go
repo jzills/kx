@@ -33,14 +33,24 @@ func (e StaleResourceError) Error() string {
 // that distinguishes it, so the message is all there is to go on.
 var notFoundMarkers = []string{"(NotFound)", "not found"}
 
-// IsNotFound reports whether an error looks like a missing resource.
+// IsNotFound reports whether kubectl said a resource is missing.
+//
+// The message is matched only after the error is known to be kubectl's. That
+// order is the whole point: "not found" is not a rare phrase, and the marker
+// list cannot be made specific enough to be safe on an arbitrary error —
+// scanner.NotFoundError reads "grype not found on PATH", which is the same
+// words about something that was never a resource. Two releases patched that
+// collision by excluding a type at the call sites it reached; the collision was
+// never in kubectl's wording, but in the pattern being applied to errors
+// kubectl never produced, and requiring the type here ends it everywhere at
+// once rather than one call site at a time.
 func IsNotFound(err error) bool {
-	if err == nil {
+	var reported kubectl.Error
+	if !errors.As(err, &reported) {
 		return false
 	}
-	message := err.Error()
 	for _, marker := range notFoundMarkers {
-		if strings.Contains(message, marker) {
+		if strings.Contains(reported.Stderr, marker) {
 			return true
 		}
 	}
@@ -97,6 +107,17 @@ func isStale(err error) bool {
 		// carry their own relist hint and are reported as they are.
 		return mismatch.Relist == ""
 	}
+	// A missing scanner used to need excluding here by type: IsNotFound read
+	// the bare substring "not found" off any error, and scanner.NotFoundError
+	// reads "grype not found on PATH — install it to run this scan.", so a
+	// scanner that vanished between kx scan's preflight and the scan printed
+	// its install message and then "Run 'kx get <resource>' to refresh the
+	// list." — relisting a listing that was never the problem.
+	//
+	// The exclusion is gone because it has nothing left to do: IsNotFound now
+	// requires a kubectl.Error, and a scanner's error is not one. Every other
+	// error kx constructs is covered by the same change, rather than each
+	// being discovered and excluded in turn.
 	return IsNotFound(err)
 }
 
