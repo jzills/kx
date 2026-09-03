@@ -109,3 +109,17 @@ migration code for a cache.
 `KX_STATE` points at a different file, for a terminal or CI job that wants its
 own history instead of sharing the one in `~/.kx`. `kx --version` prints the
 path actually in use, in case yours is somewhere else.
+
+```bash
+# terminal A
+export KX_STATE=~/.kx/state-a.json
+kx get pods
+
+# terminal B
+export KX_STATE=~/.kx/state-b.json
+kx get deploy
+```
+
+Each terminal now resolves indexes against its own listing — `kx delete 1` in
+B never touches what A listed. [`KX_CONFIG`](../configuration/) does the same
+for `~/.kx/config.toml`.
