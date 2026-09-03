@@ -24,6 +24,12 @@
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
 </div>
 
+<div align="center">
+
+**[Full documentation →](https://jzills.github.io/kx/)**
+
+</div>
+
 ## Contents
 
 - [Install](#install)
