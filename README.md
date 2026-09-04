@@ -93,10 +93,11 @@ sharing a name keep separate numbers.
 
 Known kinds can drop the `get` — `kx pods`, `kx deploy -n kube-system`,
 `kx svc -m api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) and
-CRDs (short name, kind, or plural) included; CRDs resolve from kubectl's
-on-disk discovery cache, with no API call. An integer after a kind relists just
-that index (`kx po 3`), and anything unrecognized falls back to
-`kx get <resource>`.
+CRDs (short name, kind, or plural) included. A CRD resolves from kubectl's
+on-disk discovery cache, with no API call.
+
+An integer after a kind relists just that index (`kx po 3`). Anything
+unrecognized falls back to `kx get <resource>`.
 
 `--watch`/`-w` redraws the table live instead of printing one that never
 finishes. It's display-only — a watch never completes, so there's nothing to
@@ -124,11 +125,12 @@ it dies. Rows are indexed, so `kx diag 1` or `kx logs 2` drill straight in;
 </div>
 
 `kx diag <index>` diagnoses one resource: a verdict banner, a `SUMMARY` of
-findings (CrashLoopBackOff, image pull failures, OOMKills, unschedulable pods,
-stalled rollouts, missing Service endpoints, Pending PVCs, failed CronJob runs,
-Ingresses pointing at missing Services, usage near limits), a per-pod status
-table, log tails from broken containers, and warning events — one screen
-instead of four kubectl commands.
+findings, a per-pod status table, log tails from broken containers, and warning
+events — one screen instead of four kubectl commands.
+
+Findings cover CrashLoopBackOff, image pull failures, OOMKills, unschedulable
+pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed CronJob
+runs, Ingresses pointing at missing Services, and usage near limits.
 
 Nodes work the same way, indexed from `kx get nodes` or `kx top nodes`:
 conditions (not ready, memory/disk/PID pressure, network unavailable), whether
@@ -139,12 +141,14 @@ sick. Nodes are cluster-scoped, so they never appear in a namespace sweep or
 
 ### Take a node out of service
 
-`kx cordon <index>` marks an indexed node unschedulable so nothing new lands on
-it; `kx drain <index>` also evicts what's already there, streaming kubectl's
-progress and prompting first unless you pass `--yes`; `kx uncordon <index>`
-puts it back. Cordon and uncordon take several indexes and ranges like
-`kx delete`; drain takes one, deliberately — a range is a way to take a cluster
-down by typo. kubectl's own drain flags pass through (`--ignore-daemonsets`,
+- `kx cordon <index>` marks a node unschedulable, so nothing new lands on it.
+- `kx drain <index>` also evicts what's already there, streaming kubectl's
+  progress and prompting first unless you pass `--yes`.
+- `kx uncordon <index>` puts it back.
+
+Cordon and uncordon take several indexes and ranges like `kx delete`. Drain
+takes one, deliberately — a range is a way to take a cluster down by typo.
+kubectl's own drain flags pass through (`--ignore-daemonsets`,
 `--delete-emptydir-data`, ...).
 
 ### Read a Secret in plaintext
@@ -169,11 +173,12 @@ prints every credential in the namespace.
 
 ### Scan images for vulnerabilities
 
-`kx scan <index>` scans the unique container images of an indexed workload
-(init containers and CronJob job templates included); bare `kx scan` sweeps
-every workload in the namespace. Results come back as a severity summary, or
-the full per-image CVE report with `--full`. Requires the CLI for the selected
-engine — [Docker Scout](https://docs.docker.com/scout/) by default, or
+`kx scan <index>` scans the unique container images of an indexed workload,
+init containers and CronJob job templates included. Bare `kx scan` sweeps every
+workload in the namespace. Results come back as a severity summary, or the full
+per-image CVE report with `--full`.
+
+Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/) by default, or
 [Trivy](https://trivy.dev/) and [Grype](https://github.com/anchore/grype) via
 `kx engine trivy` / `kx engine grype`.
 
@@ -184,18 +189,22 @@ engine — [Docker Scout](https://docs.docker.com/scout/) by default, or
 ### View reports in a browser
 
 `--html` on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the same
-analysis as a page and opens it in your browser as well as printing to the
-terminal; Ctrl-C stops the server. It binds `127.0.0.1` only and writes nothing
-to disk. The page is drawn in your active theme, and costs no extra API or
-scanner call — the data was already gathered for the table. Sweep rows expand
-into that resource's full report, image rows into the CVEs behind their counts.
+analysis as a page and opens it in your browser, as well as printing to the
+terminal. Ctrl-C stops the server. It binds `127.0.0.1` only and writes nothing
+to disk.
 
-`--port` serves on a given port instead of a free one; `--no-open` skips the
-browser but still prints the URL. `--out <path>` writes the page to a file
-instead of serving it — the one case a report reaches disk — and implies
-`--html`, so `kx diag --out report.html` is the whole command; `--port` and
-`--no-open` are refused alongside it, since they configure a server it never
-starts.
+The page is drawn in your active theme, and costs no extra API or scanner call —
+the data was already gathered for the table. Sweep rows expand into that
+resource's full report, image rows into the CVEs behind their counts.
+
+- `--port` serves on a given port instead of a free one.
+- `--no-open` skips the browser, but still prints the URL.
+- `--out <path>` writes the page to a file instead of serving it — the one case
+  a report reaches disk.
+
+`--out` implies `--html`, so `kx diag --out report.html` is the whole command.
+`--port` and `--no-open` are refused alongside it, since they configure a
+server it never starts.
 
 #### `kx diag --html`
 
@@ -270,20 +279,22 @@ points kx at a different state file, so a second terminal — or a CI job — ke
 its own history instead of sharing the one in `~/.kx`.
 
 Each entry records the context it was listed in, since a resource name means
-nothing without its cluster — `kx state` names it beside the namespace, and
+nothing without its cluster. `kx state` names it beside the namespace, and
 `kx state --all` gives it a column when the history spans more than one.
-Switching contexts therefore retires your indexes: rather than resolve a staging
-index against production, `kx` refuses, names both contexts, and re-runs the
-listing so there are usable numbers on screen — `kx get pods` in staging,
-`kx context 2`, then `kx delete 1` deletes nothing and relists. `kx ns <index>`
-is refused the same way; `kx context <index>` is the exception, since contexts
-live in kubeconfig rather than in any cluster.
 
-`kx ns` and `kx contexts` save to slots of their own, outside that history, so
-`kx ns 2` counts against the namespaces you last listed however much you've
-listed since — and switching namespaces never pushes work off the stack.
-`kx state --all` summarizes the slots; `kx state --targets` expands them so you
-can pick a number without re-listing.
+Switching contexts therefore retires your indexes. Rather than resolve a staging
+index against production, `kx` refuses, names both contexts, and re-runs the
+listing so there are usable numbers on screen: `kx get pods` in staging,
+`kx context 2`, then `kx delete 1` deletes nothing and relists.
+
+`kx ns <index>` is refused the same way. `kx context <index>` is the exception,
+since contexts live in kubeconfig rather than in any cluster.
+
+`kx ns` and `kx contexts` save to slots of their own, outside that history. So
+`kx ns 2` counts against the namespaces you last listed, however much you've
+listed since, and switching namespaces never pushes work off the stack.
+`kx state --all` summarizes the slots, and `kx state --targets` expands them so
+you can pick a number without re-listing.
 
 To operate on a namespace rather than switch to it, list it with `kx get ns`:
 that stacks it, so `kx describe <index>` and `kx label <index>` work as usual,
