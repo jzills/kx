@@ -116,18 +116,6 @@ events — one screen instead of four kubectl commands.
 
 [Triage a namespace →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
 
-### Take a node out of service
-
-- `kx cordon <index>` marks a node unschedulable.
-- `kx drain <index>` also evicts what's already there, streaming kubectl's
-  progress and prompting first unless you pass `--yes`.
-- `kx uncordon <index>` puts it back.
-
-Cordon and uncordon take several indexes and ranges like `kx delete`. Drain
-takes one, deliberately — a range is a way to take a cluster down by typo.
-
-[Take a node out of service →](https://jzills.github.io/kx/docs/guides/take-a-node-out-of-service/)
-
 ### Read a Secret in plaintext
 
 `kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
