@@ -57,11 +57,10 @@ uvx --from kx-cli kx get pods
 pipx run --spec kx-cli kx get pods
 ```
 
-Standalone binaries for linux, macOS and Windows (amd64/arm64) are attached to
-each [GitHub Release](https://github.com/jzills/kx/releases), with checksums in
-`SHA256SUMS`. On macOS, the first run of a freshly installed krew plugin or
-standalone binary takes a few seconds while Gatekeeper scans it — run
-`kx --version >/dev/null` to get it over with.
+Standalone binaries for linux, macOS and Windows are attached to every
+[GitHub Release](https://github.com/jzills/kx/releases).
+
+[Install →](https://jzills.github.io/kx/docs/getting-started/install/)
 
 ## Quickstart
 
