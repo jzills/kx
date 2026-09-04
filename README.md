@@ -122,16 +122,11 @@ it dies. Rows are indexed, so `kx diag 1` or `kx logs 2` drill straight in;
 findings, a per-pod status table, log tails from broken containers, and warning
 events — one screen instead of four kubectl commands.
 
-Findings cover CrashLoopBackOff, image pull failures, OOMKills, unschedulable
-pods, stalled rollouts, missing Service endpoints, Pending PVCs, failed CronJob
-runs, Ingresses pointing at missing Services, and usage near limits.
+Findings run from CrashLoopBackOff and image pull failures through OOMKills,
+stalled rollouts, missing Service endpoints and Pending PVCs. Nodes are
+diagnosed the same way, indexed from `kx get nodes` or `kx top nodes`.
 
-Nodes work the same way, indexed from `kx get nodes` or `kx top nodes`:
-conditions (not ready, memory/disk/PID pressure, network unavailable), whether
-it's cordoned, and a tally of stuck pods — finished ones excluded, since their
-objects linger until garbage collection and would keep a healthy node looking
-sick. Nodes are cluster-scoped, so they never appear in a namespace sweep or
-`-A`.
+[Triage a namespace →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
 
 ### Take a node out of service
 
@@ -142,8 +137,8 @@ sick. Nodes are cluster-scoped, so they never appear in a namespace sweep or
 
 Cordon and uncordon take several indexes and ranges like `kx delete`. Drain
 takes one, deliberately — a range is a way to take a cluster down by typo.
-kubectl's own drain flags pass through (`--ignore-daemonsets`,
-`--delete-emptydir-data`, ...).
+
+[Take a node out of service →](https://jzills.github.io/kx/docs/guides/take-a-node-out-of-service/)
 
 ### Read a Secret in plaintext
 
@@ -158,8 +153,9 @@ export PGPASSWORD=$(kx secret 1 --decode -k password)
 ```
 
 Bare `kx secret --decode` decodes every Secret in the namespace in one call,
-`-n` included. It confirms first unless you pass `--yes`/`-y`, since that
-prints every credential in the namespace.
+confirming first — that prints every credential you have.
+
+[Read a Secret in plaintext →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
@@ -172,9 +168,11 @@ init containers and CronJob job templates included. Bare `kx scan` sweeps every
 workload in the namespace. Results come back as a severity summary, or the full
 per-image CVE report with `--full`.
 
-Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/) by default, or
-[Trivy](https://trivy.dev/) and [Grype](https://github.com/anchore/grype) via
-`kx engine trivy` / `kx engine grype`.
+Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/)
+by default, or [Trivy](https://trivy.dev/) and
+[Grype](https://github.com/anchore/grype) via `kx engine`.
+
+[Scan images for vulnerabilities →](https://jzills.github.io/kx/docs/guides/scan-images/)
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
@@ -183,22 +181,17 @@ Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.
 ### View reports in a browser
 
 `--html` on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the same
-analysis as a page and opens it in your browser, as well as printing to the
-terminal. Ctrl-C stops the server. It binds `127.0.0.1` only and writes nothing
-to disk.
+analysis as a page and opens it in your browser. It binds `127.0.0.1` only and
+writes nothing to disk.
 
-The page is drawn in your active theme, and costs no extra API or scanner call —
-the data was already gathered for the table. Sweep rows expand into that
-resource's full report, image rows into the CVEs behind their counts.
+The page is drawn in your active theme. Sweep rows expand into that resource's
+full report, image rows into the CVEs behind their counts — detail the terminal
+has no room for.
 
-- `--port` serves on a given port instead of a free one.
-- `--no-open` skips the browser, but still prints the URL.
-- `--out <path>` writes the page to a file instead of serving it — the one case
-  a report reaches disk.
+`--out <path>` writes the page to a file instead of serving it, which is what
+you want in CI — `kx diag --out report.html` is the whole command.
 
-`--out` implies `--html`, so `kx diag --out report.html` is the whole command.
-`--port` and `--no-open` are refused alongside it, since they configure a
-server it never starts.
+[Browser reports →](https://jzills.github.io/kx/docs/guides/browser-reports/)
 
 #### `kx diag --html`
 
@@ -228,14 +221,8 @@ The ownership graph as a collapsible tree, indexed like every other kx listing.
 
 ## Use kx in CI
 
-`kx diag`, `kx scan`, `kx tree` and `kx top` all take `--json`: the same
-analysis as a machine-readable document, every swept resource — healthy ones
-included — and every CVE behind the counts. Each carries a `schemaVersion` and
-names its subject in fields, so a consumer never has to split `Deployment/api`
-apart, and all three views are built from the same values, so they can't
-disagree.
-
-`--fail-on <severity>` turns the two that produce verdicts into a gate:
+`--fail-on <severity>` turns a sweep into a build gate, and `--json` prints the
+same analysis as a document for anything downstream.
 
 ```bash
 kx diag -A --fail-on critical                        # 0 if the cluster is healthy, 2 if not
@@ -244,16 +231,10 @@ kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical 
 kx diag -A --fail-on critical --out report.html      # publishes the report *and* fails the build
 ```
 
-`kx tree` and `kx top` have no `--fail-on` — neither produces a verdict to gate
-on. The gate applies alongside `--json` and `--out` alike, so a pipeline can
-publish a report and still fail on what's in it. Use `--out`, not bare `--html`,
-in CI: `--html` blocks until Ctrl-C, which a pipeline never sends, so the gate
-after it never runs. `kx scan --full --fail-on` is refused rather than ignored,
-since `--full` streams the scanner's own report and kx never parses it.
+Exit **2** means findings breached the threshold, **1** means kx itself failed —
+so a pipeline can tell "the cluster is sick" from "the check never ran".
 
-Exit **2** means findings breached the threshold; **1** means kx itself failed —
-so a pipeline can tell "the cluster is sick" from "the check never ran". An
-image kx couldn't scan breaches every threshold for the same reason.
+[Using kx in CI →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)
 
 ## History
 
@@ -268,33 +249,11 @@ kx state back         # step back one (forward steps the other way)
 kx state drop 2       # remove position 2 (--all clears everything, slots included)
 ```
 
-The older `kx back`/`kx forward`/`kx drop` spellings still work. `KX_STATE`
-points kx at a different state file, so a second terminal — or a CI job — keeps
-its own history instead of sharing the one in `~/.kx`.
+Each entry remembers the context it was listed in, so a staging index is never
+resolved against production — `kx` refuses and relists instead. `KX_STATE`
+points kx at a different state file, so a second terminal keeps its own history.
 
-Each entry records the context it was listed in, since a resource name means
-nothing without its cluster. `kx state` names it beside the namespace, and
-`kx state --all` gives it a column when the history spans more than one.
-
-Switching contexts therefore retires your indexes. Rather than resolve a staging
-index against production, `kx` refuses, names both contexts, and re-runs the
-listing so there are usable numbers on screen: `kx get pods` in staging,
-`kx context 2`, then `kx delete 1` deletes nothing and relists.
-
-`kx ns <index>` is refused the same way. `kx context <index>` is the exception,
-since contexts live in kubeconfig rather than in any cluster.
-
-`kx ns` and `kx contexts` save to slots of their own, outside that history. So
-`kx ns 2` counts against the namespaces you last listed, however much you've
-listed since, and switching namespaces never pushes work off the stack.
-`kx state --all` summarizes the slots, and `kx state --targets` expands them so
-you can pick a number without re-listing.
-
-To operate on a namespace rather than switch to it, list it with `kx get ns`:
-that stacks it, so `kx describe <index>` and `kx label <index>` work as usual,
-and refreshes the slot so both spellings agree on what `2` means. A narrowed
-listing counts — after `kx get ns -l team=platform`, `kx ns <index>` indexes
-those. Run `kx ns` for all of them again.
+[State and history →](https://jzills.github.io/kx/docs/concepts/state/)
 
 ## Configuration
 
