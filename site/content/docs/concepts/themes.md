@@ -1,6 +1,6 @@
 ---
 title: Themes
-description: Ten palettes for the terminal, the HTML reports, and this page.
+description: Eleven palettes for the terminal, the HTML reports, and this page.
 weight: 4
 ---
 

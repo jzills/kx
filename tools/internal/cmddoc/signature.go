@@ -67,6 +67,19 @@ func Signature(cmd *cobra.Command) string {
 	return strings.Join(parts, " ")
 }
 
+// ShortSignature is the invocation without its flags: the command and its
+// positional arguments only. The README's table uses it so the command column
+// stays narrow enough to scan — the full flag list belongs on the site's
+// reference pages, which render one command per page and have room for it.
+func ShortSignature(cmd *cobra.Command) string {
+	spec := cli.ParseUse(cmd.Use)
+	parts := []string{"kx " + cmd.Name()}
+	for _, arg := range spec.Args {
+		parts = append(parts, ArgToken(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
 // Commands returns every registered command keyed by name, so a generator can
 // walk cli.CommandOrder rather than the tree's own arbitrary order.
 func Commands() map[string]*cobra.Command {
