@@ -98,20 +98,25 @@ An image whose scan failed breaches every threshold, for the same reason a
 missing test is not a passing one: an image kx could not read has not been
 shown to be clean.
 
-### Old warning events don't hold the gate red
+### Old news doesn't hold the gate red
 
-A warning event drives a finding, a finding drives the verdict, and the
-verdict drives the gate — so without a limit, one `FailedScheduling` from
-three weeks ago fails the job forever on a cluster with nothing currently
-wrong with it. `kx diag` reads warning events from the last 24h only:
+Evidence drives a finding, a finding drives the verdict, and the verdict
+drives the gate — so without a limit, one `FailedScheduling` from three weeks
+ago, or one OOMKill a container recovered from last month, fails the job
+forever on a cluster with nothing currently wrong with it. `kx diag` reports
+only what happened in the last 24h — while what a resource is doing *now* is
+always reported, however long it has been doing it:
 
 ```bash
 kx diag -A --fail-on warning --since 7d    # a week's worth instead
 kx diag -A --fail-on warning --since 0     # everything the cluster still has
 ```
 
-Set your own default with `event_max_age` in
-[`config.toml`](../../reference/configuration/), or `KX_EVENT_MAX_AGE` in the
+A schedule longer than the window is the case to watch: a weekly CronJob whose
+last run failed six days ago needs `--since 7d` to show it.
+
+Set your own default with `diag_max_age` in
+[`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
 job's environment. Most clusters discard events after an hour anyway — the
 window only bites where `--event-ttl` was raised.
 

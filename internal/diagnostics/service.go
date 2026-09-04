@@ -21,11 +21,13 @@ type Service struct {
 	Client kubernetes.Interface
 	Events events.Service
 	Graph  graph.Builder
-	// MaxEventAge bounds how far back warning events are read. Zero — the
-	// zero value, so a Service built without one behaves as it always did —
-	// means no bound. The CLI resolves the window from --since and the
-	// event_max_age setting and sets it here.
-	MaxEventAge time.Duration
+	// MaxAge bounds how long ago something may have happened and still be
+	// reported: warning events, and the container and job history the
+	// findings layer reads off the Data. Zero — the zero value, so a
+	// Service built without one behaves as it always did — means no bound.
+	// The CLI resolves the window from --since and the diag_max_age
+	// setting and sets it here.
+	MaxAge time.Duration
 }
 
 // New builds a diagnostics service over a Kubernetes client.
@@ -37,9 +39,23 @@ func New(client kubernetes.Interface) Service {
 	}
 }
 
+// since is the instant this report's window opens, or the zero time when no
+// window is set.
+//
+// Read once per gather and carried on the Data, so every signal in one report
+// is measured against the same moment: two events read a moment apart cannot
+// fall on opposite sides of a cutoff that moved between them, and the findings
+// layer never has to look at a clock.
+func (s Service) since() time.Time {
+	if s.MaxAge <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(-s.MaxAge)
+}
+
 // Gather collects everything known about one resource.
 func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace string) (Data, error) {
-	data := Data{Kind: kind, Name: name, Namespace: namespace}
+	data := Data{Kind: kind, Name: name, Namespace: namespace, Since: s.since()}
 
 	if err := s.attachKindHealth(ctx, &data, kind, name, namespace); err != nil {
 		return Data{}, err
@@ -66,7 +82,7 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 			data.Pods = append(data.Pods, podDiagnostic(&pods[i]))
 		}
 		attachUsage(data.Pods, namespace, s.usageLookup(ctx, namespace))
-		s.attachLogs(ctx, data.Pods, namespace)
+		s.attachLogs(ctx, data.Pods, namespace, data.Since)
 	}
 
 	// Events are the exception: a Node's own warning events are the point of
@@ -75,7 +91,7 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 	if err != nil {
 		return Data{}, err
 	}
-	data.WarningEvents = s.warningEvents(kind, name, namespace, pods, all)
+	data.WarningEvents = s.warningEvents(data.Since, kind, name, namespace, pods, all)
 	return data, nil
 }
 
@@ -287,11 +303,13 @@ func attachUsage(pods []PodDiagnostic, namespace string, lookup map[usageKey]usa
 }
 
 // attachLogs fetches and filters a log excerpt for every unhealthy container.
-func (s Service) attachLogs(ctx context.Context, pods []PodDiagnostic, namespace string) {
+func (s Service) attachLogs(
+	ctx context.Context, pods []PodDiagnostic, namespace string, since time.Time,
+) {
 	for i := range pods {
 		for j := range pods[i].Containers {
 			container := &pods[i].Containers[j]
-			if !containerNeedsLogs(*container) {
+			if !containerNeedsLogs(*container, since) {
 				continue
 			}
 			raw, source := s.fetchLogTail(ctx, namespace, pods[i].Name, container.Name, container.State)
@@ -347,7 +365,8 @@ func (s Service) fetchLogTail(
 // the row would surface as someone else's failure. An empty namespace matches
 // anywhere, for a caller that doesn't know the scope it is asking about.
 func (s Service) warningEvents(
-	kind kinds.Kind, name, namespace string, pods []corev1.Pod, all []corev1.Event,
+	since time.Time, kind kinds.Kind, name, namespace string,
+	pods []corev1.Pod, all []corev1.Event,
 ) []EventSummary {
 	// Deduplicated: for a bare Pod the workload target equals its pod target.
 	type target struct {
@@ -372,14 +391,6 @@ func (s Service) warningEvents(
 	groups := map[groupKey]*EventSummary{}
 	var order []groupKey
 
-	// The window is measured from one instant for the whole gather, so two
-	// events read a moment apart cannot fall on opposite sides of a cutoff
-	// that moved between them.
-	var cutoff time.Time
-	if s.MaxEventAge > 0 {
-		cutoff = time.Now().Add(-s.MaxEventAge)
-	}
-
 	for _, t := range targets {
 		for _, event := range s.Events.Filter(all, t.name, t.kind) {
 			if event.Type != "Warning" {
@@ -395,7 +406,7 @@ func (s Service) warningEvents(
 			// cannot inflate the ×count of one inside it. An event with no
 			// timestamp at all is kept: it cannot be shown to be stale, and
 			// hiding a live failure over a missing field is the worse error.
-			if !cutoff.IsZero() && !timestamp.IsZero() && timestamp.Before(cutoff) {
+			if outsideWindow(timestamp, since) {
 				continue
 			}
 			if existing, ok := groups[key]; ok {

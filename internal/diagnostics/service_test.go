@@ -477,7 +477,7 @@ func TestGatherDropsEventsOlderThanTheWindow(t *testing.T) {
 		agedWarning("e1", "Unhealthy", "Pod", "solo", 1, 10*time.Minute),
 		agedWarning("e2", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
 	)
-	s.MaxEventAge = time.Hour
+	s.MaxAge = time.Hour
 
 	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
 	if err != nil {
@@ -517,7 +517,7 @@ func TestGatherKeepsAnEventWithNoTimestamp(t *testing.T) {
 		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
 		undated,
 	)
-	s.MaxEventAge = time.Hour
+	s.MaxAge = time.Hour
 
 	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
 	if err != nil {
@@ -537,7 +537,7 @@ func TestGatherDoesNotCountFilteredOccurrencesInATally(t *testing.T) {
 		agedWarning("e1", "Unhealthy", "Pod", "solo", 2, 10*time.Minute),
 		agedWarning("e2", "Unhealthy", "Pod", "solo", 40, 21*24*time.Hour),
 	)
-	s.MaxEventAge = time.Hour
+	s.MaxAge = time.Hour
 
 	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
 	if err != nil {
@@ -559,7 +559,7 @@ func TestSweepDropsEventsOlderThanTheWindow(t *testing.T) {
 		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
 		agedWarning("e1", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
 	)
-	s.MaxEventAge = time.Hour
+	s.MaxAge = time.Hour
 
 	all, err := s.Sweep(context.Background(), ns)
 	if err != nil {
@@ -608,5 +608,97 @@ func TestGroupedEventKeepsTheNewestOccurrence(t *testing.T) {
 	}
 	if summary.Message != "the recent one" {
 		t.Errorf("Message = %q, want the newest occurrence's message", summary.Message)
+	}
+}
+
+// settledPod is a healthy, running pod whose container thrashed once and has
+// been fine ever since — the shape the window exists to stop reporting.
+func settledPod(name string, terminatedAgo time.Duration) *corev1.Pod {
+	status := running("app")
+	status.RestartCount = 21
+	status.LastTerminationState = corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{
+			Reason: "OOMKilled", ExitCode: 137,
+			FinishedAt: metav1.NewTime(time.Now().Add(-terminatedAgo)),
+		},
+	}
+	return podWith(name, "p1", corev1.PodRunning, []corev1.ContainerStatus{status})
+}
+
+// The analysis is a pure function of the Data, so the instant the window
+// opened has to travel on it — recomputing a cutoff in the findings layer
+// would measure one gather against two different moments.
+func TestGatherRecordsTheWindowOnTheData(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	s.MaxAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	want := time.Now().Add(-time.Hour)
+	if data.Since.Sub(want) > time.Minute || want.Sub(data.Since) > time.Minute {
+		t.Errorf("Since = %v, want about %v", data.Since, want)
+	}
+}
+
+func TestGatherWithoutAWindowLeavesSinceZero(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.Since.IsZero() {
+		t.Errorf("Since = %v, want zero when no window is set", data.Since)
+	}
+}
+
+// Logs are fetched for a container with history to explain. Once that history
+// falls outside the window nothing will report it, so the previous-instance
+// log tail is both irrelevant and an API call per container to avoid.
+func TestGatherSkipsLogsForASettledContainer(t *testing.T) {
+	s := service(settledPod("solo", 21*24*time.Hour))
+	s.MaxAge = 24 * time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if lines := data.Pods[0].Containers[0].LogLines; len(lines) != 0 {
+		t.Errorf("log lines = %v, want none for a container that settled weeks ago", lines)
+	}
+}
+
+func TestGatherStillReadsLogsForARecentTermination(t *testing.T) {
+	s := service(settledPod("solo", 10*time.Minute))
+	s.MaxAge = 24 * time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if lines := data.Pods[0].Containers[0].LogLines; len(lines) == 0 {
+		t.Error("no log lines for a container that terminated ten minutes ago")
+	}
+}
+
+// A sweep analyses the same Data the indexed path does, so it has to stamp
+// the window too — otherwise a triage table reports history an indexed run
+// of the same resource would not.
+func TestSweepRecordsTheWindowOnEveryResource(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	s.MaxAge = time.Hour
+
+	all, err := s.Sweep(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("Sweep returned nothing to check")
+	}
+	for _, data := range all {
+		if data.Since.IsZero() {
+			t.Errorf("%s/%s has no window recorded", data.Kind, data.Name)
+		}
 	}
 }

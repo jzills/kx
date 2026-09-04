@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -316,7 +317,7 @@ func TestServiceHealthFromEndpoints(t *testing.T) {
 // stays fast and quiet.
 func TestContainerNeedsLogs(t *testing.T) {
 	healthy := ContainerDiagnostic{Ready: true, State: "Running"}
-	if containerNeedsLogs(healthy) {
+	if containerNeedsLogs(healthy, unbounded) {
 		t.Error("a healthy container was asked for logs")
 	}
 	for name, container := range map[string]ContainerDiagnostic{
@@ -325,7 +326,7 @@ func TestContainerNeedsLogs(t *testing.T) {
 		"has restarted":   {Ready: true, State: "Running", RestartCount: 1},
 		"died previously": {Ready: true, State: "Running", LastTerminatedReason: "Error"},
 	} {
-		if !containerNeedsLogs(container) {
+		if !containerNeedsLogs(container, unbounded) {
 			t.Errorf("%s: no logs requested", name)
 		}
 	}
@@ -421,4 +422,51 @@ func TestIngressBackendServiceNamesEmptyIngressYieldsNone(t *testing.T) {
 func ingressBackendPtr(serviceName string) *networkingv1.IngressBackend {
 	backend := ingressBackend(serviceName)
 	return &backend
+}
+
+// The reason a container died says nothing about when, and the window needs
+// both. FinishedAt is what dates the whole of a container's history — the
+// last termination and, with it, the restart count.
+func TestContainerDiagnosticKeepsWhenItLastTerminated(t *testing.T) {
+	finished := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	status := running("app")
+	status.RestartCount = 4
+	status.LastTerminationState = corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{
+			Reason: "OOMKilled", ExitCode: 137, FinishedAt: finished,
+		},
+	}
+	got := containerDiagnostic(&status, nil)
+	if !got.LastTerminatedAt.Equal(finished.Time) {
+		t.Errorf("LastTerminatedAt = %v, want %v", got.LastTerminatedAt, finished.Time)
+	}
+}
+
+// A container that has never terminated has nothing to date, and must not be
+// given a zero-value timestamp that reads as 1 January year 1 — outsideWindow
+// treats a zero as undatable, which is the behaviour that keeps it reported.
+func TestContainerDiagnosticWithoutATerminationHasNoTime(t *testing.T) {
+	status := running("app")
+	if got := containerDiagnostic(&status, nil); !got.LastTerminatedAt.IsZero() {
+		t.Errorf("LastTerminatedAt = %v, want zero", got.LastTerminatedAt)
+	}
+}
+
+// A Job's failure is dated by the transition into the Failed condition —
+// there is no other timestamp for it: CompletionTime is set only on success.
+func TestJobHealthKeepsWhenItFailed(t *testing.T) {
+	failedAt := metav1.NewTime(time.Now().Add(-8 * 24 * time.Hour))
+	job := &batchv1.Job{Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+		Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded", LastTransitionTime: failedAt,
+	}}}}
+	if got := jobHealthFrom(job).FailedAt; !got.Equal(failedAt.Time) {
+		t.Errorf("FailedAt = %v, want %v", got, failedAt.Time)
+	}
+}
+
+func TestJobHealthOfARunningJobHasNoFailureTime(t *testing.T) {
+	job := &batchv1.Job{Status: batchv1.JobStatus{Active: 1}}
+	if got := jobHealthFrom(job).FailedAt; !got.IsZero() {
+		t.Errorf("FailedAt = %v, want zero for a job that has not failed", got)
+	}
 }

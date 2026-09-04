@@ -13,7 +13,7 @@ engine = "trivy"
 max_history = 25
 shells = ["zsh", "bash", "sh"]
 debug_image = "alpine"
-event_max_age = "7d"
+diag_max_age = "7d"
 ```
 
 `kx --version` prints the path it resolved, which is the quickest way to find
@@ -28,17 +28,16 @@ out whether the file you are editing is the file it reads.
 | `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](../state/) keeps. |
 | `shells` | `KX_SHELLS` | `bash, sh` | Shell candidates `kx exec` tries, in order. |
 | `debug_image` | `KX_DEBUG_IMAGE` | `busybox` | Image `kx debug` attaches to a pod; `--image` overrides it per run. |
-| `event_max_age` | `KX_EVENT_MAX_AGE` | `24h` | How far back [`kx diag`](../../reference/commands/diagnostic/) reads warning events; `--since` overrides it per run. |
+| `diag_max_age` | `KX_DIAG_MAX_AGE` | `24h` | How far back [`kx diag`](../../reference/commands/diagnostic/) looks for evidence; `--since` overrides it per run. |
 | `theme_disable` | `KX_THEME_DISABLE` | `false` | Turn off styling entirely — the same as `--no-color`. |
 
 `shells` is a list in the file and a comma-separated string in the
 environment: `KX_SHELLS=zsh,bash,sh`.
 
-`event_max_age` is a duration — `30m`, `12h`, `7d` — and `0` means no limit.
-It exists because a warning event drives a finding, a finding drives the
-verdict, and a verdict drives `--fail-on`: without a window, one
-`FailedScheduling` from three weeks ago holds a resource at `warnings`, and a
-CI gate red, forever.
+`diag_max_age` is a duration — `30m`, `12h`, `7d` — and `0` means no limit.
+It exists because evidence drives a finding, a finding drives the verdict, and
+a verdict drives `--fail-on`: without a window, one `FailedScheduling` from
+three weeks ago holds a resource at `warnings`, and a CI gate red, forever.
 
 Two commands write to the file rather than making you edit it:
 

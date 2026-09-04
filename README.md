@@ -193,12 +193,13 @@ kx diag -A --fail-on critical                        # 0 if the cluster is healt
 kx scan -A --fail-on high                            # the same, for image vulnerabilities
 kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
 kx diag -A --fail-on critical --out report.html      # publishes the report *and* fails the build
-kx diag -A --fail-on warning --since 7d              # a week of warning events, not just today's
+kx diag -A --fail-on warning --since 7d              # a week of history, not just today's
 ```
 
-Warning events older than 24h are ignored, so a `FailedScheduling` from last
-month stops holding the gate red. `--since` changes the window per run,
-`event_max_age` changes the default.
+Only the last 24h counts: a warning event, an OOMKill a container recovered
+from, a failed run. Anything older stops holding the gate red, while whatever
+a resource is doing *now* is always reported. `--since` changes the window per
+run, `diag_max_age` changes the default.
 
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".

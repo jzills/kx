@@ -62,8 +62,15 @@ type ContainerDiagnostic struct {
 	ExitCode             *int32
 	LastTerminatedReason string
 	LastExitCode         *int32
-	LogLines             []string
-	LogSource            string // "previous" | "current"
+	// LastTerminatedAt is when the previous run of this container ended.
+	// Zero when it has never terminated, or when the API did not record it.
+	//
+	// It is what dates the container's history: LastTerminatedReason says
+	// what went wrong last time, and RestartCount is cumulative over the
+	// pod's whole life, so neither says whether the trouble is current.
+	LastTerminatedAt time.Time
+	LogLines         []string
+	LogSource        string // "previous" | "current"
 	// LogFiltered is false when LogLines is a raw tail rather than lines
 	// matching a severity token.
 	LogFiltered bool
@@ -119,6 +126,10 @@ type PVCHealth struct {
 // JobHealth does not reuse ReplicaHealth: a Job has no desired/ready replica
 // concept, only completion and failure counts against a backoff limit.
 type JobHealth struct {
+	// FailedAt is when the run was declared failed — the Failed condition's
+	// transition time. Zero for a run that has not failed, and for one whose
+	// failure the API did not date.
+	FailedAt             time.Time
 	Succeeded            int32
 	Failed               int32
 	Active               int32
@@ -230,6 +241,14 @@ type NodeHealth struct {
 // Data is the raw, already-flattened result of a gather. It carries no
 // findings — the analysis layer produces those.
 type Data struct {
+	// Since is the instant this report's window opens: nothing that
+	// happened before it is reported. Zero means no window.
+	//
+	// An instant rather than a duration, and recorded here rather than
+	// recomputed, so the analysis stays a pure function of the data — one
+	// gather is measured against one moment, and a findings test needs no
+	// clock.
+	Since         time.Time
 	Kind          kinds.Kind
 	Name          string
 	Namespace     string
@@ -242,6 +261,17 @@ type Data struct {
 	Ingress       *IngressHealth
 	Pods          []PodDiagnostic
 	WarningEvents []EventSummary
+}
+
+// outsideWindow reports whether something that happened at falls before the
+// window opened.
+//
+// Two things are never outside it: anything at all when no window is set, and
+// anything the cluster did not date. A missing timestamp cannot be shown to be
+// stale, and hiding a live failure over one is the worse error — the same rule
+// an undated event gets.
+func outsideWindow(at, since time.Time) bool {
+	return !since.IsZero() && !at.IsZero() && at.Before(since)
 }
 
 // Rank orders findings of equal severity by how specific they are.

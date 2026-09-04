@@ -166,15 +166,15 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 	}
 }
 
-// eventWindow resolves how far back warning events are read: --since when it
-// was given, the event_max_age setting otherwise.
+// eventWindow resolves how far back the report looks: --since when it was
+// given, the diag_max_age setting otherwise.
 //
 // An empty value means the flag was absent — "" is not a duration anyone can
 // type, so the flag needs no Changed() check to tell "unset" from "0", and
 // --since 0 keeps its own meaning of no window at all.
-func eventWindow(since string, cfg config.Config) (time.Duration, error) {
+func reportWindow(since string, cfg config.Config) (time.Duration, error) {
 	if since == "" {
-		return cfg.EventMaxAge, nil
+		return cfg.DiagMaxAge, nil
 	}
 	window, err := config.ParseDuration(since)
 	if err != nil {
@@ -184,7 +184,7 @@ func eventWindow(since string, cfg config.Config) (time.Duration, error) {
 }
 
 // sinceFlag renders the resolved window for an HTML report's invocation line,
-// so a saved page says which events it could have shown.
+// so a saved page says how far back it was allowed to look.
 //
 // Printed even when it came from the setting rather than the flag: the line
 // exists to say what the page covers, and a reader cannot know the config the
@@ -207,7 +207,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
-			"Warning events older than 24h are ignored, so a failure from last month stops holding a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the event_max_age setting changes the default.",
+			"Only what happened in the last 24h is reported: a warning event, a past restart or OOMKill a container recovered from, a failed run. Without that bound, a failure from last month holds a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. What a resource is doing *now* is always reported, however long it has been doing it. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the diag_max_age setting changes the default.\n\n" +
+			"A schedule longer than the window is the case to watch: a weekly CronJob whose last run failed six days ago needs --since 7d to show it.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
@@ -259,7 +260,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 
 			// Parsed here for the same reason --fail-on is: a typo should
 			// cost nothing, not a sweep of every namespace first.
-			window, err := eventWindow(since, services.Config)
+			window, err := reportWindow(since, services.Config)
 			if err != nil {
 				return err
 			}
@@ -297,7 +298,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return err
 			}
 			service := diagnostics.New(client)
-			service.MaxEventAge = window
+			service.MaxAge = window
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
@@ -401,8 +402,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
 	cmd.Flags().String("since", "",
-		"Ignore warning events older than this, such as 30m, 12h or 7d; "+
-			"0 for no limit (default from event_max_age, 24h)")
+		"Ignore anything that happened longer ago than this — events, past "+
+			"restarts, failed runs; 30m, 12h, 7d; 0 for no limit "+
+			"(default from diag_max_age, 24h)")
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,

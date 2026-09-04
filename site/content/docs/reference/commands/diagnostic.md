@@ -12,7 +12,9 @@ With no index, sweeps every workload in the current namespace, or in the namespa
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
-Warning events older than 24h are ignored, so a failure from last month stops holding a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the event_max_age setting changes the default.
+Only what happened in the last 24h is reported: a warning event, a past restart or OOMKill a container recovered from, a failed run. Without that bound, a failure from last month holds a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. What a resource is doing *now* is always reported, however long it has been doing it. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the diag_max_age setting changes the default.
+
+A schedule longer than the window is the case to watch: a weekly CronJob whose last run failed six days ago needs --since 7d to show it.
 
 ## Usage
 
@@ -43,7 +45,7 @@ kx diagnostic [OPTIONS] [index]
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
-| `--since string` | Ignore warning events older than this, such as 30m, 12h or 7d; 0 for no limit (default from event_max_age, 24h) |
+| `--since string` | Ignore anything that happened longer ago than this — events, past restarts, failed runs; 30m, 12h, 7d; 0 for no limit (default from diag_max_age, 24h) |
 
 ## Global options
 

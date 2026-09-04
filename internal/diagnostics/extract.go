@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -94,12 +95,20 @@ func replicaHealthFrom(kind kinds.Kind, object any) *ReplicaHealth {
 // jobHealthFrom extracts job health from an already-fetched Job.
 func jobHealthFrom(job *batchv1.Job) *JobHealth {
 	failedReasons := map[string]bool{}
+	// The Failed condition's transition is the only date a failed run has:
+	// CompletionTime is set on success, and StartTime says when it began
+	// rather than when it went wrong.
+	var failedAt time.Time
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed {
 			failedReasons[condition.Reason] = true
+			if at := condition.LastTransitionTime.Time; at.After(failedAt) {
+				failedAt = at
+			}
 		}
 	}
 	return &JobHealth{
+		FailedAt:             failedAt,
 		Succeeded:            job.Status.Succeeded,
 		Failed:               job.Status.Failed,
 		Active:               job.Status.Active,
@@ -210,9 +219,10 @@ func containerDiagnostic(status *corev1.ContainerStatus, spec *corev1.Container)
 		diagnostic.ExitCode = int32Ptr(status.State.Terminated.ExitCode)
 	}
 
-	if status.LastTerminationState.Terminated != nil {
-		diagnostic.LastTerminatedReason = status.LastTerminationState.Terminated.Reason
-		diagnostic.LastExitCode = int32Ptr(status.LastTerminationState.Terminated.ExitCode)
+	if last := status.LastTerminationState.Terminated; last != nil {
+		diagnostic.LastTerminatedReason = last.Reason
+		diagnostic.LastExitCode = int32Ptr(last.ExitCode)
+		diagnostic.LastTerminatedAt = last.FinishedAt.Time
 	}
 
 	if spec != nil {
@@ -242,11 +252,19 @@ func schedulingInfo(status corev1.PodStatus) SchedulingInfo {
 // containerNeedsLogs reports whether a container is unhealthy in some way: not
 // ready, not running, restarted, or previously terminated. Fully healthy
 // containers are skipped so healthy reports stay clean and fast.
-func containerNeedsLogs(container ContainerDiagnostic) bool {
-	return !container.Ready ||
-		container.State != "Running" ||
-		container.RestartCount > 0 ||
-		container.LastTerminatedReason != ""
+//
+// A container whose only trouble is outside the window is skipped too. Nothing
+// will report that history, so the previous instance's tail would be an
+// excerpt of a crash no finding mentions — and one API call per container to
+// produce it.
+func containerNeedsLogs(container ContainerDiagnostic, since time.Time) bool {
+	if !container.Ready || container.State != "Running" {
+		return true
+	}
+	if outsideWindow(container.LastTerminatedAt, since) {
+		return false
+	}
+	return container.RestartCount > 0 || container.LastTerminatedReason != ""
 }
 
 func derefInt32(value *int32) int32 {

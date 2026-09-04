@@ -675,11 +675,11 @@ func TestDiagnosticRegistersSinceFlag(t *testing.T) {
 }
 
 // The flag is an override of the setting, not a separate knob: unset means
-// whatever config.toml or KX_EVENT_MAX_AGE resolved to.
-func TestEventWindowFallsBackToTheConfiguredSetting(t *testing.T) {
+// whatever config.toml or KX_DIAG_MAX_AGE resolved to.
+func TestReportWindowFallsBackToTheConfiguredSetting(t *testing.T) {
 	cfg := config.Default()
-	cfg.EventMaxAge = 12 * time.Hour
-	got, err := eventWindow("", cfg)
+	cfg.DiagMaxAge = 12 * time.Hour
+	got, err := reportWindow("", cfg)
 	if err != nil {
 		t.Fatalf("eventWindow: %v", err)
 	}
@@ -688,10 +688,10 @@ func TestEventWindowFallsBackToTheConfiguredSetting(t *testing.T) {
 	}
 }
 
-func TestEventWindowFlagOverridesTheSetting(t *testing.T) {
+func TestReportWindowFlagOverridesTheSetting(t *testing.T) {
 	cfg := config.Default()
-	cfg.EventMaxAge = 12 * time.Hour
-	got, err := eventWindow("7d", cfg)
+	cfg.DiagMaxAge = 12 * time.Hour
+	got, err := reportWindow("7d", cfg)
 	if err != nil {
 		t.Fatalf("eventWindow: %v", err)
 	}
@@ -702,9 +702,9 @@ func TestEventWindowFlagOverridesTheSetting(t *testing.T) {
 
 // --since 0 is how someone gets the old unbounded behaviour back for one run,
 // so zero from the flag must not be mistaken for an absent flag.
-func TestEventWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
+func TestReportWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
 	cfg := config.Default()
-	got, err := eventWindow("0", cfg)
+	got, err := reportWindow("0", cfg)
 	if err != nil {
 		t.Fatalf("eventWindow: %v", err)
 	}
@@ -713,8 +713,8 @@ func TestEventWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
 	}
 }
 
-func TestEventWindowRejectsAMalformedValue(t *testing.T) {
-	if _, err := eventWindow("7 weeks", config.Default()); err == nil {
+func TestReportWindowRejectsAMalformedValue(t *testing.T) {
+	if _, err := reportWindow("7 weeks", config.Default()); err == nil {
 		t.Fatal("eventWindow accepted '7 weeks'")
 	} else if !strings.Contains(err.Error(), "--since") {
 		t.Errorf("err = %v, want it to name --since", err)
@@ -854,5 +854,62 @@ func TestDiagSweepHTMLOmitsAnUnlimitedWindow(t *testing.T) {
 	}
 	if strings.Contains(string(page), "--since") {
 		t.Error("an unlimited run recorded a --since it was not given")
+	}
+}
+
+// settledPod is a running, ready pod whose container thrashed and OOMKilled
+// weeks ago and has been fine since. Nothing about it is wrong now, and
+// before the window it reported critical forever.
+func settledPod(name, namespace string, terminatedAgo time.Duration) []runtime.Object {
+	return []runtime.Object{&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "app", Ready: true, RestartCount: 21,
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				LastTerminationState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Reason: "OOMKilled", ExitCode: 137,
+						FinishedAt: metav1.NewTime(time.Now().Add(-terminatedAgo)),
+					},
+				},
+			}},
+		},
+	}}
+}
+
+// The window has to reach a container's own history, not just events — the
+// cutoff travels from the flag, through Sweep, onto every Data, and into the
+// findings layer.
+func TestDiagSweepAppliesTheWindowToContainerHistory(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, settledPod("web", "prod", 21*24*time.Hour)...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(sink.String(), "OOMKilled") {
+		t.Errorf("a three-week-old OOMKill still drove the sweep:\n%s", sink.String())
+	}
+}
+
+func TestDiagSweepWithoutAWindowStillReportsOldContainerHistory(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, settledPod("web", "prod", 21*24*time.Hour)...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{"namespace": "prod", "since": "0"} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "OOMKilled") {
+		t.Errorf("--since 0 dropped history it was told to keep:\n%s", sink.String())
 	}
 }

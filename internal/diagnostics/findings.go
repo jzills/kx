@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -58,7 +59,7 @@ func BuildReport(data Data) Report {
 		findings = append(findings, replicaFindings(*data.Replicas)...)
 	}
 	if data.Job != nil {
-		findings = append(findings, jobFindings(*data.Job)...)
+		findings = append(findings, jobFindings(*data.Job, data.Since)...)
 	}
 	if data.Service != nil {
 		findings = append(findings, serviceFindings(*data.Service)...)
@@ -67,13 +68,13 @@ func BuildReport(data Data) Report {
 		findings = append(findings, pvcFindings(*data.PVC)...)
 	}
 	if data.CronJob != nil {
-		findings = append(findings, cronJobFindings(*data.CronJob)...)
+		findings = append(findings, cronJobFindings(*data.CronJob, data.Since)...)
 	}
 	if data.Ingress != nil {
 		findings = append(findings, ingressFindings(*data.Ingress)...)
 	}
 	for _, pod := range data.Pods {
-		findings = append(findings, podFindings(pod)...)
+		findings = append(findings, podFindings(pod, data.Since)...)
 	}
 	findings = append(findings, eventFindings(data.WarningEvents)...)
 
@@ -234,7 +235,14 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 // jobFindings treats suspended, active and successfully completed Jobs as OK —
 // the same treatment a Deployment scaled to zero already gets. Trouble in the
 // Job's own pods surfaces separately through podFindings.
-func jobFindings(job JobHealth) []Finding {
+func jobFindings(job JobHealth, since time.Time) []Finding {
+	// A run that failed before the window opened is not this report's news.
+	// Unlike a container's history, nothing supersedes it — no run has
+	// happened since — so a schedule longer than the window needs --since
+	// widened to see its last failure, which is what the flag is for.
+	if outsideWindow(job.FailedAt, since) {
+		return nil
+	}
 	var findings []Finding
 	if job.BackoffLimitExceeded {
 		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
@@ -270,12 +278,12 @@ func serviceFindings(service ServiceHealth) []Finding {
 // CronJob whose last run hit BackoffLimitExceeded reads the same way a
 // standalone failed Job does. Suspended and never-run are both OK — not enough
 // signal to call a fresh or paused CronJob broken.
-func cronJobFindings(cronJob CronJobHealth) []Finding {
+func cronJobFindings(cronJob CronJobHealth, since time.Time) []Finding {
 	if cronJob.Suspended || cronJob.MostRecentJob == nil {
 		return nil
 	}
 	var findings []Finding
-	for _, finding := range jobFindings(*cronJob.MostRecentJob) {
+	for _, finding := range jobFindings(*cronJob.MostRecentJob, since) {
 		findings = append(findings, Finding{
 			finding.Severity, finding.Rank, "Most recent run: " + finding.Summary,
 		})
@@ -308,10 +316,10 @@ func ingressFindings(ingress IngressHealth) []Finding {
 	return findings
 }
 
-func podFindings(pod PodDiagnostic) []Finding {
+func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	var findings []Finding
 	for _, container := range pod.Containers {
-		findings = append(findings, containerFindings(pod.Name, container)...)
+		findings = append(findings, containerFindings(pod.Name, container, since)...)
 	}
 
 	anyWaiting := false
@@ -352,9 +360,15 @@ func podFindings(pod PodDiagnostic) []Finding {
 	return findings
 }
 
-func containerFindings(podName string, container ContainerDiagnostic) []Finding {
+func containerFindings(podName string, container ContainerDiagnostic, since time.Time) []Finding {
 	var findings []Finding
 	reason := container.WaitingReason
+	// What the container is doing now is reported however old it is; what it
+	// did last time is reported only if it happened inside the window. A
+	// container that OOMKilled once and has been running ever since has been
+	// superseded by that evidence, and reporting it forever held a healthy
+	// workload at critical.
+	settled := outsideWindow(container.LastTerminatedAt, since)
 
 	switch {
 	case reason == "CrashLoopBackOff":
@@ -376,7 +390,8 @@ func containerFindings(podName string, container ContainerDiagnostic) []Finding 
 	}
 
 	switch {
-	case container.TerminatedReason == "OOMKilled" || container.LastTerminatedReason == "OOMKilled":
+	case container.TerminatedReason == "OOMKilled" ||
+		(container.LastTerminatedReason == "OOMKilled" && !settled):
 		findings = append(findings, Finding{Critical, Cause, "OOMKilled in pod " + podName})
 	case container.TerminatedReason != "" && container.TerminatedReason != "Completed" &&
 		container.ExitCode != nil && *container.ExitCode != 0:
@@ -387,7 +402,9 @@ func containerFindings(podName string, container ContainerDiagnostic) []Finding 
 
 	// Only when not waiting: a CrashLoopBackOff finding already reports the
 	// restart count, and repeating it adds nothing.
-	if reason == "" && container.RestartCount >= restartWarnThreshold {
+	// The count is cumulative over the pod's whole life, so the last
+	// termination is what says whether the thrashing is current.
+	if reason == "" && !settled && container.RestartCount >= restartWarnThreshold {
 		findings = append(findings, Finding{Warning, Cause, fmt.Sprintf(
 			"Container %s in pod %s restarted %d times",
 			container.Name, podName, container.RestartCount)})

@@ -45,13 +45,32 @@ kx logs 2     # straight into the logs of row 2
 - a `SUMMARY` of findings
 - a per-pod status table
 - recent log tails from broken containers
-- warning events from the last 24h — `--since 7d` widens the window, `--since 0`
-  removes it
+- warning events
 
 The findings it looks for include CrashLoopBackOff, image pull failures,
 OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints,
 Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that
 don't exist.
+
+## Now, not once
+
+Only what happened in the last 24h is reported — a warning event, a restart
+or OOMKill a container recovered from, a run that failed. What a resource is
+doing *now* is always reported, however long it has been doing it: a container
+in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+
+That line matters because a finding drives the verdict and the verdict drives
+[`--fail-on`](../use-kx-in-ci/). Without it, one `FailedScheduling` from three
+weeks ago holds a healthy workload at `warnings` forever.
+
+```bash
+kx diag --since 7d    # a week of history
+kx diag --since 0     # everything, the old behaviour
+```
+
+Watch for schedules longer than the window: a weekly CronJob whose last run
+failed six days ago needs `--since 7d` to show it. `diag_max_age` in
+[config.toml](../../reference/configuration/) sets your own default.
 
 ## Usage as a signal, not just state
 
