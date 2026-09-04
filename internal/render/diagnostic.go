@@ -33,6 +33,27 @@ func severityStyle(severity diagnostics.Severity) string {
 	}
 }
 
+// A finding and an event message are both sentences the cluster wrote, and
+// Kubernetes writes long ones — the scheduler's "0/1 nodes are available…"
+// runs past 200 columns. Wrapped here rather than left to the terminal, which
+// breaks a line at column 0: the continuation then starts to the left of the
+// section header and the block stops reading as a list at all.
+//
+// Each continuation is tucked one level inside the text it belongs to, so the
+// icon (or the event heading) keeps the left margin to itself and the eye can
+// still find where one entry ends and the next begins.
+const (
+	findingHang      = "      "
+	eventMessageHang = "        "
+)
+
+// proseLines wraps text to what is left of the prose width once a hanging
+// indent of hang columns is paid for, so the first line and every
+// continuation fit the same budget.
+func (r *Renderer) proseLines(text string, hang int) []string {
+	return wrapText(text, r.proseWidth()-hang)
+}
+
 // Diagnostic renders a full report for one resource.
 func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	// The verdict rides in the banner rather than on a line of its own.
@@ -67,7 +88,11 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary))
+			lines := r.proseLines(finding.Summary, len(findingHang))
+			r.line("  " + icon + " " + r.style(theme.Body, lines[0]))
+			for _, rest := range lines[1:] {
+				r.line(findingHang + r.style(theme.Body, rest))
+			}
 		}
 	}
 
@@ -193,7 +218,11 @@ func (r *Renderer) warningEvents(events []diagnostics.EventSummary) {
 			line += r.style(theme.Muted, " · "+age)
 		}
 		r.line("    " + line)
-		r.line("      " + event.Message)
+		message := r.proseLines(event.Message, len(eventMessageHang))
+		r.line("      " + message[0])
+		for _, rest := range message[1:] {
+			r.line(eventMessageHang + rest)
+		}
 	}
 }
 
