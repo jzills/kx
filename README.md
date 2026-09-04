@@ -72,15 +72,15 @@ kx logs 3      # the third pod
 kx diag 3      # why it's unhealthy
 ```
 
-Indexes come several at a time, as ranges, or narrowed:
+Indexes come several at a time, as ranges, or narrowed.
 
 ```bash
-kx delete 3 5                # several at once
-kx delete 3..7               # an inclusive range, walking either direction
-kx delete ..5                # open at the start
-kx delete 5..                # open to the end of the listing
-kx get pods -m api           # --match/-m filters rows by name substring
-kx get pods -n prod -l app=api   # anything else passes through to kubectl
+kx delete 3 5                   # several at once
+kx delete 3..7                  # an inclusive range, walking either direction
+kx delete ..5                   # open at the start
+kx delete 5..                   # open to the end of the listing
+kx get pods -m api              # --match/-m filters rows by name substring
+kx get pods -n prod -l app=api  # anything else passes through to kubectl
 ```
 
 `-A` listings are indexed too: each row records its own namespace, so
@@ -137,7 +137,7 @@ takes one, deliberately — a range is a way to take a cluster down by typo.
 
 `kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
 Values that aren't text show `<binary, N bytes>`. `--key`/`-k` prints a single
-value raw — no banner, no wrapping — so it drops straight into a shell:
+value raw — no banner, no wrapping — so it drops straight into a shell.
 
 ```bash
 export PGPASSWORD=$(kx secret 1 --decode -k password)
