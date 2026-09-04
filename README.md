@@ -107,10 +107,11 @@ bare number.
 ### Triage a namespace
 
 Bare `kx diag` sweeps the current namespace — every workload kind, plus
-Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy. It reads live usage too, so a
-pod running hot against its memory limit is flagged as an OOMKill risk before
-it dies. Rows are indexed, so `kx diag 1` or `kx logs 2` drill straight in;
-`-A` sweeps every namespace, adding a NAMESPACE column.
+Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
+It reads live usage too, so a pod running hot against its memory limit is
+flagged as an OOMKill risk before it dies. Rows are indexed, so `kx diag 1` or
+`kx logs 2` drill straight in; `-A` sweeps every namespace, adding a NAMESPACE
+column.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
@@ -151,11 +152,11 @@ export PGPASSWORD=$(kx secret 1 --decode -k password)
 Bare `kx secret --decode` decodes every Secret in the namespace in one call,
 confirming first — that prints every credential you have.
 
-[Read a Secret in plaintext →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
-
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
 </div>
+
+[Read a Secret in plaintext →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
 
 ### Scan images for vulnerabilities
 
@@ -168,11 +169,11 @@ Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.
 by default, or [Trivy](https://trivy.dev/) and
 [Grype](https://github.com/anchore/grype) via `kx engine`.
 
-[Scan images for vulnerabilities →](https://jzills.github.io/kx/docs/guides/scan-images/)
-
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
+
+[Scan images for vulnerabilities →](https://jzills.github.io/kx/docs/guides/scan-images/)
 
 ### View reports in a browser
 
