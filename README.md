@@ -99,17 +99,11 @@ on-disk discovery cache, with no API call.
 An integer after a kind relists just that index (`kx po 3`). Anything
 unrecognized falls back to `kx get <resource>`.
 
-`--watch`/`-w` redraws the table live instead of printing one that never
-finishes. It's display-only — a watch never completes, so there's nothing to
-index; `-o json`/`yaml` stream kubectl's own watch instead.
+`--watch`/`-w` redraws the table live as resources change.
 
-`--no-color` disables styling, `-v`/`--version` prints the version and build,
-and `-h`/`--help` on any command shows usage, examples, and aliases.
-
-`kx completion <bash|zsh|fish|powershell>` prints a completion script. Indexes
-complete with the resource behind them — `kx describe <TAB>` offers
-`1  api-7d8f (Pod)` — as do resource types, rollout actions, themes, engines,
-and `-n` namespaces, all served from `~/.kx/state.json` with no API call.
+`kx completion <bash|zsh|fish|powershell>` completes indexes with the resource
+behind them, so `kx describe <TAB>` offers `1  api-7d8f (Pod)` rather than a
+bare number.
 
 ### Triage a namespace
 
