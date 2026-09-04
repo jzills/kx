@@ -62,23 +62,6 @@ func (r *Renderer) Detail(pairs [][2]string) string {
 // Detail renders label/value lines through the package-level renderer.
 func Detail(pairs [][2]string) string { return current.Detail(pairs) }
 
-// helpWidth is the width help text wraps to.
-//
-// Capped rather than taken straight from the terminal: prose set to the full
-// width of a maximized window is measurably harder to read, and the help
-// screens are mostly prose. Narrow terminals still get their own width, and
-// off-terminal output keeps pipeWidth so redirected help is never re-wrapped
-// to something a reader didn't ask for.
-const helpMaxWidth = 92
-
-func (r *Renderer) helpWidth() int {
-	width := r.width()
-	if width > helpMaxWidth {
-		return helpMaxWidth
-	}
-	return width
-}
-
 // wrapText breaks text into lines that fit within width, preserving the blank
 // lines between paragraphs. Words longer than the width (a URL, a long path)
 // are left whole rather than broken, since a split one can't be clicked or
@@ -129,7 +112,7 @@ func (r *Renderer) itemBlock(title string, items []HelpItem, minWidth int) {
 	if len(items) == 0 {
 		return
 	}
-	width := r.helpWidth()
+	width := r.proseWidth()
 	// The widest name column this screen can afford before names start costing
 	// descriptions their room. Never narrower than the caller's minimum, which
 	// is a deliberate constant (rootNameWidth, commandNameWidth) and not
@@ -279,7 +262,7 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 	r.Blank()
 	r.line(r.style(theme.Header, help.Path))
 	if help.Doc != "" {
-		for _, line := range wrapText(help.Doc, r.helpWidth()) {
+		for _, line := range wrapText(help.Doc, r.proseWidth()) {
 			r.line(r.style(theme.Muted, line))
 		}
 	}
