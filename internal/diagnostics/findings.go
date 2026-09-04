@@ -237,9 +237,14 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 // Job's own pods surfaces separately through podFindings.
 func jobFindings(job JobHealth, since time.Time) []Finding {
 	// A run that failed before the window opened is not this report's news.
-	// Unlike a container's history, nothing supersedes it — no run has
-	// happened since — so a schedule longer than the window needs --since
-	// widened to see its last failure, which is what the flag is for.
+	//
+	// The failure is not lost with the line: the run's failed pods hang off
+	// the same Data, and a pod in Failed phase is present state, so it is
+	// reported however long ago it died. A CronJob whose last run failed
+	// weeks ago still reads critical — it loses this rollup, not its
+	// diagnosis. Only where the pods are gone too (ttlSecondsAfterFinished,
+	// a zero history limit) does the run go quiet, and --since widens the
+	// window for that.
 	if outsideWindow(job.FailedAt, since) {
 		return nil
 	}

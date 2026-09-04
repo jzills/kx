@@ -1024,3 +1024,38 @@ func TestBuildReportAppliesTheDataWindowToHistory(t *testing.T) {
 			report.Verdict, summaries(report.Findings))
 	}
 }
+
+// Bounding a run drops its rollup line, not its diagnosis. The pods that run
+// left behind are present state — a pod in Failed phase is failed now — so a
+// CronJob whose last run failed weeks ago still reads critical, which is why
+// bounding the run does not silence a schedule longer than the window.
+//
+// Only where those pods are gone too — ttlSecondsAfterFinished, a zero
+// history limit — does the run go quiet, and --since is what widens the
+// window for that.
+func TestStaleRunLosesItsRollupButNotItsPods(t *testing.T) {
+	exit := int32(1)
+	data := Data{
+		Kind: kinds.CronJob, Name: "nightly", Since: windowStart,
+		CronJob: &CronJobHealth{MostRecentJob: &JobHealth{
+			Failed: 2, BackoffLimit: 1, BackoffLimitExceeded: true, FailedAt: longAgo,
+		}},
+		Pods: []PodDiagnostic{{
+			Name: "nightly-1", Phase: "Failed", TotalContainers: 1,
+			Containers: []ContainerDiagnostic{{
+				Name: "run", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+			}},
+		}},
+	}
+	report := BuildReport(data)
+
+	if hasSummaryContaining(report.Findings, "Most recent run") {
+		t.Errorf("findings = %v, want the rollup dropped", summaries(report.Findings))
+	}
+	if !hasSummaryContaining(report.Findings, "Pod nightly-1 failed") {
+		t.Errorf("findings = %v, want the failed pod still reported", summaries(report.Findings))
+	}
+	if report.Verdict != Critical {
+		t.Errorf("verdict = %v, want critical — the run's pods are failed now", report.Verdict)
+	}
+}

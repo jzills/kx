@@ -112,8 +112,10 @@ kx diag -A --fail-on warning --since 7d    # a week's worth instead
 kx diag -A --fail-on warning --since 0     # everything the cluster still has
 ```
 
-A schedule longer than the window is the case to watch: a weekly CronJob whose
-last run failed six days ago needs `--since 7d` to show it.
+A run that failed outside the window loses its rollup line, not its diagnosis
+— the failed pods it left behind are current state, so they are still
+reported. Widen the window where those pods have been cleaned up
+(`ttlSecondsAfterFinished`, a zero history limit).
 
 Set your own default with `diag_max_age` in
 [`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the

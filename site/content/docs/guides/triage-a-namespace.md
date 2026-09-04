@@ -68,8 +68,10 @@ kx diag --since 7d    # a week of history
 kx diag --since 0     # everything, the old behaviour
 ```
 
-Watch for schedules longer than the window: a weekly CronJob whose last run
-failed six days ago needs `--since 7d` to show it. `diag_max_age` in
+A run that failed outside the window loses its `Most recent run:` line, not
+its diagnosis: the failed pods it left behind are current state, so a CronJob
+whose last run failed weeks ago still reads critical. Widen the window where
+those pods have been cleaned up. `diag_max_age` in
 [config.toml](../../reference/configuration/) sets your own default.
 
 ## Usage as a signal, not just state
