@@ -136,7 +136,7 @@ confirming first — that prints every credential you have.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
 
-### Scan images for vulnerabilities
+### Scan images for CVEs
 
 `kx scan <index>` scans the unique container images of an indexed workload.
 Bare `kx scan` sweeps every workload in the namespace. Results come back as a
@@ -152,7 +152,7 @@ by default, or [Trivy](https://trivy.dev/) and
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/scan-images/)
 
-### Map what owns what
+### See what owns what
 
 `kx tree <index>` walks the ownership graph — Deployment to ReplicaSet to Pods —
 and indexes every node it draws, so anything in the tree is one number away.
@@ -164,7 +164,7 @@ Bare `kx tree` graphs the whole namespace.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/ownership-tree/)
 
-### View reports in a browser
+### Reports in the browser
 
 `--html` on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the same
 analysis as a page and opens it in your browser. It binds `127.0.0.1` only and
@@ -200,7 +200,7 @@ so a pipeline can tell "the cluster is sick" from "the check never ran".
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)
 
-## History
+## State and history
 
 `kx` keeps up to 10 `kx get` results in `~/.kx/state.json`, with a cursor
 marking the entry indexes resolve against.
@@ -228,7 +228,7 @@ override. The two worth changing have commands of their own — `kx theme` and
 Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker`
 stays clean. [`NO_COLOR`](https://no-color.org/) is honored too.
 
-[Full guide →](https://jzills.github.io/kx/docs/reference/configuration/)
+[Full guide →](https://jzills.github.io/kx/docs/concepts/configuration/)
 
 ## Themes
 
@@ -242,6 +242,8 @@ persists your choice, by name or index.
 Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`,
 `mono`, `light` and `plain`.
+
+[Full guide →](https://jzills.github.io/kx/docs/concepts/themes/)
 
 ## Commands
 
