@@ -109,16 +109,13 @@ flagged as an OOMKill risk before it dies.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
 </div>
 
-`kx diag <index>` diagnoses one resource: a verdict banner, a `SUMMARY` of
-findings, a per-pod status table, log tails from broken containers, and warning
-events — one screen instead of four kubectl commands.
+`kx diag <index>` diagnoses a single resource: a top level verdict, a findings summary, a per-pod status table, log tails from broken containers and warning events — one screen instead of four kubectl commands.
 
 [Triage a namespace →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
 
 ### Read a Secret in plaintext
 
-`kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
-Values that aren't text show `<binary, N bytes>`. `--key`/`-k` prints a single
+`kx secret <index> --decode` prints an indexed Secret's keys and values decoded. `--key`/`-k` prints a single
 value raw — no banner, no wrapping — so it drops straight into a shell.
 
 ```bash
@@ -136,8 +133,7 @@ confirming first — that prints every credential you have.
 
 ### Scan images for vulnerabilities
 
-`kx scan <index>` scans the unique container images of an indexed workload,
-init containers and CronJob job templates included. Bare `kx scan` sweeps every
+`kx scan <index>` scans the unique container images of an indexed workload. Bare `kx scan` sweeps every
 workload in the namespace. Results come back as a severity summary, or the full
 per-image CVE report with `--full`.
 
