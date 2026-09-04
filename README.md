@@ -114,10 +114,6 @@ flagged as an OOMKill risk before it dies. Rows are indexed, so `kx diag 1` or
 findings, a per-pod status table, log tails from broken containers, and warning
 events — one screen instead of four kubectl commands.
 
-Findings run from CrashLoopBackOff and image pull failures through OOMKills,
-stalled rollouts, missing Service endpoints and Pending PVCs. Nodes are
-diagnosed the same way, indexed from `kx get nodes` or `kx top nodes`.
-
 [Triage a namespace →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
 
 ### Take a node out of service
