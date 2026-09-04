@@ -94,10 +94,8 @@ Known kinds can drop the `get` — `kx pods`, `kx deploy -n kube-system`,
 `kx svc -m api` — kubectl's shorthands and your CRDs included. A CRD resolves
 from kubectl's on-disk discovery cache, with no API call.
 
-An integer after a kind relists just that index (`kx po 3`). Anything
-unrecognized falls back to `kx get <resource>`.
-
-`--watch`/`-w` redraws the table live as resources change.
+`--watch`/`-w` redraws the table in place, rather than appending lines the way
+`kubectl -w` does.
 
 `kx completion <bash|zsh|fish|powershell>` completes indexes with the resource
 behind them, so `kx describe <TAB>` offers `1  api-7d8f (Pod)` rather than a
