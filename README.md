@@ -104,8 +104,7 @@ Bare `kx diag` sweeps the current namespace — every workload kind, plus
 Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
 It reads live usage too, so a pod running hot against its memory limit is
 flagged as an OOMKill risk before it dies. Rows are indexed, so `kx diag 1` or
-`kx logs 2` drill straight in; `-A` sweeps every namespace, adding a NAMESPACE
-column.
+`kx logs 2` drill straight in. `-A` sweeps every namespace.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
