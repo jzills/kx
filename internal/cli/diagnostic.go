@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
@@ -164,6 +166,38 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 	}
 }
 
+// eventWindow resolves how far back warning events are read: --since when it
+// was given, the event_max_age setting otherwise.
+//
+// An empty value means the flag was absent — "" is not a duration anyone can
+// type, so the flag needs no Changed() check to tell "unset" from "0", and
+// --since 0 keeps its own meaning of no window at all.
+func eventWindow(since string, cfg config.Config) (time.Duration, error) {
+	if since == "" {
+		return cfg.EventMaxAge, nil
+	}
+	window, err := config.ParseDuration(since)
+	if err != nil {
+		return 0, fmt.Errorf("'--since': %w", err)
+	}
+	return window, nil
+}
+
+// sinceFlag renders the resolved window for an HTML report's invocation line,
+// so a saved page says which events it could have shown.
+//
+// Printed even when it came from the setting rather than the flag: the line
+// exists to say what the page covers, and a reader cannot know the config the
+// report was produced under. An unlimited window prints nothing — there is no
+// window to record, and "--since 0" would read as a setting rather than as the
+// absence of one.
+func sinceFlag(window time.Duration) string {
+	if window == 0 {
+		return ""
+	}
+	return "--since " + config.FormatDuration(window)
+}
+
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        use + " [index]",
@@ -172,9 +206,11 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Aliases:    aliases,
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
-			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.",
+			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
+			"Warning events older than 24h are ignored, so a failure from last month stops holding a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the event_max_age setting changes the default.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
+			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -187,6 +223,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			out, _ := cmd.Flags().GetString("out")
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
+			since, _ := cmd.Flags().GetString("since")
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -218,6 +255,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					return err
 				}
 				threshold = parsed
+			}
+
+			// Parsed here for the same reason --fail-on is: a typo should
+			// cost nothing, not a sweep of every namespace first.
+			window, err := eventWindow(since, services.Config)
+			if err != nil {
+				return err
 			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
@@ -253,6 +297,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return err
 			}
 			service := diagnostics.New(client)
+			service.MaxEventAge = window
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
@@ -290,7 +335,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						scope = render.AllNamespaces
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
-						invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
+						invocation(use, scopeArgs(namespace, allNamespaces),
+							sinceFlag(window), portFlag(port)))
 					if err != nil {
 						return err
 					}
@@ -331,7 +377,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if htmlOpts.Enabled {
 				meta, err := pageMeta(services.Config.Theme,
 					"diag · "+string(report.Kind)+"/"+report.Name,
-					invocation(use, args[0], portFlag(port)))
+					invocation(use, args[0], sinceFlag(window), portFlag(port)))
 				if err != nil {
 					return err
 				}
@@ -354,6 +400,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
+	cmd.Flags().String("since", "",
+		"Ignore warning events older than this, such as 30m, 12h or 7d; "+
+			"0 for no limit (default from event_max_age, 24h)")
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,

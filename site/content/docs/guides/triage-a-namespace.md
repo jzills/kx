@@ -45,7 +45,8 @@ kx logs 2     # straight into the logs of row 2
 - a `SUMMARY` of findings
 - a per-pod status table
 - recent log tails from broken containers
-- warning events
+- warning events from the last 24h — `--since 7d` widens the window, `--since 0`
+  removes it
 
 The findings it looks for include CrashLoopBackOff, image pull failures,
 OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints,

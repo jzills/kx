@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -661,5 +664,195 @@ func TestDiagSingleWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
 	}
 	if silent.Code != findingsExitCode {
 		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
+	}
+}
+
+func TestDiagnosticRegistersSinceFlag(t *testing.T) {
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", []string{"diag"})
+	if cmd.Flags().Lookup("since") == nil {
+		t.Error("--since is not registered, so it will not appear in --help")
+	}
+}
+
+// The flag is an override of the setting, not a separate knob: unset means
+// whatever config.toml or KX_EVENT_MAX_AGE resolved to.
+func TestEventWindowFallsBackToTheConfiguredSetting(t *testing.T) {
+	cfg := config.Default()
+	cfg.EventMaxAge = 12 * time.Hour
+	got, err := eventWindow("", cfg)
+	if err != nil {
+		t.Fatalf("eventWindow: %v", err)
+	}
+	if got != 12*time.Hour {
+		t.Errorf("window = %v, want the configured 12h", got)
+	}
+}
+
+func TestEventWindowFlagOverridesTheSetting(t *testing.T) {
+	cfg := config.Default()
+	cfg.EventMaxAge = 12 * time.Hour
+	got, err := eventWindow("7d", cfg)
+	if err != nil {
+		t.Fatalf("eventWindow: %v", err)
+	}
+	if want := 7 * 24 * time.Hour; got != want {
+		t.Errorf("window = %v, want %v", got, want)
+	}
+}
+
+// --since 0 is how someone gets the old unbounded behaviour back for one run,
+// so zero from the flag must not be mistaken for an absent flag.
+func TestEventWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
+	cfg := config.Default()
+	got, err := eventWindow("0", cfg)
+	if err != nil {
+		t.Fatalf("eventWindow: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("window = %v, want 0 — --since 0 asks for no window", got)
+	}
+}
+
+func TestEventWindowRejectsAMalformedValue(t *testing.T) {
+	if _, err := eventWindow("7 weeks", config.Default()); err == nil {
+		t.Fatal("eventWindow accepted '7 weeks'")
+	} else if !strings.Contains(err.Error(), "--since") {
+		t.Errorf("err = %v, want it to name --since", err)
+	}
+}
+
+// Parsed before the cluster is read, like --fail-on: a typo should not cost a
+// sweep of every namespace before it is reported. Services{} has no client, so
+// reaching one would nil-panic rather than return this error.
+func TestDiagRejectsAMalformedSinceBeforeReadingTheCluster(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", nil)
+	if err := cmd.Flags().Set("since", "7 weeks"); err != nil {
+		t.Fatalf("set --since: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("a malformed --since was accepted")
+	} else if !strings.Contains(err.Error(), "--since") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// stalePod is a running pod carrying one warning event from three weeks ago —
+// the shape the issue describes: nothing wrong now, a verdict stuck at
+// "warnings" because of something that happened last month.
+func stalePod(name, namespace string) []runtime.Object {
+	return []runtime.Object{
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: "app", Ready: true,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
+			},
+		},
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Name: "e1", Namespace: namespace},
+			Type:           "Warning",
+			Reason:         "FailedScheduling",
+			Message:        "no nodes available",
+			Count:          3,
+			LastTimestamp:  metav1.NewTime(time.Now().Add(-21 * 24 * time.Hour)),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: name, Namespace: namespace},
+		},
+	}
+}
+
+// The whole point, end to end: the window has to reach the gatherer, not just
+// be parsed. Asserting on RunE's rendered output is the only way to see that
+// the resolved window was actually handed to the diagnostics service.
+func TestDiagSweepAppliesTheDefaultEventWindow(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("a three-week-old warning still drove the sweep:\n%s", sink.String())
+	}
+}
+
+// ...and --since 0 asks for it back, which is what makes the default a
+// default rather than a hard rule.
+func TestDiagSweepWithoutAWindowStillReportsAnOldEvent(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.Flags().Set("since", "0"); err != nil {
+		t.Fatalf("set --since: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("--since 0 dropped an event it was told to keep:\n%s", sink.String())
+	}
+}
+
+// A saved report has to say what it covers. Without the window on the
+// invocation line the page looks like a full account of the namespace while
+// silently omitting everything older than a day.
+func TestDiagSweepHTMLRecordsTheWindowInTheInvocation(t *testing.T) {
+	quietRender(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{
+		"namespace": "prod", "since": "7d", "out": out,
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(page), "--since 7d") {
+		t.Error("the report does not record the event window it was built with")
+	}
+}
+
+// An unbounded run has no window to record, and a page claiming `--since 0`
+// would read as a setting rather than as the absence of one.
+func TestDiagSweepHTMLOmitsAnUnlimitedWindow(t *testing.T) {
+	quietRender(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{
+		"namespace": "prod", "since": "0", "out": out,
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(page), "--since") {
+		t.Error("an unlimited run recorded a --since it was not given")
 	}
 }

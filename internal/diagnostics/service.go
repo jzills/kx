@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -20,6 +21,11 @@ type Service struct {
 	Client kubernetes.Interface
 	Events events.Service
 	Graph  graph.Builder
+	// MaxEventAge bounds how far back warning events are read. Zero — the
+	// zero value, so a Service built without one behaves as it always did —
+	// means no bound. The CLI resolves the window from --since and the
+	// event_max_age setting and sets it here.
+	MaxEventAge time.Duration
 }
 
 // New builds a diagnostics service over a Kubernetes client.
@@ -366,6 +372,14 @@ func (s Service) warningEvents(
 	groups := map[groupKey]*EventSummary{}
 	var order []groupKey
 
+	// The window is measured from one instant for the whole gather, so two
+	// events read a moment apart cannot fall on opposite sides of a cutoff
+	// that moved between them.
+	var cutoff time.Time
+	if s.MaxEventAge > 0 {
+		cutoff = time.Now().Add(-s.MaxEventAge)
+	}
+
 	for _, t := range targets {
 		for _, event := range s.Events.Filter(all, t.name, t.kind) {
 			if event.Type != "Warning" {
@@ -377,11 +391,23 @@ func (s Service) warningEvents(
 			key := groupKey{event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name}
 			count := events.Count(event)
 			timestamp := events.Timestamp(event)
+			// Dropped before grouping, so an occurrence outside the window
+			// cannot inflate the ×count of one inside it. An event with no
+			// timestamp at all is kept: it cannot be shown to be stale, and
+			// hiding a live failure over a missing field is the worse error.
+			if !cutoff.IsZero() && !timestamp.IsZero() && timestamp.Before(cutoff) {
+				continue
+			}
 			if existing, ok := groups[key]; ok {
 				existing.Count += count
-				existing.Message = event.Message
-				if !timestamp.IsZero() {
+				// The newest occurrence, not the last one read: the API
+				// returns events in no useful order, and this timestamp is
+				// what the report prints as "most recent" and what the
+				// window above is measured against. The message travels
+				// with it so the two describe the same occurrence.
+				if timestamp.After(existing.LastTimestamp) {
 					existing.LastTimestamp = timestamp
+					existing.Message = event.Message
 				}
 				continue
 			}

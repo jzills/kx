@@ -12,6 +12,8 @@ With no index, sweeps every workload in the current namespace, or in the namespa
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
+Warning events older than 24h are ignored, so a failure from last month stops holding a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the event_max_age setting changes the default.
+
 ## Usage
 
 ```text
@@ -41,6 +43,7 @@ kx diagnostic [OPTIONS] [index]
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
+| `--since string` | Ignore warning events older than this, such as 30m, 12h or 7d; 0 for no limit (default from event_max_age, 24h) |
 
 ## Global options
 
@@ -58,5 +61,6 @@ kx diagnostic -n prod
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json
+kx diagnostic --since 7d
 kx diagnostic -A --fail-on critical --out report.html
 ```

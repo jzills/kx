@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultTheme is the palette used when none is configured. It lives here until
@@ -19,6 +20,22 @@ const DefaultTheme = "github-dark"
 // DefaultTheme: a hardcoded literal here rather than importing scanner, same
 // stopgap as DefaultTheme not importing theme.
 const DefaultEngine = "scout"
+
+// DefaultEventMaxAge is how far back kx diag looks for warning events when
+// nothing is configured.
+//
+// Finite rather than unlimited, which is a deliberate behaviour choice and not
+// merely a safe-looking number. A warning event drives a finding, a finding
+// drives the verdict, and a verdict drives --fail-on's exit code — so one
+// FailedScheduling from three weeks ago used to hold a resource at "warnings"
+// forever and fail a CI gate on a cluster with nothing currently wrong with
+// it. That is the same failure PodPhaseCounts.Stalled was fixed for.
+//
+// A day rather than a week because the API server's own default event TTL is
+// an hour: on a stock cluster this changes nothing at all, and it only takes
+// effect where somebody raised --event-ttl and inherited the stale verdicts
+// that come with it.
+const DefaultEventMaxAge = 24 * time.Hour
 
 // DefaultDebugImage is the image kx debug attaches when none is configured.
 // Small, ubiquitous, and carries a shell — which is the whole point, since the
@@ -34,6 +51,9 @@ type Config struct {
 	Theme        string
 	Engine       string
 	DebugImage   string
+	// EventMaxAge bounds how old a warning event may be and still be
+	// reported by kx diag. Zero means no bound.
+	EventMaxAge time.Duration
 }
 
 // Default returns the configuration used when nothing is set.
@@ -45,6 +65,7 @@ func Default() Config {
 		Theme:        DefaultTheme,
 		Engine:       DefaultEngine,
 		DebugImage:   DefaultDebugImage,
+		EventMaxAge:  DefaultEventMaxAge,
 	}
 }
 
@@ -80,6 +101,8 @@ func Settings() []Setting {
 		{"max_history", "KX_MAX_HISTORY", "Number of kx get results kept in history"},
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
+		{"event_max_age", "KX_EVENT_MAX_AGE",
+			"How far back kx diag reads warning events; 0 for no limit"},
 		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
 		{"", "KX_CONFIG", "Config file path, instead of ~/.kx/config.toml"},
 	}
@@ -172,6 +195,18 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.Engine = name
 		}
+		if value, ok := raw["event_max_age"]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return cfg, errors.New(
+					"kx: event_max_age must be a string, such as \"7d\"")
+			}
+			window, err := ParseDuration(text)
+			if err != nil {
+				return cfg, fmt.Errorf("kx: event_max_age: %w", err)
+			}
+			cfg.EventMaxAge = window
+		}
 		if value, ok := raw["debug_image"]; ok {
 			name, ok := value.(string)
 			if !ok {
@@ -209,6 +244,13 @@ func (l Loader) Load() (Config, error) {
 	}
 	if value, ok := os.LookupEnv("KX_ENGINE"); ok {
 		cfg.Engine = value
+	}
+	if value, ok := os.LookupEnv("KX_EVENT_MAX_AGE"); ok {
+		window, err := ParseDuration(value)
+		if err != nil {
+			return cfg, fmt.Errorf("kx: KX_EVENT_MAX_AGE: %w", err)
+		}
+		cfg.EventMaxAge = window
 	}
 	if value, ok := os.LookupEnv("KX_DEBUG_IMAGE"); ok {
 		cfg.DebugImage = value

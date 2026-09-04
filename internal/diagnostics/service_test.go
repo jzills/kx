@@ -460,3 +460,153 @@ func TestGatherWorkloadStillResolvesItsPods(t *testing.T) {
 		t.Fatalf("got %d pods, want 1", len(data.Pods))
 	}
 }
+
+// agedWarning is a warning event last seen a given time ago.
+func agedWarning(name, reason, kind, object string, count int32, age time.Duration) *corev1.Event {
+	event := warning(name, reason, kind, object, count)
+	event.LastTimestamp = metav1.NewTime(time.Now().Add(-age))
+	return event
+}
+
+// The point of the window: a warning from three weeks ago is not what is wrong
+// with a workload today, and while it was reported it held the verdict at
+// "warnings" — and any --fail-on gate red — indefinitely.
+func TestGatherDropsEventsOlderThanTheWindow(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 1, 10*time.Minute),
+		agedWarning("e2", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+	s.MaxEventAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 || data.WarningEvents[0].Reason != "Unhealthy" {
+		t.Fatalf("events = %+v, want only the 10m-old Unhealthy", data.WarningEvents)
+	}
+}
+
+// Zero is "no window", and it has to stay the zero value's meaning: every
+// caller that builds a Service without setting one gets today's behaviour.
+func TestGatherWithoutAWindowKeepsEveryEvent(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 1, 10*time.Minute),
+		agedWarning("e2", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 2 {
+		t.Fatalf("events = %+v, want both", data.WarningEvents)
+	}
+}
+
+// An event carrying neither a last-seen nor a creation time cannot be shown to
+// be stale, and dropping it would hide a live failure on the strength of a
+// missing field. The renderer already omits the age for one of these.
+func TestGatherKeepsAnEventWithNoTimestamp(t *testing.T) {
+	undated := warning("e1", "Unhealthy", "Pod", "solo", 1)
+	undated.LastTimestamp = metav1.Time{}
+	undated.CreationTimestamp = metav1.Time{}
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		undated,
+	)
+	s.MaxEventAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want the undated event kept", data.WarningEvents)
+	}
+}
+
+// Filtered before grouping, not after: an occurrence outside the window must
+// not inflate the ×count of the one inside it, which is the number the finding
+// and the report both print.
+func TestGatherDoesNotCountFilteredOccurrencesInATally(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 2, 10*time.Minute),
+		agedWarning("e2", "Unhealthy", "Pod", "solo", 40, 21*24*time.Hour),
+	)
+	s.MaxEventAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want one", data.WarningEvents)
+	}
+	if got := data.WarningEvents[0].Count; got != 2 {
+		t.Errorf("count = %d, want 2 — the 40 occurrences outside the window are not this week's", got)
+	}
+}
+
+// A sweep reads the same events through the same helper, so the window has to
+// hold there too — a namespace triage is where a stale warning does the most
+// damage, since it is one row of many nobody re-reads.
+func TestSweepDropsEventsOlderThanTheWindow(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+	s.MaxEventAge = time.Hour
+
+	all, err := s.Sweep(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("Sweep returned nothing to check")
+	}
+	for _, data := range all {
+		if len(data.WarningEvents) != 0 {
+			t.Errorf("%s/%s events = %+v, want none", data.Kind, data.Name, data.WarningEvents)
+		}
+	}
+}
+
+// The grouped summary's timestamp is what the report prints as the most recent
+// occurrence, and what the window is measured against. The API returns events
+// in no particular order, so taking whichever arrived last reported an older
+// occurrence as the newest.
+func TestGroupedEventKeepsTheNewestOccurrence(t *testing.T) {
+	newest := time.Now().Add(-5 * time.Minute)
+	old := warning("e2", "Unhealthy", "Pod", "solo", 1)
+	old.LastTimestamp = metav1.NewTime(time.Now().Add(-6 * time.Hour))
+	old.Message = "the old one"
+	recent := warning("e1", "Unhealthy", "Pod", "solo", 1)
+	recent.LastTimestamp = metav1.NewTime(newest)
+	recent.Message = "the recent one"
+
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		// Named so the API lists the newest first — the order in which a
+		// "last one wins" grouping keeps the older occurrence.
+		recent, old,
+	)
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want one group", data.WarningEvents)
+	}
+	summary := data.WarningEvents[0]
+	if !summary.LastTimestamp.Equal(newest) {
+		t.Errorf("LastTimestamp = %v, want the newest occurrence %v", summary.LastTimestamp, newest)
+	}
+	if summary.Message != "the recent one" {
+		t.Errorf("Message = %q, want the newest occurrence's message", summary.Message)
+	}
+}

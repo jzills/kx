@@ -14,6 +14,7 @@ what the settings do and when styling applies.
 | `max_history` | `KX_MAX_HISTORY` | integer | `10` |
 | `shells` | `KX_SHELLS` | list of strings | `["bash", "sh"]` |
 | `debug_image` | `KX_DEBUG_IMAGE` | string | `busybox` |
+| `event_max_age` | `KX_EVENT_MAX_AGE` | duration string | `"24h"` |
 | `theme_disable` | `KX_THEME_DISABLE` | boolean | `false` |
 
 Environment variables win over the file. `shells` is a TOML array in the file
@@ -31,8 +32,11 @@ engine = "trivy"
 max_history = 25
 shells = ["zsh", "bash", "sh"]
 debug_image = "alpine"
+event_max_age = "7d"
 theme_disable = false
 ```
+
+`event_max_age` is a duration: `30m`, `12h`, `7d`. `"0"` removes the limit.
 
 Nothing here is required — kx runs on the defaults with no config file at all.
 

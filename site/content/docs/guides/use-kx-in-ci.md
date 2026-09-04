@@ -98,6 +98,23 @@ An image whose scan failed breaches every threshold, for the same reason a
 missing test is not a passing one: an image kx could not read has not been
 shown to be clean.
 
+### Old warning events don't hold the gate red
+
+A warning event drives a finding, a finding drives the verdict, and the
+verdict drives the gate — so without a limit, one `FailedScheduling` from
+three weeks ago fails the job forever on a cluster with nothing currently
+wrong with it. `kx diag` reads warning events from the last 24h only:
+
+```bash
+kx diag -A --fail-on warning --since 7d    # a week's worth instead
+kx diag -A --fail-on warning --since 0     # everything the cluster still has
+```
+
+Set your own default with `event_max_age` in
+[`config.toml`](../../reference/configuration/), or `KX_EVENT_MAX_AGE` in the
+job's environment. Most clusters discard events after an hour anyway — the
+window only bites where `--event-ttl` was raised.
+
 ## The exit code is 2
 
 Two, not one, and the difference is the point:
