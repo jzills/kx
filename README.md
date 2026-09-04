@@ -92,9 +92,8 @@ kx get pods -n prod -l app=api   # anything else passes through to kubectl
 sharing a name keep separate numbers.
 
 Known kinds can drop the `get` — `kx pods`, `kx deploy -n kube-system`,
-`kx svc -m api` — kubectl shorthands (`po`, `deploy`, `svc`, `sts`, ...) and
-CRDs (short name, kind, or plural) included. A CRD resolves from kubectl's
-on-disk discovery cache, with no API call.
+`kx svc -m api` — kubectl's shorthands and your CRDs included. A CRD resolves
+from kubectl's on-disk discovery cache, with no API call.
 
 An integer after a kind relists just that index (`kx po 3`). Anything
 unrecognized falls back to `kx get <resource>`.
@@ -107,9 +106,8 @@ bare number.
 
 ### Triage a namespace
 
-Bare `kx diag` sweeps the current namespace — Deployments, StatefulSets,
-DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims, Ingresses, and
-pods nothing owns — and ranks what's unhealthy. It reads live usage too, so a
+Bare `kx diag` sweeps the current namespace — every workload kind, plus
+Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy. It reads live usage too, so a
 pod running hot against its memory limit is flagged as an OOMKill risk before
 it dies. Rows are indexed, so `kx diag 1` or `kx logs 2` drill straight in;
 `-A` sweeps every namespace, adding a NAMESPACE column.
@@ -130,7 +128,7 @@ diagnosed the same way, indexed from `kx get nodes` or `kx top nodes`.
 
 ### Take a node out of service
 
-- `kx cordon <index>` marks a node unschedulable, so nothing new lands on it.
+- `kx cordon <index>` marks a node unschedulable.
 - `kx drain <index>` also evicts what's already there, streaming kubectl's
   progress and prompting first unless you pass `--yes`.
 - `kx uncordon <index>` puts it back.
@@ -142,11 +140,9 @@ takes one, deliberately — a range is a way to take a cluster down by typo.
 
 ### Read a Secret in plaintext
 
-`kx secret <index> --decode` prints an indexed Secret's keys and values decoded,
-instead of the base64 kubectl returns. Values that aren't text show a
-`<binary, N bytes>` placeholder rather than garbling the table. `--key`/`-k`
-prints a single value raw — no banner, no wrapping — so it drops straight into
-a shell:
+`kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
+Values that aren't text show `<binary, N bytes>`. `--key`/`-k` prints a single
+value raw — no banner, no wrapping — so it drops straight into a shell:
 
 ```bash
 export PGPASSWORD=$(kx secret 1 --decode -k password)
@@ -271,9 +267,8 @@ points kx at a different state file, so a second terminal keeps its own history.
 `KX_CONFIG` points kx at a config file other than `~/.kx/config.toml`, the way
 `KX_STATE` does for the state file.
 
-Styled output is emitted only when stdout is a terminal — piped or redirected
-output is plain text, so `kx get pods | grep worker` stays clean. The
-[`NO_COLOR`](https://no-color.org/) convention is honored as well.
+Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker`
+stays clean. [`NO_COLOR`](https://no-color.org/) is honored too.
 
 ## Themes
 
