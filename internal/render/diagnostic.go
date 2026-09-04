@@ -58,6 +58,27 @@ func windowSuffix(window time.Duration) string {
 	return ""
 }
 
+// A finding and an event message are both sentences the cluster wrote, and
+// Kubernetes writes long ones — the scheduler's "0/1 nodes are available…"
+// runs past 200 columns. Wrapped here rather than left to the terminal, which
+// breaks a line at column 0: the continuation then starts to the left of the
+// section header and the block stops reading as a list at all.
+//
+// Each continuation is tucked one level inside the text it belongs to, so the
+// icon (or the event heading) keeps the left margin to itself and the eye can
+// still find where one entry ends and the next begins.
+const (
+	findingHang      = "      "
+	eventMessageHang = "        "
+)
+
+// proseLines wraps text to what is left of the prose width once a hanging
+// indent of hang columns is paid for, so the first line and every
+// continuation fit the same budget.
+func (r *Renderer) proseLines(text string, hang int) []string {
+	return wrapText(text, r.proseWidth()-hang)
+}
+
 // Diagnostic renders a full report for one resource.
 func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	// The verdict rides in the banner rather than on a line of its own.
@@ -93,8 +114,11 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary) +
-				r.style(theme.Muted, findingTime(finding)))
+			lines := r.findingLines(finding)
+			r.line("  " + icon + " " + lines[0])
+			for _, rest := range lines[1:] {
+				r.line(findingHang + rest)
+			}
 		}
 	}
 
@@ -184,6 +208,35 @@ func findingTime(f diagnostics.Finding) string {
 		return " · for " + duration
 	}
 	return ""
+}
+
+// findingLines is one finding as the lines it renders on: its summary wrapped
+// to the prose width, with the moment or duration from findingTime on the end
+// of the last line — or on a line of its own when that line has no room left.
+//
+// Inside the wrapping rather than appended after it, because the time is part
+// of the sentence: appended, it would be the one thing in the block still able
+// to run past the width the rest of it was just wrapped to.
+func (r *Renderer) findingLines(finding diagnostics.Finding) []string {
+	wrapped := r.proseLines(finding.Summary, len(findingHang))
+	lines := make([]string, len(wrapped))
+	for i, text := range wrapped {
+		lines[i] = r.style(theme.Body, text)
+	}
+
+	suffix := findingTime(finding)
+	if suffix == "" {
+		return lines
+	}
+	last := len(wrapped) - 1
+	if len(wrapped[last])+len(suffix) <= r.proseWidth()-len(findingHang) {
+		lines[last] += r.style(theme.Muted, suffix)
+		return lines
+	}
+	// No room, so the time takes a line of its own — still the entry's own
+	// indent, and still carrying its separator, since what it separates is
+	// the summary above it rather than a neighbour on the same line.
+	return append(lines, r.style(theme.Muted, strings.TrimPrefix(suffix, " ")))
 }
 
 // containerState names the state with the moment it stopped, when it has
@@ -285,7 +338,11 @@ func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.
 			line += r.style(theme.Muted, " · "+age)
 		}
 		r.line("    " + line)
-		r.line("      " + event.Message)
+		message := r.proseLines(event.Message, len(eventMessageHang))
+		r.line("      " + message[0])
+		for _, rest := range message[1:] {
+			r.line(eventMessageHang + rest)
+		}
 	}
 }
 

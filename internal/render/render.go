@@ -219,6 +219,24 @@ func StateHistory(history state.History)             { current.StateHistory(hist
 func State(entry state.State)                        { current.State(entry) }
 func SwitchTargets(history state.History, live Live) { current.SwitchTargets(history, live) }
 
+// proseMaxWidth is the width prose wraps to: the help screens, and the
+// findings and event messages a diagnostic report is mostly made of.
+//
+// Capped rather than taken straight from the terminal: prose set to the full
+// width of a maximized window is measurably harder to read. Narrow terminals
+// still get their own width. Redirected output is capped too — it is read by
+// a person just as a terminal is, and a pipeline that wants unwrapped text
+// has --json.
+const proseMaxWidth = 92
+
+// proseWidth is the width prose has to fit inside.
+func (r *Renderer) proseWidth() int {
+	if width := r.width(); width < proseMaxWidth {
+		return width
+	}
+	return proseMaxWidth
+}
+
 // pipeWidth is the width used off-terminal. Wide enough that piped or
 // redirected output is never truncated, matching the Python console.
 const pipeWidth = 1000

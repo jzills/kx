@@ -76,8 +76,8 @@ func TestItemBlockKeepsDescriptionsInsideTheWidthCap(t *testing.T) {
 		if strings.Contains(line, path) {
 			continue
 		}
-		if len(line) > helpMaxWidth {
-			t.Errorf("line is %d columns, want at most %d:\n%q", len(line), helpMaxWidth, line)
+		if len(line) > proseMaxWidth {
+			t.Errorf("line is %d columns, want at most %d:\n%q", len(line), proseMaxWidth, line)
 		}
 	}
 	if !strings.Contains(out.String(), doc) {
