@@ -62,7 +62,7 @@ Standalone binaries for linux, macOS and Windows are attached to every
 
 [Install →](https://jzills.github.io/kx/docs/getting-started/install/)
 
-## Quickstart
+## Usage
 
 A `kx` session at a glance — one listing, then everything after it by number.
 
@@ -70,12 +70,9 @@ A `kx` session at a glance — one listing, then everything after it by number.
 kx get pods    # lists pods, numbering each row
 kx logs 3      # the third pod
 kx diag 3      # why it's unhealthy
-kx delete 3 5  # or several at once
 ```
 
-## Usage
-
-Every command takes the numbers `kx get` assigned.
+Indexes come several at a time, as ranges, or narrowed:
 
 ```bash
 kx delete 3 5                # several at once
