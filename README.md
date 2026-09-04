@@ -18,7 +18,9 @@
 
 </div>
 
-`kx` is a kubectl wrapper that adds index-based resource selection. Run `kx get <resource>` once, then reference any result by number instead of typing full resource names.
+`kx` is a kubectl wrapper that adds index-based resource selection. Run
+`kx get <resource>` once, then reference any result by number instead of typing
+full resource names.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
@@ -60,7 +62,7 @@ pipx run --spec kx-cli kx get pods
 Standalone binaries for linux, macOS and Windows are attached to every
 [GitHub Release](https://github.com/jzills/kx/releases).
 
-[Install →](https://jzills.github.io/kx/docs/getting-started/install/)
+[Full guide →](https://jzills.github.io/kx/docs/getting-started/install/)
 
 ## Usage
 
@@ -109,14 +111,17 @@ flagged as an OOMKill risk before it dies.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
 </div>
 
-`kx diag <index>` diagnoses a single resource: a top level verdict, a findings summary, a per-pod status table, log tails from broken containers and warning events — one screen instead of four kubectl commands.
+`kx diag <index>` diagnoses a single resource: a top level verdict, a findings
+summary, a per-pod status table, log tails from broken containers and warning
+events — one screen instead of four kubectl commands.
 
-[Triage a namespace →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
+[Full guide →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)
 
 ### Read a Secret in plaintext
 
-`kx secret <index> --decode` prints an indexed Secret's keys and values decoded. `--key`/`-k` prints a single
-value raw — no banner, no wrapping — so it drops straight into a shell.
+`kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
+`--key`/`-k` prints a single value raw — no banner, no wrapping — so it drops
+straight into a shell.
 
 ```bash
 export PGPASSWORD=$(kx secret 1 --decode -k password)
@@ -129,13 +134,13 @@ confirming first — that prints every credential you have.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
 </div>
 
-[Read a Secret in plaintext →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
+[Full guide →](https://jzills.github.io/kx/docs/guides/read-a-secret/)
 
 ### Scan images for vulnerabilities
 
-`kx scan <index>` scans the unique container images of an indexed workload. Bare `kx scan` sweeps every
-workload in the namespace. Results come back as a severity summary, or the full
-per-image CVE report with `--full`.
+`kx scan <index>` scans the unique container images of an indexed workload.
+Bare `kx scan` sweeps every workload in the namespace. Results come back as a
+severity summary, or the full per-image CVE report with `--full`.
 
 Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/)
 by default, or [Trivy](https://trivy.dev/) and
@@ -145,7 +150,19 @@ by default, or [Trivy](https://trivy.dev/) and
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </div>
 
-[Scan images for vulnerabilities →](https://jzills.github.io/kx/docs/guides/scan-images/)
+[Full guide →](https://jzills.github.io/kx/docs/guides/scan-images/)
+
+### Map what owns what
+
+`kx tree <index>` walks the ownership graph — Deployment to ReplicaSet to Pods —
+and indexes every node it draws, so anything in the tree is one number away.
+Bare `kx tree` graphs the whole namespace.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>
+</div>
+
+[Full guide →](https://jzills.github.io/kx/docs/guides/ownership-tree/)
 
 ### View reports in a browser
 
@@ -160,33 +177,11 @@ has no room for.
 `--out <path>` writes the page to a file instead of serving it, which is what
 you want in CI — `kx diag --out report.html` is the whole command.
 
-[Browser reports →](https://jzills.github.io/kx/docs/guides/browser-reports/)
-
-#### `kx diag --html`
-
-A namespace sweep's severity-sorted findings, filterable and sortable by any
-column, with a group-by for larger sweeps.
-
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
 </div>
 
-#### `kx scan --html`
-
-Per-image severity counts up top; the CVE table below groups by image and
-expands each row into its full detail.
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/scan-html.png" alt="kx scan --html dashboard" width="800"/>
-</div>
-
-#### `kx tree --html`
-
-The ownership graph as a collapsible tree, indexed like every other kx listing.
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree --html dashboard" width="800"/>
-</div>
+[Full guide →](https://jzills.github.io/kx/docs/guides/browser-reports/)
 
 ## Use kx in CI
 
@@ -203,7 +198,7 @@ kx diag -A --fail-on critical --out report.html      # publishes the report *and
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".
 
-[Using kx in CI →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)
+[Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)
 
 ## History
 
@@ -222,70 +217,65 @@ Each entry remembers the context it was listed in, so a staging index is never
 resolved against production — `kx` refuses and relists instead. `KX_STATE`
 points kx at a different state file, so a second terminal keeps its own history.
 
-[State and history →](https://jzills.github.io/kx/docs/concepts/state/)
+[Full guide →](https://jzills.github.io/kx/docs/concepts/state/)
 
 ## Configuration
 
-`kx` reads `~/.kx/config.toml`; environment variables override file settings.
-
-| Key | Env var | Default | Description |
-| --- | --- | --- | --- |
-| `max_history` | `KX_MAX_HISTORY` | `10` | Number of `kx get` results kept in history. |
-| `shells` | `KX_SHELLS` (comma-separated) | `["bash", "sh"]` | Shell candidates for `kx exec`. |
-| `debug_image` | `KX_DEBUG_IMAGE` | `"busybox"` | Image `kx debug` attaches to a pod, or runs on a node; `--image` overrides it. |
-| `theme` | `KX_THEME` | `"github-dark"` | Color theme for all output. |
-| `theme_disable` | `KX_THEME_DISABLE` | `false` | Disable styled output (same as `--no-color`). |
-| `engine` | `KX_ENGINE` | `"scout"` | Default scan engine for `kx scan` (`scout`, `trivy`, `grype`). |
-
-`KX_CONFIG` points kx at a config file other than `~/.kx/config.toml`, the way
-`KX_STATE` does for the state file.
+`kx` reads `~/.kx/config.toml`, and every setting takes a `KX_*` environment
+override. The two worth changing have commands of their own — `kx theme` and
+`kx engine` both persist your choice.
 
 Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker`
 stays clean. [`NO_COLOR`](https://no-color.org/) is honored too.
 
+[Full guide →](https://jzills.github.io/kx/docs/reference/configuration/)
+
 ## Themes
 
-`kx theme` lists the available themes with a preview of each; `kx theme <name|index>` persists a choice to `~/.kx/config.toml`.
+`kx theme` lists the available themes with a preview of each. `kx theme <name>`
+persists your choice, by name or index.
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
 </div>
 
-Prefab themes: `github-dark` (default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light` (for light terminal backgrounds), and `plain` (no styling at all).
+Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
+`gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`,
+`mono`, `light` and `plain`.
 
 ## Commands
 
 <!-- commands-table-start -->
 | Command | Description |
 |---|---|
-| `kx annotate <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove annotations on an indexed resource. |
+| `kx annotate <index> [<key=value>...]` | Set or remove annotations on an indexed resource. |
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx cordon <index>...` | Mark one or more indexed Nodes unschedulable. |
-| `kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]` | Copy files to or from an indexed pod via kubectl cp. |
-| `kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]` | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
-| `kx delete <index>... [--yes/-y]` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
-| `kx describe <index>... [kubectl flags...]` | Show full kubectl describe output for one or more indexed resources. |
-| `kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
-| `kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]` | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
-| `kx edit <index> [kubectl flags...]` | Open an indexed resource in your editor via kubectl edit. |
+| `kx cp <src> <dest>` | Copy files to or from an indexed pod via kubectl cp. |
+| `kx debug <index> [<command>...]` | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
+| `kx delete <index>...` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
+| `kx describe <index>...` | Show full kubectl describe output for one or more indexed resources. |
+| `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| `kx drain <index>` | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
+| `kx edit <index>` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
-| `kx exec <index> [<command>...] [kubectl flags...]` | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
-| `kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
-| `kx label <index> [<key=value>...] [--overwrite] [--remove str]` | Set or remove labels on an indexed resource. |
-| `kx labels <index>... [--selector/-s]` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx logs <index>... [kubectl flags...]` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| `kx exec <index> [<command>...]` | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
+| `kx get <resource> [<index>...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
+| `kx label <index> [<key=value>...]` | Set or remove labels on an indexed resource. |
+| `kx labels <index>...` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
+| `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
-| `kx port-forward <index> <port> [kubectl flags...]` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| `kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int] [scanner flags...]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
-| `kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
-| `kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--out str] [--port int] [kubectl flags...]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
-| `kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
+| `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| `kx secret [<index>...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
+| `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
-| `kx yaml <index>... [--show str]` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
-| `kx state [<position>] [--all/-a] [--targets/-t]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
+| `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
+| `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
@@ -306,7 +296,7 @@ go test -race ./...
 
 `pre-commit run --all-files` runs gofmt and go vet, and regenerates the command
 table above from the command tree — it fails if the table has drifted from the
-commands it documents. Tests are not in the hook; run them yourself.
+commands it documents. Tests are not in the hook — run them yourself.
 
 The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)
 tapes — see [`demo/README.md`](demo/README.md) for seeding the demo namespace
