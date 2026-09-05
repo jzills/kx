@@ -895,15 +895,14 @@ func TestRecentOOMKillIsStillReported(t *testing.T) {
 	}
 }
 
-// Current state is never bounded: a container that is terminated *now* is
-// broken now, however long ago it died.
-func TestCurrentOOMKillIsReportedWhateverItsAge(t *testing.T) {
+// A termination the cluster did not date cannot be shown to be stale.
+func TestUndatedOOMKillIsReportedWhateverItsAge(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
 		LastTerminatedAt: longAgo,
 	}, windowStart)
 	if !hasSummaryContaining(findings, "OOMKilled") {
-		t.Errorf("findings = %v, want the current OOMKilled", summaries(findings))
+		t.Errorf("findings = %v, want the undated OOMKilled", summaries(findings))
 	}
 }
 
@@ -1025,15 +1024,13 @@ func TestBuildReportAppliesTheDataWindowToHistory(t *testing.T) {
 	}
 }
 
-// Bounding a run drops its rollup line, not its diagnosis. The pods that run
-// left behind are present state — a pod in Failed phase is failed now — so a
-// CronJob whose last run failed weeks ago still reads critical, which is why
-// bounding the run does not silence a schedule longer than the window.
+// A stale run goes quiet entirely — the rollup and the corpses it left.
 //
-// Only where those pods are gone too — ttlSecondsAfterFinished, a zero
-// history limit — does the run go quiet, and --since is what widens the
-// window for that.
-func TestStaleRunLosesItsRollupButNotItsPods(t *testing.T) {
+// This is the whole point of dating terminal state: bounding the run alone
+// achieved nothing, because the pods it failed with kept the verdict red
+// forever. A workload whose last run failed in July is not a workload with a
+// problem today; --since widens the window when it is.
+func TestStaleRunAndThePodsItFailedWithBothGoQuiet(t *testing.T) {
 	exit := int32(1)
 	data := Data{
 		Kind: kinds.CronJob, Name: "nightly", Since: windowStart,
@@ -1043,19 +1040,123 @@ func TestStaleRunLosesItsRollupButNotItsPods(t *testing.T) {
 		Pods: []PodDiagnostic{{
 			Name: "nightly-1", Phase: "Failed", TotalContainers: 1,
 			Containers: []ContainerDiagnostic{{
-				Name: "run", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+				Name: "run", State: "Terminated", TerminatedReason: "Error",
+				ExitCode: &exit, TerminatedAt: longAgo,
 			}},
 		}},
 	}
 	report := BuildReport(data)
 
-	if hasSummaryContaining(report.Findings, "Most recent run") {
-		t.Errorf("findings = %v, want the rollup dropped", summaries(report.Findings))
+	if len(report.Findings) != 0 {
+		t.Errorf("findings = %v, want none — every one of them is three weeks old",
+			summaries(report.Findings))
 	}
-	if !hasSummaryContaining(report.Findings, "Pod nightly-1 failed") {
-		t.Errorf("findings = %v, want the failed pod still reported", summaries(report.Findings))
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v, want healthy", report.Verdict)
 	}
-	if report.Verdict != Critical {
-		t.Errorf("verdict = %v, want critical — the run's pods are failed now", report.Verdict)
+}
+
+// A container that terminated is not doing anything: it finished, at a
+// moment, and stays finished. Reported forever, a Job whose pods died in
+// July reads critical in September — which is what bounding its run was
+// supposed to stop, and could not while its pods were unbounded.
+func TestStaleTerminatedContainerIsNotReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: longAgo,
+	}, windowStart)
+	if hasSummaryContaining(findings, "terminated") {
+		t.Errorf("findings = %v, want none for a container that died weeks ago",
+			summaries(findings))
+	}
+}
+
+func TestRecentTerminatedContainerIsStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: recently,
+	}, windowStart)
+	if !hasSummaryContaining(findings, "terminated: Error (exit 1)") {
+		t.Errorf("findings = %v, want the recent failure", summaries(findings))
+	}
+}
+
+func TestStaleTerminalOOMKillIsNotReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
+		TerminatedAt: longAgo,
+	}, windowStart)
+	if hasSummaryContaining(findings, "OOMKilled") {
+		t.Errorf("findings = %v, want none for an OOMKill from three weeks ago",
+			summaries(findings))
+	}
+}
+
+// The pod-level rollup follows its containers: a Failed pod is a pod that
+// finished failing, dated by the last of them to stop.
+func TestStaleFailedPodIsNotReported(t *testing.T) {
+	exit := int32(1)
+	findings := podFindings(PodDiagnostic{
+		Name: "job-1", Phase: "Failed", TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+			ExitCode: &exit, TerminatedAt: longAgo,
+		}},
+	}, windowStart)
+	if len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a pod that failed weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentFailedPodIsStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := podFindings(PodDiagnostic{
+		Name: "job-1", Phase: "Failed", TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+			ExitCode: &exit, TerminatedAt: recently,
+		}},
+	}, windowStart)
+	if !hasSummaryContaining(findings, "Pod job-1 failed") {
+		t.Errorf("findings = %v, want the recent failure", summaries(findings))
+	}
+}
+
+// A Failed pod with nothing to date it — evicted before its containers ran,
+// or a status the API never filled in — stays reported.
+func TestUndatedFailedPodIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{Name: "job-1", Phase: "Failed"}, windowStart)
+	if !hasSummaryContaining(findings, "Pod job-1 failed") {
+		t.Errorf("findings = %v, want an undatable failure kept", summaries(findings))
+	}
+}
+
+// The other half of the line: a container still failing is still failing,
+// however long it has been doing it. An ImagePullBackOff from three weeks ago
+// is not old news — it is a pod that has never run.
+func TestOngoingFailuresAreReportedWhateverTheirAge(t *testing.T) {
+	for _, reason := range []string{"CrashLoopBackOff", "ImagePullBackOff", "CreateContainerConfigError"} {
+		findings := containerFindings("nginx", ContainerDiagnostic{
+			Name: "app", State: "Waiting", WaitingReason: reason,
+			WaitingMessage: "still broken", LastTerminatedAt: longAgo, TerminatedAt: longAgo,
+		}, windowStart)
+		if len(findings) == 0 {
+			t.Errorf("%s produced no finding — an ongoing failure was bounded", reason)
+		}
+	}
+}
+
+// A pod that has been Pending for three weeks has been failing to schedule
+// for three weeks. Nothing about it has finished.
+func TestStalePendingPodIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "web-1", Phase: "Pending",
+		Scheduling: SchedulingInfo{Schedulable: false, Reason: "Unschedulable",
+			Message: "0/1 nodes are available"},
+	}, windowStart)
+	if !hasSummaryContaining(findings, "Unschedulable") {
+		t.Errorf("findings = %v, want the ongoing scheduling failure", summaries(findings))
 	}
 }

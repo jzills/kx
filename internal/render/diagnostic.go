@@ -148,7 +148,7 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 				name, phaseCell, readyCell,
 				Plain(restarts(container)),
 				Plain(container.Name),
-				Styled(container.State, statusColor(container.State)),
+				Styled(containerState(container), statusColor(container.State)),
 				reasonCell,
 			})
 		}
@@ -169,6 +169,20 @@ func restarts(container diagnostics.ContainerDiagnostic) string {
 		return count + " (" + age + ")"
 	}
 	return count
+}
+
+// containerState names the state with the moment it stopped, when it has
+// stopped — "Terminated (46d ago)".
+//
+// A report can read healthy with corpses still in its table, since findings
+// about a container that finished before the window are dropped while the
+// table goes on listing what exists. The age is what keeps those two honest
+// with each other.
+func containerState(container diagnostics.ContainerDiagnostic) string {
+	if age := FormatAge(container.TerminatedAt); age != "" {
+		return container.State + " (" + age + ")"
+	}
+	return container.State
 }
 
 // Log tokens that read as failures rather than warnings.

@@ -55,9 +55,15 @@ don't exist.
 ## Now, not once
 
 Only what happened in the last 24h is reported — a warning event, a restart
-or OOMKill a container recovered from, a run that failed. What a resource is
-doing *now* is always reported, however long it has been doing it: a container
-in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+or OOMKill a container recovered from, a pod or run that failed. What is still
+going wrong is always reported, however long it has been going wrong: a
+container in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+
+The line is *finished* versus *ongoing*, not past versus present. A container
+that terminated with an error stopped at a moment and stays stopped, so it is
+dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that
+has never run, which is a problem now. Findings that carry an age are the ones
+`--since` can hide.
 
 That line matters because a finding drives the verdict and the verdict drives
 [`--fail-on`](../use-kx-in-ci/). Without it, one `FailedScheduling` from three
@@ -68,11 +74,9 @@ kx diag --since 7d    # a week of history
 kx diag --since 0     # everything, the old behaviour
 ```
 
-A run that failed outside the window loses its `Most recent run:` line, not
-its diagnosis: the failed pods it left behind are current state, so a CronJob
-whose last run failed weeks ago still reads critical. Widen the window where
-those pods have been cleaned up. `diag_max_age` in
-[config.toml](../../reference/configuration/) sets your own default.
+A schedule longer than the window wants `--since` widened: a weekly CronJob
+whose last run failed six days ago needs `--since 7d` to see it. `diag_max_age`
+in [config.toml](../../reference/configuration/) sets your own default.
 
 ## Usage as a signal, not just state
 

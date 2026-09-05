@@ -51,15 +51,23 @@ func (s Severity) Token() string {
 
 // ContainerDiagnostic is one container's flattened status.
 type ContainerDiagnostic struct {
-	Name                 string
-	Ready                bool
-	Started              *bool
-	RestartCount         int32
-	State                string // "Running" | "Waiting" | "Terminated" | "Unknown"
-	WaitingReason        string
-	WaitingMessage       string
-	TerminatedReason     string
-	ExitCode             *int32
+	Name             string
+	Ready            bool
+	Started          *bool
+	RestartCount     int32
+	State            string // "Running" | "Waiting" | "Terminated" | "Unknown"
+	WaitingReason    string
+	WaitingMessage   string
+	TerminatedReason string
+	ExitCode         *int32
+	// TerminatedAt is when the container this diagnostic describes stopped,
+	// set only while it is in the terminated state.
+	//
+	// A terminated container is not doing anything: it finished, at this
+	// moment, and stays finished. That makes it history like the rest —
+	// Kubernetes keeps a terminated pod's object until GC, so without a date
+	// a Job whose pods died in July reads critical in September.
+	TerminatedAt         time.Time
 	LastTerminatedReason string
 	LastExitCode         *int32
 	// LastTerminatedAt is when the previous run of this container ended.
@@ -78,6 +86,20 @@ type ContainerDiagnostic struct {
 	CPULimit    *resource.Quantity
 	MemoryUsage *resource.Quantity
 	MemoryLimit *resource.Quantity
+}
+
+// FinishedAt is when this pod stopped, taken from the last of its containers
+// to terminate. Zero while any container is still running, and for a pod that
+// failed without leaving a dated container status behind — an eviction before
+// the containers started, or a status the API never filled in.
+func (p PodDiagnostic) FinishedAt() time.Time {
+	var latest time.Time
+	for _, container := range p.Containers {
+		if container.TerminatedAt.After(latest) {
+			latest = container.TerminatedAt
+		}
+	}
+	return latest
 }
 
 // SchedulingInfo records why a pod could not be placed.
@@ -210,8 +232,11 @@ type PodPhaseCounts struct {
 // shipped) failing a CI gate forever on a cluster with nothing wrong with it.
 //
 // The pod itself is not lost: a pod that failed is a fact about the workload
-// that owns it, and kx diag on that workload reports it. A node is not the
-// right place to be told about something that finished days ago.
+// that owns it, and kx diag on that workload reports it while it is recent —
+// dated by the container that stopped last, under the same window as
+// everything else that has finished. A node is not the right place to be told
+// about something that finished days ago, and after long enough neither is
+// the workload.
 func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Unknown }
 
 // Active is the pods the node is still expected to be running: everything

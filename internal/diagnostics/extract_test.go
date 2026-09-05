@@ -470,3 +470,48 @@ func TestJobHealthOfARunningJobHasNoFailureTime(t *testing.T) {
 		t.Errorf("FailedAt = %v, want zero for a job that has not failed", got)
 	}
 }
+
+// The current terminated state has its own timestamp, separate from the
+// previous one — a container that is stopped now stopped at a moment, and
+// that moment is what says whether its failure is this week's news.
+func TestContainerDiagnosticKeepsWhenItTerminated(t *testing.T) {
+	finished := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	status := corev1.ContainerStatus{
+		Name: "migrate",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			Reason: "Error", ExitCode: 1, FinishedAt: finished,
+		}},
+	}
+	got := containerDiagnostic(&status, nil)
+	if !got.TerminatedAt.Equal(finished.Time) {
+		t.Errorf("TerminatedAt = %v, want %v", got.TerminatedAt, finished.Time)
+	}
+}
+
+func TestRunningContainerHasNoTerminationTime(t *testing.T) {
+	status := running("app")
+	if got := containerDiagnostic(&status, nil); !got.TerminatedAt.IsZero() {
+		t.Errorf("TerminatedAt = %v, want zero for a running container", got.TerminatedAt)
+	}
+}
+
+// A pod is finished when its last container is, so a multi-container pod is
+// dated by the one that outlived the others.
+func TestPodFinishedAtIsItsLastContainerToStop(t *testing.T) {
+	first := time.Now().Add(-3 * time.Hour)
+	last := time.Now().Add(-30 * time.Minute)
+	pod := PodDiagnostic{Containers: []ContainerDiagnostic{
+		{Name: "a", TerminatedAt: first},
+		{Name: "b", TerminatedAt: last},
+	}}
+	if got := pod.FinishedAt(); !got.Equal(last) {
+		t.Errorf("FinishedAt = %v, want %v", got, last)
+	}
+}
+
+func TestPodStillRunningHasNoFinishedAt(t *testing.T) {
+	pod := PodDiagnostic{Containers: []ContainerDiagnostic{{Name: "a"}}}
+	if got := pod.FinishedAt(); !got.IsZero() {
+		t.Errorf("FinishedAt = %v, want zero", got)
+	}
+}

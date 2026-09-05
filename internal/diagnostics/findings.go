@@ -237,15 +237,11 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 // the same treatment a Deployment scaled to zero already gets. Trouble in the
 // Job's own pods surfaces separately through podFindings.
 func jobFindings(job JobHealth, since time.Time) []Finding {
-	// A run that failed before the window opened is not this report's news.
-	//
-	// The failure is not lost with the line: the run's failed pods hang off
-	// the same Data, and a pod in Failed phase is present state, so it is
-	// reported however long ago it died. A CronJob whose last run failed
-	// weeks ago still reads critical — it loses this rollup, not its
-	// diagnosis. Only where the pods are gone too (ttlSecondsAfterFinished,
-	// a zero history limit) does the run go quiet, and --since widens the
-	// window for that.
+	// A run that failed before the window opened is not this report's news,
+	// and neither are the pods it failed with — those are dated by their own
+	// terminations and drop with it. A workload whose last run failed in July
+	// is not a workload with a problem today; --since widens the window when
+	// it is, and a schedule longer than the window wants that.
 	if outsideWindow(job.FailedAt, since) {
 		return nil
 	}
@@ -355,8 +351,13 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 			"Unschedulable: %s (pod %s)", detail, pod.Name)))
 	case pod.Phase == "Pending":
 		findings = append(findings, finding(Warning, Aggregate, "Pod "+pod.Name+" pending"))
-	case pod.Phase == "Failed":
-		findings = append(findings, finding(Critical, Aggregate, "Pod "+pod.Name+" failed"))
+	// A failed pod finished failing, dated by the last of its containers to
+	// stop. Kubernetes keeps it until GC, so without that date one preempted
+	// or OOM-evicted pod reports its workload broken indefinitely — the same
+	// reason PodPhaseCounts.Stalled leaves Failed out of a node's tally.
+	case pod.Phase == "Failed" && !outsideWindow(pod.FinishedAt(), since):
+		findings = append(findings, dated(Critical, Aggregate, pod.FinishedAt(),
+			"Pod "+pod.Name+" failed"))
 	case pod.Phase == "Running" && pod.ReadyContainers < pod.TotalContainers && !anyWaiting:
 		// A waiting container already produced its own, more specific finding.
 		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
@@ -375,6 +376,11 @@ func containerFindings(podName string, container ContainerDiagnostic, since time
 	// superseded by that evidence, and reporting it forever held a healthy
 	// workload at critical.
 	settled := outsideWindow(container.LastTerminatedAt, since)
+	// A terminated container stopped at a moment and stays stopped, so it is
+	// bounded like any other finished thing. Waiting and running are not:
+	// an ImagePullBackOff from three weeks ago is a pod that has never run,
+	// which is a problem now.
+	finished := outsideWindow(container.TerminatedAt, since)
 
 	switch {
 	case reason == "CrashLoopBackOff":
@@ -399,14 +405,15 @@ func containerFindings(podName string, container ContainerDiagnostic, since time
 	// Two OOMKills, told apart by which state they are in: the current one
 	// is happening now and carries no moment, the previous one happened at
 	// one and is dated by it.
-	case container.TerminatedReason == "OOMKilled":
-		findings = append(findings, finding(Critical, Cause, "OOMKilled in pod "+podName))
+	case container.TerminatedReason == "OOMKilled" && !finished:
+		findings = append(findings, dated(Critical, Cause, container.TerminatedAt,
+			"OOMKilled in pod "+podName))
 	case container.LastTerminatedReason == "OOMKilled" && !settled:
 		findings = append(findings, dated(Critical, Cause, container.LastTerminatedAt,
 			"OOMKilled in pod "+podName))
 	case container.TerminatedReason != "" && container.TerminatedReason != "Completed" &&
-		container.ExitCode != nil && *container.ExitCode != 0:
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		container.ExitCode != nil && *container.ExitCode != 0 && !finished:
+		findings = append(findings, dated(Critical, Cause, container.TerminatedAt, fmt.Sprintf(
 			"Container %s in pod %s terminated: %s (exit %d)",
 			container.Name, podName, container.TerminatedReason, *container.ExitCode)))
 	}

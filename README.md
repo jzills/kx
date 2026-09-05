@@ -197,9 +197,10 @@ kx diag -A --fail-on warning --since 7d              # a week of history, not ju
 ```
 
 Only the last 24h counts: a warning event, an OOMKill a container recovered
-from, a failed run. Anything older stops holding the gate red, while whatever
-a resource is doing *now* is always reported. `--since` changes the window per
-run, `diag_max_age` changes the default.
+from, a pod or run that failed. Anything older stops holding the gate red,
+while whatever is still going wrong — a CrashLoopBackOff, a Pending pod — is
+always reported. `--since` changes the window per run, `diag_max_age` changes
+the default.
 
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".

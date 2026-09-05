@@ -34,7 +34,7 @@
             <td>{{if eq $i 0}}{{ready $pod}}{{end}}</td>
             <td class="num">{{$c.RestartCount}}{{if $c.RestartCount}}{{with age $c.LastTerminatedAt}} <span class="dim">({{.}})</span>{{end}}{{end}}</td>
             <td>{{$c.Name}}</td>
-            <td class="{{statusClass $c.State}}">{{$c.State}}</td>
+            <td class="{{statusClass $c.State}}">{{$c.State}}{{with age $c.TerminatedAt}} <span class="dim">({{.}})</span>{{end}}</td>
             <td class="{{statusClass (reason $c)}}">{{reason $c}}</td>
             {{template "meter" cpuUsage $c}}
             {{template "meter" memoryUsage $c}}

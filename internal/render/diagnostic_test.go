@@ -495,3 +495,39 @@ func TestCurrentLogTailIsNotDated(t *testing.T) {
 		t.Errorf("a current tail was labelled as the previous instance:\n%s", out)
 	}
 }
+
+// A report can now read healthy with corpses still in its table, so the
+// table has to say how old they are — the same treatment RESTARTS gets, in
+// the cell that names the terminal state.
+func TestTerminatedStateCarriesItsAge(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Job, Name: "migrate", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "migrate-1", Phase: "Failed", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "run", State: "Terminated", TerminatedReason: "Error",
+				TerminatedAt: time.Now().Add(-46 * 24 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "Terminated (46d ago)") {
+		t.Errorf("state cell does not say when it stopped:\n%s", out)
+	}
+}
+
+func TestRunningStateStaysBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running",
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "Running (") {
+		t.Errorf("a running container was given a stop time:\n%s", out)
+	}
+}

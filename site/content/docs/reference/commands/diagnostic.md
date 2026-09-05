@@ -12,9 +12,11 @@ With no index, sweeps every workload in the current namespace, or in the namespa
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
-Only what happened in the last 24h is reported: a warning event, a past restart or OOMKill a container recovered from, a failed run. Without that bound, a failure from last month holds a verdict at warnings — and a --fail-on gate red — long after it stopped mattering. What a resource is doing *now* is always reported, however long it has been doing it. --since sets a different window (30m, 12h, 7d), --since 0 removes it, and the diag_max_age setting changes the default.
+Only what happened in the last 24h is reported: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. Without that bound, a failure from last month holds a verdict at warnings — and a --fail-on gate red — long after it stopped mattering.
 
-A failed run older than the window loses its rollup line, not its diagnosis: the run's failed pods are current state, so they are reported however long ago they died. Widen the window with --since where those pods have been cleaned up.
+What is still going wrong is always reported, however long it has been going wrong: a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints. The window bounds what finished, not what continues. Findings that carry an age are the ones it can hide.
+
+--since sets a different window (30m, 12h, 7d), --since 0 removes it, and the diag_max_age setting changes the default. A schedule longer than the window wants --since widened: a weekly CronJob whose last run failed six days ago needs --since 7d.
 
 ## Usage
 

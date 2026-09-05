@@ -217,6 +217,7 @@ func containerDiagnostic(status *corev1.ContainerStatus, spec *corev1.Container)
 		diagnostic.State = "Terminated"
 		diagnostic.TerminatedReason = status.State.Terminated.Reason
 		diagnostic.ExitCode = int32Ptr(status.State.Terminated.ExitCode)
+		diagnostic.TerminatedAt = status.State.Terminated.FinishedAt.Time
 	}
 
 	if last := status.LastTerminationState.Terminated; last != nil {
@@ -258,6 +259,12 @@ func schedulingInfo(status corev1.PodStatus) SchedulingInfo {
 // excerpt of a crash no finding mentions — and one API call per container to
 // produce it.
 func containerNeedsLogs(container ContainerDiagnostic, since time.Time) bool {
+	// A container that stopped before the window opened is one no finding
+	// will mention, so its tail would be an excerpt of a crash the report
+	// does not report.
+	if outsideWindow(container.TerminatedAt, since) {
+		return false
+	}
 	if !container.Ready || container.State != "Running" {
 		return true
 	}

@@ -104,18 +104,16 @@ Evidence drives a finding, a finding drives the verdict, and the verdict
 drives the gate — so without a limit, one `FailedScheduling` from three weeks
 ago, or one OOMKill a container recovered from last month, fails the job
 forever on a cluster with nothing currently wrong with it. `kx diag` reports
-only what happened in the last 24h — while what a resource is doing *now* is
-always reported, however long it has been doing it:
+only what happened in the last 24h — while what is still going wrong is
+always reported, however long it has been going wrong:
 
 ```bash
 kx diag -A --fail-on warning --since 7d    # a week's worth instead
 kx diag -A --fail-on warning --since 0     # everything the cluster still has
 ```
 
-A run that failed outside the window loses its rollup line, not its diagnosis
-— the failed pods it left behind are current state, so they are still
-reported. Widen the window where those pods have been cleaned up
-(`ttlSecondsAfterFinished`, a zero history limit).
+A schedule longer than the window wants `--since` widened: a weekly CronJob
+whose last run failed six days ago needs `--since 7d` to fail the gate on it.
 
 Set your own default with `diag_max_age` in
 [`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
