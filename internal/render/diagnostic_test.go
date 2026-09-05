@@ -400,3 +400,98 @@ func TestTriageAllHealthyCaptionNamesTheWindow(t *testing.T) {
 		t.Errorf("caption does not name the window:\n%s", out)
 	}
 }
+
+// An age on a finding is not decoration: it is how a reader tells which
+// lines --since governs. A finding that carries one can be filtered away by
+// a narrower window; one that does not is present state, and no window will
+// ever hide it.
+func TestDatedFindingCarriesItsAge(t *testing.T) {
+	report := reportWithFinding("OOMKilled in pod api-1")
+	report.Findings[0].At = time.Now().Add(-3 * time.Hour)
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "OOMKilled in pod api-1 · 3h ago") {
+		t.Errorf("finding is not dated:\n%s", out)
+	}
+}
+
+func TestPresentStateFindingCarriesNoAge(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "ready · ") {
+		t.Errorf("an undated finding was given an age:\n%s", out)
+	}
+}
+
+// kubectl's own spelling for the same fact — `kubectl get pods` prints
+// "21 (3h ago)" — so the column reads the way a reader already expects, and
+// says whether the restarts fall inside the window.
+func TestRestartsCarryTheirLastRestartTime(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 21,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "21 (3h ago)") {
+		t.Errorf("restart column does not say when:\n%s", out)
+	}
+}
+
+func TestRestartsWithoutATerminationStayBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 2,
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "(") {
+		t.Errorf("a bare restart count was given a parenthetical:\n%s", out)
+	}
+}
+
+// A log tail from a dead instance is an excerpt of a crash that happened at
+// some point, and reading it without knowing when is how an old crash gets
+// mistaken for the current one.
+func TestPreviousLogTailSaysHowOldItIs(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Waiting", WaitingReason: "CrashLoopBackOff",
+				LogLines: []string{"ERROR boom"}, LogSource: "previous", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "previous instance, 3h ago") {
+		t.Errorf("log heading does not date the instance:\n%s", out)
+	}
+}
+
+func TestCurrentLogTailIsNotDated(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Running", Ready: true,
+				LogLines: []string{"ERROR boom"}, LogSource: "current", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "previous instance") {
+		t.Errorf("a current tail was labelled as the previous instance:\n%s", out)
+	}
+}

@@ -945,3 +945,43 @@ func TestTriageResultWithoutReportsHasNoWindow(t *testing.T) {
 		t.Errorf("Window = %v, want zero", result.Window)
 	}
 }
+
+// The terminal dates a finding; a document has to carry the same fact, in a
+// form a pipeline can compare rather than parse out of "3h ago". Present
+// state has no moment, so the field is absent rather than zero.
+func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
+	at := time.Now().Add(-3 * time.Hour).UTC().Truncate(time.Second)
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{
+			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, At: at,
+				Summary: "OOMKilled in pod web-1"},
+			{Severity: diagnostics.Critical, Rank: diagnostics.Aggregate,
+				Summary: "Only 0/1 replicas ready"},
+		},
+	}
+	document, err := diagnosticJSON(report, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+
+	var parsed struct {
+		Resources []struct {
+			Findings []struct {
+				Summary string `json:"summary"`
+				At      string `json:"at"`
+			} `json:"findings"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	findings := parsed.Resources[0].Findings
+	if got := findings[0].At; got != at.Format(time.RFC3339) {
+		t.Errorf("at = %q, want %q", got, at.Format(time.RFC3339))
+	}
+	if findings[1].At != "" {
+		t.Errorf("at = %q, want it absent for a present-state finding", findings[1].At)
+	}
+}

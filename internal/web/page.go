@@ -441,6 +441,9 @@ var funcs = template.FuncMap{
 	// it per call to a closure over the page's own Captured time, so the same
 	// page value always renders the same bytes rather than reading the clock.
 	"age": func(time.Time) string { return "" },
+	// window spells a report's own window — "last 24h" — so the page says
+	// what it was allowed to see, the way the terminal banner does.
+	"window": render.WindowLabel,
 	"cpuUsage": func(c diagnostics.ContainerDiagnostic) Usage {
 		return usageOf(c.CPUUsage, c.CPULimit, "cpu")
 	},

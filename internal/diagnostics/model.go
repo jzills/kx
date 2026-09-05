@@ -307,10 +307,35 @@ const (
 )
 
 // Finding is one distilled health signal.
+//
+// At is when the thing it reports happened, and is set only for the signals
+// the window bounds: a warning event, a container's last termination, a run
+// that failed. A finding about present state — a container waiting now, a
+// replica count that is short now — has no At, because there is no moment to
+// name; it is true until it stops being true.
+//
+// That split is visible in the rendered report, and deliberately so: a line
+// that carries an age is a line --since can filter away, and a line without
+// one is a line no window will ever hide.
 type Finding struct {
 	Severity Severity
 	Rank     Rank
+	At       time.Time
 	Summary  string
+}
+
+// finding builds a finding about present state, which carries no moment.
+//
+// A constructor rather than a literal so the fields stay positional: Rank
+// ascends from most specific, so its zero value claims a finding names a
+// cause, and a keyed literal that omits it would make that claim silently.
+func finding(severity Severity, rank Rank, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, Summary: summary}
+}
+
+// dated builds a finding about something that happened at a moment.
+func dated(severity Severity, rank Rank, at time.Time, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, At: at, Summary: summary}
 }
 
 // Report is the analysed result.

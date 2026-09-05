@@ -36,12 +36,13 @@ func severityStyle(severity diagnostics.Severity) string {
 	}
 }
 
-// windowLabel spells the window a report was gathered under, for a caption
+// WindowLabel spells the window a report was gathered under, for a caption
 // that has to say what it was allowed to see. Empty when there is no window.
 //
 // The same vocabulary the --since flag reads, so the caption names a value
-// that can be typed straight back at it.
-func windowLabel(window time.Duration) string {
+// that can be typed straight back at it. Exported for the HTML report, which
+// has the same thing to say and must not invent its own spelling for it.
+func WindowLabel(window time.Duration) string {
 	if window <= 0 {
 		return ""
 	}
@@ -51,7 +52,7 @@ func windowLabel(window time.Duration) string {
 // windowSuffix is windowLabel as a trailing segment, for the lines that build
 // their own caption rather than going through Caption.
 func windowSuffix(window time.Duration) string {
-	if label := windowLabel(window); label != "" {
+	if label := WindowLabel(window); label != "" {
 		return " · " + label
 	}
 	return ""
@@ -92,7 +93,14 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary))
+			// Dated findings are the ones the window bounds, so the age
+			// doubles as the mark of what --since can filter away. The
+			// same trailing shape the event section already uses.
+			age := ""
+			if formatted := FormatAge(finding.At); formatted != "" {
+				age = r.style(theme.Muted, " · "+formatted)
+			}
+			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary) + age)
 		}
 	}
 
@@ -138,7 +146,7 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 			}
 			rows = append(rows, []Cell{
 				name, phaseCell, readyCell,
-				Plain(strconv.Itoa(int(container.RestartCount))),
+				Plain(restarts(container)),
 				Plain(container.Name),
 				Styled(container.State, statusColor(container.State)),
 				reasonCell,
@@ -146,6 +154,21 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 		}
 	}
 	r.Table(columns, rows)
+}
+
+// restarts spells the restart count with the time of the last one, the way
+// kubectl get pods does — "21 (3h ago)". The count alone is cumulative over
+// the pod's whole life, so it cannot say whether the thrashing is current,
+// which is the question the window turns on.
+func restarts(container diagnostics.ContainerDiagnostic) string {
+	count := strconv.Itoa(int(container.RestartCount))
+	if container.RestartCount == 0 {
+		return count
+	}
+	if age := FormatAge(container.LastTerminatedAt); age != "" {
+		return count + " (" + age + ")"
+	}
+	return count
 }
 
 // Log tokens that read as failures rather than warnings.
@@ -186,9 +209,17 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	r.line("  " + r.style(theme.Header, "LOGS"))
 	for _, e := range entries {
 		note := ""
+		// A tail from a dead instance is an excerpt of a crash that
+		// happened at some point; without its age an old one reads as the
+		// current failure.
+		if e.container.LogSource == "previous" {
+			if age := FormatAge(e.container.LastTerminatedAt); age != "" {
+				note = " · previous instance, " + age
+			}
+		}
 		if !e.container.LogFiltered {
 			// Nothing matched a severity token, so this is just the tail.
-			note = " · recent output"
+			note += " · recent output"
 		}
 		r.line("    " + r.style(theme.Muted,
 			"Pod/"+e.pod.Name+" · container "+e.container.Name+note))
@@ -206,7 +237,7 @@ func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.
 		// otherwise mean both "there are none" and "there are, and they
 		// were older than the window", and only one of those is reassuring.
 		empty := "No warning events"
-		if label := windowLabel(window); label != "" {
+		if label := WindowLabel(window); label != "" {
 			empty += " in the " + label
 		}
 		r.line("    " + r.style(theme.Muted, empty))

@@ -1325,3 +1325,68 @@ func TestRenderDiagKeepsANamespaceInTheBanner(t *testing.T) {
 		t.Errorf("banner has %d separators, want 2:\n%s", separators, banner)
 	}
 }
+
+// The HTML report has the same thing to say about what it was allowed to
+// see, and must say it in the same words — a page whose findings are dated
+// while the terminal's are not, or which spells the window differently, is
+// two reports of one gather.
+func TestDiagPageDatesAFindingAndItsRestarts(t *testing.T) {
+	report := criticalReport(t)
+	// Fixed relative to testMeta's Captured, like the event fixture above,
+	// so the page renders the same bytes every time.
+	terminated := time.Date(2026, 8, 1, 7, 41, 22, 0, time.UTC)
+	report.Findings[0].At = terminated
+	report.Pods[0].Containers[0].LastTerminatedAt = terminated
+	report.Pods[0].Containers[0].LogSource = "previous"
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	html := string(page)
+	age := render.FormatAgeAt(testMeta(t).Captured, terminated)
+	for _, want := range []string{
+		"2 of 3 replicas unavailable<span class=\"dim\"> · " + age,
+		"17 <span class=\"dim\">(" + age + ")</span>",
+		"previous instance, " + age,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("page does not carry %q", want)
+		}
+	}
+}
+
+// An undated finding is present state, and giving it an age would claim a
+// moment the cluster never reported.
+func TestDiagPageLeavesAnUndatedFindingBare(t *testing.T) {
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{criticalReport(t)},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if strings.Contains(string(page), "2 of 3 replicas unavailable<span") {
+		t.Error("an undated finding was given an age")
+	}
+}
+
+func TestDiagPageQualifiesAnEmptyEventSectionWithTheWindow(t *testing.T) {
+	report := criticalReport(t)
+	report.WarningEvents = nil
+	report.Window = 24 * time.Hour
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if !strings.Contains(string(page), "No warning events in the last 24h") {
+		t.Error("the empty event section does not name the window")
+	}
+}

@@ -6,7 +6,7 @@
       {{range .Findings}}
       <div class="finding-row">
         <span class="icon {{severityClass .Severity}}">{{severityIcon .Severity}}</span>
-        <span>{{.Summary}}</span>
+        <span>{{.Summary}}{{with age .At}}<span class="dim"> · {{.}}</span>{{end}}</span>
       </div>
       {{end}}
     {{else}}
@@ -32,7 +32,7 @@
             <td>{{if eq $i 0}}{{$pod.Name}}{{end}}</td>
             <td class="{{statusClass $pod.Phase}}">{{if eq $i 0}}{{$pod.Phase}}{{end}}</td>
             <td>{{if eq $i 0}}{{ready $pod}}{{end}}</td>
-            <td class="num">{{$c.RestartCount}}</td>
+            <td class="num">{{$c.RestartCount}}{{if $c.RestartCount}}{{with age $c.LastTerminatedAt}} <span class="dim">({{.}})</span>{{end}}{{end}}</td>
             <td>{{$c.Name}}</td>
             <td class="{{statusClass $c.State}}">{{$c.State}}</td>
             <td class="{{statusClass (reason $c)}}">{{reason $c}}</td>
@@ -65,7 +65,7 @@
     {{range $c := $pod.Containers}}
       {{if $c.LogLines}}
       <div>
-        <p class="subhead">Pod/{{$pod.Name}} · container {{$c.Name}}{{if not $c.LogFiltered}} · recent output{{end}}</p>
+        <p class="subhead">Pod/{{$pod.Name}} · container {{$c.Name}}{{if eq $c.LogSource "previous"}}{{with age $c.LastTerminatedAt}} · previous instance, {{.}}{{end}}{{end}}{{if not $c.LogFiltered}} · recent output{{end}}</p>
         <pre class="logblock">{{range $c.LogLines}}{{.}}
 {{end}}</pre>
       </div>
@@ -87,7 +87,7 @@
     {{end}}
     </div>
   {{else}}
-    <p class="dim">No warning events</p>
+    <p class="dim">No warning events{{with window .Window}} in the {{.}}{{end}}</p>
   {{end}}
 </div>
 {{end}}

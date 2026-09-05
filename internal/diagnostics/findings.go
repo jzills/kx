@@ -137,25 +137,25 @@ func nodeFindings(node NodeHealth) []Finding {
 		if condition.Type == "Ready" {
 			switch condition.Status {
 			case "False":
-				findings = append(findings, Finding{Critical, Cause,
-					"Not ready: " + conditionDetail(condition)})
+				findings = append(findings, finding(Critical, Cause,
+					"Not ready: "+conditionDetail(condition)))
 			case "Unknown":
-				findings = append(findings, Finding{Critical, Cause,
-					"Node status unknown: " + conditionDetail(condition)})
+				findings = append(findings, finding(Critical, Cause,
+					"Node status unknown: "+conditionDetail(condition)))
 			}
 			continue
 		}
 		if label, pressure := pressureConditions[condition.Type]; pressure && condition.Status == "True" {
-			findings = append(findings, Finding{Critical, Cause,
-				label + ": " + conditionDetail(condition)})
+			findings = append(findings, finding(Critical, Cause,
+				label+": "+conditionDetail(condition)))
 		}
 	}
 
 	// Warning, not critical, and deliberately so: a cordoned node is usually
 	// cordoned on purpose, and it is exactly what kx cordon just did.
 	if node.Unschedulable {
-		findings = append(findings, Finding{Warning, Cause,
-			"Cordoned: no new pods will be scheduled here"})
+		findings = append(findings, finding(Warning, Cause,
+			"Cordoned: no new pods will be scheduled here"))
 	}
 
 	// An aggregate, and ranked as one — a node reporting both a condition and
@@ -166,8 +166,8 @@ func nodeFindings(node NodeHealth) []Finding {
 	// Against Active, not Total: the two halves of the ratio have to count the
 	// same pods, and Stalled leaves the terminated ones out.
 	if stalled := node.Pods.Stalled(); stalled > 0 {
-		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
-			"%d/%d pods not running (%s)", stalled, node.Pods.Active(), phaseBreakdown(node.Pods))})
+		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+			"%d/%d pods not running (%s)", stalled, node.Pods.Active(), phaseBreakdown(node.Pods))))
 	}
 	return findings
 }
@@ -210,25 +210,25 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 	var findings []Finding
 	if replicas.Generation != nil && replicas.ObservedGeneration != nil &&
 		*replicas.ObservedGeneration < *replicas.Generation {
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
 			"Rollout stalled: observed generation %d behind spec generation %d",
-			*replicas.ObservedGeneration, *replicas.Generation)})
+			*replicas.ObservedGeneration, *replicas.Generation)))
 	}
 	if replicas.Ready < replicas.Desired {
 		severity := Warning
 		if replicas.Ready == 0 && replicas.Desired > 0 {
 			severity = Critical
 		}
-		findings = append(findings, Finding{severity, Aggregate, fmt.Sprintf(
-			"Only %d/%d replicas ready", replicas.Ready, replicas.Desired)})
+		findings = append(findings, finding(severity, Aggregate, fmt.Sprintf(
+			"Only %d/%d replicas ready", replicas.Ready, replicas.Desired)))
 	}
 	if replicas.Available < replicas.Desired {
-		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
-			"%d/%d replicas available", replicas.Available, replicas.Desired)})
+		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+			"%d/%d replicas available", replicas.Available, replicas.Desired)))
 	}
 	if replicas.Updated < replicas.Desired {
-		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
-			"Rollout in progress: %d/%d replicas updated", replicas.Updated, replicas.Desired)})
+		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+			"Rollout in progress: %d/%d replicas updated", replicas.Updated, replicas.Desired)))
 	}
 	return findings
 }
@@ -251,11 +251,11 @@ func jobFindings(job JobHealth, since time.Time) []Finding {
 	}
 	var findings []Finding
 	if job.BackoffLimitExceeded {
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"BackoffLimitExceeded (%d/%d failed)", job.Failed, job.BackoffLimit)})
+		findings = append(findings, dated(Critical, Cause, job.FailedAt, fmt.Sprintf(
+			"BackoffLimitExceeded (%d/%d failed)", job.Failed, job.BackoffLimit)))
 	}
 	if job.DeadlineExceeded {
-		findings = append(findings, Finding{Critical, Cause, "DeadlineExceeded"})
+		findings = append(findings, dated(Critical, Cause, job.FailedAt, "DeadlineExceeded"))
 	}
 	return findings
 }
@@ -269,13 +269,13 @@ func serviceFindings(service ServiceHealth) []Finding {
 	total := service.ReadyAddresses + service.NotReadyAddresses
 	switch {
 	case total == 0:
-		return []Finding{{Critical, Cause, "No endpoints: no pods match the selector"}}
+		return []Finding{finding(Critical, Cause, "No endpoints: no pods match the selector")}
 	case service.ReadyAddresses == 0:
-		return []Finding{{Critical, Aggregate, fmt.Sprintf(
-			"%d endpoint(s) not ready, 0 ready", service.NotReadyAddresses)}}
+		return []Finding{finding(Critical, Aggregate, fmt.Sprintf(
+			"%d endpoint(s) not ready, 0 ready", service.NotReadyAddresses))}
 	case service.NotReadyAddresses > 0:
-		return []Finding{{Warning, Aggregate, fmt.Sprintf(
-			"%d/%d endpoints ready", service.ReadyAddresses, total)}}
+		return []Finding{finding(Warning, Aggregate, fmt.Sprintf(
+			"%d/%d endpoints ready", service.ReadyAddresses, total))}
 	}
 	return nil
 }
@@ -289,10 +289,10 @@ func cronJobFindings(cronJob CronJobHealth, since time.Time) []Finding {
 		return nil
 	}
 	var findings []Finding
-	for _, finding := range jobFindings(*cronJob.MostRecentJob, since) {
-		findings = append(findings, Finding{
-			finding.Severity, finding.Rank, "Most recent run: " + finding.Summary,
-		})
+	for _, run := range jobFindings(*cronJob.MostRecentJob, since) {
+		findings = append(findings, dated(
+			run.Severity, run.Rank, run.At, "Most recent run: "+run.Summary,
+		))
 	}
 	return findings
 }
@@ -302,10 +302,10 @@ func cronJobFindings(cronJob CronJobHealth, since time.Time) []Finding {
 func pvcFindings(pvc PVCHealth) []Finding {
 	switch pvc.Phase {
 	case "Pending":
-		return []Finding{{Warning, Cause, "PersistentVolumeClaim pending"}}
+		return []Finding{finding(Warning, Cause, "PersistentVolumeClaim pending")}
 	case "Lost":
-		return []Finding{{Critical, Cause,
-			"PersistentVolumeClaim lost: backing volume no longer available"}}
+		return []Finding{finding(Critical, Cause,
+			"PersistentVolumeClaim lost: backing volume no longer available")}
 	}
 	return nil
 }
@@ -316,8 +316,8 @@ func pvcFindings(pvc PVCHealth) []Finding {
 func ingressFindings(ingress IngressHealth) []Finding {
 	findings := make([]Finding, 0, len(ingress.MissingBackends))
 	for _, name := range ingress.MissingBackends {
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"Ingress references missing Service '%s'", name)})
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+			"Ingress references missing Service '%s'", name)))
 	}
 	return findings
 }
@@ -351,17 +351,17 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 		// the scheduler's message runs to a couple of hundred characters, and
 		// name-first meant the triage table's ellipsis landed mid-word before
 		// the row had said anything ("Pod report-unschedulable-57d7… unsc…").
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"Unschedulable: %s (pod %s)", detail, pod.Name)})
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+			"Unschedulable: %s (pod %s)", detail, pod.Name)))
 	case pod.Phase == "Pending":
-		findings = append(findings, Finding{Warning, Aggregate, "Pod " + pod.Name + " pending"})
+		findings = append(findings, finding(Warning, Aggregate, "Pod "+pod.Name+" pending"))
 	case pod.Phase == "Failed":
-		findings = append(findings, Finding{Critical, Aggregate, "Pod " + pod.Name + " failed"})
+		findings = append(findings, finding(Critical, Aggregate, "Pod "+pod.Name+" failed"))
 	case pod.Phase == "Running" && pod.ReadyContainers < pod.TotalContainers && !anyWaiting:
 		// A waiting container already produced its own, more specific finding.
-		findings = append(findings, Finding{Warning, Aggregate, fmt.Sprintf(
+		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
 			"Pod %s: %d/%d containers ready",
-			pod.Name, pod.ReadyContainers, pod.TotalContainers)})
+			pod.Name, pod.ReadyContainers, pod.TotalContainers)))
 	}
 	return findings
 }
@@ -378,32 +378,37 @@ func containerFindings(podName string, container ContainerDiagnostic, since time
 
 	switch {
 	case reason == "CrashLoopBackOff":
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"CrashLoopBackOff in pod %s (%d restarts)", podName, container.RestartCount)})
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+			"CrashLoopBackOff in pod %s (%d restarts)", podName, container.RestartCount)))
 	case imagePullReasons[reason]:
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"Image pull failure (%s) in pod %s", reason, podName)})
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+			"Image pull failure (%s) in pod %s", reason, podName)))
 	case configErrorReasons[reason]:
 		detail := container.WaitingMessage
 		if detail == "" {
 			detail = reason
 		}
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
-			"Container config error in pod %s: %s", podName, detail)})
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+			"Container config error in pod %s: %s", podName, detail)))
 	case reason != "":
-		findings = append(findings, Finding{Warning, Cause, fmt.Sprintf(
-			"Container %s in pod %s waiting: %s", container.Name, podName, reason)})
+		findings = append(findings, finding(Warning, Cause, fmt.Sprintf(
+			"Container %s in pod %s waiting: %s", container.Name, podName, reason)))
 	}
 
 	switch {
-	case container.TerminatedReason == "OOMKilled" ||
-		(container.LastTerminatedReason == "OOMKilled" && !settled):
-		findings = append(findings, Finding{Critical, Cause, "OOMKilled in pod " + podName})
+	// Two OOMKills, told apart by which state they are in: the current one
+	// is happening now and carries no moment, the previous one happened at
+	// one and is dated by it.
+	case container.TerminatedReason == "OOMKilled":
+		findings = append(findings, finding(Critical, Cause, "OOMKilled in pod "+podName))
+	case container.LastTerminatedReason == "OOMKilled" && !settled:
+		findings = append(findings, dated(Critical, Cause, container.LastTerminatedAt,
+			"OOMKilled in pod "+podName))
 	case container.TerminatedReason != "" && container.TerminatedReason != "Completed" &&
 		container.ExitCode != nil && *container.ExitCode != 0:
-		findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
+		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
 			"Container %s in pod %s terminated: %s (exit %d)",
-			container.Name, podName, container.TerminatedReason, *container.ExitCode)})
+			container.Name, podName, container.TerminatedReason, *container.ExitCode)))
 	}
 
 	// Only when not waiting: a CrashLoopBackOff finding already reports the
@@ -411,9 +416,9 @@ func containerFindings(podName string, container ContainerDiagnostic, since time
 	// The count is cumulative over the pod's whole life, so the last
 	// termination is what says whether the thrashing is current.
 	if reason == "" && !settled && container.RestartCount >= restartWarnThreshold {
-		findings = append(findings, Finding{Warning, Cause, fmt.Sprintf(
+		findings = append(findings, dated(Warning, Cause, container.LastTerminatedAt, fmt.Sprintf(
 			"Container %s in pod %s restarted %d times",
-			container.Name, podName, container.RestartCount)})
+			container.Name, podName, container.RestartCount)))
 	}
 	return append(findings, usageFindings(container)...)
 }
@@ -427,20 +432,20 @@ func usageFindings(container ContainerDiagnostic) []Finding {
 	if pct, ok := usagePercent(container.MemoryUsage, container.MemoryLimit); ok {
 		switch {
 		case pct >= memoryCriticalPct:
-			findings = append(findings, Finding{Critical, Cause, fmt.Sprintf(
+			findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
 				"Memory at %d%% of limit (%s/%s) — OOMKill risk",
-				pct, formatMemory(container.MemoryUsage), formatMemory(container.MemoryLimit))})
+				pct, formatMemory(container.MemoryUsage), formatMemory(container.MemoryLimit))))
 		case pct >= memoryWarnPct:
-			findings = append(findings, Finding{Warning, Cause, fmt.Sprintf(
+			findings = append(findings, finding(Warning, Cause, fmt.Sprintf(
 				"Memory at %d%% of limit (%s/%s)",
-				pct, formatMemory(container.MemoryUsage), formatMemory(container.MemoryLimit))})
+				pct, formatMemory(container.MemoryUsage), formatMemory(container.MemoryLimit))))
 		}
 	}
 
 	if pct, ok := usagePercent(container.CPUUsage, container.CPULimit); ok && pct >= cpuWarnPct {
-		findings = append(findings, Finding{Warning, Cause, fmt.Sprintf(
+		findings = append(findings, finding(Warning, Cause, fmt.Sprintf(
 			"CPU at %d%% of limit (%s/%s) — likely throttling",
-			pct, formatCPU(container.CPUUsage), formatCPU(container.CPULimit))})
+			pct, formatCPU(container.CPUUsage), formatCPU(container.CPULimit))))
 	}
 	return findings
 }
@@ -478,8 +483,8 @@ func formatCPU(value *resource.Quantity) string {
 func eventFindings(events []EventSummary) []Finding {
 	findings := make([]Finding, 0, len(events))
 	for _, event := range events {
-		findings = append(findings, Finding{Warning, Event, fmt.Sprintf(
-			"%s ×%d on %s/%s", event.Reason, event.Count, event.Kind, event.Name)})
+		findings = append(findings, dated(Warning, Event, event.LastTimestamp, fmt.Sprintf(
+			"%s ×%d on %s/%s", event.Reason, event.Count, event.Kind, event.Name)))
 	}
 	return findings
 }
