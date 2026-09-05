@@ -80,8 +80,11 @@ func TestFormatDurationRoundTripsTheSpelling(t *testing.T) {
 		want  string
 	}{
 		{7 * 24 * time.Hour, "7d"},
+		{48 * time.Hour, "2d"},
 		{36 * time.Hour, "36h"},
-		{24 * time.Hour, "1d"},
+		// A day is spelled in hours: "24h" is how the default is written
+		// everywhere it is documented, and how anyone says a day-long window.
+		{24 * time.Hour, "24h"},
 		{12 * time.Hour, "12h"},
 		{30 * time.Minute, "30m"},
 		{90 * time.Second, "1m30s"},

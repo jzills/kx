@@ -292,6 +292,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 
 	for i := range results {
 		results[i].Since = since
+		results[i].Window = s.MaxAge
 	}
 	return results, nil
 }

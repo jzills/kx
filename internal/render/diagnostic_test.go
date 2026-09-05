@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
@@ -26,6 +27,16 @@ func sampleReport() diagnostics.Report {
 			Message: "Failed to pull image",
 		}},
 	})
+}
+
+func reportWithFinding(summary string) diagnostics.Report {
+	return diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{{
+			Severity: diagnostics.Critical, Rank: diagnostics.Cause, Summary: summary,
+		}},
+	}
 }
 
 // A deliberate deviation from the Python renderer: Rich's summary grid pads
@@ -321,5 +332,71 @@ func TestDiagnosticHeaderKeepsANamespace(t *testing.T) {
 	})
 	if !strings.Contains(out, "Pod/web · prod · ") {
 		t.Errorf("header does not name the namespace:\n%s", out)
+	}
+}
+
+// A report that hides what it found has to say so. Without this the banner's
+// issue count, and "No warning events", are both silently conditional on a
+// window the terminal never mentions — the HTML report says it on its
+// invocation line, and the terminal had no equivalent.
+func TestDiagnosticBannerNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 24 * time.Hour
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if first := strings.SplitN(out, "\n", 2)[0]; !strings.Contains(first, "· last 24h") {
+		t.Errorf("banner = %q, want it to name the window", first)
+	}
+}
+
+func TestDiagnosticBannerOmitsAnUnboundedWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "last ") {
+		t.Errorf("an unbounded report named a window:\n%s", out)
+	}
+}
+
+// "No warning events" means two different things once a window exists —
+// there are none, or there are and they were hidden. Only one of them is
+// worth reading as reassurance.
+func TestNoWarningEventsNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 90 * time.Minute
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "No warning events in the last 90m") {
+		t.Errorf("output does not qualify the empty event section:\n%s", out)
+	}
+}
+
+func TestNoWarningEventsUnqualifiedWithoutAWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if !strings.Contains(out, "No warning events\n") {
+		t.Errorf("output does not carry the plain empty state:\n%s", out)
+	}
+}
+
+// A sweep hides on the same terms, and its caption is the only line it has
+// to say so on.
+func TestTriageCaptionNamesTheWindow(t *testing.T) {
+	result := TriageResult{
+		Namespace: "prod", Checked: 2, Window: 7 * 24 * time.Hour,
+		Reports: []diagnostics.Report{{
+			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+			Verdict: diagnostics.Critical,
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Triage(result) })
+	if !strings.Contains(out, "last 7d") {
+		t.Errorf("caption does not name the window:\n%s", out)
+	}
+}
+
+// An all-healthy sweep is the one most worth qualifying: "all healthy" is a
+// claim about what was looked at.
+func TestTriageAllHealthyCaptionNamesTheWindow(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{Namespace: "prod", Checked: 3, Window: 24 * time.Hour})
+	})
+	if !strings.Contains(out, "last 24h") {
+		t.Errorf("caption does not name the window:\n%s", out)
 	}
 }

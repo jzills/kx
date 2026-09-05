@@ -101,6 +101,7 @@ func BuildReport(data Data) Report {
 	}
 
 	return Report{
+		Window:        data.Window,
 		Kind:          data.Kind,
 		Name:          data.Name,
 		Namespace:     data.Namespace,

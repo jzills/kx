@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/jzills/kx/internal/config"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/theme"
@@ -33,6 +36,27 @@ func severityStyle(severity diagnostics.Severity) string {
 	}
 }
 
+// windowLabel spells the window a report was gathered under, for a caption
+// that has to say what it was allowed to see. Empty when there is no window.
+//
+// The same vocabulary the --since flag reads, so the caption names a value
+// that can be typed straight back at it.
+func windowLabel(window time.Duration) string {
+	if window <= 0 {
+		return ""
+	}
+	return "last " + config.FormatDuration(window)
+}
+
+// windowSuffix is windowLabel as a trailing segment, for the lines that build
+// their own caption rather than going through Caption.
+func windowSuffix(window time.Duration) string {
+	if label := windowLabel(window); label != "" {
+		return " · " + label
+	}
+	return ""
+}
+
 // Diagnostic renders a full report for one resource.
 func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	// The verdict rides in the banner rather than on a line of its own.
@@ -57,7 +81,8 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	if report.Namespace != "" {
 		prefix += report.Namespace + " · "
 	}
-	r.line(r.style(theme.Muted, prefix) + extra)
+	r.line(r.style(theme.Muted, prefix) + extra +
+		r.style(theme.Muted, windowSuffix(report.Window)))
 
 	r.Blank()
 	// Section headers align with the pod table's content, which pads by two.
@@ -73,7 +98,7 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 
 	r.podTable(report.Pods)
 	r.logs(report.Pods)
-	r.warningEvents(report.WarningEvents)
+	r.warningEvents(report.WarningEvents, report.Window)
 }
 
 // podTable lists every pod and its containers, one container per row with the
@@ -173,11 +198,18 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	}
 }
 
-func (r *Renderer) warningEvents(events []diagnostics.EventSummary) {
+func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.Duration) {
 	r.Blank()
 	r.line("  " + r.style(theme.Header, "WARNING EVENTS"))
 	if len(events) == 0 {
-		r.line("    " + r.style(theme.Muted, "No warning events"))
+		// Qualified when a window is in force: "No warning events" would
+		// otherwise mean both "there are none" and "there are, and they
+		// were older than the window", and only one of those is reassuring.
+		empty := "No warning events"
+		if label := windowLabel(window); label != "" {
+			empty += " in the " + label
+		}
+		r.line("    " + r.style(theme.Muted, empty))
 		return
 	}
 	for position, event := range events {

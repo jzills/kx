@@ -55,7 +55,10 @@ func (s Service) since() time.Time {
 
 // Gather collects everything known about one resource.
 func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace string) (Data, error) {
-	data := Data{Kind: kind, Name: name, Namespace: namespace, Since: s.since()}
+	data := Data{
+		Kind: kind, Name: name, Namespace: namespace,
+		Since: s.since(), Window: s.MaxAge,
+	}
 
 	if err := s.attachKindHealth(ctx, &data, kind, name, namespace); err != nil {
 		return Data{}, err

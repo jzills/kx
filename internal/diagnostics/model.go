@@ -241,6 +241,10 @@ type NodeHealth struct {
 // Data is the raw, already-flattened result of a gather. It carries no
 // findings — the analysis layer produces those.
 type Data struct {
+	// Window is how long that window is. Since is what the analysis
+	// compares against; this is what a reader is told, because an instant
+	// is not a caption and "24h0m0.001s" is not a duration anyone typed.
+	Window time.Duration
 	// Since is the instant this report's window opens: nothing that
 	// happened before it is reported. Zero means no window.
 	//
@@ -315,6 +319,10 @@ type Finding struct {
 // available and updated shortfalls, so the rendered report needs no separate
 // replica section.
 type Report struct {
+	// Window is the length of the window the data was gathered under, so
+	// the rendered report can say what it was allowed to see. Zero means
+	// no window, and nothing is said.
+	Window        time.Duration
 	Kind          kinds.Kind
 	Name          string
 	Namespace     string

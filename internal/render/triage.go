@@ -1,6 +1,8 @@
 package render
 
 import (
+	"time"
+
 	"strconv"
 
 	"github.com/jzills/kx/internal/diagnostics"
@@ -29,6 +31,11 @@ type TriageResult struct {
 	// Full mirrors kx diag --full: Reports already includes healthy resources,
 	// so the footer must not also claim some were left out.
 	Full bool
+	// Window is how far back the sweep was allowed to look. "12 checked"
+	// and "all healthy" are both claims about what was looked at, and this
+	// is the only line the table has to qualify them on. Zero means no
+	// window was applied, and the caption says nothing.
+	Window time.Duration
 }
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
@@ -51,14 +58,15 @@ func (r *Renderer) Triage(result TriageResult) {
 	}
 	if len(result.Reports) == 0 {
 		r.line(r.style(theme.Muted, "Mixed · "+scope+" · ") +
-			r.style(theme.Success, strconv.Itoa(result.Checked)+" checked · all healthy"))
+			r.style(theme.Success, strconv.Itoa(result.Checked)+" checked · all healthy") +
+			r.style(theme.Muted, windowSuffix(result.Window)))
 		return
 	}
 
 	// No blank line between the caption and the table: every other indexed
 	// listing puts its header row directly under the caption, and the Python
 	// renderer's extra line here was alone in doing otherwise.
-	r.Caption("Mixed", scope, strconv.Itoa(result.Checked)+" checked")
+	r.Caption("Mixed", scope, strconv.Itoa(result.Checked)+" checked", windowLabel(result.Window))
 
 	// Headed "X" like every other indexed listing. The Python renderer left it
 	// blank, alone among the indexed tables; these numbers are indexes passed

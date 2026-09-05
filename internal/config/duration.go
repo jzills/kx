@@ -57,7 +57,9 @@ func FormatDuration(window time.Duration) string {
 	switch {
 	case window == 0:
 		return "0"
-	case window%(24*time.Hour) == 0:
+	// Days only from two up: a day-long window is written "24h" wherever it
+	// is documented, and "1d" reads as a spelling nobody chose.
+	case window >= 48*time.Hour && window%(24*time.Hour) == 0:
 		return fmt.Sprintf("%dd", window/(24*time.Hour))
 	case window%time.Hour == 0:
 		return fmt.Sprintf("%dh", window/time.Hour)

@@ -94,6 +94,14 @@ func (c TriageCommand) Execute(
 		terminalReports = reports
 	}
 
+	// Every report in one sweep was gathered under the same window, so any
+	// of them carries the sweep's — and an empty sweep has no rows to
+	// qualify, so it needs none.
+	var window time.Duration
+	if len(reports) > 0 {
+		window = reports[0].Window
+	}
+
 	result := render.TriageResult{
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
@@ -102,6 +110,7 @@ func (c TriageCommand) Execute(
 		All:           reports,
 		Healthy:       len(reports) - len(unhealthy),
 		Full:          full,
+		Window:        window,
 	}
 
 	// Every swept resource is indexed, not just the unhealthy ones printed by

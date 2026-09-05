@@ -913,3 +913,35 @@ func TestDiagSweepWithoutAWindowStillReportsOldContainerHistory(t *testing.T) {
 		t.Errorf("--since 0 dropped history it was told to keep:\n%s", sink.String())
 	}
 }
+
+// The sweep's caption is where a triage table says what it was allowed to
+// see, so the window has to reach the result — every report in one sweep
+// carries the same one, which is what makes taking it from a report sound.
+func TestTriageResultCarriesTheWindow(t *testing.T) {
+	swept := unhealthy(kinds.Deployment, "web", "prod")
+	swept.Window = 7 * 24 * time.Hour
+	gatherer := &fakeGatherer{sweep: []diagnostics.Data{swept}}
+	var saved []state.State
+
+	result, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Window != 7*24*time.Hour {
+		t.Errorf("Window = %v, want the window its reports were gathered under", result.Window)
+	}
+}
+
+// An empty sweep has no report to take a window from, and no rows to
+// qualify — the caption says "nothing to check" and nothing else.
+func TestTriageResultWithoutReportsHasNoWindow(t *testing.T) {
+	gatherer := &fakeGatherer{}
+	var saved []state.State
+	result, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Window != 0 {
+		t.Errorf("Window = %v, want zero", result.Window)
+	}
+}
