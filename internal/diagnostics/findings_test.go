@@ -1160,3 +1160,29 @@ func TestStalePendingPodIsStillReported(t *testing.T) {
 		t.Errorf("findings = %v, want the ongoing scheduling failure", summaries(findings))
 	}
 }
+
+// A container that has stopped cannot have restarted since, so its own
+// termination dates the count when there is no previous one to date it —
+// the shape a pod carries when the API recorded state but no lastState.
+func TestRestartsOnAStoppedContainerAreDatedByItsTermination(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+		RestartCount: 21, TerminatedAt: longAgo,
+	}, windowStart)
+	if hasSummaryContaining(findings, "restarted") {
+		t.Errorf("findings = %v, want no restart finding for a container that stopped weeks ago",
+			summaries(findings))
+	}
+}
+
+func TestRestartsOnARecentlyStoppedContainerAreStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+		RestartCount: 21, TerminatedAt: recently,
+	}, windowStart)
+	if !hasSummaryContaining(findings, "restarted 21 times") {
+		t.Errorf("findings = %v, want the restart finding", summaries(findings))
+	}
+}

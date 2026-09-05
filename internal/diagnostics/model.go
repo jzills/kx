@@ -88,6 +88,20 @@ type ContainerDiagnostic struct {
 	MemoryLimit *resource.Quantity
 }
 
+// StoppedAt is the last time this container stopped, whichever instance that
+// was: the one running now if it has terminated, or the one before it.
+//
+// It dates the restart count, which is cumulative over the pod's whole life
+// and so says nothing about when the thrashing happened. Either termination
+// will do, because a container cannot have restarted since the last time it
+// stopped.
+func (c ContainerDiagnostic) StoppedAt() time.Time {
+	if c.TerminatedAt.After(c.LastTerminatedAt) {
+		return c.TerminatedAt
+	}
+	return c.LastTerminatedAt
+}
+
 // FinishedAt is when this pod stopped, taken from the last of its containers
 // to terminate. Zero while any container is still running, and for a pod that
 // failed without leaving a dated container status behind — an eviction before
