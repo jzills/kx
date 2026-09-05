@@ -1,0 +1,66 @@
+# Status the cluster would normally write, and cannot be asked to write with
+# dates in the past. Applied to the status subresource after the objects
+# exist, because `kubectl apply` drops a status block entirely.
+#
+# "@-46d" is expanded at apply time, read by the same parser as
+# `kx diag --since`, so 46d means here exactly what it means there.
+---
+- kind: Pod
+  name: ancient-crash
+  patch:
+    phase: Failed
+    containerStatuses:
+      - name: app
+        image: busybox
+        imageID: ""
+        ready: false
+        restartCount: 21
+        state:
+          terminated:
+            exitCode: 1
+            reason: Error
+            startedAt: "@-46d"
+            finishedAt: "@-46d"
+        lastState:
+          terminated:
+            exitCode: 137
+            reason: OOMKilled
+            startedAt: "@-46d"
+            finishedAt: "@-46d"
+
+- kind: Pod
+  name: recent-crash
+  patch:
+    phase: Failed
+    containerStatuses:
+      - name: app
+        image: busybox
+        imageID: ""
+        ready: false
+        restartCount: 3
+        state:
+          terminated:
+            exitCode: 1
+            reason: Error
+            startedAt: "@-10m"
+            finishedAt: "@-10m"
+
+- kind: Job
+  name: ancient-run
+  patch:
+    failed: 2
+    # A finished Job must say when it started; the API rejects a terminal
+    # status without it. No completionTime — that field belongs to a Job
+    # that succeeded, and the API rejects it beside a Failed condition.
+    startTime: "@-46d"
+    # Both conditions: the API refuses a patch that drops the terminal
+    # FailureTarget it already carries.
+    conditions:
+      - type: FailureTarget
+        status: "True"
+        reason: BackoffLimitExceeded
+        lastTransitionTime: "@-46d"
+      - type: Failed
+        status: "True"
+        reason: BackoffLimitExceeded
+        lastTransitionTime: "@-46d"
