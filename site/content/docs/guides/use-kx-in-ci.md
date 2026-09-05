@@ -101,24 +101,29 @@ shown to be clean.
 ### Old news doesn't hold the gate red
 
 Evidence drives a finding, a finding drives the verdict, and the verdict
-drives the gate — so without a limit, one `FailedScheduling` from three weeks
-ago, or one OOMKill a container recovered from last month, fails the job
-forever on a cluster with nothing currently wrong with it. `kx diag` reports
-only what happened in the last 24h — while what is still going wrong is
-always reported, however long it has been going wrong:
+drives the gate — so by default one `FailedScheduling` from three weeks ago,
+or one OOMKill a container recovered from last month, fails the job forever on
+a cluster with nothing currently wrong with it. `--since` bounds what the
+report is allowed to look at, and only ever hides what *finished* — what is
+still going wrong is always reported, however long it has been going wrong:
 
 ```bash
-kx diag -A --fail-on warning --since 7d    # a week's worth instead
-kx diag -A --fail-on warning --since 0     # everything the cluster still has
+kx diag -A --fail-on warning --since 24h   # today's failures only
+kx diag -A --fail-on warning --since 7d    # a week's worth
+kx diag -A --fail-on warning               # everything, however old
 ```
+
+A gate is the place this matters most: without `--since`, a job that went red
+once stays red until somebody deletes the evidence.
 
 A schedule longer than the window wants `--since` widened: a weekly CronJob
 whose last run failed six days ago needs `--since 7d` to fail the gate on it.
 
-Set your own default with `diag_max_age` in
+Set it once with `diag_max_age` in
 [`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
-job's environment. Most clusters discard events after an hour anyway — the
-window only bites where `--event-ttl` was raised.
+job's environment. Events are the least of it — most clusters discard those
+after an hour anyway; what a window really reaches is a container's own
+history, which the kubelet keeps for as long as the pod lives.
 
 ## The exit code is 2
 

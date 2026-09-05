@@ -54,10 +54,11 @@ don't exist.
 
 ## Now, not once
 
-Only what happened in the last 24h is reported — a warning event, a restart
-or OOMKill a container recovered from, a pod or run that failed. What is still
-going wrong is always reported, however long it has been going wrong: a
-container in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+Everything is reported by default, however old — and `--since` bounds it to
+what happened recently: a warning event, a restart or OOMKill a container
+recovered from, a pod or run that failed. What is still going wrong is always
+reported, window or not, however long it has been going wrong: a container in
+CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
 
 The line is *finished* versus *ongoing*, not past versus present. A container
 that terminated with an error stopped at a moment and stays stopped, so it is
@@ -70,13 +71,15 @@ That line matters because a finding drives the verdict and the verdict drives
 weeks ago holds a healthy workload at `warnings` forever.
 
 ```bash
+kx diag --since 24h   # today's failures only
 kx diag --since 7d    # a week of history
-kx diag --since 0     # everything, the old behaviour
+kx diag               # everything, however old
 ```
 
 A schedule longer than the window wants `--since` widened: a weekly CronJob
 whose last run failed six days ago needs `--since 7d` to see it. `diag_max_age`
-in [config.toml](../../reference/configuration/) sets your own default.
+in [config.toml](../../reference/configuration/) sets a window once, for every
+run.
 
 ## Usage as a signal, not just state
 

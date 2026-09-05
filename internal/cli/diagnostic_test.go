@@ -769,9 +769,15 @@ func stalePod(name, namespace string) []runtime.Object {
 // The whole point, end to end: the window has to reach the gatherer, not just
 // be parsed. Asserting on RunE's rendered output is the only way to see that
 // the resolved window was actually handed to the diagnostics service.
-func TestDiagSweepAppliesTheDefaultEventWindow(t *testing.T) {
+//
+// Configured rather than passed, because a window set once in config.toml has
+// the longer path to travel — through Config, reportWindow and the service —
+// and is the one a user is most likely to be relying on without thinking
+// about it.
+func TestDiagSweepAppliesTheConfiguredWindow(t *testing.T) {
 	sink := captureRender(t)
 	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	services.Config.DiagMaxAge = 24 * time.Hour
 	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
 	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
 		t.Fatalf("set --namespace: %v", err)
@@ -885,6 +891,7 @@ func settledPod(name, namespace string, terminatedAgo time.Duration) []runtime.O
 func TestDiagSweepAppliesTheWindowToContainerHistory(t *testing.T) {
 	sink := captureRender(t)
 	services := diagnosticHTMLServices(t, settledPod("web", "prod", 21*24*time.Hour)...)
+	services.Config.DiagMaxAge = 24 * time.Hour
 	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
 	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
 		t.Fatalf("set --namespace: %v", err)
@@ -983,5 +990,26 @@ func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
 	}
 	if findings[1].At != "" {
 		t.Errorf("at = %q, want it absent for a present-state finding", findings[1].At)
+	}
+}
+
+// Unbounded unless asked. A run with no --since and no diag_max_age reports
+// what kx has always reported, so upgrading changes no verdict and no exit
+// code until someone chooses a window.
+func TestDiagSweepWithNothingConfiguredReportsEverything(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("a default run hid a three-week-old warning:\n%s", sink.String())
+	}
+	if strings.Contains(sink.String(), "last ") {
+		t.Errorf("a default run claimed a window:\n%s", sink.String())
 	}
 }

@@ -21,21 +21,22 @@ const DefaultTheme = "github-dark"
 // stopgap as DefaultTheme not importing theme.
 const DefaultEngine = "scout"
 
-// DefaultDiagMaxAge is how far back kx diag looks when nothing is configured.
+// DefaultDiagMaxAge is how far back kx diag looks when nothing is configured:
+// all the way, as it always has.
 //
-// Finite rather than unlimited, which is a deliberate behaviour choice and not
-// merely a safe-looking number. Evidence drives a finding, a finding drives
-// the verdict, and a verdict drives --fail-on's exit code — so one
-// FailedScheduling from three weeks ago, or one OOMKill a container recovered
-// from a month ago, used to hold a resource at "warnings" forever and fail a
-// CI gate on a cluster with nothing currently wrong with it. That is the same
-// failure PodPhaseCounts.Stalled was fixed for.
+// Unbounded rather than a day, so a window is something a user chooses rather
+// than something an upgrade does to them. A verdict — and with it a --fail-on
+// exit code — is the same before and after this feature until someone passes
+// --since or sets diag_max_age, and nothing kx used to report goes missing
+// from a report nobody asked to narrow.
 //
-// A day rather than a week because the API server's own default event TTL is
-// an hour: for events, on a stock cluster, this changes nothing at all. What
-// it does reach everywhere is a container's own history, which the kubelet
-// keeps for as long as the pod lives.
-const DefaultDiagMaxAge = 24 * time.Hour
+// The cost of that choice is that the stale-verdict problem stays until it is
+// opted out of: a FailedScheduling from three weeks ago, or an OOMKill a
+// container recovered from last month, still holds a resource at "warnings"
+// on a default run. `diag_max_age = "24h"` in config.toml is the one line
+// that fixes it everywhere, and CI wants --since on the command line where
+// the gate can be read next to it.
+const DefaultDiagMaxAge = 0
 
 // DefaultDebugImage is the image kx debug attaches when none is configured.
 // Small, ubiquitous, and carries a shell — which is the whole point, since the
@@ -52,7 +53,7 @@ type Config struct {
 	Engine       string
 	DebugImage   string
 	// DiagMaxAge bounds how long ago something may have happened and still
-	// be reported by kx diag. Zero means no bound.
+	// be reported by kx diag. Zero — the default — means no bound.
 	DiagMaxAge time.Duration
 }
 
@@ -102,7 +103,7 @@ func Settings() []Setting {
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
 		{"diag_max_age", "KX_DIAG_MAX_AGE",
-			"How far back kx diag looks for evidence; 0 for no limit"},
+			"How far back kx diag looks for evidence; unset for no limit"},
 		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
 		{"", "KX_CONFIG", "Config file path, instead of ~/.kx/config.toml"},
 	}

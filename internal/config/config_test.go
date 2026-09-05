@@ -383,17 +383,17 @@ func TestDebugImageRejectsANonString(t *testing.T) {
 	}
 }
 
-// kx diag stops letting a warning event from weeks ago hold a verdict at
-// "warnings" forever, and 24h is the window it does that in unless told
-// otherwise.
-func TestDiagMaxAgeDefaults(t *testing.T) {
+// Unbounded unless asked: kx diag reports what it always reported until
+// someone chooses a window, so an upgrade changes no verdict and no exit
+// code on its own.
+func TestDiagMaxAgeDefaultsToNoWindow(t *testing.T) {
 	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
 	cfg, err := loader.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if want := 24 * time.Hour; cfg.DiagMaxAge != want {
-		t.Errorf("DiagMaxAge = %v, want %v", cfg.DiagMaxAge, want)
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want no window", cfg.DiagMaxAge)
 	}
 }
 

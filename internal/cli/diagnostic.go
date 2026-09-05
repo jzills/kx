@@ -216,9 +216,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
-			"Only what happened in the last 24h is reported: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. Without that bound, a failure from last month holds a verdict at warnings — and a --fail-on gate red — long after it stopped mattering.\n\n" +
-			"What is still going wrong is always reported, however long it has been going wrong: a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints. The window bounds what finished, not what continues. Findings that carry an age are the ones it can hide.\n\n" +
-			"--since sets a different window (30m, 12h, 7d), --since 0 removes it, and the diag_max_age setting changes the default. A schedule longer than the window wants --since widened: a weekly CronJob whose last run failed six days ago needs --since 7d.",
+			"--since bounds how far back the report looks (30m, 12h, 7d). Without it everything is reported, however old — which is what holds a resource at warnings, and a --fail-on gate red, over a failure from last month. Set diag_max_age in config.toml to choose a window once rather than per run.\n\n" +
+			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints. Findings that carry an age are the ones --since can hide.\n\n" +
+			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
@@ -413,8 +413,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Print the report as JSON instead of a table")
 	cmd.Flags().String("since", "",
 		"Ignore anything that happened longer ago than this — events, past "+
-			"restarts, failed runs; 30m, 12h, 7d; 0 for no limit "+
-			"(default from diag_max_age, 24h)")
+			"restarts, failed runs; 30m, 12h, 7d. Defaults to diag_max_age, "+
+			"which is unset: everything is reported")
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,
