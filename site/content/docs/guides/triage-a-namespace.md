@@ -52,6 +52,35 @@ OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints,
 Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that
 don't exist.
 
+## Now, not once
+
+Everything is reported by default, however old — and `--since` bounds it to
+what happened recently: a warning event, a restart or OOMKill a container
+recovered from, a pod or run that failed. What is still going wrong is always
+reported, window or not, however long it has been going wrong: a container in
+CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+
+The line is *finished* versus *ongoing*, not past versus present. A container
+that terminated with an error stopped at a moment and stays stopped, so it is
+dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that
+has never run, which is a problem now. Findings that carry an age are the ones
+`--since` can hide.
+
+That line matters because a finding drives the verdict and the verdict drives
+[`--fail-on`](../use-kx-in-ci/). Without it, one `FailedScheduling` from three
+weeks ago holds a healthy workload at `warnings` forever.
+
+```bash
+kx diag --since 24h   # today's failures only
+kx diag --since 7d    # a week of history
+kx diag               # everything, however old
+```
+
+A schedule longer than the window wants `--since` widened: a weekly CronJob
+whose last run failed six days ago needs `--since 7d` to see it. `diag_max_age`
+in [config.toml](../../reference/configuration/) sets a window once, for every
+run.
+
 ## Usage as a signal, not just state
 
 Findings also draw on live resource usage, the same data

@@ -46,6 +46,10 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	// findings, so every entry needs it — but it is still a single call.
 	usage := s.usageLookup(ctx, namespace)
 
+	// One instant for the whole sweep: every resource in a triage table is
+	// measured against the same window.
+	since := s.since()
+
 	var results []Data
 	claimedPods := map[types.UID]bool{}
 	claimedJobs := map[types.UID]bool{}
@@ -92,7 +96,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			Pods:    diagnoseAll(recentPods),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(
+		data.WarningEvents = s.warningEvents(since,
 			kinds.CronJob, cronJob.Name, data.Namespace, recentPods, allEvents)
 		results = append(results, data)
 	}
@@ -168,7 +172,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			data.Job = jobHealthFrom(entry.object.(*batchv1.Job))
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(
+		data.WarningEvents = s.warningEvents(since,
 			entry.kind, entry.name, entry.namespace, owned, allEvents)
 		results = append(results, data)
 	}
@@ -219,7 +223,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			Pods: diagnoseAll(matched),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(
+		data.WarningEvents = s.warningEvents(since,
 			kinds.Service, service.Name, service.Namespace, matched, allEvents)
 		results = append(results, data)
 	}
@@ -234,7 +238,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		results = append(results, Data{
 			Kind: kinds.PersistentVolumeClaim, Name: claim.Name, Namespace: claim.Namespace,
 			PVC: &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))},
-			WarningEvents: s.warningEvents(
+			WarningEvents: s.warningEvents(since,
 				kinds.PersistentVolumeClaim, claim.Name, claim.Namespace, nil, allEvents),
 		})
 	}
@@ -264,7 +268,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		results = append(results, Data{
 			Kind: kinds.Ingress, Name: ingress.Name, Namespace: ingress.Namespace,
 			Ingress: &IngressHealth{MissingBackends: missing},
-			WarningEvents: s.warningEvents(
+			WarningEvents: s.warningEvents(since,
 				kinds.Ingress, ingress.Name, ingress.Namespace, nil, allEvents),
 		})
 	}
@@ -281,10 +285,15 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 			Pods: diagnoseAll(single),
 		}
 		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(kinds.Pod, pod.Name, pod.Namespace, single, allEvents)
+		data.WarningEvents = s.warningEvents(
+			since, kinds.Pod, pod.Name, pod.Namespace, single, allEvents)
 		results = append(results, data)
 	}
 
+	for i := range results {
+		results[i].Since = since
+		results[i].Window = s.MaxAge
+	}
 	return results, nil
 }
 

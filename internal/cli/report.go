@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
@@ -26,8 +27,13 @@ const reportSchemaVersion = 1
 // Rank is deliberately absent. It orders the findings in the array and the
 // array is already in that order, so exposing it would publish an internal
 // vocabulary a consumer would have to keep up with for no gain.
+// At is when the reported thing happened, RFC 3339, and is present only for
+// the findings that have a moment: a warning event, a container's last
+// termination, a failed run. A finding about present state has none, and its
+// absence is the signal that no --since window can hide that line.
 type jsonFinding struct {
 	Severity string `json:"severity"`
+	At       string `json:"at,omitempty"`
 	Summary  string `json:"summary"`
 }
 
@@ -54,8 +60,13 @@ type jsonReport struct {
 func reportOf(report diagnostics.Report, index int) jsonReport {
 	findings := make([]jsonFinding, 0, len(report.Findings))
 	for _, finding := range report.Findings {
+		at := ""
+		if !finding.At.IsZero() {
+			at = finding.At.UTC().Format(time.RFC3339)
+		}
 		findings = append(findings, jsonFinding{
 			Severity: finding.Severity.Token(),
+			At:       at,
 			Summary:  finding.Summary,
 		})
 	}

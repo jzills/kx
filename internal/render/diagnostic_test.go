@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
@@ -26,6 +27,16 @@ func sampleReport() diagnostics.Report {
 			Message: "Failed to pull image",
 		}},
 	})
+}
+
+func reportWithFinding(summary string) diagnostics.Report {
+	return diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{{
+			Severity: diagnostics.Critical, Rank: diagnostics.Cause, Summary: summary,
+		}},
+	}
 }
 
 // A deliberate deviation from the Python renderer: Rich's summary grid pads
@@ -321,5 +332,202 @@ func TestDiagnosticHeaderKeepsANamespace(t *testing.T) {
 	})
 	if !strings.Contains(out, "Pod/web · prod · ") {
 		t.Errorf("header does not name the namespace:\n%s", out)
+	}
+}
+
+// A report that hides what it found has to say so. Without this the banner's
+// issue count, and "No warning events", are both silently conditional on a
+// window the terminal never mentions — the HTML report says it on its
+// invocation line, and the terminal had no equivalent.
+func TestDiagnosticBannerNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 24 * time.Hour
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if first := strings.SplitN(out, "\n", 2)[0]; !strings.Contains(first, "· last 24h") {
+		t.Errorf("banner = %q, want it to name the window", first)
+	}
+}
+
+func TestDiagnosticBannerOmitsAnUnboundedWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "last ") {
+		t.Errorf("an unbounded report named a window:\n%s", out)
+	}
+}
+
+// "No warning events" means two different things once a window exists —
+// there are none, or there are and they were hidden. Only one of them is
+// worth reading as reassurance.
+func TestNoWarningEventsNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 90 * time.Minute
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "No warning events in the last 90m") {
+		t.Errorf("output does not qualify the empty event section:\n%s", out)
+	}
+}
+
+func TestNoWarningEventsUnqualifiedWithoutAWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if !strings.Contains(out, "No warning events\n") {
+		t.Errorf("output does not carry the plain empty state:\n%s", out)
+	}
+}
+
+// A sweep hides on the same terms, and its caption is the only line it has
+// to say so on.
+func TestTriageCaptionNamesTheWindow(t *testing.T) {
+	result := TriageResult{
+		Namespace: "prod", Checked: 2, Window: 7 * 24 * time.Hour,
+		Reports: []diagnostics.Report{{
+			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+			Verdict: diagnostics.Critical,
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Triage(result) })
+	if !strings.Contains(out, "last 7d") {
+		t.Errorf("caption does not name the window:\n%s", out)
+	}
+}
+
+// An all-healthy sweep is the one most worth qualifying: "all healthy" is a
+// claim about what was looked at.
+func TestTriageAllHealthyCaptionNamesTheWindow(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{Namespace: "prod", Checked: 3, Window: 24 * time.Hour})
+	})
+	if !strings.Contains(out, "last 24h") {
+		t.Errorf("caption does not name the window:\n%s", out)
+	}
+}
+
+// An age on a finding is not decoration: it is how a reader tells which
+// lines --since governs. A finding that carries one can be filtered away by
+// a narrower window; one that does not is present state, and no window will
+// ever hide it.
+func TestDatedFindingCarriesItsAge(t *testing.T) {
+	report := reportWithFinding("OOMKilled in pod api-1")
+	report.Findings[0].At = time.Now().Add(-3 * time.Hour)
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "OOMKilled in pod api-1 · 3h ago") {
+		t.Errorf("finding is not dated:\n%s", out)
+	}
+}
+
+func TestPresentStateFindingCarriesNoAge(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "ready · ") {
+		t.Errorf("an undated finding was given an age:\n%s", out)
+	}
+}
+
+// kubectl's own spelling for the same fact — `kubectl get pods` prints
+// "21 (3h ago)" — so the column reads the way a reader already expects, and
+// says whether the restarts fall inside the window.
+func TestRestartsCarryTheirLastRestartTime(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 21,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "21 (3h ago)") {
+		t.Errorf("restart column does not say when:\n%s", out)
+	}
+}
+
+func TestRestartsWithoutATerminationStayBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 2,
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "(") {
+		t.Errorf("a bare restart count was given a parenthetical:\n%s", out)
+	}
+}
+
+// A log tail from a dead instance is an excerpt of a crash that happened at
+// some point, and reading it without knowing when is how an old crash gets
+// mistaken for the current one.
+func TestPreviousLogTailSaysHowOldItIs(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Waiting", WaitingReason: "CrashLoopBackOff",
+				LogLines: []string{"ERROR boom"}, LogSource: "previous", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "previous instance, 3h ago") {
+		t.Errorf("log heading does not date the instance:\n%s", out)
+	}
+}
+
+func TestCurrentLogTailIsNotDated(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Running", Ready: true,
+				LogLines: []string{"ERROR boom"}, LogSource: "current", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "previous instance") {
+		t.Errorf("a current tail was labelled as the previous instance:\n%s", out)
+	}
+}
+
+// A report can now read healthy with corpses still in its table, so the
+// table has to say how old they are — the same treatment RESTARTS gets, in
+// the cell that names the terminal state.
+func TestTerminatedStateCarriesItsAge(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Job, Name: "migrate", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "migrate-1", Phase: "Failed", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "run", State: "Terminated", TerminatedReason: "Error",
+				TerminatedAt: time.Now().Add(-46 * 24 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "Terminated (46d ago)") {
+		t.Errorf("state cell does not say when it stopped:\n%s", out)
+	}
+}
+
+func TestRunningStateStaysBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running",
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "Running (") {
+		t.Errorf("a running container was given a stop time:\n%s", out)
 	}
 }
