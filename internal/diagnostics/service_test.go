@@ -702,3 +702,86 @@ func TestSweepRecordsTheWindowOnEveryResource(t *testing.T) {
 		}
 	}
 }
+
+// The three timestamps a Node and a PVC keep, which kx was flattening away.
+func TestGatherNodeKeepsConditionAndCordonTimes(t *testing.T) {
+	changed := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	cordoned := metav1.NewTime(time.Now().Add(-90 * time.Minute))
+	s := service(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Spec: corev1.NodeSpec{
+			Unschedulable: true,
+			Taints: []corev1.Taint{{
+				Key: "node.kubernetes.io/unschedulable", Effect: corev1.TaintEffectNoSchedule,
+				TimeAdded: &cordoned,
+			}},
+		},
+		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: corev1.NodeReady, Status: corev1.ConditionFalse,
+			Reason: "KubeletNotReady", LastTransitionTime: changed,
+		}}},
+	})
+
+	data, err := s.Gather(context.Background(), kinds.Node, "worker-1", "")
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.Node.Conditions) != 1 || !data.Node.Conditions[0].Since.Equal(changed.Time) {
+		t.Errorf("conditions = %+v, want one carrying %v", data.Node.Conditions, changed.Time)
+	}
+	if !data.Node.CordonedSince.Equal(cordoned.Time) {
+		t.Errorf("CordonedSince = %v, want %v", data.Node.CordonedSince, cordoned.Time)
+	}
+}
+
+// A node cordoned before the taint carried a time — or by something that
+// wrote the bool directly — still reports as cordoned, just without saying
+// how long.
+func TestGatherNodeWithoutACordonTaintHasNoCordonTime(t *testing.T) {
+	s := service(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Spec:       corev1.NodeSpec{Unschedulable: true},
+	})
+	data, err := s.Gather(context.Background(), kinds.Node, "worker-1", "")
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.Node.CordonedSince.IsZero() {
+		t.Errorf("CordonedSince = %v, want zero", data.Node.CordonedSince)
+	}
+}
+
+func TestGatherPendingPVCKeepsWhenItWasCreated(t *testing.T) {
+	created := metav1.NewTime(time.Now().Add(-48 * 24 * time.Hour))
+	s := service(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "storage", Namespace: ns, CreationTimestamp: created,
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	})
+	data, err := s.Gather(context.Background(), kinds.PersistentVolumeClaim, "storage", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.PVC.PendingSince.Equal(created.Time) {
+		t.Errorf("PendingSince = %v, want %v", data.PVC.PendingSince, created.Time)
+	}
+}
+
+// A bound claim is not waiting for anything.
+func TestGatherBoundPVCHasNoPendingTime(t *testing.T) {
+	s := service(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "storage", Namespace: ns,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	})
+	data, err := s.Gather(context.Background(), kinds.PersistentVolumeClaim, "storage", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.PVC.PendingSince.IsZero() {
+		t.Errorf("PendingSince = %v, want zero for a bound claim", data.PVC.PendingSince)
+	}
+}

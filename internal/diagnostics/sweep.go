@@ -237,7 +237,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		claim := &claims.Items[i]
 		results = append(results, Data{
 			Kind: kinds.PersistentVolumeClaim, Name: claim.Name, Namespace: claim.Namespace,
-			PVC: &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))},
+			PVC: pvcHealthFrom(claim),
 			WarningEvents: s.warningEvents(since,
 				kinds.PersistentVolumeClaim, claim.Name, claim.Namespace, nil, allEvents),
 		})

@@ -127,6 +127,35 @@ func jobHealthFrom(job *batchv1.Job) *JobHealth {
 	}
 }
 
+// pvcHealthFrom extracts claim health, dating a pending one by its creation:
+// a claim that binds never returns to Pending, so one that is pending now has
+// been pending for its whole life. A bound claim is waiting for nothing and
+// carries no time.
+func pvcHealthFrom(claim *corev1.PersistentVolumeClaim) *PVCHealth {
+	health := &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))}
+	if health.Phase == "Pending" {
+		health.PendingSince = claim.CreationTimestamp.Time
+	}
+	return health
+}
+
+// cordonedSince is when a node was cordoned, read from the taint the API
+// server adds alongside spec.unschedulable.
+//
+// The bool records only that it happened. The taint carries timeAdded, which
+// is populated here despite being a NoSchedule rather than a NoExecute taint
+// — verified against a live cluster rather than assumed. A node cordoned by
+// something that wrote the bool without the taint reports no time, and the
+// finding says less rather than guessing.
+func cordonedSince(node *corev1.Node) time.Time {
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == corev1.TaintNodeUnschedulable && taint.TimeAdded != nil {
+			return taint.TimeAdded.Time
+		}
+	}
+	return time.Time{}
+}
+
 // serviceHealthFrom extracts service health from a Service and its Endpoints.
 // Endpoints may be nil when the read failed or 404ed.
 func serviceHealthFrom(service *corev1.Service, endpoints *corev1.Endpoints) *ServiceHealth {

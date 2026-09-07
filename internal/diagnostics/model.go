@@ -168,6 +168,11 @@ type ServiceHealth struct {
 // PVCHealth is self-contained: no pod fan-out, no ownership.
 type PVCHealth struct {
 	Phase string // "Pending" | "Bound" | "Lost" | "Unknown"
+	// PendingSince is when the claim was created, which for a pending one
+	// is how long it has been waiting: a claim that binds never returns to
+	// Pending, so it has been pending for its whole life. Zero once bound,
+	// having no wait to report.
+	PendingSince time.Time
 }
 
 // JobHealth does not reuse ReplicaHealth: a Job has no desired/ready replica
@@ -227,6 +232,9 @@ type NodeCondition struct {
 	Status  string
 	Reason  string
 	Message string
+	// Since is when the condition last changed to the status it holds now,
+	// which for a bad one is how long the node has been in trouble.
+	Since time.Time
 }
 
 // PodPhaseCounts is a tally of the pods on a Node, by phase.
@@ -285,6 +293,11 @@ func (c PodPhaseCounts) Active() int { return c.Running + c.Pending + c.Unknown 
 type NodeHealth struct {
 	Conditions    []NodeCondition
 	Unschedulable bool
+	// CordonedSince is when the node was cordoned, read from the taint the
+	// API server adds alongside spec.unschedulable — the bool itself says
+	// nothing about when, and the taint's timeAdded is set for it despite
+	// being a NoSchedule rather than a NoExecute one.
+	CordonedSince time.Time
 	Pods          PodPhaseCounts
 }
 

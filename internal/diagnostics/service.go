@@ -109,13 +109,17 @@ func (s Service) attachKindHealth(
 		if err != nil {
 			return err
 		}
-		health := &NodeHealth{Unschedulable: node.Spec.Unschedulable}
+		health := &NodeHealth{
+			Unschedulable: node.Spec.Unschedulable,
+			CordonedSince: cordonedSince(node),
+		}
 		for _, condition := range node.Status.Conditions {
 			health.Conditions = append(health.Conditions, NodeCondition{
 				Type:    string(condition.Type),
 				Status:  string(condition.Status),
 				Reason:  condition.Reason,
 				Message: condition.Message,
+				Since:   condition.LastTransitionTime.Time,
 			})
 		}
 		// Scoped by the field selector the API server indexes, so this asks
@@ -171,7 +175,7 @@ func (s Service) attachKindHealth(
 		if err != nil {
 			return err
 		}
-		data.PVC = &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))}
+		data.PVC = pvcHealthFrom(claim)
 	case kinds.CronJob:
 		cronJob, err := s.Client.BatchV1().CronJobs(namespace).Get(ctx, name, get)
 		if err != nil {

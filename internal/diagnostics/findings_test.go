@@ -1251,3 +1251,67 @@ func TestFinishedFindingsKeepAMomentAndNoDuration(t *testing.T) {
 		}
 	}
 }
+
+// A Node's conditions carry their own transition times, so a node report has
+// no reason to be the one place a summary reads as undated.
+func TestNodeConditionFindingsSayHowLongTheyHaveBeenTrue(t *testing.T) {
+	since := time.Now().Add(-3 * time.Hour)
+	findings := nodeFindings(NodeHealth{Conditions: []NodeCondition{
+		{Type: "Ready", Status: "False", Reason: "KubeletNotReady", Since: since},
+		{Type: "MemoryPressure", Status: "True", Reason: "KubeletHasInsufficientMemory", Since: since},
+	}})
+	if len(findings) != 2 {
+		t.Fatalf("findings = %v, want two", summaries(findings))
+	}
+	for _, finding := range findings {
+		if !finding.Since.Equal(since) {
+			t.Errorf("%q: Since = %v, want %v", finding.Summary, finding.Since, since)
+		}
+	}
+}
+
+// Cordoning is dated by the taint the API server adds with it — the bare
+// spec.unschedulable bool says nothing about when.
+func TestCordonedFindingSaysHowLongItHasBeenCordoned(t *testing.T) {
+	since := time.Now().Add(-90 * time.Minute)
+	findings := nodeFindings(NodeHealth{Unschedulable: true, CordonedSince: since})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one", summaries(findings))
+	}
+	if !findings[0].Since.Equal(since) {
+		t.Errorf("Since = %v, want %v", findings[0].Since, since)
+	}
+}
+
+// A PVC that binds never returns to Pending, so it has been pending since it
+// was created — no guess involved.
+func TestPendingPVCSaysHowLongItHasBeenPending(t *testing.T) {
+	since := time.Now().Add(-48 * 24 * time.Hour)
+	findings := pvcFindings(PVCHealth{Phase: "Pending", PendingSince: since})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one", summaries(findings))
+	}
+	if !findings[0].Since.Equal(since) {
+		t.Errorf("Since = %v, want %v", findings[0].Since, since)
+	}
+}
+
+// The findings that cannot honestly be dated stay bare: a Service's own
+// creation says when the Service was made, not when its endpoints went away,
+// and usage is instantaneous.
+func TestUndatableFindingsStayBare(t *testing.T) {
+	bare := append(
+		serviceFindings(ServiceHealth{HasSelector: true}),
+		ingressFindings(IngressHealth{MissingBackends: []string{"api"}})...)
+	bare = append(bare, nodeFindings(NodeHealth{
+		Pods: PodPhaseCounts{Total: 24, Running: 23, Pending: 1},
+	})...)
+	if len(bare) == 0 {
+		t.Fatal("no findings produced")
+	}
+	for _, finding := range bare {
+		if !finding.Since.IsZero() || !finding.At.IsZero() {
+			t.Errorf("%q claims a time the cluster does not record", finding.Summary)
+		}
+	}
+}

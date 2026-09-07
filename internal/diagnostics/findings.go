@@ -137,16 +137,16 @@ func nodeFindings(node NodeHealth) []Finding {
 		if condition.Type == "Ready" {
 			switch condition.Status {
 			case "False":
-				findings = append(findings, finding(Critical, Cause,
+				findings = append(findings, ongoing(Critical, Cause, condition.Since,
 					"Not ready: "+conditionDetail(condition)))
 			case "Unknown":
-				findings = append(findings, finding(Critical, Cause,
+				findings = append(findings, ongoing(Critical, Cause, condition.Since,
 					"Node status unknown: "+conditionDetail(condition)))
 			}
 			continue
 		}
 		if label, pressure := pressureConditions[condition.Type]; pressure && condition.Status == "True" {
-			findings = append(findings, finding(Critical, Cause,
+			findings = append(findings, ongoing(Critical, Cause, condition.Since,
 				label+": "+conditionDetail(condition)))
 		}
 	}
@@ -154,7 +154,7 @@ func nodeFindings(node NodeHealth) []Finding {
 	// Warning, not critical, and deliberately so: a cordoned node is usually
 	// cordoned on purpose, and it is exactly what kx cordon just did.
 	if node.Unschedulable {
-		findings = append(findings, finding(Warning, Cause,
+		findings = append(findings, ongoing(Warning, Cause, node.CordonedSince,
 			"Cordoned: no new pods will be scheduled here"))
 	}
 
@@ -298,7 +298,8 @@ func cronJobFindings(cronJob CronJobHealth, since time.Time) []Finding {
 func pvcFindings(pvc PVCHealth) []Finding {
 	switch pvc.Phase {
 	case "Pending":
-		return []Finding{finding(Warning, Cause, "PersistentVolumeClaim pending")}
+		return []Finding{ongoing(Warning, Cause, pvc.PendingSince,
+			"PersistentVolumeClaim pending")}
 	case "Lost":
 		return []Finding{finding(Critical, Cause,
 			"PersistentVolumeClaim lost: backing volume no longer available")}
