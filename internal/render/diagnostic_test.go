@@ -540,7 +540,7 @@ func TestOngoingFindingSaysHowLongItHasBeenTrue(t *testing.T) {
 	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
 	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
-	if !strings.Contains(out, "in pod api-1 (for 24d)") {
+	if !strings.Contains(out, "in pod api-1 · for 24d") {
 		t.Errorf("ongoing finding does not say how long:\n%s", out)
 	}
 }
@@ -554,10 +554,10 @@ func TestOngoingAndFinishedFindingsReadDifferently(t *testing.T) {
 		Summary: "Failed ×46154 on Pod/api-1",
 	})
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
-	if !strings.Contains(out, "(for 24d)") || !strings.Contains(out, "· 3m ago") {
+	if !strings.Contains(out, "· for 24d") || !strings.Contains(out, "· 3m ago") {
 		t.Errorf("the two shapes are not both present:\n%s", out)
 	}
-	if strings.Contains(out, "(for 24d) ·") || strings.Contains(out, "ago (for") {
+	if strings.Contains(out, "for 24d · ") || strings.Contains(out, "ago · for") {
 		t.Errorf("a finding carries both shapes at once:\n%s", out)
 	}
 }
@@ -565,7 +565,7 @@ func TestOngoingAndFinishedFindingsReadDifferently(t *testing.T) {
 // A kind that records no duration says nothing rather than "(for 0s)".
 func TestFindingWithoutADurationStaysBare(t *testing.T) {
 	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
-	if strings.Contains(out, "(for") {
+	if strings.Contains(out, "for ") {
 		t.Errorf("a finding with no duration invented one:\n%s", out)
 	}
 }
@@ -582,7 +582,7 @@ func TestAFindingCarryingBothPrefersTheMoment(t *testing.T) {
 	if !strings.Contains(out, "· 3m ago") {
 		t.Errorf("the moment was not preferred:\n%s", out)
 	}
-	if strings.Contains(out, "(for ") {
+	if strings.Contains(out, "· for ") {
 		t.Errorf("both shapes were rendered:\n%s", out)
 	}
 }

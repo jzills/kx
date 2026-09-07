@@ -1407,7 +1407,7 @@ func TestDiagPageSaysHowLongAnOngoingFindingHasBeenTrue(t *testing.T) {
 		t.Fatalf("RenderDiag: %v", err)
 	}
 	want := render.FormatElapsedAt(testMeta(t).Captured, report.Findings[0].Since)
-	if !strings.Contains(string(page), "(for "+want+")") {
+	if !strings.Contains(string(page), "· for "+want) {
 		t.Errorf("page does not say how long the finding has been true (%s)", want)
 	}
 }
@@ -1425,7 +1425,7 @@ func TestDiagPagePrefersAMomentOverADuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderDiag: %v", err)
 	}
-	if strings.Contains(string(page), "(for ") {
+	if strings.Contains(string(page), "· for ") {
 		t.Error("a finding with a moment also carries a duration")
 	}
 }

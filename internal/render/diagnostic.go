@@ -168,17 +168,20 @@ func restarts(container diagnostics.ContainerDiagnostic) string {
 // findingTime is the trailing segment that says when a finding's subject
 // happened, or how long it has been true.
 //
-// Two shapes, because they answer different questions and a reader has to be
-// able to tell them apart: "· 3m ago" is a moment, and a narrow enough
-// --since will hide that finding; "(for 24d)" is a duration, and no window
-// ever will. A finding carries one or neither — never both — and neither
-// when the cluster records no way to date it.
+// Two readings, one shape: "· 2m ago" is a moment, and a narrow enough
+// --since will hide that finding; "· for 24d" is a duration, and no window
+// ever will. The words carry that difference, so the separator does not have
+// to — every other trailing segment kx prints is · -separated, and a
+// parenthetical here would be the only one of its kind on the screen.
+//
+// A finding carries one or neither, never both, and neither when the cluster
+// records no way to date it.
 func findingTime(f diagnostics.Finding) string {
 	if moment := FormatAge(f.At); moment != "" {
 		return " · " + moment
 	}
 	if duration := FormatElapsed(f.Since); duration != "" {
-		return " (for " + duration + ")"
+		return " · for " + duration
 	}
 	return ""
 }

@@ -16,7 +16,7 @@ A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes a
 
 A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.
 
-Every finding says which it is. '(for 24d)' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.
+Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.
 
 A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.
 

@@ -6,7 +6,7 @@
       {{range .Findings}}
       <div class="finding-row">
         <span class="icon {{severityClass .Severity}}">{{severityIcon .Severity}}</span>
-        <span>{{.Summary}}{{with age .At}}<span class="dim"> · {{.}}</span>{{else}}{{with elapsed .Since}}<span class="dim"> (for {{.}})</span>{{end}}{{end}}</span>
+        <span>{{.Summary}}{{with age .At}}<span class="dim"> · {{.}}</span>{{else}}{{with elapsed .Since}}<span class="dim"> · for {{.}}</span>{{end}}{{end}}</span>
       </div>
       {{end}}
     {{else}}
