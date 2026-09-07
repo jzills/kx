@@ -125,6 +125,11 @@ type SchedulingInfo struct {
 
 // PodDiagnostic is one pod's flattened status.
 type PodDiagnostic struct {
+	// UnhealthySince is when this pod stopped being ready, or when it was
+	// created if it never was. It answers "how long has this been failing",
+	// which is a different question from Finding.At's "when did this
+	// happen" — and unlike that one, no window can filter it away.
+	UnhealthySince  time.Time
 	Name            string
 	Phase           string
 	Node            string
@@ -137,6 +142,12 @@ type PodDiagnostic struct {
 // ReplicaHealth is the replica rollup shared by Deployments, StatefulSets and
 // DaemonSets.
 type ReplicaHealth struct {
+	// UnavailableSince is when the workload last became unavailable, which
+	// is how long it has been short rather than when anything happened to
+	// it. Zero when it is available, and for the kinds that record no
+	// conditions to read it from — a DaemonSet has none, and a duration
+	// nobody recorded is better left unsaid than guessed at.
+	UnavailableSince   time.Time
 	Desired            int32
 	Ready              int32
 	Available          int32
@@ -360,7 +371,12 @@ type Finding struct {
 	Severity Severity
 	Rank     Rank
 	At       time.Time
-	Summary  string
+	// Since is when an ongoing signal started, and is set instead of At for
+	// the findings a window can never hide: how long a pod has been failing
+	// to pull, how long a Deployment has been short. A finding answers one
+	// of the two questions, never both.
+	Since   time.Time
+	Summary string
 }
 
 // finding builds a finding about present state, which carries no moment.
@@ -375,6 +391,13 @@ func finding(severity Severity, rank Rank, summary string) Finding {
 // dated builds a finding about something that happened at a moment.
 func dated(severity Severity, rank Rank, at time.Time, summary string) Finding {
 	return Finding{Severity: severity, Rank: rank, At: at, Summary: summary}
+}
+
+// ongoing builds a finding about something still happening, carrying how long
+// it has been true. A zero since is legal and simply says less: some kinds
+// record no condition to read a duration from.
+func ongoing(severity Severity, rank Rank, since time.Time, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, Since: since, Summary: summary}
 }
 
 // Report is the analysed result.

@@ -1390,3 +1390,42 @@ func TestDiagPageQualifiesAnEmptyEventSectionWithTheWindow(t *testing.T) {
 		t.Error("the empty event section does not name the window")
 	}
 }
+
+// The page has to draw the same distinction the terminal does: a moment the
+// window can hide, or a duration it cannot.
+func TestDiagPageSaysHowLongAnOngoingFindingHasBeenTrue(t *testing.T) {
+	report := criticalReport(t)
+	// Fixed relative to testMeta's Captured, so the page renders the same
+	// bytes every time.
+	report.Findings[0].Since = time.Date(2026, 7, 8, 9, 41, 22, 0, time.UTC)
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	want := render.FormatElapsedAt(testMeta(t).Captured, report.Findings[0].Since)
+	if !strings.Contains(string(page), "(for "+want+")") {
+		t.Errorf("page does not say how long the finding has been true (%s)", want)
+	}
+}
+
+// A finding with a moment keeps it, and gains no duration alongside.
+func TestDiagPagePrefersAMomentOverADuration(t *testing.T) {
+	report := criticalReport(t)
+	report.Findings[0].At = time.Date(2026, 8, 1, 9, 37, 22, 0, time.UTC)
+	report.Findings[0].Since = time.Date(2026, 7, 8, 9, 41, 22, 0, time.UTC)
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if strings.Contains(string(page), "(for ") {
+		t.Error("a finding with a moment also carries a duration")
+	}
+}

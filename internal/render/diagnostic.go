@@ -93,14 +93,8 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			// Dated findings are the ones the window bounds, so the age
-			// doubles as the mark of what --since can filter away. The
-			// same trailing shape the event section already uses.
-			age := ""
-			if formatted := FormatAge(finding.At); formatted != "" {
-				age = r.style(theme.Muted, " · "+formatted)
-			}
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary) + age)
+			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary) +
+				r.style(theme.Muted, findingTime(finding)))
 		}
 	}
 
@@ -169,6 +163,24 @@ func restarts(container diagnostics.ContainerDiagnostic) string {
 		return count + " (" + age + ")"
 	}
 	return count
+}
+
+// findingTime is the trailing segment that says when a finding's subject
+// happened, or how long it has been true.
+//
+// Two shapes, because they answer different questions and a reader has to be
+// able to tell them apart: "· 3m ago" is a moment, and a narrow enough
+// --since will hide that finding; "(for 24d)" is a duration, and no window
+// ever will. A finding carries one or neither — never both — and neither
+// when the cluster records no way to date it.
+func findingTime(f diagnostics.Finding) string {
+	if moment := FormatAge(f.At); moment != "" {
+		return " · " + moment
+	}
+	if duration := FormatElapsed(f.Since); duration != "" {
+		return " (for " + duration + ")"
+	}
+	return ""
 }
 
 // containerState names the state with the moment it stopped, when it has

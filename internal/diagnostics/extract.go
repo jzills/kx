@@ -60,7 +60,15 @@ func lastN(values []string, n int) []string {
 func replicaHealthFrom(kind kinds.Kind, object any) *ReplicaHealth {
 	switch workload := object.(type) {
 	case *appsv1.Deployment:
+		var unavailableSince time.Time
+		for _, condition := range workload.Status.Conditions {
+			if condition.Type == appsv1.DeploymentAvailable &&
+				condition.Status == corev1.ConditionFalse {
+				unavailableSince = condition.LastTransitionTime.Time
+			}
+		}
 		return &ReplicaHealth{
+			UnavailableSince:   unavailableSince,
 			Desired:            derefInt32(workload.Spec.Replicas),
 			Ready:              workload.Status.ReadyReplicas,
 			Available:          workload.Status.AvailableReplicas,
@@ -186,6 +194,7 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		phase = "Unknown"
 	}
 	return PodDiagnostic{
+		UnhealthySince:  unhealthySince(pod),
 		Name:            pod.Name,
 		Phase:           phase,
 		Node:            pod.Spec.NodeName,
@@ -194,6 +203,36 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		Containers:      containers,
 		Scheduling:      schedulingInfo(pod.Status),
 	}
+}
+
+// unhealthySince is how long a pod has been failing: since it stopped being
+// ready, or since it was created if it never became ready.
+//
+// The creation fallback is not a guess. A pod with no Ready condition has not
+// been through the scheduler, and one whose Ready condition has always been
+// False has been failing for its whole life — both of which started when it
+// was created. A ready pod gets nothing, having no duration to report.
+//
+// For a pod that flaps this is the current episode rather than the whole
+// history: a crashlooping container with no readiness probe counts as ready
+// while it runs, so the condition transitions on every restart and a pod
+// broken for weeks can read "for 2m". That is what the cluster records, and
+// the restart count beside it — "4673 (57s ago)" — is what carries the rest
+// of the story.
+func unhealthySince(pod *corev1.Pod) time.Time {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type != corev1.PodReady {
+			continue
+		}
+		if condition.Status == corev1.ConditionTrue {
+			return time.Time{}
+		}
+		if !condition.LastTransitionTime.IsZero() {
+			return condition.LastTransitionTime.Time
+		}
+		break
+	}
+	return pod.CreationTimestamp.Time
 }
 
 func containerDiagnostic(status *corev1.ContainerStatus, spec *corev1.Container) ContainerDiagnostic {

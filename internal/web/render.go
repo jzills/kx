@@ -72,6 +72,9 @@ func RenderDiag(page DiagPage) ([]byte, error) {
 		"age": func(timestamp time.Time) string {
 			return render.FormatAgeAt(page.Captured, timestamp)
 		},
+		"elapsed": func(since time.Time) string {
+			return render.FormatElapsedAt(page.Captured, since)
+		},
 	})
 	var out bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&out, "layout", page); err != nil {

@@ -29,11 +29,16 @@ const reportSchemaVersion = 1
 // vocabulary a consumer would have to keep up with for no gain.
 // At is when the reported thing happened, RFC 3339, and is present only for
 // the findings that have a moment: a warning event, a container's last
-// termination, a failed run. A finding about present state has none, and its
-// absence is the signal that no --since window can hide that line.
+// termination, a failed run.
+//
+// Since is the other half: when an ongoing signal started, for the findings
+// no --since window can hide. A finding carries one or the other, never both,
+// so a consumer can tell "this failed at 09:41" from "this has been failing
+// since 13 August" without parsing the summary.
 type jsonFinding struct {
 	Severity string `json:"severity"`
 	At       string `json:"at,omitempty"`
+	Since    string `json:"since,omitempty"`
 	Summary  string `json:"summary"`
 }
 
@@ -60,13 +65,10 @@ type jsonReport struct {
 func reportOf(report diagnostics.Report, index int) jsonReport {
 	findings := make([]jsonFinding, 0, len(report.Findings))
 	for _, finding := range report.Findings {
-		at := ""
-		if !finding.At.IsZero() {
-			at = finding.At.UTC().Format(time.RFC3339)
-		}
 		findings = append(findings, jsonFinding{
 			Severity: finding.Severity.Token(),
-			At:       at,
+			At:       rfc3339(finding.At),
+			Since:    rfc3339(finding.Since),
 			Summary:  finding.Summary,
 		})
 	}
@@ -78,6 +80,15 @@ func reportOf(report diagnostics.Report, index int) jsonReport {
 		Verdict:   report.Verdict.Token(),
 		Findings:  findings,
 	}
+}
+
+// rfc3339 formats a timestamp for a document, and an unset one as an absent
+// field rather than as year 1.
+func rfc3339(timestamp time.Time) string {
+	if timestamp.IsZero() {
+		return ""
+	}
+	return timestamp.UTC().Format(time.RFC3339)
 }
 
 // diagnosticJSON serialises one resource's report. index is the one the

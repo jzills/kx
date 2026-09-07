@@ -202,7 +202,7 @@ func TestContainerWaitingReasons(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			findings := containerFindings("nginx", ContainerDiagnostic{
-				Name: "app", WaitingReason: tc.reason}, unbounded)
+				Name: "app", WaitingReason: tc.reason}, unbounded, unbounded)
 			if got := severityOf(t, findings, tc.contains); got != tc.want {
 				t.Errorf("severity = %v, want %v", got, tc.want)
 			}
@@ -212,7 +212,7 @@ func TestContainerWaitingReasons(t *testing.T) {
 
 func TestOOMKilledFromEitherState(t *testing.T) {
 	current := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", TerminatedReason: "OOMKilled"}, unbounded)
+		Name: "app", TerminatedReason: "OOMKilled"}, unbounded, unbounded)
 	if got := severityOf(t, current, "OOMKilled"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
@@ -220,7 +220,7 @@ func TestOOMKilledFromEitherState(t *testing.T) {
 	// The common case: the container restarted, so the OOM is in its previous
 	// state rather than its current one.
 	previous := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", LastTerminatedReason: "OOMKilled"}, unbounded)
+		Name: "app", LastTerminatedReason: "OOMKilled"}, unbounded, unbounded)
 	if !hasSummaryContaining(previous, "OOMKilled") {
 		t.Errorf("findings = %v, want an OOMKilled finding", summaries(previous))
 	}
@@ -230,18 +230,18 @@ func TestOOMKilledFromEitherState(t *testing.T) {
 func TestCompletedContainerIsNotAFinding(t *testing.T) {
 	exit := int32(0)
 	findings := containerFindings("job-1", ContainerDiagnostic{
-		Name: "run", TerminatedReason: "Completed", ExitCode: &exit, Ready: true}, unbounded)
+		Name: "run", TerminatedReason: "Completed", ExitCode: &exit, Ready: true}, unbounded, unbounded)
 	if len(findings) != 0 {
 		t.Errorf("findings = %v, want none", summaries(findings))
 	}
 }
 
 func TestRestartThreshold(t *testing.T) {
-	below := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 4}, unbounded)
+	below := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 4}, unbounded, unbounded)
 	if hasSummaryContaining(below, "restarted") {
 		t.Errorf("4 restarts produced %v, want none", summaries(below))
 	}
-	at := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 5}, unbounded)
+	at := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 5}, unbounded, unbounded)
 	if got := severityOf(t, at, "restarted 5 times"); got != Warning {
 		t.Errorf("severity = %v, want Warning", got)
 	}
@@ -251,7 +251,7 @@ func TestRestartThreshold(t *testing.T) {
 // finding, so repeating it adds nothing.
 func TestRestartFindingSuppressedWhileWaiting(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", RestartCount: 9, WaitingReason: "CrashLoopBackOff"}, unbounded)
+		Name: "app", RestartCount: 9, WaitingReason: "CrashLoopBackOff"}, unbounded, unbounded)
 	if hasSummaryContaining(findings, "restarted 9 times") {
 		t.Errorf("findings = %v, want no separate restart finding", summaries(findings))
 	}
@@ -879,7 +879,7 @@ func TestStaleOOMKillIsNotReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running",
 		LastTerminatedReason: "OOMKilled", LastTerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if hasSummaryContaining(findings, "OOMKilled") {
 		t.Errorf("findings = %v, want no OOMKilled from three weeks ago", summaries(findings))
 	}
@@ -889,7 +889,7 @@ func TestRecentOOMKillIsStillReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running",
 		LastTerminatedReason: "OOMKilled", LastTerminatedAt: recently,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "OOMKilled") {
 		t.Errorf("findings = %v, want the OOMKilled from ten minutes ago", summaries(findings))
 	}
@@ -900,7 +900,7 @@ func TestUndatedOOMKillIsReportedWhateverItsAge(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
 		LastTerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "OOMKilled") {
 		t.Errorf("findings = %v, want the undated OOMKilled", summaries(findings))
 	}
@@ -912,7 +912,7 @@ func TestStaleRestartsAreNotReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running",
 		RestartCount: 21, LastTerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if hasSummaryContaining(findings, "restarted") {
 		t.Errorf("findings = %v, want no restart finding for a pod that settled", summaries(findings))
 	}
@@ -922,7 +922,7 @@ func TestRecentRestartsAreStillReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running",
 		RestartCount: 21, LastTerminatedAt: recently,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "restarted 21 times") {
 		t.Errorf("findings = %v, want the restart finding", summaries(findings))
 	}
@@ -934,7 +934,7 @@ func TestCrashLoopBackOffIsReportedWhateverItsAge(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", WaitingReason: "CrashLoopBackOff",
 		RestartCount: 21, LastTerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "CrashLoopBackOff") {
 		t.Errorf("findings = %v, want the CrashLoopBackOff", summaries(findings))
 	}
@@ -946,7 +946,7 @@ func TestUndatedHistoryIsStillReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running",
 		RestartCount: 21, LastTerminatedReason: "OOMKilled",
-	}, windowStart)
+	}, windowStart, unbounded)
 	for _, want := range []string{"OOMKilled", "restarted 21 times"} {
 		if !hasSummaryContaining(findings, want) {
 			t.Errorf("findings = %v, want %q kept when nothing dates it", summaries(findings), want)
@@ -960,7 +960,7 @@ func TestWithoutAWindowEveryHistoricalFindingSurvives(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", Ready: true, State: "Running", RestartCount: 21,
 		LastTerminatedReason: "OOMKilled", LastTerminatedAt: longAgo,
-	}, time.Time{})
+	}, time.Time{}, unbounded)
 	for _, want := range []string{"OOMKilled", "restarted 21 times"} {
 		if !hasSummaryContaining(findings, want) {
 			t.Errorf("findings = %v, want %q with no window set", summaries(findings), want)
@@ -1065,7 +1065,7 @@ func TestStaleTerminatedContainerIsNotReported(t *testing.T) {
 	findings := containerFindings("job-1", ContainerDiagnostic{
 		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
 		ExitCode: &exit, TerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if hasSummaryContaining(findings, "terminated") {
 		t.Errorf("findings = %v, want none for a container that died weeks ago",
 			summaries(findings))
@@ -1077,7 +1077,7 @@ func TestRecentTerminatedContainerIsStillReported(t *testing.T) {
 	findings := containerFindings("job-1", ContainerDiagnostic{
 		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
 		ExitCode: &exit, TerminatedAt: recently,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "terminated: Error (exit 1)") {
 		t.Errorf("findings = %v, want the recent failure", summaries(findings))
 	}
@@ -1087,7 +1087,7 @@ func TestStaleTerminalOOMKillIsNotReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
 		TerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if hasSummaryContaining(findings, "OOMKilled") {
 		t.Errorf("findings = %v, want none for an OOMKill from three weeks ago",
 			summaries(findings))
@@ -1141,7 +1141,7 @@ func TestOngoingFailuresAreReportedWhateverTheirAge(t *testing.T) {
 		findings := containerFindings("nginx", ContainerDiagnostic{
 			Name: "app", State: "Waiting", WaitingReason: reason,
 			WaitingMessage: "still broken", LastTerminatedAt: longAgo, TerminatedAt: longAgo,
-		}, windowStart)
+		}, windowStart, unbounded)
 		if len(findings) == 0 {
 			t.Errorf("%s produced no finding — an ongoing failure was bounded", reason)
 		}
@@ -1169,7 +1169,7 @@ func TestRestartsOnAStoppedContainerAreDatedByItsTermination(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
 		RestartCount: 21, TerminatedAt: longAgo,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if hasSummaryContaining(findings, "restarted") {
 		t.Errorf("findings = %v, want no restart finding for a container that stopped weeks ago",
 			summaries(findings))
@@ -1181,8 +1181,73 @@ func TestRestartsOnARecentlyStoppedContainerAreStillReported(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
 		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
 		RestartCount: 21, TerminatedAt: recently,
-	}, windowStart)
+	}, windowStart, unbounded)
 	if !hasSummaryContaining(findings, "restarted 21 times") {
 		t.Errorf("findings = %v, want the restart finding", summaries(findings))
+	}
+}
+
+// Every ongoing finding says how long it has been going on, so a summary
+// does not read as though one row is dated and the rest are unknowable. The
+// duration is not a moment: no window can filter these away.
+func TestOngoingFindingsSayHowLongTheyHaveBeenTrue(t *testing.T) {
+	since := time.Now().Add(-24 * 24 * time.Hour)
+	pod := PodDiagnostic{
+		Name: "api-1", Phase: "Pending", UnhealthySince: since, TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "app", State: "Waiting", WaitingReason: "ImagePullBackOff",
+		}},
+	}
+	for _, finding := range podFindings(pod, unbounded) {
+		if finding.Since.IsZero() {
+			t.Errorf("%q carries no duration", finding.Summary)
+		}
+		if !finding.At.IsZero() {
+			t.Errorf("%q carries a moment as well as a duration", finding.Summary)
+		}
+	}
+}
+
+func TestReplicaFindingsSayHowLongTheyHaveBeenShort(t *testing.T) {
+	since := time.Now().Add(-53 * 24 * time.Hour)
+	findings := replicaFindings(ReplicaHealth{Desired: 1, UnavailableSince: since})
+	if len(findings) == 0 {
+		t.Fatal("a Deployment with no ready replicas produced no findings")
+	}
+	for _, finding := range findings {
+		if !finding.Since.Equal(since) {
+			t.Errorf("%q: Since = %v, want %v", finding.Summary, finding.Since, since)
+		}
+	}
+}
+
+// A kind that records no conditions — a DaemonSet — leaves the duration
+// unset rather than inventing one, and the finding simply says less.
+func TestReplicaFindingsWithoutAConditionCarryNoDuration(t *testing.T) {
+	for _, finding := range replicaFindings(ReplicaHealth{Desired: 1}) {
+		if !finding.Since.IsZero() {
+			t.Errorf("%q invented a duration", finding.Summary)
+		}
+	}
+}
+
+// A finished thing keeps its moment and gains no duration: the two answer
+// different questions and a finding only ever asks one of them.
+func TestFinishedFindingsKeepAMomentAndNoDuration(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "run", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: recently,
+	}, windowStart, time.Time{})
+	if len(findings) == 0 {
+		t.Fatal("no findings for a container that failed ten minutes ago")
+	}
+	for _, finding := range findings {
+		if finding.At.IsZero() {
+			t.Errorf("%q lost its moment", finding.Summary)
+		}
+		if !finding.Since.IsZero() {
+			t.Errorf("%q carries a duration as well as a moment", finding.Summary)
+		}
 	}
 }

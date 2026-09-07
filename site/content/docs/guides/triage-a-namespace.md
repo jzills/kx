@@ -63,8 +63,22 @@ CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
 The line is *finished* versus *ongoing*, not past versus present. A container
 that terminated with an error stopped at a moment and stays stopped, so it is
 dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that
-has never run, which is a problem now. Findings that carry an age are the ones
-`--since` can hide.
+has never run, which is a problem now.
+
+Every finding says which it is, and the shape tells you whether a window can
+reach it:
+
+```
+✗ Image pull failure (ImagePullBackOff) in pod api-badimage-… (for 24d)
+✗ Only 0/1 replicas ready (for 53d)
+! Failed ×46198 on Pod/api-badimage-… · 2m ago
+```
+
+`(for 24d)` is how long something has been true — no `--since` will hide it.
+`· 2m ago` is when something happened, and a narrow enough window will. A pod
+that flaps counts from its current episode, not its whole history: a
+crashlooping container is briefly ready on each restart, so `(for 2m)` beside
+4673 restarts is the last crash, not the first.
 
 That line matters because a finding drives the verdict and the verdict drives
 [`--fail-on`](../use-kx-in-ci/). Without it, one `FailedScheduling` from three

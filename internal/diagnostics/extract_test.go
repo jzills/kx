@@ -515,3 +515,92 @@ func TestPodStillRunningHasNoFinishedAt(t *testing.T) {
 		t.Errorf("FinishedAt = %v, want zero", got)
 	}
 }
+
+// How long a pod has been failing is a different question from when
+// something happened to it, and the Ready condition is where the cluster
+// answers it: a pod that has never been ready has been failing since it was
+// created, and one that fell over says when it stopped being ready.
+func TestPodDiagnosticKeepsHowLongItHasBeenUnready(t *testing.T) {
+	since := metav1.NewTime(time.Now().Add(-24 * 24 * time.Hour))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: metav1.NewTime(time.Now())},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionFalse, LastTransitionTime: since,
+			}},
+		},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.Equal(since.Time) {
+		t.Errorf("UnhealthySince = %v, want %v", got, since.Time)
+	}
+}
+
+// No Ready condition at all — a pod the scheduler has not touched yet —
+// falls back to its creation, which is how long it has been failing to
+// become anything.
+func TestPodDiagnosticFallsBackToCreationForHowLong(t *testing.T) {
+	created := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: created},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.Equal(created.Time) {
+		t.Errorf("UnhealthySince = %v, want the creation time %v", got, created.Time)
+	}
+}
+
+// A ready pod is not failing, so it has no duration to report.
+func TestReadyPodHasNoUnhealthySince(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: metav1.NewTime(time.Now())},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(time.Now()),
+			}},
+		},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.IsZero() {
+		t.Errorf("UnhealthySince = %v, want zero for a ready pod", got)
+	}
+}
+
+// A Deployment says how long it has been short, in its Available condition.
+func TestReplicaHealthKeepsHowLongItHasBeenUnavailable(t *testing.T) {
+	since := metav1.NewTime(time.Now().Add(-53 * 24 * time.Hour))
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{Replicas: i32(1)},
+		Status: appsv1.DeploymentStatus{
+			Conditions: []appsv1.DeploymentCondition{{
+				Type: appsv1.DeploymentAvailable, Status: corev1.ConditionFalse,
+				LastTransitionTime: since,
+			}},
+		},
+	}
+	got := replicaHealthFrom(kinds.Deployment, deployment)
+	if got == nil || !got.UnavailableSince.Equal(since.Time) {
+		t.Errorf("UnavailableSince = %+v, want %v", got, since.Time)
+	}
+}
+
+// An available Deployment is not short of anything. Nor is a DaemonSet, which
+// records no conditions at all — the duration is simply unknown there, and
+// an unknown one is left unsaid rather than guessed from creation.
+func TestAvailableWorkloadHasNoUnavailableSince(t *testing.T) {
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{Replicas: i32(1)},
+		Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{{
+			Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(time.Now()),
+		}}},
+	}
+	if got := replicaHealthFrom(kinds.Deployment, deployment); got == nil || !got.UnavailableSince.IsZero() {
+		t.Errorf("UnavailableSince = %+v, want zero", got)
+	}
+	daemon := &appsv1.DaemonSet{Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3}}
+	if got := replicaHealthFrom(kinds.DaemonSet, daemon); got == nil || !got.UnavailableSince.IsZero() {
+		t.Errorf("DaemonSet UnavailableSince = %+v, want zero", got)
+	}
+}

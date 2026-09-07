@@ -1013,3 +1013,43 @@ func TestDiagSweepWithNothingConfiguredReportsEverything(t *testing.T) {
 		t.Errorf("a default run claimed a window:\n%s", sink.String())
 	}
 }
+
+// The document carries both halves of a finding's time, and never both on
+// one finding: "at" is a moment a window can hide, "since" is how long
+// something has been true.
+func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
+	moment := time.Now().Add(-3 * time.Minute).UTC().Truncate(time.Second)
+	start := time.Now().Add(-24 * 24 * time.Hour).UTC().Truncate(time.Second)
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{
+			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, Since: start,
+				Summary: "Image pull failure (ImagePullBackOff) in pod web-1"},
+			{Severity: diagnostics.Warning, Rank: diagnostics.Event, At: moment,
+				Summary: "Failed ×46154 on Pod/web-1"},
+		},
+	}
+	document, err := diagnosticJSON(report, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	var parsed struct {
+		Resources []struct {
+			Findings []struct {
+				At    string `json:"at"`
+				Since string `json:"since"`
+			} `json:"findings"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	findings := parsed.Resources[0].Findings
+	if findings[0].Since != start.Format(time.RFC3339) || findings[0].At != "" {
+		t.Errorf("ongoing finding = %+v, want only since=%s", findings[0], start.Format(time.RFC3339))
+	}
+	if findings[1].At != moment.Format(time.RFC3339) || findings[1].Since != "" {
+		t.Errorf("dated finding = %+v, want only at=%s", findings[1], moment.Format(time.RFC3339))
+	}
+}

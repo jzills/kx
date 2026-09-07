@@ -210,7 +210,7 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 	var findings []Finding
 	if replicas.Generation != nil && replicas.ObservedGeneration != nil &&
 		*replicas.ObservedGeneration < *replicas.Generation {
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Critical, Cause, replicas.UnavailableSince, fmt.Sprintf(
 			"Rollout stalled: observed generation %d behind spec generation %d",
 			*replicas.ObservedGeneration, *replicas.Generation)))
 	}
@@ -219,15 +219,15 @@ func replicaFindings(replicas ReplicaHealth) []Finding {
 		if replicas.Ready == 0 && replicas.Desired > 0 {
 			severity = Critical
 		}
-		findings = append(findings, finding(severity, Aggregate, fmt.Sprintf(
+		findings = append(findings, ongoing(severity, Aggregate, replicas.UnavailableSince, fmt.Sprintf(
 			"Only %d/%d replicas ready", replicas.Ready, replicas.Desired)))
 	}
 	if replicas.Available < replicas.Desired {
-		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+		findings = append(findings, ongoing(Warning, Aggregate, replicas.UnavailableSince, fmt.Sprintf(
 			"%d/%d replicas available", replicas.Available, replicas.Desired)))
 	}
 	if replicas.Updated < replicas.Desired {
-		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+		findings = append(findings, ongoing(Warning, Aggregate, replicas.UnavailableSince, fmt.Sprintf(
 			"Rollout in progress: %d/%d replicas updated", replicas.Updated, replicas.Desired)))
 	}
 	return findings
@@ -321,7 +321,7 @@ func ingressFindings(ingress IngressHealth) []Finding {
 func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	var findings []Finding
 	for _, container := range pod.Containers {
-		findings = append(findings, containerFindings(pod.Name, container, since)...)
+		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
 	}
 
 	anyWaiting := false
@@ -347,10 +347,11 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 		// the scheduler's message runs to a couple of hundred characters, and
 		// name-first meant the triage table's ellipsis landed mid-word before
 		// the row had said anything ("Pod report-unschedulable-57d7… unsc…").
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Critical, Cause, pod.UnhealthySince, fmt.Sprintf(
 			"Unschedulable: %s (pod %s)", detail, pod.Name)))
 	case pod.Phase == "Pending":
-		findings = append(findings, finding(Warning, Aggregate, "Pod "+pod.Name+" pending"))
+		findings = append(findings, ongoing(Warning, Aggregate, pod.UnhealthySince,
+			"Pod "+pod.Name+" pending"))
 	// A failed pod finished failing, dated by the last of its containers to
 	// stop. Kubernetes keeps it until GC, so without that date one preempted
 	// or OOM-evicted pod reports its workload broken indefinitely — the same
@@ -360,14 +361,16 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 			"Pod "+pod.Name+" failed"))
 	case pod.Phase == "Running" && pod.ReadyContainers < pod.TotalContainers && !anyWaiting:
 		// A waiting container already produced its own, more specific finding.
-		findings = append(findings, finding(Warning, Aggregate, fmt.Sprintf(
+		findings = append(findings, ongoing(Warning, Aggregate, pod.UnhealthySince, fmt.Sprintf(
 			"Pod %s: %d/%d containers ready",
 			pod.Name, pod.ReadyContainers, pod.TotalContainers)))
 	}
 	return findings
 }
 
-func containerFindings(podName string, container ContainerDiagnostic, since time.Time) []Finding {
+func containerFindings(
+	podName string, container ContainerDiagnostic, since, unhealthySince time.Time,
+) []Finding {
 	var findings []Finding
 	reason := container.WaitingReason
 	// What the container is doing now is reported however old it is; what it
@@ -384,20 +387,20 @@ func containerFindings(podName string, container ContainerDiagnostic, since time
 
 	switch {
 	case reason == "CrashLoopBackOff":
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
 			"CrashLoopBackOff in pod %s (%d restarts)", podName, container.RestartCount)))
 	case imagePullReasons[reason]:
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
 			"Image pull failure (%s) in pod %s", reason, podName)))
 	case configErrorReasons[reason]:
 		detail := container.WaitingMessage
 		if detail == "" {
 			detail = reason
 		}
-		findings = append(findings, finding(Critical, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
 			"Container config error in pod %s: %s", podName, detail)))
 	case reason != "":
-		findings = append(findings, finding(Warning, Cause, fmt.Sprintf(
+		findings = append(findings, ongoing(Warning, Cause, unhealthySince, fmt.Sprintf(
 			"Container %s in pod %s waiting: %s", container.Name, podName, reason)))
 	}
 
