@@ -1224,6 +1224,27 @@ func TestRestartsOnARecentlyStoppedContainerAreStillReported(t *testing.T) {
 	}
 }
 
+// The restart count is dated by the restart it counts, not by whatever the
+// container did afterwards. A container that last restarted three weeks ago
+// and then stopped ten minutes ago has no restarting inside a day-wide
+// window — and the RESTARTS column beside it says "21 (21d ago)", so a
+// finding claiming 10m would contradict the table on the same screen.
+func TestRestartsAreDatedByTheRestartTheyCount(t *testing.T) {
+	container := ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Completed",
+		RestartCount: 21, TerminatedAt: recently, LastTerminatedAt: longAgo,
+	}
+	findings := containerFindings("nginx", container, windowStart, unbounded)
+	if hasSummaryContaining(findings, "restarted") {
+		t.Errorf("findings = %v, want no restart finding — the last restart was weeks ago",
+			summaries(findings))
+	}
+	findings = containerFindings("nginx", container, unbounded, unbounded)
+	if at := momentOf(t, findings, "restarted 21 times"); !at.Equal(longAgo) {
+		t.Errorf("restart finding dated %v, want the restart itself, %v", at, longAgo)
+	}
+}
+
 // Every ongoing finding says how long it has been going on, so a summary
 // does not read as though one row is dated and the rest are unknowable. The
 // duration is not a moment: no window can filter these away.

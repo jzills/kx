@@ -425,13 +425,16 @@ func containerFindings(
 
 	// Only when not waiting: a CrashLoopBackOff finding already reports the
 	// restart count, and repeating it adds nothing.
-	// Dated by the last time the container stopped, either instance — see
-	// StoppedAt. Not by settled, which is about the previous termination
-	// alone: a container with a stale current termination and no recorded
-	// previous one kept reporting its restarts under every window.
-	stopped := outsideWindow(container.StoppedAt(), since)
-	if reason == "" && !stopped && container.RestartCount >= restartWarnThreshold {
-		findings = append(findings, dated(Warning, Cause, container.LastTerminatedAt, fmt.Sprintf(
+	// Gated and dated by the same moment — when the container last restarted,
+	// see RestartedAt — because they are the same claim: a count kept because
+	// the restarting was recent cannot then print the age of something else.
+	// Not settled, which is about the previous termination alone: a container
+	// with a stale current termination and no recorded previous one kept
+	// reporting its restarts under every window.
+	restarted := container.RestartedAt()
+	if reason == "" && !outsideWindow(restarted, since) &&
+		container.RestartCount >= restartWarnThreshold {
+		findings = append(findings, dated(Warning, Cause, restarted, fmt.Sprintf(
 			"Container %s in pod %s restarted %d times",
 			container.Name, podName, container.RestartCount)))
 	}
