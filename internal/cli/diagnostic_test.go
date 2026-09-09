@@ -67,6 +67,43 @@ func triageOf(gatherer Gatherer, saved *[]state.State) TriageCommand {
 	}
 }
 
+// A sweep that found nothing still ran under a window, and the caption has to
+// say which: "0 checked · all healthy" and "0 checked · all healthy · last
+// 30m" are different claims, and only the first is about the cluster. The
+// window came from the flag, not from a row — reading it back off the reports
+// meant an empty sweep silently dropped it, exactly where a reader has least
+// else to go on.
+func TestAnEmptySweepStillReportsItsWindow(t *testing.T) {
+	var saved []state.State
+	command := triageOf(&fakeGatherer{}, &saved)
+	command.Window = 30 * time.Minute
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Checked != 0 {
+		t.Fatalf("Checked = %d, want an empty sweep", result.Checked)
+	}
+	if result.Window != 30*time.Minute {
+		t.Errorf("Window = %v, want the 30m the sweep ran under", result.Window)
+	}
+}
+
+func TestASweepReportsTheWindowItWasGivenNotOneReadOffARow(t *testing.T) {
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: []diagnostics.Data{
+		unhealthy(kinds.Deployment, "api", "prod"),
+	}}, &saved)
+	command.Window = 30 * time.Minute
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Window != 30*time.Minute {
+		t.Errorf("Window = %v, want 30m", result.Window)
+	}
+}
+
 // -A sweeps every namespace and indexes what it finds, now that a resource
 // carries the namespace it was found in. Two same-named workloads in different
 // namespaces must each keep their own number.
@@ -921,30 +958,14 @@ func TestDiagSweepWithoutAWindowStillReportsOldContainerHistory(t *testing.T) {
 	}
 }
 
-// The sweep's caption is where a triage table says what it was allowed to
-// see, so the window has to reach the result — every report in one sweep
-// carries the same one, which is what makes taking it from a report sound.
-func TestTriageResultCarriesTheWindow(t *testing.T) {
-	swept := unhealthy(kinds.Deployment, "web", "prod")
-	swept.Window = 7 * 24 * time.Hour
-	gatherer := &fakeGatherer{sweep: []diagnostics.Data{swept}}
+// An unbounded sweep names no window, whatever it found — the caption has
+// nothing to qualify, and "last 0" is not a thing a reader can be told.
+func TestAnUnboundedSweepNamesNoWindow(t *testing.T) {
 	var saved []state.State
-
-	result, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if result.Window != 7*24*time.Hour {
-		t.Errorf("Window = %v, want the window its reports were gathered under", result.Window)
-	}
-}
-
-// An empty sweep has no report to take a window from, and no rows to
-// qualify — the caption says "nothing to check" and nothing else.
-func TestTriageResultWithoutReportsHasNoWindow(t *testing.T) {
-	gatherer := &fakeGatherer{}
-	var saved []state.State
-	result, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
+	command := triageOf(&fakeGatherer{sweep: []diagnostics.Data{
+		unhealthy(kinds.Deployment, "web", "prod"),
+	}}, &saved)
+	result, err := command.Execute(context.Background(), "prod", false, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

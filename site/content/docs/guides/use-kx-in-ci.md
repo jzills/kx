@@ -42,11 +42,18 @@ underneath that is worse than one it can check for.
 {
   "schemaVersion": 1,
   "namespace": "prod",
+  "window": "24h",
   "checked": 12,
   "healthy": 1,
   "resources": [ … ]
 }
 ```
+
+`window` is how far back that run was allowed to look, spelled the way
+`--since` reads it. A run with no window carries no such field. It is what
+tells two runs of the same job apart when the second one is quieter — the
+cluster got better, or the window got narrower — which a document that only
+counted what it found could not say.
 
 All four commands that emit `--json` name their subject with the same fields,
 so a pipeline that reads one does not have to learn a second shape to read the

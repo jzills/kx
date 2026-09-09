@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
@@ -675,6 +676,49 @@ func TestDiagnosticJSONHasOneShapeIndexedOrSwept(t *testing.T) {
 		if _, present := decodeJSON(t, indexed)[field]; present {
 			t.Errorf("indexed document still carries a top-level %q:\n%s", field, indexed)
 		}
+	}
+}
+
+// The document says what window it was produced under, in the vocabulary
+// --since reads. The terminal banner and the HTML invocation line both say
+// it; JSON is where it matters most, since --json is what a CI job parses
+// beside the --fail-on gate that the same window governs. Without it, a run
+// that got quieter cannot be told from a window that got narrower.
+func TestDiagnosticJSONSaysWhatWindowItRanUnder(t *testing.T) {
+	indexed, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod",
+		Verdict: diagnostics.Critical, Window: 24 * time.Hour,
+	}, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	if got := decodeJSON(t, indexed)["window"]; got != "24h" {
+		t.Errorf("window = %v, want \"24h\":\n%s", got, indexed)
+	}
+
+	swept, err := triageJSON(render.TriageResult{
+		Namespace: "prod", Checked: 3, Healthy: 2, Window: 7 * 24 * time.Hour,
+		All: []diagnostics.Report{{Kind: kinds.Pod, Name: "web"}},
+	})
+	if err != nil {
+		t.Fatalf("triageJSON: %v", err)
+	}
+	if got := decodeJSON(t, swept)["window"]; got != "7d" {
+		t.Errorf("window = %v, want \"7d\":\n%s", got, swept)
+	}
+}
+
+// An unbounded run has no window to name, and must not claim one — "0" would
+// read as a setting rather than as the absence of one.
+func TestUnboundedDiagnosticJSONCarriesNoWindow(t *testing.T) {
+	out, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
+	}, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	if _, present := decodeJSON(t, out)["window"]; present {
+		t.Errorf("unbounded document names a window:\n%s", out)
 	}
 }
 
