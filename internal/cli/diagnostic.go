@@ -48,6 +48,13 @@ func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.
 type TriageCommand struct {
 	Diagnostics Gatherer
 	Save        func(state.State) error
+	// Window is how far back the sweep was allowed to look — the same value
+	// the caller set on the service. Carried in rather than read back off a
+	// report because a sweep that found nothing has no report to read it
+	// from, and that is the case where a caption saying "last 30m" matters
+	// most: "0 checked · all healthy" would otherwise be indistinguishable
+	// from a cluster that is genuinely quiet.
+	Window time.Duration
 }
 
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
@@ -94,14 +101,6 @@ func (c TriageCommand) Execute(
 		terminalReports = reports
 	}
 
-	// Every report in one sweep was gathered under the same window, so any
-	// of them carries the sweep's — and an empty sweep has no rows to
-	// qualify, so it needs none.
-	var window time.Duration
-	if len(reports) > 0 {
-		window = reports[0].Window
-	}
-
 	result := render.TriageResult{
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
@@ -110,7 +109,7 @@ func (c TriageCommand) Execute(
 		All:           reports,
 		Healthy:       len(reports) - len(unhealthy),
 		Full:          full,
-		Window:        window,
+		Window:        c.Window,
 	}
 
 	// Every swept resource is indexed, not just the unhealthy ones printed by
@@ -322,7 +321,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				stop := render.Status(sweeping)
 				result, err := TriageCommand{
-					Diagnostics: service, Save: services.State.Save,
+					Diagnostics: service, Save: services.State.Save, Window: window,
 				}.Execute(ctx, namespace, allNamespaces, full)
 				stop()
 				if err != nil {
