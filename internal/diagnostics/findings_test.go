@@ -48,6 +48,19 @@ func severityOf(t *testing.T, findings []Finding, substring string) Severity {
 	return OK
 }
 
+// momentOf is severityOf for the other half of a finding: when the thing it
+// reports happened. Zero for an ongoing one, which carries a duration instead.
+func momentOf(t *testing.T, findings []Finding, substring string) time.Time {
+	t.Helper()
+	for _, finding := range findings {
+		if strings.Contains(finding.Summary, substring) {
+			return finding.At
+		}
+	}
+	t.Fatalf("no finding contains %q; got %v", substring, summaries(findings))
+	return time.Time{}
+}
+
 // The verdict is the highest finding severity, and findings sort most severe
 // first so the triage table's top finding is the worst one.
 func TestReportVerdictAndOrdering(t *testing.T) {
@@ -1130,6 +1143,30 @@ func TestUndatedFailedPodIsStillReported(t *testing.T) {
 	findings := podFindings(PodDiagnostic{Name: "job-1", Phase: "Failed"}, windowStart)
 	if !hasSummaryContaining(findings, "Pod job-1 failed") {
 		t.Errorf("findings = %v, want an undatable failure kept", summaries(findings))
+	}
+}
+
+// A pod that failed in an init container leaves no main-container status to
+// date it by — podDiagnostic reads pod.Status.ContainerStatuses alone, and an
+// eviction can lose those too. Undated, the failure is outside no window at
+// all, so one Job that failed to initialise last month would hold its workload
+// critical and a --fail-on gate red forever. The pod's own UnhealthySince
+// dates it instead.
+func TestFailedPodWithNoContainerDateIsDatedByItsReadyTransition(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "migrate-1", Phase: "Failed", UnhealthySince: longAgo,
+	}, windowStart)
+	if len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a pod that failed weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentlyFailedPodWithNoContainerDateIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "migrate-1", Phase: "Failed", UnhealthySince: recently,
+	}, windowStart)
+	if at := momentOf(t, findings, "Pod migrate-1 failed"); !at.Equal(recently) {
+		t.Errorf("failure dated %v, want the moment it stopped being ready, %v", at, recently)
 	}
 }
 

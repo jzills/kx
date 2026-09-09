@@ -116,6 +116,27 @@ func (p PodDiagnostic) FinishedAt() time.Time {
 	return latest
 }
 
+// StoppedAt is when a failed pod's failure happened: the last of its
+// containers to terminate, or when it stopped being ready if none of them
+// carries a date.
+//
+// The fallback is what keeps such a failure datable at all. FinishedAt reads
+// the container statuses, which a pod that failed in an init container never
+// fills in — podDiagnostic flattens pod.Status.ContainerStatuses alone — and
+// which an eviction can drop entirely. An undated failure falls outside no
+// window, so without this one Job that failed to initialise last month holds
+// its workload critical, and a --fail-on gate red, forever: the case the
+// window exists to end.
+//
+// Zero remains possible, for a pod carrying neither. That one stays reported
+// under every window, by the same rule an undated event does.
+func (p PodDiagnostic) StoppedAt() time.Time {
+	if finished := p.FinishedAt(); !finished.IsZero() {
+		return finished
+	}
+	return p.UnhealthySince
+}
+
 // SchedulingInfo records why a pod could not be placed.
 type SchedulingInfo struct {
 	Schedulable bool

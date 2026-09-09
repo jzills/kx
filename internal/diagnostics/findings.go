@@ -354,11 +354,12 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 		findings = append(findings, ongoing(Warning, Aggregate, pod.UnhealthySince,
 			"Pod "+pod.Name+" pending"))
 	// A failed pod finished failing, dated by the last of its containers to
-	// stop. Kubernetes keeps it until GC, so without that date one preempted
-	// or OOM-evicted pod reports its workload broken indefinitely — the same
+	// stop — or, when none of them was dated, by when it stopped being ready.
+	// Kubernetes keeps it until GC, so without that date one preempted or
+	// OOM-evicted pod reports its workload broken indefinitely — the same
 	// reason PodPhaseCounts.Stalled leaves Failed out of a node's tally.
-	case pod.Phase == "Failed" && !outsideWindow(pod.FinishedAt(), since):
-		findings = append(findings, dated(Critical, Aggregate, pod.FinishedAt(),
+	case pod.Phase == "Failed" && !outsideWindow(pod.StoppedAt(), since):
+		findings = append(findings, dated(Critical, Aggregate, pod.StoppedAt(),
 			"Pod "+pod.Name+" failed"))
 	case pod.Phase == "Running" && pod.ReadyContainers < pod.TotalContainers && !anyWaiting:
 		// A waiting container already produced its own, more specific finding.
