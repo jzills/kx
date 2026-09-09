@@ -33,17 +33,25 @@ func FormatElapsedAt(now, since time.Time) string { return elapsed(now, since) }
 // formatAgeAt takes the reference time so the formatting is testable without
 // freezing the clock.
 func formatAgeAt(now, timestamp time.Time) string {
-	magnitude := elapsed(now, timestamp)
-	if magnitude == "" || magnitude == justNow {
-		return magnitude
+	if timestamp.IsZero() {
+		return ""
 	}
-	return magnitude + " ago"
+	if int(now.Sub(timestamp).Seconds()) < 0 {
+		return justNow
+	}
+	return elapsed(now, timestamp) + " ago"
 }
 
 // justNow is what a timestamp in the future renders as, rather than "in 3m":
 // the cause is clock skew between the API server and here, and admitting
-// nothing useful is known beats reporting a negative age. It carries no
-// "ago", which is why formatAgeAt passes it through untouched.
+// nothing useful is known beats reporting a negative age.
+//
+// An age only. A duration renders skew as "0s" instead, because the two are
+// read differently: "just now" names a moment, and a finding built on it read
+// "· for just now" — a moment inside a sentence about how long something has
+// been true. Something that started a moment ago has been true for none of
+// it, which is what "for 0s" says, and what a node cordoned a second ago has
+// always printed.
 const justNow = "just now"
 
 func elapsed(now, timestamp time.Time) string {
@@ -52,7 +60,7 @@ func elapsed(now, timestamp time.Time) string {
 	}
 	seconds := int(now.Sub(timestamp).Seconds())
 	if seconds < 0 {
-		return justNow
+		seconds = 0
 	}
 	for _, unit := range []struct {
 		suffix string
