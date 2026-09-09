@@ -586,3 +586,158 @@ func TestAFindingCarryingBothPrefersTheMoment(t *testing.T) {
 		t.Errorf("both shapes were rendered:\n%s", out)
 	}
 }
+
+// A finding is a sentence, and Kubernetes writes long ones — the scheduler's
+// "0/1 nodes are available…" runs past 200 columns. Left unwrapped the
+// terminal broke it at column 0, so the continuation started under the
+// section header and the block stopped reading as a list.
+const longFinding = "Unschedulable: 0/1 nodes are available: 1 Insufficient cpu. " +
+	"no new claims to deallocate, preemption: 0/1 nodes are available: 1 " +
+	"Preemption is not helpful for scheduling. (pod report-unschedulable-57d7f65ccc-fph56)"
+
+// summaryLines is the SUMMARY block's lines, header excluded.
+func summaryLines(t *testing.T, out string) []string {
+	t.Helper()
+	var lines []string
+	inSummary := false
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, "SUMMARY"):
+			inSummary = true
+		case inSummary && strings.TrimSpace(line) == "":
+			inSummary = false
+		case inSummary:
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		t.Fatalf("no SUMMARY lines in:\n%s", out)
+	}
+	return lines
+}
+
+func TestLongFindingWrapsInsideTheProseWidth(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	lines := summaryLines(t, out)
+	if len(lines) < 2 {
+		t.Fatalf("a %d-column finding was not wrapped:\n%s", len(longFinding), out)
+	}
+	for _, line := range lines {
+		if width := len([]rune(line)); width > proseMaxWidth {
+			t.Errorf("line is %d columns, want at most %d:\n%q", width, proseMaxWidth, line)
+		}
+	}
+}
+
+// Tucked: the icon owns the left margin and every continuation sits inside
+// the text it belongs to, so the eye can still find where one finding ends
+// and the next begins.
+func TestWrappedFindingContinuationsAreIndentedPastTheIcon(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	lines := summaryLines(t, out)
+	if got := lines[0]; !strings.HasPrefix(got, "  ✗ ") {
+		t.Errorf("first line = %q, want it to start with the icon at column 2", got)
+	}
+	for _, line := range lines[1:] {
+		if !strings.HasPrefix(line, "      ") || strings.HasPrefix(line, "       ") {
+			t.Errorf("continuation = %q, want exactly six spaces of indent", line)
+		}
+	}
+}
+
+// Wrapping must not lose or invent a word, and must not break one in half —
+// a truncated pod name is worse than a wrapped line.
+func TestWrappingPreservesTheFindingText(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	var words []string
+	for _, line := range summaryLines(t, out) {
+		fields := strings.Fields(line)
+		if len(words) == 0 {
+			fields = fields[1:] // the icon
+		}
+		words = append(words, fields...)
+	}
+	if got := strings.Join(words, " "); got != longFinding {
+		t.Errorf("wrapped text = %q, want %q", got, longFinding)
+	}
+}
+
+func TestShortFindingStaysOnOneLine(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if lines := summaryLines(t, out); len(lines) != 1 {
+		t.Errorf("a short finding took %d lines:\n%s", len(lines), out)
+	}
+}
+
+// The wrapping and the dating meet on the same line, so the time has to be
+// inside the wrap rather than appended after it — appended, it would be the
+// one thing in a wrapped block still able to run past the width.
+//
+// Swept across lengths so the boundary is crossed wherever it falls: the time
+// rides the last line while there is room for it and takes a line of its own
+// when there is not. Both branches are asserted to have happened, or the
+// sweep would pass having only ever exercised one.
+func TestAFindingsTimeNeverPushesALinePastTheWidth(t *testing.T) {
+	var sawInline, sawOwnLine bool
+	for words := 1; words <= 40; words++ {
+		report := reportWithFinding(strings.TrimSpace(strings.Repeat("failing ", words)))
+		report.Findings[0].At = time.Now().Add(-3 * time.Minute)
+		out := capture(func(r *Renderer) { r.Diagnostic(report) })
+
+		for _, line := range summaryLines(t, out) {
+			if width := len([]rune(line)); width > proseMaxWidth {
+				t.Fatalf("%d words: line is %d columns, want at most %d:\n%q",
+					words, width, proseMaxWidth, line)
+			}
+			if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "· ") {
+				sawOwnLine = true
+			} else if strings.Contains(trimmed, "· 3m ago") {
+				sawInline = true
+			}
+		}
+		if !strings.Contains(out, "3m ago") {
+			t.Fatalf("%d words: the time went missing:\n%s", words, out)
+		}
+	}
+	if !sawInline {
+		t.Error("the time never rode the last line")
+	}
+	if !sawOwnLine {
+		t.Error("the time never took a line of its own — the overflow branch is untested")
+	}
+}
+
+// The event message is prose too, and a long one — an image pull error
+// carrying a registry URL and a digest — overflowed the same way.
+func TestLongEventMessageWrapsUnderItsHeading(t *testing.T) {
+	message := "Failed to pull image \"registry.example.com/team/service:1.4.2\": " +
+		"rpc error: code = Unknown desc = failed to pull and unpack image: " +
+		"failed to resolve reference: unexpected status from HEAD request: 401 Unauthorized"
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		WarningEvents: []diagnostics.EventSummary{{
+			Reason: "Failed", Kind: "Pod", Name: "api-abc", Count: 4, Message: message,
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Failed to pull") || strings.HasPrefix(line, "        ") {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) < 2 {
+		t.Fatalf("a %d-column message was not wrapped:\n%s", len(message), out)
+	}
+	for _, line := range lines {
+		if width := len([]rune(line)); width > proseMaxWidth {
+			t.Errorf("line is %d columns, want at most %d:\n%q", width, proseMaxWidth, line)
+		}
+	}
+	for _, line := range lines[1:] {
+		if !strings.HasPrefix(line, "        ") || strings.HasPrefix(line, "         ") {
+			t.Errorf("continuation = %q, want exactly eight spaces of indent", line)
+		}
+	}
+}
