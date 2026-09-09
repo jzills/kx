@@ -711,6 +711,76 @@ func TestDiagnosticRegistersSinceFlag(t *testing.T) {
 	}
 }
 
+// The flag's help has to name the default it actually falls back to. Written
+// against an unset diag_max_age, the sentence went on claiming "unset" on the
+// one machine whose reader most needs to know otherwise: the one where the
+// key is set.
+func TestSinceHelpNamesTheConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	// 36h rather than a round 12h: the sentence already lists "30m, 12h, 7d"
+	// as spellings, so asserting on 12h would pass on the vocabulary alone.
+	cfg.DiagMaxAge = 36 * time.Hour
+	usage := sinceUsageOf(t, cfg)
+	if !strings.Contains(usage, "36h") {
+		t.Errorf("--since help = %q, want it to name the configured 36h", usage)
+	}
+	if strings.Contains(usage, "unset") {
+		t.Errorf("--since help = %q, want it not to call a set diag_max_age unset", usage)
+	}
+}
+
+// And says so plainly when there is nothing to name, since that is the state
+// every default install is in.
+func TestSinceHelpSaysWhenNothingIsConfigured(t *testing.T) {
+	usage := sinceUsageOf(t, config.Default())
+	if !strings.Contains(usage, "unset") {
+		t.Errorf("--since help = %q, want it to say diag_max_age is unset", usage)
+	}
+}
+
+// The long help's --since paragraph carries the same claim about the default,
+// at more length, and was wrong in the same way.
+func TestSinceOverviewNamesTheConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.DiagMaxAge = 36 * time.Hour
+	long := newDiagnosticCommand(Services{Config: cfg}, "diagnostic", nil).Long
+	if !strings.Contains(long, "currently 36h") {
+		t.Errorf("long help = %q, want the --since paragraph to name 36h", long)
+	}
+	if strings.Contains(long, "Without it everything is reported") {
+		t.Errorf("long help = %q, want it not to promise an unbounded default "+
+			"a set diag_max_age has taken away", long)
+	}
+	// The way back to the old behaviour is the only thing a reader with the
+	// key set can't work out from the rest of the screen.
+	if !strings.Contains(long, "'--since 0'") {
+		t.Errorf("long help = %q, want it to name --since 0", long)
+	}
+}
+
+func TestSinceOverviewTeachesTheSettingWhenUnset(t *testing.T) {
+	long := newDiagnosticCommand(Services{Config: config.Default()}, "diagnostic", nil).Long
+	if !strings.Contains(long, "Without it everything is reported") {
+		t.Errorf("long help = %q, want the unbounded default described", long)
+	}
+	if !strings.Contains(long, "Set diag_max_age in config.toml") {
+		t.Errorf("long help = %q, want the setting taught to a reader without one", long)
+	}
+}
+
+// Read off the built command rather than from sinceUsage directly: the help a
+// reader sees is the flag's, and a usage string that never reached the
+// registration would agree with itself.
+func sinceUsageOf(t *testing.T, cfg config.Config) string {
+	t.Helper()
+	flag := newDiagnosticCommand(Services{Config: cfg}, "diagnostic", nil).
+		Flags().Lookup("since")
+	if flag == nil {
+		t.Fatal("--since is not registered")
+	}
+	return flag.Usage
+}
+
 // The flag is an override of the setting, not a separate knob: unset means
 // whatever config.toml or KX_DIAG_MAX_AGE resolved to.
 func TestReportWindowFallsBackToTheConfiguredSetting(t *testing.T) {

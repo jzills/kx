@@ -155,6 +155,7 @@ func isPathArg(name string) bool { return name == "src" || name == "dest" }
 var flagValues = map[string]completer{
 	"engine":    completeEngine,
 	"namespace": completeNamespaceNames,
+	"since":     completeWindow,
 }
 
 // flagValueCompletion answers when the cursor is on a flag's value rather than
@@ -375,6 +376,17 @@ func completeTheme(Services, string) []string {
 
 func completeEngine(Services, string) []string {
 	return scanner.Names()
+}
+
+// completeWindow suggests the windows --since is documented with.
+//
+// Not a closed set — any duration config.ParseDuration reads is legal — but
+// the shell's fallback for a flag with no completer of its own is filenames,
+// which is what a duration flag least wants. The day spelling in particular is
+// kx's own, since kubectl's --since rejects "7d", so a reader who is never
+// offered it has no way to learn from the shell that it exists.
+func completeWindow(Services, string) []string {
+	return []string{"30m", "12h", "7d"}
 }
 
 // registerFlagCompletions completes flag values that come from a fixed set or
