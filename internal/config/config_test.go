@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, contents string) Loader {
@@ -379,5 +380,86 @@ func TestDebugImageEnvOverridesFile(t *testing.T) {
 func TestDebugImageRejectsANonString(t *testing.T) {
 	if _, err := writeConfig(t, "debug_image = 3\n").Load(); err == nil {
 		t.Error("a numeric debug_image was accepted")
+	}
+}
+
+// Unbounded unless asked: kx diag reports what it always reported until
+// someone chooses a window, so an upgrade changes no verdict and no exit
+// code on its own.
+func TestDiagMaxAgeDefaultsToNoWindow(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want no window", cfg.DiagMaxAge)
+	}
+}
+
+func TestDiagMaxAgeFromFile(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7d\"\n")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 7 * 24 * time.Hour; cfg.DiagMaxAge != want {
+		t.Errorf("DiagMaxAge = %v, want %v", cfg.DiagMaxAge, want)
+	}
+}
+
+func TestDiagMaxAgeEnvOverridesFile(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7d\"\n")
+	t.Setenv("KX_DIAG_MAX_AGE", "30m")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 30 * time.Minute; cfg.DiagMaxAge != want {
+		t.Errorf("DiagMaxAge = %v, want %v", cfg.DiagMaxAge, want)
+	}
+}
+
+// Zero is how the file spells "no window", so it has to reach the diagnostics
+// rather than being read as an unset key falling back to the default.
+func TestDiagMaxAgeZeroIsUnlimited(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"0\"\n")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want 0", cfg.DiagMaxAge)
+	}
+}
+
+// A duration is a string in TOML — `diag_max_age = 7` has no unit and cannot
+// be guessed at.
+func TestDiagMaxAgeRejectsANonString(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = 7\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a non-string diag_max_age")
+	} else if !strings.Contains(err.Error(), "diag_max_age") {
+		t.Errorf("error = %q, want it to name diag_max_age", err)
+	}
+}
+
+func TestDiagMaxAgeRejectsAMalformedValue(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7 weeks\"\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed diag_max_age")
+	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
+		!strings.Contains(err.Error(), "diag_max_age") {
+		t.Errorf("error = %q, want a kx: error naming diag_max_age", err)
+	}
+}
+
+func TestDiagMaxAgeRejectsAMalformedEnvValue(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	t.Setenv("KX_DIAG_MAX_AGE", "later")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed KX_DIAG_MAX_AGE")
+	} else if !strings.Contains(err.Error(), "KX_DIAG_MAX_AGE") {
+		t.Errorf("error = %q, want it to name KX_DIAG_MAX_AGE", err)
 	}
 }

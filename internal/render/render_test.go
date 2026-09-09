@@ -526,3 +526,33 @@ func TestAMultiWordQuotedFragmentStaysOneSpan(t *testing.T) {
 		t.Errorf("Error rendered\n  %q\nwant\n  %q", got, want)
 	}
 }
+
+// "3m ago" answers when something happened; "3m" answers how long something
+// has been true. A finding is one or the other, never both, and the report
+// tells them apart by shape — so the magnitude is shared and the "ago" is
+// not.
+func TestFormatElapsedIsAnAgeWithoutTheAgo(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		since time.Time
+		want  string
+	}{
+		{now.Add(-24 * 24 * time.Hour), "24d"},
+		{now.Add(-3 * time.Hour), "3h"},
+		{now.Add(-12 * time.Minute), "12m"},
+		{now.Add(-45 * time.Second), "45s"},
+	} {
+		if got := FormatElapsedAt(now, tc.since); got != tc.want {
+			t.Errorf("FormatElapsedAt(%v) = %q, want %q", tc.since, got, tc.want)
+		}
+		if got, want := FormatAgeAt(now, tc.since), tc.want+" ago"; got != want {
+			t.Errorf("FormatAgeAt(%v) = %q, want %q", tc.since, got, want)
+		}
+	}
+}
+
+func TestFormatElapsedOfAnUndatedThingIsEmpty(t *testing.T) {
+	if got := FormatElapsedAt(time.Now(), time.Time{}); got != "" {
+		t.Errorf("FormatElapsedAt(zero) = %q, want empty", got)
+	}
+}

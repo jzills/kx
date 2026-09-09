@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -316,7 +317,7 @@ func TestServiceHealthFromEndpoints(t *testing.T) {
 // stays fast and quiet.
 func TestContainerNeedsLogs(t *testing.T) {
 	healthy := ContainerDiagnostic{Ready: true, State: "Running"}
-	if containerNeedsLogs(healthy) {
+	if containerNeedsLogs(healthy, unbounded) {
 		t.Error("a healthy container was asked for logs")
 	}
 	for name, container := range map[string]ContainerDiagnostic{
@@ -325,7 +326,7 @@ func TestContainerNeedsLogs(t *testing.T) {
 		"has restarted":   {Ready: true, State: "Running", RestartCount: 1},
 		"died previously": {Ready: true, State: "Running", LastTerminatedReason: "Error"},
 	} {
-		if !containerNeedsLogs(container) {
+		if !containerNeedsLogs(container, unbounded) {
 			t.Errorf("%s: no logs requested", name)
 		}
 	}
@@ -421,4 +422,185 @@ func TestIngressBackendServiceNamesEmptyIngressYieldsNone(t *testing.T) {
 func ingressBackendPtr(serviceName string) *networkingv1.IngressBackend {
 	backend := ingressBackend(serviceName)
 	return &backend
+}
+
+// The reason a container died says nothing about when, and the window needs
+// both. FinishedAt is what dates the whole of a container's history — the
+// last termination and, with it, the restart count.
+func TestContainerDiagnosticKeepsWhenItLastTerminated(t *testing.T) {
+	finished := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	status := running("app")
+	status.RestartCount = 4
+	status.LastTerminationState = corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{
+			Reason: "OOMKilled", ExitCode: 137, FinishedAt: finished,
+		},
+	}
+	got := containerDiagnostic(&status, nil)
+	if !got.LastTerminatedAt.Equal(finished.Time) {
+		t.Errorf("LastTerminatedAt = %v, want %v", got.LastTerminatedAt, finished.Time)
+	}
+}
+
+// A container that has never terminated has nothing to date, and must not be
+// given a zero-value timestamp that reads as 1 January year 1 — outsideWindow
+// treats a zero as undatable, which is the behaviour that keeps it reported.
+func TestContainerDiagnosticWithoutATerminationHasNoTime(t *testing.T) {
+	status := running("app")
+	if got := containerDiagnostic(&status, nil); !got.LastTerminatedAt.IsZero() {
+		t.Errorf("LastTerminatedAt = %v, want zero", got.LastTerminatedAt)
+	}
+}
+
+// A Job's failure is dated by the transition into the Failed condition —
+// there is no other timestamp for it: CompletionTime is set only on success.
+func TestJobHealthKeepsWhenItFailed(t *testing.T) {
+	failedAt := metav1.NewTime(time.Now().Add(-8 * 24 * time.Hour))
+	job := &batchv1.Job{Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+		Type: batchv1.JobFailed, Reason: "BackoffLimitExceeded", LastTransitionTime: failedAt,
+	}}}}
+	if got := jobHealthFrom(job).FailedAt; !got.Equal(failedAt.Time) {
+		t.Errorf("FailedAt = %v, want %v", got, failedAt.Time)
+	}
+}
+
+func TestJobHealthOfARunningJobHasNoFailureTime(t *testing.T) {
+	job := &batchv1.Job{Status: batchv1.JobStatus{Active: 1}}
+	if got := jobHealthFrom(job).FailedAt; !got.IsZero() {
+		t.Errorf("FailedAt = %v, want zero for a job that has not failed", got)
+	}
+}
+
+// The current terminated state has its own timestamp, separate from the
+// previous one — a container that is stopped now stopped at a moment, and
+// that moment is what says whether its failure is this week's news.
+func TestContainerDiagnosticKeepsWhenItTerminated(t *testing.T) {
+	finished := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	status := corev1.ContainerStatus{
+		Name: "migrate",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			Reason: "Error", ExitCode: 1, FinishedAt: finished,
+		}},
+	}
+	got := containerDiagnostic(&status, nil)
+	if !got.TerminatedAt.Equal(finished.Time) {
+		t.Errorf("TerminatedAt = %v, want %v", got.TerminatedAt, finished.Time)
+	}
+}
+
+func TestRunningContainerHasNoTerminationTime(t *testing.T) {
+	status := running("app")
+	if got := containerDiagnostic(&status, nil); !got.TerminatedAt.IsZero() {
+		t.Errorf("TerminatedAt = %v, want zero for a running container", got.TerminatedAt)
+	}
+}
+
+// A pod is finished when its last container is, so a multi-container pod is
+// dated by the one that outlived the others.
+func TestPodFinishedAtIsItsLastContainerToStop(t *testing.T) {
+	first := time.Now().Add(-3 * time.Hour)
+	last := time.Now().Add(-30 * time.Minute)
+	pod := PodDiagnostic{Containers: []ContainerDiagnostic{
+		{Name: "a", TerminatedAt: first},
+		{Name: "b", TerminatedAt: last},
+	}}
+	if got := pod.FinishedAt(); !got.Equal(last) {
+		t.Errorf("FinishedAt = %v, want %v", got, last)
+	}
+}
+
+func TestPodStillRunningHasNoFinishedAt(t *testing.T) {
+	pod := PodDiagnostic{Containers: []ContainerDiagnostic{{Name: "a"}}}
+	if got := pod.FinishedAt(); !got.IsZero() {
+		t.Errorf("FinishedAt = %v, want zero", got)
+	}
+}
+
+// How long a pod has been failing is a different question from when
+// something happened to it, and the Ready condition is where the cluster
+// answers it: a pod that has never been ready has been failing since it was
+// created, and one that fell over says when it stopped being ready.
+func TestPodDiagnosticKeepsHowLongItHasBeenUnready(t *testing.T) {
+	since := metav1.NewTime(time.Now().Add(-24 * 24 * time.Hour))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: metav1.NewTime(time.Now())},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionFalse, LastTransitionTime: since,
+			}},
+		},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.Equal(since.Time) {
+		t.Errorf("UnhealthySince = %v, want %v", got, since.Time)
+	}
+}
+
+// No Ready condition at all — a pod the scheduler has not touched yet —
+// falls back to its creation, which is how long it has been failing to
+// become anything.
+func TestPodDiagnosticFallsBackToCreationForHowLong(t *testing.T) {
+	created := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: created},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.Equal(created.Time) {
+		t.Errorf("UnhealthySince = %v, want the creation time %v", got, created.Time)
+	}
+}
+
+// A ready pod is not failing, so it has no duration to report.
+func TestReadyPodHasNoUnhealthySince(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", CreationTimestamp: metav1.NewTime(time.Now())},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(time.Now()),
+			}},
+		},
+	}
+	if got := podDiagnostic(pod).UnhealthySince; !got.IsZero() {
+		t.Errorf("UnhealthySince = %v, want zero for a ready pod", got)
+	}
+}
+
+// A Deployment says how long it has been short, in its Available condition.
+func TestReplicaHealthKeepsHowLongItHasBeenUnavailable(t *testing.T) {
+	since := metav1.NewTime(time.Now().Add(-53 * 24 * time.Hour))
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{Replicas: i32(1)},
+		Status: appsv1.DeploymentStatus{
+			Conditions: []appsv1.DeploymentCondition{{
+				Type: appsv1.DeploymentAvailable, Status: corev1.ConditionFalse,
+				LastTransitionTime: since,
+			}},
+		},
+	}
+	got := replicaHealthFrom(kinds.Deployment, deployment)
+	if got == nil || !got.UnavailableSince.Equal(since.Time) {
+		t.Errorf("UnavailableSince = %+v, want %v", got, since.Time)
+	}
+}
+
+// An available Deployment is not short of anything. Nor is a DaemonSet, which
+// records no conditions at all — the duration is simply unknown there, and
+// an unknown one is left unsaid rather than guessed from creation.
+func TestAvailableWorkloadHasNoUnavailableSince(t *testing.T) {
+	deployment := &appsv1.Deployment{
+		Spec: appsv1.DeploymentSpec{Replicas: i32(1)},
+		Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{{
+			Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(time.Now()),
+		}}},
+	}
+	if got := replicaHealthFrom(kinds.Deployment, deployment); got == nil || !got.UnavailableSince.IsZero() {
+		t.Errorf("UnavailableSince = %+v, want zero", got)
+	}
+	daemon := &appsv1.DaemonSet{Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3}}
+	if got := replicaHealthFrom(kinds.DaemonSet, daemon); got == nil || !got.UnavailableSince.IsZero() {
+		t.Errorf("DaemonSet UnavailableSince = %+v, want zero", got)
+	}
 }

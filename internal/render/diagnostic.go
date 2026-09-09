@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/jzills/kx/internal/config"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/theme"
@@ -33,6 +36,28 @@ func severityStyle(severity diagnostics.Severity) string {
 	}
 }
 
+// WindowLabel spells the window a report was gathered under, for a caption
+// that has to say what it was allowed to see. Empty when there is no window.
+//
+// The same vocabulary the --since flag reads, so the caption names a value
+// that can be typed straight back at it. Exported for the HTML report, which
+// has the same thing to say and must not invent its own spelling for it.
+func WindowLabel(window time.Duration) string {
+	if window <= 0 {
+		return ""
+	}
+	return "last " + config.FormatDuration(window)
+}
+
+// windowSuffix is windowLabel as a trailing segment, for the lines that build
+// their own caption rather than going through Caption.
+func windowSuffix(window time.Duration) string {
+	if label := WindowLabel(window); label != "" {
+		return " · " + label
+	}
+	return ""
+}
+
 // Diagnostic renders a full report for one resource.
 func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	// The verdict rides in the banner rather than on a line of its own.
@@ -57,7 +82,8 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	if report.Namespace != "" {
 		prefix += report.Namespace + " · "
 	}
-	r.line(r.style(theme.Muted, prefix) + extra)
+	r.line(r.style(theme.Muted, prefix) + extra +
+		r.style(theme.Muted, windowSuffix(report.Window)))
 
 	r.Blank()
 	// Section headers align with the pod table's content, which pads by two.
@@ -67,13 +93,14 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary))
+			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary) +
+				r.style(theme.Muted, findingTime(finding)))
 		}
 	}
 
 	r.podTable(report.Pods)
 	r.logs(report.Pods)
-	r.warningEvents(report.WarningEvents)
+	r.warningEvents(report.WarningEvents, report.Window)
 }
 
 // podTable lists every pod and its containers, one container per row with the
@@ -113,14 +140,64 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 			}
 			rows = append(rows, []Cell{
 				name, phaseCell, readyCell,
-				Plain(strconv.Itoa(int(container.RestartCount))),
+				Plain(restarts(container)),
 				Plain(container.Name),
-				Styled(container.State, statusColor(container.State)),
+				Styled(containerState(container), statusColor(container.State)),
 				reasonCell,
 			})
 		}
 	}
 	r.Table(columns, rows)
+}
+
+// restarts spells the restart count with the time of the last one, the way
+// kubectl get pods does — "21 (3h ago)". The count alone is cumulative over
+// the pod's whole life, so it cannot say whether the thrashing is current,
+// which is the question the window turns on.
+func restarts(container diagnostics.ContainerDiagnostic) string {
+	count := strconv.Itoa(int(container.RestartCount))
+	if container.RestartCount == 0 {
+		return count
+	}
+	if age := FormatAge(container.LastTerminatedAt); age != "" {
+		return count + " (" + age + ")"
+	}
+	return count
+}
+
+// findingTime is the trailing segment that says when a finding's subject
+// happened, or how long it has been true.
+//
+// Two readings, one shape: "· 2m ago" is a moment, and a narrow enough
+// --since will hide that finding; "· for 24d" is a duration, and no window
+// ever will. The words carry that difference, so the separator does not have
+// to — every other trailing segment kx prints is · -separated, and a
+// parenthetical here would be the only one of its kind on the screen.
+//
+// A finding carries one or neither, never both, and neither when the cluster
+// records no way to date it.
+func findingTime(f diagnostics.Finding) string {
+	if moment := FormatAge(f.At); moment != "" {
+		return " · " + moment
+	}
+	if duration := FormatElapsed(f.Since); duration != "" {
+		return " · for " + duration
+	}
+	return ""
+}
+
+// containerState names the state with the moment it stopped, when it has
+// stopped — "Terminated (46d ago)".
+//
+// A report can read healthy with corpses still in its table, since findings
+// about a container that finished before the window are dropped while the
+// table goes on listing what exists. The age is what keeps those two honest
+// with each other.
+func containerState(container diagnostics.ContainerDiagnostic) string {
+	if age := FormatAge(container.TerminatedAt); age != "" {
+		return container.State + " (" + age + ")"
+	}
+	return container.State
 }
 
 // Log tokens that read as failures rather than warnings.
@@ -161,9 +238,17 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	r.line("  " + r.style(theme.Header, "LOGS"))
 	for _, e := range entries {
 		note := ""
+		// A tail from a dead instance is an excerpt of a crash that
+		// happened at some point; without its age an old one reads as the
+		// current failure.
+		if e.container.LogSource == "previous" {
+			if age := FormatAge(e.container.LastTerminatedAt); age != "" {
+				note = " · previous instance, " + age
+			}
+		}
 		if !e.container.LogFiltered {
 			// Nothing matched a severity token, so this is just the tail.
-			note = " · recent output"
+			note += " · recent output"
 		}
 		r.line("    " + r.style(theme.Muted,
 			"Pod/"+e.pod.Name+" · container "+e.container.Name+note))
@@ -173,11 +258,18 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	}
 }
 
-func (r *Renderer) warningEvents(events []diagnostics.EventSummary) {
+func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.Duration) {
 	r.Blank()
 	r.line("  " + r.style(theme.Header, "WARNING EVENTS"))
 	if len(events) == 0 {
-		r.line("    " + r.style(theme.Muted, "No warning events"))
+		// Qualified when a window is in force: "No warning events" would
+		// otherwise mean both "there are none" and "there are, and they
+		// were older than the window", and only one of those is reassuring.
+		empty := "No warning events"
+		if label := WindowLabel(window); label != "" {
+			empty += " in the " + label
+		}
+		r.line("    " + r.style(theme.Muted, empty))
 		return
 	}
 	for position, event := range events {

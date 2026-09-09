@@ -193,7 +193,14 @@ kx diag -A --fail-on critical                        # 0 if the cluster is healt
 kx scan -A --fail-on high                            # the same, for image vulnerabilities
 kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
 kx diag -A --fail-on critical --out report.html      # publishes the report *and* fails the build
+kx diag -A --fail-on warning --since 24h             # ignore what failed before today
 ```
+
+`--since` bounds how far back the report looks — a warning event, an OOMKill a
+container recovered from, a pod or run that failed. Without it a failure from
+last month holds the gate red forever. Whatever is still going wrong — a
+CrashLoopBackOff, a Pending pod — is reported either way. `diag_max_age` sets
+a window once, for every run.
 
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".
