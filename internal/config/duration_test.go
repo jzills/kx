@@ -71,6 +71,35 @@ func TestParseDurationErrorSuggestsAUnit(t *testing.T) {
 	}
 }
 
+// A day count large enough to overflow int64 nanoseconds converted to an
+// implementation-defined value: on amd64 it wrapped negative, so a plainly
+// positive input was reported as "cannot be negative", and on a platform that
+// saturates instead it would have become a ~292-year window nobody asked for.
+// ParseFloat also accepts "Inf" and "NaN", which are not durations either.
+func TestParseDurationRejectsOutOfRangeDays(t *testing.T) {
+	for _, value := range []string{"1e30d", "Infd", "NaNd", "1e9d"} {
+		got, err := ParseDuration(value)
+		if err == nil {
+			t.Errorf("ParseDuration(%q) = %v, want an error", value, got)
+			continue
+		}
+		if strings.Contains(err.Error(), "negative") {
+			t.Errorf("ParseDuration(%q) = %q, want a range error rather than a sign one",
+				value, err)
+		}
+	}
+}
+
+// The largest window that fits stays legal: the ceiling is int64 nanoseconds,
+// not a number somebody guessed at.
+func TestParseDurationAcceptsTheLargestWindowThatFits(t *testing.T) {
+	if got, err := ParseDuration("100000d"); err != nil {
+		t.Errorf("ParseDuration(\"100000d\") = %v, want 273 years and no error", err)
+	} else if got != 100000*24*time.Hour {
+		t.Errorf("ParseDuration(\"100000d\") = %v, want 100000 days", got)
+	}
+}
+
 // FormatDuration is what the HTML report's invocation line prints, so a
 // window has to come back out in the vocabulary it went in as: 168h0m0s is
 // not a command anyone typed.

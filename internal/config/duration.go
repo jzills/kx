@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -25,15 +26,34 @@ import (
 func ParseDuration(value string) (time.Duration, error) {
 	invalid := fmt.Errorf(
 		"invalid duration %q — use a number and a unit, such as 30m, 12h or 7d", value)
+	negative := fmt.Errorf("duration %q cannot be negative", value)
 
 	parsed := time.Duration(0)
 	if days, ok := strings.CutSuffix(value, "d"); ok {
 		count, err := strconv.ParseFloat(days, 64)
-		if err != nil {
+		// NaN is a float64 ParseFloat accepts and a duration nobody typed:
+		// "NaNd" parses, and converting it produces a number no comparison
+		// below would catch.
+		if err != nil || math.IsNaN(count) {
 			return 0, invalid
+		}
+		if count < 0 {
+			return 0, negative
+		}
+		// Checked before the conversion, not after: converting an
+		// out-of-range float64 to an integer type is implementation-defined
+		// in Go. On amd64 it wrapped, so "1e30d" — a plainly positive input
+		// — came back as "cannot be negative", and on a platform that
+		// saturates instead it would have quietly become a 292-year window.
+		// ParseFloat accepts "Inf" too, which lands here rather than above.
+		if count > maxDays {
+			return 0, fmt.Errorf(
+				"duration %q is too long — a window has to fit in about 292 years", value)
 		}
 		parsed = time.Duration(count * float64(24*time.Hour))
 	} else {
+		// time.ParseDuration reports its own overflow, so the range check
+		// above is only needed for the spelling it does not handle.
 		var err error
 		if parsed, err = time.ParseDuration(value); err != nil {
 			return 0, invalid
@@ -41,10 +61,14 @@ func ParseDuration(value string) (time.Duration, error) {
 	}
 
 	if parsed < 0 {
-		return 0, fmt.Errorf("duration %q cannot be negative", value)
+		return 0, negative
 	}
 	return parsed, nil
 }
+
+// maxDays is the longest window a time.Duration can hold, in days: int64
+// nanoseconds, which runs out at roughly 292 years.
+const maxDays = float64(math.MaxInt64) / float64(24*time.Hour)
 
 // FormatDuration writes a window back in the vocabulary ParseDuration reads,
 // so a window can be printed into a command line a reader could type.

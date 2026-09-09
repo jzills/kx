@@ -305,6 +305,27 @@ func TestFormatAgeFutureIsJustNow(t *testing.T) {
 	}
 }
 
+// A duration is not an age, and skew has to read differently in each. "just
+// now" is a moment — the word "now" carries it — and a finding that says "· for
+// just now" is a sentence with a moment inside a duration. A signal that
+// started a moment ago has been true for none of it.
+func TestFormatElapsedFutureIsZero(t *testing.T) {
+	now := time.Now()
+	if got := FormatElapsedAt(now, now.Add(time.Minute)); got != "0s" {
+		t.Errorf("future timestamp = %q, want \"0s\" — findings render it as \"for %s\"", got, got)
+	}
+}
+
+// ...and the age it shares its magnitudes with keeps saying "just now",
+// which is the whole reason the two are separate calls.
+func TestFormatAgeAndElapsedPartWaysOnSkew(t *testing.T) {
+	now := time.Now()
+	future := now.Add(30 * time.Second)
+	if age, elapsed := FormatAgeAt(now, future), FormatElapsedAt(now, future); age == elapsed {
+		t.Errorf("age and elapsed both = %q on a skewed timestamp", age)
+	}
+}
+
 func TestEllipsize(t *testing.T) {
 	cases := []struct {
 		text string

@@ -49,7 +49,7 @@ func WindowLabel(window time.Duration) string {
 	return "last " + config.FormatDuration(window)
 }
 
-// windowSuffix is windowLabel as a trailing segment, for the lines that build
+// windowSuffix is WindowLabel as a trailing segment, for the lines that build
 // their own caption rather than going through Caption.
 func windowSuffix(window time.Duration) string {
 	if label := WindowLabel(window); label != "" {
