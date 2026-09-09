@@ -669,6 +669,44 @@ func TestShortFindingStaysOnOneLine(t *testing.T) {
 	}
 }
 
+// The wrapping and the dating meet on the same line, so the time has to be
+// inside the wrap rather than appended after it — appended, it would be the
+// one thing in a wrapped block still able to run past the width.
+//
+// Swept across lengths so the boundary is crossed wherever it falls: the time
+// rides the last line while there is room for it and takes a line of its own
+// when there is not. Both branches are asserted to have happened, or the
+// sweep would pass having only ever exercised one.
+func TestAFindingsTimeNeverPushesALinePastTheWidth(t *testing.T) {
+	var sawInline, sawOwnLine bool
+	for words := 1; words <= 40; words++ {
+		report := reportWithFinding(strings.TrimSpace(strings.Repeat("failing ", words)))
+		report.Findings[0].At = time.Now().Add(-3 * time.Minute)
+		out := capture(func(r *Renderer) { r.Diagnostic(report) })
+
+		for _, line := range summaryLines(t, out) {
+			if width := len([]rune(line)); width > proseMaxWidth {
+				t.Fatalf("%d words: line is %d columns, want at most %d:\n%q",
+					words, width, proseMaxWidth, line)
+			}
+			if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "· ") {
+				sawOwnLine = true
+			} else if strings.Contains(trimmed, "· 3m ago") {
+				sawInline = true
+			}
+		}
+		if !strings.Contains(out, "3m ago") {
+			t.Fatalf("%d words: the time went missing:\n%s", words, out)
+		}
+	}
+	if !sawInline {
+		t.Error("the time never rode the last line")
+	}
+	if !sawOwnLine {
+		t.Error("the time never took a line of its own — the overflow branch is untested")
+	}
+}
+
 // The event message is prose too, and a long one — an image pull error
 // carrying a registry URL and a digest — overflowed the same way.
 func TestLongEventMessageWrapsUnderItsHeading(t *testing.T) {
