@@ -46,6 +46,15 @@ that filters it.
 rewritten by the kubelet within seconds; a pod bound to a node that does not
 exist keeps whatever you patch into it. See `stale-history` for the pattern.
 
+**And a faked age does not last.** That same pod is an orphan, and the pod
+garbage collector force-deletes it on its twenty-second cycle — 21s and 50s
+in two runs here. Nothing in the namespace says why: no event, no status, and
+the only record is `Forced deletion of orphaned Pod succeeded` in the
+kube-controller-manager log. So run the commands straight after `apply`, and
+re-apply rather than debugging a namespace that emptied itself. Whatever is
+not a pod — a suspended Job, a written Event — stays put, so a scenario comes
+back short rather than empty.
+
 ## No assertions
 
 These deploy a situation; they do not check the output. Running the commands

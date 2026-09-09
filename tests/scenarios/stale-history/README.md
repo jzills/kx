@@ -60,6 +60,11 @@ them terminations weeks in the past. On a real node the kubelet rewrites a
 patched status within seconds, so aged container history cannot be faked
 there.
 
+Neither pod outlives the trick by much: an orphan is force-deleted by the pod
+garbage collector within a minute of being applied, so the commands above want
+running straight after `apply` — and `apply` again if the table comes back
+short. The `ancient-run` row survives, being a Job rather than a pod.
+
 `ancient-run` is suspended so the Job controller creates no pods for it; its
 failure is written rather than earned, which is the only way to have one older
 than the fixture.
