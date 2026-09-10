@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
@@ -249,12 +250,13 @@ func splitLeadingIndexes(args []string) (indexes, rest []string) {
 }
 
 func newLogsCommand(services Services) *cobra.Command {
-	return &cobra.Command{
-		Use:                "logs <index>... [kubectl flags]",
-		SuggestFor:         []string{"tail"},
-		Short:              "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
-		Long:               "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1..3\n  kx logs 3..",
+	cmd := &cobra.Command{
+		Use:        "logs <index>... [kubectl flags]",
+		SuggestFor: []string{"tail"},
+		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
+		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.\n\n" +
+			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -283,6 +285,11 @@ func newLogsCommand(services Services) *cobra.Command {
 			if err := checkFollow(extra, len(indexes)); err != nil {
 				return err
 			}
+			// Before the first subprocess, so a malformed window is reported
+			// once in kx's voice rather than once per index in kubectl's.
+			if extra, err = rewriteSince(extra); err != nil {
+				return err
+			}
 
 			command := LogsCommand{
 				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
@@ -303,6 +310,47 @@ func newLogsCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	// Registered so it appears in the command's help; parsing is by hand, like
+	// every other flag on a command that forwards argv to kubectl.
+	cmd.Flags().String("since", "",
+		"Only logs newer than this (30m, 12h, 7d)")
+	return cmd
+}
+
+// rewriteSince replaces kx's --since with one kubectl can parse.
+//
+// kubectl reads its own --since with time.ParseDuration, which stops at hours,
+// so `7d` — the spelling kx diag --since takes, and the one anyone asking for a
+// week reaches for — came back as `unknown unit "d"` from a subprocess, about a
+// flag the user had every reason to think was kx's. Reading it here makes the
+// duration vocabulary the CLI's rather than each subprocess's, which is the
+// whole reason ParseDuration lives in config.
+//
+// Everything kubectl accepts, ParseDuration accepts too, so nothing that used
+// to work stops — with one deliberate exception: a negative window, which
+// ParseDuration refuses as the typo it is.
+//
+// The rewritten flag is appended rather than left in place. Its position among
+// kubectl's flags means nothing, and a repeated flag keeps its last value here
+// exactly as pflag would.
+func rewriteSince(args []string) ([]string, error) {
+	// --since-time is a different flag taking an instant, and matches none of
+	// the spellings below — it passes through with everything else.
+	if !hasFlag(args, "--since", "") {
+		return args, nil
+	}
+	value, rest, err := extractString(args, "--since", "")
+	if err != nil {
+		return nil, err
+	}
+	window, err := config.ParseDuration(value)
+	if err != nil {
+		return nil, fmt.Errorf("'--since': %w", err)
+	}
+	// String() rather than FormatDuration: this spelling is for kubectl, and
+	// FormatDuration writes the day form kubectl rejects — the very reason
+	// this function exists.
+	return append(rest, "--since="+window.String()), nil
 }
 
 // checkFollow refuses to follow several pods at once.

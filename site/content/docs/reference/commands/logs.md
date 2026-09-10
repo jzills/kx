@@ -8,6 +8,8 @@ weight: 17
 
 Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.
 
+kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.
+
 Unrecognized flags are passed through to kubectl.
 
 ## Usage
@@ -22,6 +24,12 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 |---|---|
 | `<index>...` | Row number from the current listing; run kx state to see it |
 
+## Options
+
+| Option | Description |
+|---|---|
+| `--since string` | Only logs newer than this (30m, 12h, 7d) |
+
 ## Global options
 
 | Option | Description |
@@ -35,6 +43,7 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 kx logs 1
 kx logs 1 2
 kx logs 1 -f --tail=100
+kx logs 1 --since 7d
 kx logs 1..3
 kx logs 3..
 ```
