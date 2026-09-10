@@ -113,7 +113,11 @@ func (r *Renderer) Triage(result TriageResult) {
 	r.Blank()
 	hint := "kx diag <index> for detail"
 	footer := hint
-	if !result.Full {
+	// Nothing hidden, nothing to say: --full hides none by definition, and a
+	// sweep where nothing was healthy has no healthy count to withhold. The
+	// footer used to count first and print regardless, so a namespace with
+	// every resource unhealthy got "0 healthy resources not shown".
+	if !result.Full && result.Healthy > 0 {
 		label := "resources"
 		if result.Healthy == 1 {
 			label = "resource"
