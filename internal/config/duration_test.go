@@ -117,7 +117,15 @@ func TestFormatDurationRoundTripsTheSpelling(t *testing.T) {
 		// everywhere it is documented, and how anyone says a day-long window.
 		{24 * time.Hour, "24h"},
 		{12 * time.Hour, "12h"},
+		// Past an hour, minutes alone stop being readable: this one used to
+		// come back as "1530m", a number the reader has to divide before it
+		// means anything.
+		{25*time.Hour + 30*time.Minute, "25h30m"},
+		{90 * time.Minute, "1h30m"},
+		// Under an hour there are no hours to name, and "30m" is the
+		// spelling the docs teach.
 		{30 * time.Minute, "30m"},
+		{59 * time.Minute, "59m"},
 		{90 * time.Second, "1m30s"},
 		{0, "0"},
 	} {
@@ -158,5 +166,40 @@ func TestParseDurationAcceptsTheDayCountJustInsideTheBoundary(t *testing.T) {
 	}
 	if got <= 0 {
 		t.Errorf("ParseDuration(%q) = %v, want a positive duration", value, got)
+	}
+}
+
+// The round trip the spelling exists for: whatever FormatDuration writes,
+// ParseDuration has to read back as the same window. Both are on the path
+// from a --since value to the banner, the JSON and the HTML invocation line,
+// and a spelling that did not survive it would put a command on screen that
+// kx itself rejects.
+func TestFormatDurationSurvivesParseDuration(t *testing.T) {
+	for _, window := range []time.Duration{
+		0,
+		30 * time.Second,
+		90 * time.Second,
+		10 * time.Second,
+		30 * time.Minute,
+		59 * time.Minute,
+		90 * time.Minute,
+		25*time.Hour + 30*time.Minute,
+		time.Hour + 30*time.Second,
+		12 * time.Hour,
+		24 * time.Hour,
+		36 * time.Hour,
+		7 * 24 * time.Hour,
+	} {
+		spelled := FormatDuration(window)
+		got, err := ParseDuration(spelled)
+		if err != nil {
+			t.Errorf("ParseDuration(FormatDuration(%v)) = %v, and %q is on screen as a "+
+				"command to type", window, err, spelled)
+			continue
+		}
+		if got != window {
+			t.Errorf("ParseDuration(FormatDuration(%v)) = %v via %q, want the window back",
+				window, got, spelled)
+		}
 	}
 }

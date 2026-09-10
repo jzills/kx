@@ -409,7 +409,7 @@ func TestNoWarningEventsNamesTheWindow(t *testing.T) {
 	report := reportWithFinding("Only 0/1 replicas ready")
 	report.Window = 90 * time.Minute
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
-	if !strings.Contains(out, "No warning events in the last 90m") {
+	if !strings.Contains(out, "No warning events in the last 1h30m") {
 		t.Errorf("output does not qualify the empty event section:\n%s", out)
 	}
 }
