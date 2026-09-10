@@ -28,7 +28,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--overwrite] [--remove str]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| [`kx logs <index>... [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | [`kx namespace [<index>]`](namespace/) | List namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx rollout <action> <index>`](rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
