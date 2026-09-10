@@ -92,9 +92,16 @@ type ContainerDiagnostic struct {
 // instance ended, which is the moment the one after it began.
 //
 // It dates the restart count, which is cumulative over the pod's whole life
-// and so says nothing on its own about when the thrashing happened. It is
-// also what the RESTARTS column prints, so a finding and the table beside it
-// name the same moment.
+// and so says nothing on its own about when the thrashing happened.
+//
+// The RESTARTS column does not use it. render.restarts and the HTML report
+// both read LastTerminatedAt directly, and print a bare count when there is
+// none — which is what kubectl get pods does, and the column is a kubectl
+// column. So for a container carrying state.terminated and no lastState the
+// finding says "restarted 5 times · 46d ago" while the column says "5". The
+// divergence is deliberate: the fallback below is a bound, and a bound is
+// worth stating in a sentence that has room to say so, not in a table cell
+// that would read as a measurement.
 //
 // The fallback to this instance's own termination is a bound rather than a
 // measurement: a container that has stopped cannot have restarted since, so
