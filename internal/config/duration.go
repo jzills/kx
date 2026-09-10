@@ -89,8 +89,14 @@ func FormatDuration(window time.Duration) string {
 		return fmt.Sprintf("%dd", window/(24*time.Hour))
 	case window%time.Hour == 0:
 		return fmt.Sprintf("%dh", window/time.Hour)
-	case window%time.Minute == 0:
+	// Minutes alone only up to an hour. Past it the count stops being a
+	// window anyone can picture — 25h30m came back as "1530m", a number the
+	// reader has to divide before it means anything, on the banner, in the
+	// JSON and on the HTML report's invocation line.
+	case window < time.Hour && window%time.Minute == 0:
 		return fmt.Sprintf("%dm", window/time.Minute)
+	case window%time.Minute == 0:
+		return fmt.Sprintf("%dh%dm", window/time.Hour, (window%time.Hour)/time.Minute)
 	default:
 		return window.String()
 	}
