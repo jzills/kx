@@ -139,6 +139,53 @@ func TestTriageFullOmitsNotShownFooter(t *testing.T) {
 	}
 }
 
+// A sweep where nothing was healthy has nothing to say about healthy
+// resources. The footer counted before it decided whether to speak, so a
+// namespace with no healthy resource left got "0 healthy resources not shown"
+// — a count restating the absence of what it counts.
+func TestTriageWithNothingHealthySaysNothingAboutHealthy(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			Namespace: "prod", Checked: 1, Healthy: 0,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
+			},
+		})
+	})
+	if strings.Contains(out, "not shown") {
+		t.Errorf("footer claims resources are hidden when none were:\n%s", out)
+	}
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("footer dropped the index hint:\n%s", out)
+	}
+}
+
+// The count still speaks when there is something to count, in both
+// spellings — dropping the footer at zero must not drop it at one.
+func TestTriageCountsTheHealthyItDidHide(t *testing.T) {
+	for _, tc := range []struct {
+		healthy int
+		want    string
+	}{
+		{1, "1 healthy resource not shown"},
+		{3, "3 healthy resources not shown"},
+	} {
+		out := capture(func(r *Renderer) {
+			r.Triage(TriageResult{
+				Namespace: "prod", Checked: tc.healthy + 1, Healthy: tc.healthy,
+				Reports: []diagnostics.Report{
+					{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+						Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
+				},
+			})
+		})
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("Healthy = %d, want %q in:\n%s", tc.healthy, tc.want, out)
+		}
+	}
+}
+
 // --full shows everything, so its footer must not also claim a healthy count is
 // hidden — cluster-wide sweeps included, which now carry the same index hint as
 // every other sweep.
