@@ -786,9 +786,9 @@ func sinceUsageOf(t *testing.T, cfg config.Config) string {
 func TestReportWindowFallsBackToTheConfiguredSetting(t *testing.T) {
 	cfg := config.Default()
 	cfg.DiagMaxAge = 12 * time.Hour
-	got, err := reportWindow("", cfg)
+	got, err := resolveWindow("", cfg.DiagMaxAge)
 	if err != nil {
-		t.Fatalf("eventWindow: %v", err)
+		t.Fatalf("resolveWindow: %v", err)
 	}
 	if got != 12*time.Hour {
 		t.Errorf("window = %v, want the configured 12h", got)
@@ -798,9 +798,9 @@ func TestReportWindowFallsBackToTheConfiguredSetting(t *testing.T) {
 func TestReportWindowFlagOverridesTheSetting(t *testing.T) {
 	cfg := config.Default()
 	cfg.DiagMaxAge = 12 * time.Hour
-	got, err := reportWindow("7d", cfg)
+	got, err := resolveWindow("7d", cfg.DiagMaxAge)
 	if err != nil {
-		t.Fatalf("eventWindow: %v", err)
+		t.Fatalf("resolveWindow: %v", err)
 	}
 	if want := 7 * 24 * time.Hour; got != want {
 		t.Errorf("window = %v, want %v", got, want)
@@ -811,9 +811,9 @@ func TestReportWindowFlagOverridesTheSetting(t *testing.T) {
 // so zero from the flag must not be mistaken for an absent flag.
 func TestReportWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
 	cfg := config.Default()
-	got, err := reportWindow("0", cfg)
+	got, err := resolveWindow("0", cfg.DiagMaxAge)
 	if err != nil {
-		t.Fatalf("eventWindow: %v", err)
+		t.Fatalf("resolveWindow: %v", err)
 	}
 	if got != 0 {
 		t.Errorf("window = %v, want 0 — --since 0 asks for no window", got)
@@ -821,8 +821,8 @@ func TestReportWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
 }
 
 func TestReportWindowRejectsAMalformedValue(t *testing.T) {
-	if _, err := reportWindow("7 weeks", config.Default()); err == nil {
-		t.Fatal("eventWindow accepted '7 weeks'")
+	if _, err := resolveWindow("7 weeks", config.Default().DiagMaxAge); err == nil {
+		t.Fatal("resolveWindow accepted '7 weeks'")
 	} else if !strings.Contains(err.Error(), "--since") {
 		t.Errorf("err = %v, want it to name --since", err)
 	}
@@ -878,7 +878,7 @@ func stalePod(name, namespace string) []runtime.Object {
 // the resolved window was actually handed to the diagnostics service.
 //
 // Configured rather than passed, because a window set once in config.toml has
-// the longer path to travel — through Config, reportWindow and the service —
+// the longer path to travel — through Config, resolveWindow and the service —
 // and is the one a user is most likely to be relying on without thinking
 // about it.
 func TestDiagSweepAppliesTheConfiguredWindow(t *testing.T) {

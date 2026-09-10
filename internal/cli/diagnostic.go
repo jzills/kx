@@ -174,23 +174,6 @@ func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
 	}
 }
 
-// eventWindow resolves how far back the report looks: --since when it was
-// given, the diag_max_age setting otherwise.
-//
-// An empty value means the flag was absent — "" is not a duration anyone can
-// type, so the flag needs no Changed() check to tell "unset" from "0", and
-// --since 0 keeps its own meaning of no window at all.
-func reportWindow(since string, cfg config.Config) (time.Duration, error) {
-	if since == "" {
-		return cfg.DiagMaxAge, nil
-	}
-	window, err := config.ParseDuration(since)
-	if err != nil {
-		return 0, fmt.Errorf("'--since': %w", err)
-	}
-	return window, nil
-}
-
 // sinceFlag renders the resolved window for an HTML report's invocation line,
 // so a saved page says how far back it was allowed to look.
 //
@@ -226,23 +209,6 @@ func sinceOverview(configured time.Duration) string {
 	return lead + "Without it the window is diag_max_age, currently " +
 		config.FormatDuration(configured) + " — set in config.toml or " +
 		"KX_DIAG_MAX_AGE. '--since 0' reports everything, however old."
-}
-
-// sinceUsage is the --since flag's help, which has to name the default the
-// flag falls back to when it is absent.
-//
-// The sentence was written against an unset diag_max_age and said so
-// unconditionally, so the one reader it was wrong for was the one who had set
-// the key — the only reader for whom the default is not obvious. Spelled with
-// FormatDuration, so the help names a value that can be typed straight back at
-// the flag.
-func sinceUsage(configured time.Duration) string {
-	const lead = "Ignore anything that happened longer ago than this — events, " +
-		"past restarts, failed runs; 30m, 12h, 7d. Defaults to diag_max_age, "
-	if configured == 0 {
-		return lead + "which is unset: everything is reported"
-	}
-	return lead + "currently " + config.FormatDuration(configured)
 }
 
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
@@ -309,7 +275,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 
 			// Parsed here for the same reason --fail-on is: a typo should
 			// cost nothing, not a sweep of every namespace first.
-			window, err := reportWindow(since, services.Config)
+			window, err := resolveWindow(since, services.Config.DiagMaxAge)
 			if err != nil {
 				return err
 			}
@@ -450,7 +416,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
-	cmd.Flags().String("since", "", sinceUsage(services.Config.DiagMaxAge))
+	cmd.Flags().String("since", "", sinceUsage(
+		"Ignore anything that happened longer ago than this — events, past "+
+			"restarts, failed runs; 30m, 12h, 7d.",
+		"diag_max_age", services.Config.DiagMaxAge, "everything is reported"))
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,

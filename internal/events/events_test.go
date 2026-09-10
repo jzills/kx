@@ -103,3 +103,76 @@ func TestRowsFlattensEvents(t *testing.T) {
 		t.Error("row has no timestamp")
 	}
 }
+
+// dated builds an event last seen at a moment.
+func dated(name string, at time.Time) corev1.Event {
+	e := event(name, "Pod", "Failed")
+	e.LastTimestamp = metav1.NewTime(at)
+	return e
+}
+
+func TestWithinDropsWhatHappenedBeforeTheCutoff(t *testing.T) {
+	now := time.Now()
+	all := []corev1.Event{
+		dated("recent", now.Add(-10*time.Minute)),
+		dated("old", now.Add(-48*time.Hour)),
+	}
+	kept := Within(all, now.Add(-time.Hour))
+	if len(kept) != 1 {
+		t.Fatalf("kept %d events, want 1: %v", len(kept), kept)
+	}
+	if kept[0].InvolvedObject.Name != "recent" {
+		t.Errorf("kept %q, want the one inside the window", kept[0].InvolvedObject.Name)
+	}
+}
+
+// A zero cutoff is how "no window" is spelled, and it must keep everything —
+// otherwise an unset events_max_age would hide every event kx used to list.
+func TestWithinKeepsEverythingWithoutACutoff(t *testing.T) {
+	all := []corev1.Event{
+		dated("recent", time.Now()),
+		dated("ancient", time.Now().Add(-365*24*time.Hour)),
+	}
+	if kept := Within(all, time.Time{}); len(kept) != 2 {
+		t.Errorf("kept %d events, want both", len(kept))
+	}
+}
+
+// Undated is never stale — the rule the diagnostics window already runs on.
+// Events recorded through the newer API carry no LastTimestamp, and hiding one
+// over a missing timestamp is the worse error.
+func TestWithinKeepsAnUndatedEvent(t *testing.T) {
+	undated := event("mystery", "Pod", "Failed")
+	kept := Within([]corev1.Event{undated}, time.Now().Add(-time.Hour))
+	if len(kept) != 1 {
+		t.Errorf("kept %d events, want the undated one kept", len(kept))
+	}
+}
+
+// An event dated only by its creation is dated all the same: Timestamp already
+// falls back to it, and Within has to read the window through the same lens the
+// AGE column does or a row can be dropped for a time it never displayed.
+func TestWithinDatesAnEventTheWayTheTableDoes(t *testing.T) {
+	created := event("created", "Pod", "Failed")
+	created.CreationTimestamp = metav1.NewTime(time.Now().Add(-48 * time.Hour))
+	if kept := Within([]corev1.Event{created}, time.Now().Add(-time.Hour)); len(kept) != 0 {
+		t.Errorf("kept %d events, want the creation-dated one dropped", len(kept))
+	}
+}
+
+func TestCutoffIsZeroWithoutAWindow(t *testing.T) {
+	if got := Cutoff(0); !got.IsZero() {
+		t.Errorf("Cutoff(0) = %v, want the zero time", got)
+	}
+	if got := Cutoff(-time.Hour); !got.IsZero() {
+		t.Errorf("Cutoff(-1h) = %v, want the zero time", got)
+	}
+}
+
+func TestCutoffOpensTheWindowAWindowAgo(t *testing.T) {
+	before := time.Now()
+	got := Cutoff(time.Hour)
+	if want := before.Add(-time.Hour); got.Before(want) || got.After(time.Now().Add(-time.Hour)) {
+		t.Errorf("Cutoff(1h) = %v, want an hour before now", got)
+	}
+}

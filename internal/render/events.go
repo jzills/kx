@@ -74,9 +74,17 @@ func elapsed(now, timestamp time.Time) string {
 }
 
 // EventsTable renders the events for one resource.
-func (r *Renderer) EventsTable(rows []events.Row) {
+func (r *Renderer) EventsTable(rows []events.Row, window time.Duration) {
 	if len(rows) == 0 {
-		r.Caption("No events found")
+		// Qualified when a window is in force, for the same reason kx diag's
+		// empty WARNING EVENTS section is: "No events found" would otherwise
+		// mean both "there are none" and "there are, and they were older than
+		// the window", and only one of those is reassuring.
+		empty := "No events found"
+		if label := WindowLabel(window); label != "" {
+			empty += " in the " + label
+		}
+		r.Caption(empty)
 		return
 	}
 
@@ -103,4 +111,4 @@ func (r *Renderer) EventsTable(rows []events.Row) {
 }
 
 // EventsTable renders through the package-level renderer.
-func EventsTable(rows []events.Row) { current.EventsTable(rows) }
+func EventsTable(rows []events.Row, window time.Duration) { current.EventsTable(rows, window) }

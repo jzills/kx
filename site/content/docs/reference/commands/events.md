@@ -8,6 +8,8 @@ weight: 12
 
 Shows Kubernetes events recorded against the exact object each index names — unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.
 
+--since bounds how far back the listing looks (30m, 12h, 7d), in the same vocabulary kx diag reads. Without it every event the cluster still holds is listed — on a default cluster roughly the last hour, since that is how long the API server keeps an event before dropping it. Set events_max_age in config.toml to choose a window once rather than per run.
+
 ## Usage
 
 ```text
@@ -19,6 +21,12 @@ kx events [OPTIONS] <index>...
 | Argument | Description |
 |---|---|
 | `<index>...` | Row number from the current listing; run kx state to see it |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--since string` | Only events newer than this; 30m, 12h, 7d. Defaults to events_max_age, which is unset: every event the cluster still holds is listed |
 
 ## Global options
 
@@ -32,6 +40,7 @@ kx events [OPTIONS] <index>...
 ```bash
 kx events 1
 kx events 1 2
+kx events 1 --since 30m
 kx events 1..3
 kx events 3..
 ```

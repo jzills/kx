@@ -38,6 +38,16 @@ const DefaultEngine = "scout"
 // the gate can be read next to it.
 const DefaultDiagMaxAge = 0
 
+// DefaultEventsMaxAge is how far back kx events looks when nothing is
+// configured: all the way, for the same reason DefaultDiagMaxAge does.
+//
+// A separate key rather than a share of diag's. The two answer different
+// questions — diag's window bounds the evidence behind a verdict, this one
+// bounds a listing someone asked to read — and narrowing a triage sweep is not
+// a request for a shorter event listing. Nothing is inherited in either
+// direction, so each is set where it is meant.
+const DefaultEventsMaxAge = 0
+
 // DefaultDebugImage is the image kx debug attaches when none is configured.
 // Small, ubiquitous, and carries a shell — which is the whole point, since the
 // pod being debugged is one whose own image has none.
@@ -55,6 +65,9 @@ type Config struct {
 	// DiagMaxAge bounds how long ago something may have happened and still
 	// be reported by kx diag. Zero — the default — means no bound.
 	DiagMaxAge time.Duration
+	// EventsMaxAge is the same bound for kx events, kept separate from
+	// DiagMaxAge — see DefaultEventsMaxAge.
+	EventsMaxAge time.Duration
 }
 
 // Default returns the configuration used when nothing is set.
@@ -67,6 +80,7 @@ func Default() Config {
 		Engine:       DefaultEngine,
 		DebugImage:   DefaultDebugImage,
 		DiagMaxAge:   DefaultDiagMaxAge,
+		EventsMaxAge: DefaultEventsMaxAge,
 	}
 }
 
@@ -104,6 +118,8 @@ func Settings() []Setting {
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
 		{"diag_max_age", "KX_DIAG_MAX_AGE",
 			"How far back kx diag looks for evidence; unset for no limit"},
+		{"events_max_age", "KX_EVENTS_MAX_AGE",
+			"How far back kx events lists events; unset for no limit"},
 		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
 		{"", "KX_CONFIG", "Config file path, instead of ~/.kx/config.toml"},
 	}
@@ -208,6 +224,18 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.DiagMaxAge = window
 		}
+		if value, ok := raw["events_max_age"]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return cfg, errors.New(
+					"kx: events_max_age must be a string, such as \"7d\"")
+			}
+			window, err := ParseDuration(text)
+			if err != nil {
+				return cfg, fmt.Errorf("kx: events_max_age: %w", err)
+			}
+			cfg.EventsMaxAge = window
+		}
 		if value, ok := raw["debug_image"]; ok {
 			name, ok := value.(string)
 			if !ok {
@@ -252,6 +280,13 @@ func (l Loader) Load() (Config, error) {
 			return cfg, fmt.Errorf("kx: KX_DIAG_MAX_AGE: %w", err)
 		}
 		cfg.DiagMaxAge = window
+	}
+	if value, ok := os.LookupEnv("KX_EVENTS_MAX_AGE"); ok {
+		window, err := ParseDuration(value)
+		if err != nil {
+			return cfg, fmt.Errorf("kx: KX_EVENTS_MAX_AGE: %w", err)
+		}
+		cfg.EventsMaxAge = window
 	}
 	if value, ok := os.LookupEnv("KX_DEBUG_IMAGE"); ok {
 		cfg.DebugImage = value
