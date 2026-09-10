@@ -108,6 +108,26 @@ func TestUnfilteredLogsAreLabelled(t *testing.T) {
 	}
 }
 
+// The RESTARTS column and the restart-count finding deliberately date
+// themselves differently, and RestartedAt's doc says so. A container with
+// state.terminated and no lastState has no previous instance to point at, so
+// the column prints a bare count the way kubectl get pods does, while the
+// finding falls back to this instance's own termination as a bound. Pinned
+// because the tempting "fix" — pointing the column at RestartedAt too —
+// would put an age in a kubectl column that kubectl leaves empty.
+func TestRestartsColumnStaysBareWithoutAPreviousInstance(t *testing.T) {
+	container := diagnostics.ContainerDiagnostic{
+		Name: "app", RestartCount: 5,
+		TerminatedAt: time.Now().Add(-46 * 24 * time.Hour), TerminatedReason: "Error",
+	}
+	if got := restarts(container); got != "5" {
+		t.Errorf("restarts() = %q, want a bare count: the API recorded no previous state", got)
+	}
+	if age := FormatAge(container.RestartedAt()); age == "" {
+		t.Error("RestartedAt() carries no age, so the finding has nothing to date the count by")
+	}
+}
+
 func TestTriageAllHealthy(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{Namespace: "prod", Checked: 5, Healthy: 5})

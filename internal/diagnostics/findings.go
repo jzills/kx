@@ -407,9 +407,11 @@ func containerFindings(
 	}
 
 	switch {
-	// Two OOMKills, told apart by which state they are in: the current one
-	// is happening now and carries no moment, the previous one happened at
-	// one and is dated by it.
+	// Two OOMKills, told apart by which state they are in. Both are dated —
+	// a container killed for memory has stopped, whichever state records it,
+	// and stopping is a moment. What differs is which moment and which
+	// window gates it: the current termination against finished, the
+	// previous one against settled.
 	case container.TerminatedReason == "OOMKilled" && !finished:
 		findings = append(findings, dated(Critical, Cause, container.TerminatedAt,
 			"OOMKilled in pod "+podName))
