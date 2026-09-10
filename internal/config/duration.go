@@ -46,7 +46,9 @@ func ParseDuration(value string) (time.Duration, error) {
 		// — came back as "cannot be negative", and on a platform that
 		// saturates instead it would have quietly become a 292-year window.
 		// ParseFloat accepts "Inf" too, which lands here rather than above.
-		if count > maxDays {
+		// Inclusive: maxDays is itself a count that does not fit, since
+		// multiplying it by 24h lands on 2^63 rather than one below it.
+		if count >= maxDays {
 			return 0, fmt.Errorf(
 				"duration %q is too long — a window has to fit in about 292 years", value)
 		}

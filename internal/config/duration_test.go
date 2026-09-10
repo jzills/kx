@@ -1,6 +1,8 @@
 package config
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +124,39 @@ func TestFormatDurationRoundTripsTheSpelling(t *testing.T) {
 		if got := FormatDuration(tc.value); got != tc.want {
 			t.Errorf("FormatDuration(%v) = %q, want %q", tc.value, got, tc.want)
 		}
+	}
+}
+
+// maxDays itself is a day count that does not fit: multiplying it by 24h
+// lands on 2^63, one past what an int64 holds. The guard let it through —
+// `count > maxDays` is false for maxDays — so it reached the conversion,
+// wrapped negative, and came back as `cannot be negative`, the sign error the
+// guard exists to keep a plainly positive input from producing.
+//
+// Computed rather than written out. The boundary is whatever MaxInt64 over
+// 24h rounds to, and a literal here would only be checking the literal.
+func TestParseDurationRejectsTheBoundaryItCannotHold(t *testing.T) {
+	value := strconv.FormatFloat(maxDays, 'g', -1, 64) + "d"
+	got, err := ParseDuration(value)
+	if err == nil {
+		t.Fatalf("ParseDuration(%q) = %v, want an error: it does not fit in a Duration",
+			value, got)
+	}
+	if strings.Contains(err.Error(), "negative") {
+		t.Errorf("ParseDuration(%q) = %q, want a range error rather than a sign one",
+			value, err)
+	}
+}
+
+// The largest day count that does fit is still accepted: the guard is a
+// boundary, not a retreat from it.
+func TestParseDurationAcceptsTheDayCountJustInsideTheBoundary(t *testing.T) {
+	value := strconv.FormatFloat(math.Nextafter(maxDays, 0), 'g', -1, 64) + "d"
+	got, err := ParseDuration(value)
+	if err != nil {
+		t.Fatalf("ParseDuration(%q) = %v, want the largest window that fits", value, err)
+	}
+	if got <= 0 {
+		t.Errorf("ParseDuration(%q) = %v, want a positive duration", value, got)
 	}
 }
