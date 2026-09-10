@@ -206,6 +206,45 @@ func sinceFlag(window time.Duration) string {
 	return "--since " + config.FormatDuration(window)
 }
 
+// sinceOverview is the --since paragraph of the long help, which says the same
+// thing sinceUsage does at more length: what the report looks at when the flag
+// is absent.
+//
+// Split on the setting for the same reason — "without it everything is
+// reported" is the behaviour of an unset diag_max_age, not of kx — and the
+// half that no longer applies is replaced rather than merely qualified: a
+// reader who has already set the key does not need to be told to set it, and
+// does need to be told how to get the unbounded run back.
+func sinceOverview(configured time.Duration) string {
+	const lead = "--since bounds how far back the report looks (30m, 12h, 7d). "
+	if configured == 0 {
+		return lead + "Without it everything is reported, however old — which " +
+			"is what holds a resource at warnings, and a --fail-on gate red, " +
+			"over a failure from last month. Set diag_max_age in config.toml " +
+			"to choose a window once rather than per run."
+	}
+	return lead + "Without it the window is diag_max_age, currently " +
+		config.FormatDuration(configured) + " — set in config.toml or " +
+		"KX_DIAG_MAX_AGE. '--since 0' reports everything, however old."
+}
+
+// sinceUsage is the --since flag's help, which has to name the default the
+// flag falls back to when it is absent.
+//
+// The sentence was written against an unset diag_max_age and said so
+// unconditionally, so the one reader it was wrong for was the one who had set
+// the key — the only reader for whom the default is not obvious. Spelled with
+// FormatDuration, so the help names a value that can be typed straight back at
+// the flag.
+func sinceUsage(configured time.Duration) string {
+	const lead = "Ignore anything that happened longer ago than this — events, " +
+		"past restarts, failed runs; 30m, 12h, 7d. Defaults to diag_max_age, "
+	if configured == 0 {
+		return lead + "which is unset: everything is reported"
+	}
+	return lead + "currently " + config.FormatDuration(configured)
+}
+
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        use + " [index]",
@@ -215,7 +254,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
-			"--since bounds how far back the report looks (30m, 12h, 7d). Without it everything is reported, however old — which is what holds a resource at warnings, and a --fail-on gate red, over a failure from last month. Set diag_max_age in config.toml to choose a window once rather than per run.\n\n" +
+			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
 			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
 			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
@@ -411,10 +450,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
-	cmd.Flags().String("since", "",
-		"Ignore anything that happened longer ago than this — events, past "+
-			"restarts, failed runs; 30m, 12h, 7d. Defaults to diag_max_age, "+
-			"which is unset: everything is reported")
+	cmd.Flags().String("since", "", sinceUsage(services.Config.DiagMaxAge))
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,

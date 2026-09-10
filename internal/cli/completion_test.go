@@ -374,3 +374,27 @@ func TestCompletionWithoutSavedState(t *testing.T) {
 		t.Errorf("directive = %v, want NoFileComp", directive)
 	}
 }
+
+// `kx diag --since <TAB>` offered filenames, the shell's fallback when a flag
+// has no completion of its own. The day spelling is kx's — kubectl's own
+// --since rejects "7d" — so a reader never offered it has no way to learn from
+// the shell that it exists.
+func TestSinceCompletesTheDocumentedWindows(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+	var out bytes.Buffer
+	root.SetOut(&out)
+
+	args := []string{cobra.ShellCompRequestCmd, "diagnostic", "--since", ""}
+	if err := Execute(root, args); err != nil {
+		t.Fatalf("Execute(%v): %v", args, err)
+	}
+	for _, window := range []string{"30m", "12h", "7d"} {
+		if !strings.Contains(out.String(), window+"\n") {
+			t.Errorf("kx diag --since <TAB> = %q, want %s among the windows",
+				out.String(), window)
+		}
+	}
+	if !strings.Contains(out.String(), ":"+strconv.Itoa(int(cobra.ShellCompDirectiveNoFileComp))) {
+		t.Errorf("kx diag --since <TAB> directive in %q, want NoFileComp", out.String())
+	}
+}
