@@ -131,8 +131,8 @@ func (r *Renderer) statusFunc(
 }
 
 // Banner is the context line above a resource's output: "Pod/nginx · prod".
-func (r *Renderer) Banner(kind, name, namespace, extra string) {
-	r.Caption(kind+"/"+name, namespace, extra)
+func (r *Renderer) Banner(kind, name, namespace string, extra ...string) {
+	r.Caption(append([]string{kind + "/" + name, namespace}, extra...)...)
 }
 
 // ScopeBanner is the caption for a cross-kind sweep, matching kx diag's
@@ -165,6 +165,8 @@ func Progress(label string, total int) (advance func(), stop func()) {
 	return current.Progress(label, total)
 }
 
-func Banner(kind, name, namespace, extra string) { current.Banner(kind, name, namespace, extra) }
+func Banner(kind, name, namespace string, extra ...string) {
+	current.Banner(kind, name, namespace, extra...)
+}
 func ScopeBanner(label, namespace, extra string) { current.ScopeBanner(label, namespace, extra) }
 func Blank()                                     { current.Blank() }

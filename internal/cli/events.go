@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/index"
@@ -21,6 +22,10 @@ type EventsCommand struct {
 	Kubectl kubectl.Service
 	State   IndexResolver
 	Events  events.Service
+	// Since is the instant this run's window opens, or the zero time when
+	// there is no window. Set once for the whole run rather than per index,
+	// so several indexes in one listing are measured against one moment.
+	Since time.Time
 }
 
 func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, error) {
@@ -32,33 +37,50 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 	if err != nil {
 		return nil, err
 	}
-	filtered := c.Events.Filter(all, name, kind)
-	if len(filtered) == 0 {
+	matched := c.Events.Filter(all, name, kind)
+	if len(matched) == 0 {
 		// Deleted resources keep their events for about an hour, so only an
 		// empty result is worth a staleness check — a resource with events is
 		// evidently still known to the cluster.
+		//
+		// Checked before the window narrows anything, deliberately: an object
+		// whose events are all older than --since has plainly not been deleted,
+		// and probing for it would spend a kubectl subprocess to learn what its
+		// events already said.
 		if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
-	return events.Rows(filtered), nil
+	return events.Rows(events.Within(matched, c.Since)), nil
 }
 
 func newEventsCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "events <index>...",
 		Short: "Show Kubernetes events for one or more indexed resources.",
 		Long: "Shows Kubernetes events recorded against the exact object each index names — " +
-			"unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.",
-		Example: "  kx events 1\n  kx events 1 2\n  kx events 1..3\n  kx events 3..",
-		Args:    minArgs(1),
+			"unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.\n\n" +
+			"--since bounds how far back the listing looks (30m, 12h, 7d), in the same vocabulary kx diag reads. " +
+			"Without it every event the cluster still holds is listed — on a default cluster roughly the last " +
+			"hour, since that is how long the API server keeps an event before dropping it. Set events_max_age " +
+			"in config.toml to choose a window once rather than per run.",
+		Example: "  kx events 1\n  kx events 1 2\n  kx events 1 --since 30m\n" +
+			"  kx events 1..3\n  kx events 3..",
+		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			indexes, err := parseIndexes(services.State, "indexes", args)
 			if err != nil {
 				return err
 			}
 			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
+			// Parsed before the API server is read, so a typo fails on the
+			// flag rather than after a listing has been fetched.
+			since, _ := cmd.Flags().GetString("since")
+			window, err := resolveWindow(since, services.Config.EventsMaxAge)
+			if err != nil {
 				return err
 			}
 			client, err := services.Kubernetes()
@@ -69,6 +91,7 @@ func newEventsCommand(services Services) *cobra.Command {
 				Kubectl: services.Kubectl,
 				State:   services.State,
 				Events:  events.APIService{Client: client},
+				Since:   events.Cutoff(window),
 			}
 			for position, index := range indexes {
 				name, namespace, kind, err := services.State.Fields(index)
@@ -88,12 +111,18 @@ func newEventsCommand(services Services) *cobra.Command {
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, extra)
-				render.EventsTable(rows)
+				render.Banner(string(kind), name, namespace, extra,
+					render.WindowLabel(window))
+				render.EventsTable(rows, window)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().String("since", "", sinceUsage(
+		"Only events newer than this; 30m, 12h, 7d.",
+		"events_max_age", services.Config.EventsMaxAge,
+		"every event the cluster still holds is listed"))
+	return cmd
 }
 
 func newTopCommand(services Services) *cobra.Command {
