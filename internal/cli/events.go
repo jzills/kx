@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -61,7 +62,8 @@ func newEventsCommand(services Services) *cobra.Command {
 		Short: "Show Kubernetes events for one or more indexed resources.",
 		Long: "Shows Kubernetes events recorded against the exact object each index names — " +
 			"unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.\n\n" +
-			"--since bounds how far back the listing looks (30m, 12h, 7d), in the same vocabulary kx diag reads. " +
+			"--since bounds how far back the listing looks, in the same vocabulary kx diag reads — " +
+			config.DurationUnits + ": " + config.DurationExamples + ". " +
 			"Without it every event the cluster still holds is listed — on a default cluster roughly the last " +
 			"hour, since that is how long the API server keeps an event before dropping it. Set events_max_age " +
 			"in config.toml to choose a window once rather than per run.",
@@ -119,7 +121,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		},
 	}
 	cmd.Flags().String("since", "", sinceUsage(
-		"Only events newer than this; 30m, 12h, 7d.",
+		"Only events newer than this; "+config.DurationUnits+": "+config.DurationExamples+".",
 		"events_max_age", services.Config.EventsMaxAge,
 		"every event the cluster still holds is listed"))
 	return cmd

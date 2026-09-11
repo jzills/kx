@@ -38,7 +38,9 @@ events_max_age = "1h"
 theme_disable = false
 ```
 
-`diag_max_age` is a duration: `30m`, `12h`, `7d`. It bounds how far back
+`diag_max_age` is a duration in `s`, `m`, `h` or `d`: `90s`, `30m`, `12h`,
+`7d`. A fraction or a mixture works too — `1.5h`, `1h30m` — except with `d`,
+which takes a fraction but not a mixture: `1.5d`, never `1d12h`. It bounds how far back
 [`kx diag`](../commands/diagnostic/) looks for evidence; unset — or `"0"` —
 reports everything however old.
 

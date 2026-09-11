@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
@@ -379,6 +380,9 @@ func TestCompletionWithoutSavedState(t *testing.T) {
 // has no completion of its own. The day spelling is kx's — kubectl's own
 // --since rejects "7d" — so a reader never offered it has no way to learn from
 // the shell that it exists.
+//
+// Read off DurationExamples rather than written out, so the shell and the
+// help can only ever teach the same vocabulary.
 func TestSinceCompletesTheDocumentedWindows(t *testing.T) {
 	root := NewRoot(completionServices(t), "test")
 	var out bytes.Buffer
@@ -388,7 +392,7 @@ func TestSinceCompletesTheDocumentedWindows(t *testing.T) {
 	if err := Execute(root, args); err != nil {
 		t.Fatalf("Execute(%v): %v", args, err)
 	}
-	for _, window := range []string{"30m", "12h", "7d"} {
+	for _, window := range strings.Split(config.DurationExamples, ", ") {
 		if !strings.Contains(out.String(), window+"\n") {
 			t.Errorf("kx diag --since <TAB> = %q, want %s among the windows",
 				out.String(), window)

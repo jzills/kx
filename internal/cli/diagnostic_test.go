@@ -717,8 +717,9 @@ func TestDiagnosticRegistersSinceFlag(t *testing.T) {
 // key is set.
 func TestSinceHelpNamesTheConfiguredDefault(t *testing.T) {
 	cfg := config.Default()
-	// 36h rather than a round 12h: the sentence already lists "30m, 12h, 7d"
-	// as spellings, so asserting on 12h would pass on the vocabulary alone.
+	// 36h rather than a round 12h: the sentence already lists the documented
+	// windows ("90s, 30m, 12h, 7d") as spellings, so asserting on any of
+	// those would pass on the vocabulary alone.
 	cfg.DiagMaxAge = 36 * time.Hour
 	usage := sinceUsageOf(t, cfg)
 	if !strings.Contains(usage, "36h") {

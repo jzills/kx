@@ -28,7 +28,7 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 
 | Option | Description |
 |---|---|
-| `--since string` | Only logs newer than this (30m, 12h, 7d) |
+| `--since string` | Only logs newer than this; s, m, h or d: 90s, 30m, 12h, 7d |
 
 ## Global options
 

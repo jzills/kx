@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
@@ -378,7 +379,9 @@ func completeEngine(Services, string) []string {
 	return scanner.Names()
 }
 
-// completeWindow suggests the windows --since is documented with.
+// completeWindow suggests the windows --since is documented with — the same
+// list the help strings name, split rather than restated, so the shell can
+// never offer a vocabulary the help does not teach.
 //
 // Not a closed set — any duration config.ParseDuration reads is legal — but
 // the shell's fallback for a flag with no completer of its own is filenames,
@@ -386,7 +389,7 @@ func completeEngine(Services, string) []string {
 // kx's own, since kubectl's --since rejects "7d", so a reader who is never
 // offered it has no way to learn from the shell that it exists.
 func completeWindow(Services, string) []string {
-	return []string{"30m", "12h", "7d"}
+	return strings.Split(config.DurationExamples, ", ")
 }
 
 // registerFlagCompletions completes flag values that come from a fixed set or

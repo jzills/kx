@@ -313,7 +313,7 @@ func newLogsCommand(services Services) *cobra.Command {
 	// Registered so it appears in the command's help; parsing is by hand, like
 	// every other flag on a command that forwards argv to kubectl.
 	cmd.Flags().String("since", "",
-		"Only logs newer than this (30m, 12h, 7d)")
+		"Only logs newer than this; "+config.DurationUnits+": "+config.DurationExamples)
 	return cmd
 }
 

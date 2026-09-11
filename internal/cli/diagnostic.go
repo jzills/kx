@@ -199,7 +199,9 @@ func sinceFlag(window time.Duration) string {
 // reader who has already set the key does not need to be told to set it, and
 // does need to be told how to get the unbounded run back.
 func sinceOverview(configured time.Duration) string {
-	const lead = "--since bounds how far back the report looks (30m, 12h, 7d). "
+	const lead = "--since bounds how far back the report looks, in " + config.DurationUnits +
+		": " + config.DurationExamples + ". A fraction or a mixture works too — 1.5h, 1h30m — " +
+		"except with d, which takes a fraction but not a mixture: 1.5d, never 1d12h. "
 	if configured == 0 {
 		return lead + "Without it everything is reported, however old — which " +
 			"is what holds a resource at warnings, and a --fail-on gate red, " +
@@ -418,7 +420,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Print the report as JSON instead of a table")
 	cmd.Flags().String("since", "", sinceUsage(
 		"Ignore anything that happened longer ago than this — events, past "+
-			"restarts, failed runs; 30m, 12h, 7d.",
+			"restarts, failed runs; "+config.DurationUnits+": "+config.DurationExamples+".",
 		"diag_max_age", services.Config.DiagMaxAge, "everything is reported"))
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
