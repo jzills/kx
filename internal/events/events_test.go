@@ -176,3 +176,26 @@ func TestCutoffOpensTheWindowAWindowAgo(t *testing.T) {
 		t.Errorf("Cutoff(1h) = %v, want an hour before now", got)
 	}
 }
+
+// FirstTimestamp does not fall back to CreationTimestamp the way Timestamp
+// does. Timestamp's fallback answers "when did this last happen", and a
+// creation time is a fair enough answer; a first timestamp guessed the same
+// way would be used to compute a span, and a wrong span is worse than an
+// absent one — it would claim a burst was spread out, or the reverse.
+func TestFirstTimestampIsAbsentRatherThanGuessed(t *testing.T) {
+	created := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	event := corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(created)},
+	}
+	if got := FirstTimestamp(event); !got.IsZero() {
+		t.Errorf("FirstTimestamp = %v for an event with none, want the zero time", got)
+	}
+}
+
+func TestFirstTimestampReadsTheAPIField(t *testing.T) {
+	first := time.Date(2026, 8, 13, 1, 20, 0, 0, time.UTC)
+	event := corev1.Event{FirstTimestamp: metav1.NewTime(first)}
+	if got := FirstTimestamp(event); !got.Equal(first) {
+		t.Errorf("FirstTimestamp = %v, want %v", got, first)
+	}
+}

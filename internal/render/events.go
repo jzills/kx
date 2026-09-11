@@ -1,9 +1,9 @@
 package render
 
 import (
-	"fmt"
 	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/theme"
 )
@@ -58,19 +58,7 @@ func elapsed(now, timestamp time.Time) string {
 	if timestamp.IsZero() {
 		return ""
 	}
-	seconds := int(now.Sub(timestamp).Seconds())
-	if seconds < 0 {
-		seconds = 0
-	}
-	for _, unit := range []struct {
-		suffix string
-		size   int
-	}{{"d", 86400}, {"h", 3600}, {"m", 60}} {
-		if seconds >= unit.size {
-			return fmt.Sprintf("%d%s", seconds/unit.size, unit.suffix)
-		}
-	}
-	return fmt.Sprintf("%ds", seconds)
+	return config.FormatSpan(now.Sub(timestamp))
 }
 
 // EventsTable renders the events for one resource.

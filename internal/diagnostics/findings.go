@@ -503,8 +503,17 @@ func formatCPU(value *resource.Quantity) string {
 func eventFindings(events []EventSummary) []Finding {
 	findings := make([]Finding, 0, len(events))
 	for _, event := range events {
+		count := fmt.Sprintf("×%d", event.Count)
+		// "over 29d" rather than "for 29d": kx reserves "for" as the trailing
+		// segment meaning "has been true this long, and no window hides it"
+		// (render.findingTime). A tally accumulated over a span is a different
+		// claim, and reusing the word inside the summary would blur the one
+		// distinction the finding model is built on.
+		if span := event.Span(); span != "" {
+			count += " over " + span
+		}
 		findings = append(findings, dated(Warning, Event, event.LastTimestamp, fmt.Sprintf(
-			"%s ×%d on %s/%s", event.Reason, event.Count, event.Kind, event.Name)))
+			"%s %s on %s/%s", event.Reason, count, event.Kind, event.Name)))
 	}
 	return findings
 }

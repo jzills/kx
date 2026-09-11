@@ -108,6 +108,18 @@ func Timestamp(event corev1.Event) time.Time {
 	return event.CreationTimestamp.Time
 }
 
+// FirstTimestamp is the earliest occurrence an aggregated event covers, or the
+// zero time when the API did not record one.
+//
+// Unlike Timestamp this has no CreationTimestamp fallback. Timestamp's answers
+// "when did this last happen", where a creation time is a fair stand-in; this
+// one is subtracted from Timestamp to produce a span, and a guessed span is
+// worse than an absent one — it would claim a burst was spread out, or that a
+// month of failures happened at once.
+func FirstTimestamp(event corev1.Event) time.Time {
+	return event.FirstTimestamp.Time
+}
+
 // Count is the number of times an event fired. The API leaves it at zero rather
 // than one for a single occurrence.
 func Count(event corev1.Event) int32 {

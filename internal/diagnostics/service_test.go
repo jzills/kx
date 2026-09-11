@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -784,4 +785,90 @@ func TestGatherBoundPVCHasNoPendingTime(t *testing.T) {
 	if !data.PVC.PendingSince.IsZero() {
 		t.Errorf("PendingSince = %v, want zero for a bound claim", data.PVC.PendingSince)
 	}
+}
+
+// A group's span has to cover every Event object folded into it, so it takes
+// the earliest first-timestamp rather than the one that happened to be read
+// first — the API returns events in no useful order, the same reason
+// LastTimestamp takes the newest.
+func TestEventGroupSpansEveryObjectFoldedIntoIt(t *testing.T) {
+	newest := time.Now().Add(-time.Minute)
+	oldest := newest.Add(-29 * 24 * time.Hour)
+
+	warning := func(first, last time.Time, count int32) corev1.Event {
+		return corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "prod"},
+			Type:           "Warning",
+			Reason:         "BackOff",
+			Count:          count,
+			FirstTimestamp: metav1.NewTime(first),
+			LastTimestamp:  metav1.NewTime(last),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web", Namespace: "prod"},
+		}
+	}
+
+	// Deliberately out of order: the recent object is read first.
+	summaries := groupWarnings(t, []corev1.Event{
+		warning(newest.Add(-time.Hour), newest, 10),
+		warning(oldest, newest.Add(-time.Hour), 52112),
+	})
+
+	if len(summaries) != 1 {
+		t.Fatalf("grouped into %d summaries, want 1", len(summaries))
+	}
+	got := summaries[0]
+	if got.Count != 52122 {
+		t.Errorf("Count = %d, want 52122", got.Count)
+	}
+	if !got.FirstTimestamp.Equal(oldest) {
+		t.Errorf("FirstTimestamp = %v, want the earliest end %v", got.FirstTimestamp, oldest)
+	}
+	if span := got.Span(); span != "29d" {
+		t.Errorf("Span() = %q, want \"29d\"", span)
+	}
+}
+
+// An Event the API never dated at its first end must not stretch the group's
+// span back to the zero time.
+func TestAnUndatedObjectDoesNotStretchTheGroupSpan(t *testing.T) {
+	newest := time.Now().Add(-time.Minute)
+	dated := newest.Add(-2 * time.Hour)
+
+	warning := func(first time.Time, count int32) corev1.Event {
+		event := corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "prod"},
+			Type:           "Warning",
+			Reason:         "BackOff",
+			Count:          count,
+			LastTimestamp:  metav1.NewTime(newest),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web", Namespace: "prod"},
+		}
+		if !first.IsZero() {
+			event.FirstTimestamp = metav1.NewTime(first)
+		}
+		return event
+	}
+
+	summaries := groupWarnings(t, []corev1.Event{warning(dated, 5), warning(time.Time{}, 5)})
+	if len(summaries) != 1 {
+		t.Fatalf("grouped into %d summaries, want 1", len(summaries))
+	}
+	if !summaries[0].FirstTimestamp.Equal(dated) {
+		t.Errorf("FirstTimestamp = %v, want the one dated end %v",
+			summaries[0].FirstTimestamp, dated)
+	}
+	if span := summaries[0].Span(); span != "2h" {
+		t.Errorf("Span() = %q, want \"2h\"", span)
+	}
+}
+
+// groupWarnings drives warningEvents directly with a scripted event list. The
+// real APIService.Filter does the matching, so a fixture whose InvolvedObject
+// does not line up with the target is caught here rather than passing vacuously.
+func groupWarnings(t *testing.T, scripted []corev1.Event) []EventSummary {
+	t.Helper()
+	service := Service{Events: events.APIService{}}
+	return service.warningEvents(
+		time.Time{}, kinds.Pod, "web", "prod", nil, scripted,
+	)
 }

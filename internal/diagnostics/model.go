@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -249,12 +250,50 @@ type IngressHealth struct {
 
 // EventSummary is a grouped warning event.
 type EventSummary struct {
-	Reason        string
-	Message       string
-	Kind          string
-	Name          string
-	Count         int32
-	LastTimestamp time.Time
+	Reason  string
+	Message string
+	Kind    string
+	Name    string
+	Count   int32
+	// FirstTimestamp is the earliest occurrence the aggregate covers, and
+	// LastTimestamp the most recent. Kubernetes folds repeats of the same
+	// event into one object with a tally and these two ends rather than
+	// writing an object per occurrence, so Count spans the gap between them.
+	//
+	// Zero when the API recorded no first timestamp, in which case the span
+	// is unknown and nothing about it is claimed.
+	FirstTimestamp time.Time
+	LastTimestamp  time.Time
+}
+
+// Span is how long the aggregate took to accumulate, spelled in the vocabulary
+// --since reads, or "" when there is nothing to say.
+//
+// The count is unreadable without it. ×52122 over 29 days is about 75 an hour,
+// a pod nobody got round to fixing; ×52122 within an hour is a meltdown. The
+// window did not create that ambiguity, but it sharpened it: --since 1h
+// captioned a report "last 1h" above a count covering 29 days, because the
+// window keeps or drops a whole Event object on its last occurrence and the
+// API exposes no per-occurrence timestamps to bound the tally with.
+//
+// Spelled coarsely through config.FormatSpan — the largest unit it fills — so
+// it reads like every other age on the screen. Not FormatDuration: that spells
+// a configured window and round-trips through ParseDuration, which a measured
+// span never does, and a 29-day aggregate came back as "695h59m0.000034494s".
+//
+// Empty for a single occurrence, for an aggregate the API did not date at both
+// ends, and for a backwards span — clock skew between the API server and here
+// can land last before first, and a negative duration is never printed, the
+// same rule ages follow.
+func (e EventSummary) Span() string {
+	if e.FirstTimestamp.IsZero() || e.LastTimestamp.IsZero() {
+		return ""
+	}
+	span := e.LastTimestamp.Sub(e.FirstTimestamp)
+	if span <= 0 {
+		return ""
+	}
+	return config.FormatSpan(span)
 }
 
 // NodeCondition is one of a Node's status conditions, flattened to what a

@@ -1492,3 +1492,45 @@ func TestRenderDiagWithoutAWindowAddsNoSeparator(t *testing.T) {
 		}
 	}
 }
+
+// The HTML event head prints the tally too, and a saved page is the surface
+// most detached from the command that made it — so it needs the span most.
+func TestRenderDiagEventHeadCarriesTheSpan(t *testing.T) {
+	last := time.Now().Add(-time.Minute)
+	report := criticalReport(t)
+	report.WarningEvents = []diagnostics.EventSummary{{
+		Reason: "BackOff", Message: "Back-off pulling image", Kind: "Pod", Name: "web",
+		Count: 52122, FirstTimestamp: last.Add(-29 * 24 * time.Hour), LastTimestamp: last,
+	}}
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "×52122 over 29d") {
+		t.Error("the HTML event head did not carry the span")
+	}
+}
+
+func TestRenderDiagEventHeadWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Now().Add(-time.Minute)
+	report := criticalReport(t)
+	report.WarningEvents = []diagnostics.EventSummary{{
+		Reason: "FailedScheduling", Message: "no nodes", Kind: "Pod", Name: "web",
+		Count: 1, FirstTimestamp: at, LastTimestamp: at,
+	}}
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if strings.Contains(string(out), " over ") {
+		t.Error("a single-occurrence event grew a span segment in the HTML")
+	}
+}

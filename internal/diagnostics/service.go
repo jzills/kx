@@ -409,15 +409,32 @@ func (s Service) warningEvents(
 			key := groupKey{event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name}
 			count := events.Count(event)
 			timestamp := events.Timestamp(event)
-			// Dropped before grouping, so an occurrence outside the window
+			firstSeen := events.FirstTimestamp(event)
+			// Dropped before grouping, so an Event object outside the window
 			// cannot inflate the ×count of one inside it. An event with no
 			// timestamp at all is kept: it cannot be shown to be stale, and
 			// hiding a live failure over a missing field is the worse error.
+			//
+			// What this cannot bound is the tally *within* one object.
+			// Kubernetes folds repeats into a single Event carrying a count
+			// and two ends, and exposes no per-occurrence timestamps, so a
+			// BackOff at ×52122 across 29 days survives --since 1h whole on
+			// the strength of its last occurrence. EventSummary.Span is how
+			// that is told rather than hidden: every surface prints the
+			// window the tally accumulated over beside the tally itself.
 			if outsideWindow(timestamp, since) {
 				continue
 			}
 			if existing, ok := groups[key]; ok {
 				existing.Count += count
+				// The earliest end, so a group's span covers every object in
+				// it. Undated objects are skipped rather than treated as the
+				// beginning of time, which would stretch the span of every
+				// group one of them lands in.
+				if !firstSeen.IsZero() &&
+					(existing.FirstTimestamp.IsZero() || firstSeen.Before(existing.FirstTimestamp)) {
+					existing.FirstTimestamp = firstSeen
+				}
 				// The newest occurrence, not the last one read: the API
 				// returns events in no useful order, and this timestamp is
 				// what the report prints as "most recent" and what the
@@ -430,12 +447,13 @@ func (s Service) warningEvents(
 				continue
 			}
 			groups[key] = &EventSummary{
-				Reason:        event.Reason,
-				Message:       event.Message,
-				Kind:          event.InvolvedObject.Kind,
-				Name:          event.InvolvedObject.Name,
-				Count:         count,
-				LastTimestamp: timestamp,
+				Reason:         event.Reason,
+				Message:        event.Message,
+				Kind:           event.InvolvedObject.Kind,
+				Name:           event.InvolvedObject.Name,
+				Count:          count,
+				FirstTimestamp: firstSeen,
+				LastTimestamp:  timestamp,
 			}
 			order = append(order, key)
 		}

@@ -808,3 +808,42 @@ func TestLongEventMessageWrapsUnderItsHeading(t *testing.T) {
 		}
 	}
 }
+
+// The WARNING EVENTS section prints the tally a second time, and it needs the
+// span for the same reason the finding summary does.
+func TestWarningEventsSectionCarriesTheSpan(t *testing.T) {
+	// Anchored to one "last" rather than two calls to time.Now, so the span is
+	// exactly 29 days and the assertion cannot drift to 28d on a slow run.
+	last := time.Now().Add(-time.Minute)
+	first := last.Add(-29 * 24 * time.Hour)
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Warning,
+			WarningEvents: []diagnostics.EventSummary{{
+				Reason: "BackOff", Message: "Back-off pulling image", Kind: "Pod", Name: "web",
+				Count: 52122, FirstTimestamp: first, LastTimestamp: last,
+			}},
+		})
+	})
+	if !strings.Contains(out, "×52122 over 29d") {
+		t.Errorf("rendered output did not carry the span:\n%s", out)
+	}
+}
+
+// A single occurrence leaves the line as it was — no "over 0s" on every
+// ordinary event.
+func TestWarningEventsSectionWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Now().Add(-time.Minute)
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Warning,
+			WarningEvents: []diagnostics.EventSummary{{
+				Reason: "FailedScheduling", Message: "no nodes", Kind: "Pod", Name: "web",
+				Count: 1, FirstTimestamp: at, LastTimestamp: at,
+			}},
+		})
+	})
+	if strings.Contains(out, "over") {
+		t.Errorf("a single-occurrence event grew a span segment:\n%s", out)
+	}
+}
