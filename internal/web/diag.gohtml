@@ -81,7 +81,7 @@
     <div>
     {{range .WarningEvents}}
       <div class="event">
-        <p class="event-head">{{.Kind}}/{{.Name}} · <span class="{{statusClass .Reason}}">{{.Reason}}</span> ×{{.Count}}{{with age .LastTimestamp}} · {{.}}{{end}}</p>
+        <p class="event-head">{{.Kind}}/{{.Name}} · <span class="{{statusClass .Reason}}">{{.Reason}}</span> ×{{.Count}}{{with .Span}} over {{.}}{{end}}{{with age .LastTimestamp}} · {{.}}{{end}}</p>
         <p class="event-msg">{{.Message}}</p>
       </div>
     {{end}}

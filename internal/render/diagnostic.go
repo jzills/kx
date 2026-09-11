@@ -189,6 +189,20 @@ func restarts(container diagnostics.ContainerDiagnostic) string {
 	return count
 }
 
+// eventSpan says how long an aggregated event's ×count took to accumulate, so
+// the tally can be read. Empty when the API dated only one end of it, or when
+// there was a single occurrence with nothing to span.
+//
+// "over", not "for": the trailing "· for 24d" below is reserved for how long
+// something has been true, which no window hides. This is a tally's span, and
+// it sits inside the line rather than at the end of it.
+func eventSpan(event diagnostics.EventSummary) string {
+	if span := event.Span(); span != "" {
+		return " over " + span
+	}
+	return ""
+}
+
 // findingTime is the trailing segment that says when a finding's subject
 // happened, or how long it has been true.
 //
@@ -333,7 +347,7 @@ func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.
 		// Object first, matching the LOGS subheadings.
 		line := r.style(theme.Muted, event.Kind+"/"+event.Name+" · ") +
 			r.style(statusColor(event.Reason), event.Reason) +
-			r.style(theme.Muted, " ×"+strconv.Itoa(int(event.Count)))
+			r.style(theme.Muted, " ×"+strconv.Itoa(int(event.Count))+eventSpan(event))
 		if age := FormatAge(event.LastTimestamp); age != "" {
 			line += r.style(theme.Muted, " · "+age)
 		}

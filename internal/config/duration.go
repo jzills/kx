@@ -123,3 +123,32 @@ func FormatDuration(window time.Duration) string {
 		return window.String()
 	}
 }
+
+// FormatSpan writes a measured duration coarsely: the largest unit it fills,
+// and nothing below it.
+//
+// Distinct from FormatDuration, which spells a *configured* window and is built
+// to round-trip through ParseDuration. A window is a round number somebody
+// typed; a span is measured, so it is never round, and FormatDuration falls
+// through to time.Duration's own String for it — an event aggregate 29 days
+// wide came out as "695h59m0.000034494s".
+//
+// This is the spelling kx uses for every age and duration on screen ("2m ago",
+// "for 24d"), so a span reads like the timestamps beside it. render.elapsed
+// delegates here so there is one implementation rather than two that agree
+// until they don't.
+func FormatSpan(span time.Duration) string {
+	seconds := int(span.Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	for _, unit := range []struct {
+		suffix string
+		size   int
+	}{{"d", 86400}, {"h", 3600}, {"m", 60}} {
+		if seconds >= unit.size {
+			return fmt.Sprintf("%d%s", seconds/unit.size, unit.suffix)
+		}
+	}
+	return fmt.Sprintf("%ds", seconds)
+}

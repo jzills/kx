@@ -1373,3 +1373,49 @@ func TestUndatableFindingsStayBare(t *testing.T) {
 		}
 	}
 }
+
+// The finding summary is where the ×count is first written down, and it has to
+// carry the span for the same reason the rendered line does — a bare tally on
+// a windowed report claims the window's span.
+func TestEventFindingSummaryCarriesTheSpan(t *testing.T) {
+	first := time.Date(2026, 8, 13, 1, 20, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "BackOff", Kind: "Pod", Name: "web", Count: 52122,
+		FirstTimestamp: first, LastTimestamp: first.Add(29 * 24 * time.Hour),
+	}})
+
+	if len(findings) != 1 {
+		t.Fatalf("built %d findings, want 1", len(findings))
+	}
+	if got := findings[0].Summary; got != "BackOff ×52122 over 29d on Pod/web" {
+		t.Errorf("Summary = %q, want the span beside the count", got)
+	}
+}
+
+// "over", not "for". The trailing "· for 24d" segment means "has been true this
+// long, and no window hides it"; a tally's span is a different claim, and
+// reusing the word would blur the distinction the finding model rests on.
+func TestEventFindingSpanDoesNotBorrowTheOngoingWord(t *testing.T) {
+	first := time.Date(2026, 8, 13, 1, 20, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "BackOff", Kind: "Pod", Name: "web", Count: 52122,
+		FirstTimestamp: first, LastTimestamp: first.Add(29 * 24 * time.Hour),
+	}})
+	if strings.Contains(findings[0].Summary, "for ") {
+		t.Errorf("Summary = %q used \"for\", which is reserved for ongoing findings",
+			findings[0].Summary)
+	}
+}
+
+// A single occurrence spans nothing, and the line must stay exactly as it was
+// — this is the common case on every healthy-ish resource.
+func TestEventFindingWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "FailedScheduling", Kind: "Pod", Name: "web", Count: 1,
+		FirstTimestamp: at, LastTimestamp: at,
+	}})
+	if got := findings[0].Summary; got != "FailedScheduling ×1 on Pod/web" {
+		t.Errorf("Summary = %q, want no span segment", got)
+	}
+}
