@@ -547,3 +547,61 @@ func TestEventsMaxAgeRejectsANonString(t *testing.T) {
 		t.Errorf("error = %q, want it to name events_max_age", err)
 	}
 }
+
+// An exported-but-empty KX_* variable means unset.
+//
+// This is the normal failure mode of environment injection rather than a typo:
+// `export KX_DIAG_MAX_AGE="$CI_WINDOW"` with CI_WINDOW unset, or a Kubernetes
+// `env:` entry with no value, both produce an exported empty string. Load runs
+// for every command, so treating that as invalid took down `kx get`, `kx state`
+// and even `kx --version` — commands with no notion of a theme or a window.
+//
+// KX_STATE and KX_CONFIG have always read "" as absent, and resolveWindow reads
+// an empty --since the same way. This is that rule, applied across the loader.
+func TestEmptyEnvValuesAreUnset(t *testing.T) {
+	for _, key := range []string{
+		"KX_THEME", "KX_ENGINE", "KX_MAX_HISTORY",
+		"KX_DIAG_MAX_AGE", "KX_EVENTS_MAX_AGE", "KX_DEBUG_IMAGE",
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("KX_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+			t.Setenv(key, "")
+
+			// The registries reject "" — that is how KX_THEME="" and
+			// KX_ENGINE="" took every command down, so a stub that accepts
+			// anything would let both cases pass without testing them.
+			cfg, err := Loader{
+				ThemeKnown:  func(name string) bool { return name != "" },
+				EngineKnown: func(name string) bool { return name != "" },
+			}.Load()
+			if err != nil {
+				t.Fatalf("%s=\"\" failed Load: %v", key, err)
+			}
+			if cfg.DiagMaxAge != 0 || cfg.EventsMaxAge != 0 {
+				t.Errorf("%s=\"\" set a window: diag=%v events=%v",
+					key, cfg.DiagMaxAge, cfg.EventsMaxAge)
+			}
+		})
+	}
+}
+
+// KX_SHELLS="" failed differently: strings.Split("", ",") is []string{""}, so
+// the list was not empty, it held one shell named "" — and kx exec went off to
+// probe for it. A silent wrong answer rather than a loud one.
+func TestEmptyShellsListIsUnsetRatherThanOneEmptyShell(t *testing.T) {
+	t.Setenv("KX_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("KX_SHELLS", "")
+
+	cfg, err := Loader{
+		ThemeKnown:  func(name string) bool { return name != "" },
+		EngineKnown: func(name string) bool { return name != "" },
+	}.Load()
+	if err != nil {
+		t.Fatalf("KX_SHELLS=\"\" failed Load: %v", err)
+	}
+	for _, shell := range cfg.Shells {
+		if shell == "" {
+			t.Fatalf("KX_SHELLS=\"\" produced an empty shell candidate: %#v", cfg.Shells)
+		}
+	}
+}
