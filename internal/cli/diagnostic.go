@@ -158,6 +158,7 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 		Scope:         scope,
 		AllNamespaces: result.AllNamespaces,
 		Checked:       result.Checked,
+		Window:        render.WindowLabel(result.Window),
 		Reports:       result.All,
 	}
 }
@@ -165,11 +166,12 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 // resourcePage builds the HTML page for one indexed resource: a sweep of one,
 // always Single so the template renders it inline rather than behind a
 // <details>.
-func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
+func resourcePage(report diagnostics.Report, window time.Duration, meta web.Meta) web.DiagPage {
 	return web.DiagPage{
 		Meta:    meta,
 		Scope:   report.Namespace,
 		Single:  true,
+		Window:  render.WindowLabel(window),
 		Reports: []diagnostics.Report{report},
 	}
 }
@@ -399,7 +401,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderDiag(resourcePage(report, meta))
+				page, err := web.RenderDiag(resourcePage(report, window, meta))
 				if err != nil {
 					return err
 				}
