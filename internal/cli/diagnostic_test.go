@@ -411,7 +411,7 @@ func TestSweepPageScopedNamespaceKeepsItsOwnName(t *testing.T) {
 
 func TestResourcePageIsSingleWithExactlyOneReport(t *testing.T) {
 	report := diagnostics.Report{Name: "web", Kind: kinds.Deployment, Namespace: "prod"}
-	page := resourcePage(report, web.Meta{Title: "t"})
+	page := resourcePage(report, 0, web.Meta{Title: "t"})
 
 	if !page.Single {
 		t.Error("Single = false, want true — a single-resource page must render inline, not as a collapsed sweep row")
@@ -1143,5 +1143,29 @@ func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
 	}
 	if findings[1].At != moment.Format(time.RFC3339) || findings[1].Since != "" {
 		t.Errorf("dated finding = %+v, want only at=%s", findings[1], moment.Format(time.RFC3339))
+	}
+}
+
+// The page builders are where the window reaches the HTML report, and both
+// spell it through render.WindowLabel so a page and the terminal caption
+// beside it cannot disagree. An unbounded report carries no label at all,
+// which is what keeps the template's separator from rendering alone.
+func TestPageBuildersCarryTheWindow(t *testing.T) {
+	report := diagnostics.Report{Name: "web", Kind: kinds.Deployment, Namespace: "prod"}
+
+	if got := resourcePage(report, 24*time.Hour, web.Meta{}).Window; got != "last 24h" {
+		t.Errorf("resourcePage Window = %q, want \"last 24h\"", got)
+	}
+	if got := resourcePage(report, 0, web.Meta{}).Window; got != "" {
+		t.Errorf("an unbounded resourcePage carried Window = %q, want empty", got)
+	}
+
+	result := render.TriageResult{Namespace: "prod", Checked: 1, Window: 90 * time.Minute}
+	if got := sweepPage(result, web.Meta{}).Window; got != "last 1h30m" {
+		t.Errorf("sweepPage Window = %q, want \"last 1h30m\"", got)
+	}
+	result.Window = 0
+	if got := sweepPage(result, web.Meta{}).Window; got != "" {
+		t.Errorf("an unbounded sweepPage carried Window = %q, want empty", got)
 	}
 }

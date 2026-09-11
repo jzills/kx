@@ -116,14 +116,21 @@
       <span class="sep">·</span>
     {{end}}
     <span class="verdict {{severityClass $r.Verdict}}">{{severityIcon $r.Verdict}} {{$r.Verdict}}</span>
+    {{/* Dropped whole when unbounded, like the namespace span above: a
+         separator with nothing after it is the same bug in a different
+         place. */}}
+    {{if .Window}}
+      <span class="sep">·</span>
+      <span>{{.Window}}</span>
+    {{end}}
   </div>
   {{template "report" $r}}
 {{else}}
   <div class="block">
     {{if eq .Checked 0}}
-      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{with .Window}} · {{.}}{{end}}</p>
     {{else}}
-      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked</p>
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{with .Window}} · {{.}}{{end}}</p>
       <div class="grid-mount" data-kx-grid="diag" data-all-namespaces="{{.AllNamespaces}}"></div>
       <script type="application/json" id="kx-diag-data">{{diagRowsJSON .Reports}}</script>
       {{range $i, $r := .Reports}}<template id="diag-detail-{{$i}}">{{template "report" $r}}</template>{{end}}

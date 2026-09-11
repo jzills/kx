@@ -1429,3 +1429,66 @@ func TestDiagPagePrefersAMomentOverADuration(t *testing.T) {
 		t.Error("a finding with a moment also carries a duration")
 	}
 }
+
+// Every other surface this feature touches learned to say its window: the
+// terminal caption gets WindowLabel, the "all healthy" line gets windowSuffix,
+// the JSON document gets a "window" key. The saved HTML page did not, so a
+// sweep captioned "12 checked" over a 24h window read as a full audit — and
+// the page is the one surface a reader opens days later, detached from the
+// command line that made it. The masthead invocation line carries --since, but
+// that is provenance, not the caption a reader takes the result from.
+func TestRenderDiagSweepCaptionCarriesTheWindow(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Checked: 12,
+		Window:  "last 24h",
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "Mixed · diagnostics · 12 checked · last 24h") {
+		t.Error("the sweep caption did not carry the window")
+	}
+}
+
+// The single-resource banner drops the window the same way, and its terminal
+// twin has always shown it: "Pod/x · diagnostics · ✗ critical · 3 issues ·
+// last 1h".
+func TestRenderDiagSingleBannerCarriesTheWindow(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Window:  "last 1h",
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "last 1h") {
+		t.Error("the single-resource banner did not carry the window")
+	}
+}
+
+// An unbounded report must not grow a stray separator where the window would
+// have gone — the same empty-segment trap the cluster-scoped namespace span
+// fell into.
+func TestRenderDiagWithoutAWindowAddsNoSeparator(t *testing.T) {
+	for _, page := range []DiagPage{
+		{Meta: testMeta(t), Scope: "diagnostics", Checked: 12,
+			Reports: []diagnostics.Report{criticalReport(t)}},
+		{Meta: testMeta(t), Scope: "diagnostics", Single: true,
+			Reports: []diagnostics.Report{criticalReport(t)}},
+	} {
+		out, err := RenderDiag(page)
+		if err != nil {
+			t.Fatalf("RenderDiag returned %v", err)
+		}
+		if strings.Contains(string(out), "checked · <") {
+			t.Error("an unbounded sweep caption kept a separator with nothing after it")
+		}
+		if strings.Contains(string(out), "· ·") {
+			t.Error("an unbounded page rendered two separators in a row")
+		}
+	}
+}

@@ -54,6 +54,13 @@ type DiagPage struct {
 	AllNamespaces bool
 	Single        bool
 	Checked       int
+	// Window is the resolved --since window, already spelled the way the
+	// terminal spells it ("last 24h"), or "" when the report is unbounded.
+	//
+	// Formatted by the caller rather than here: render.WindowLabel is the one
+	// place that decides how a window reads, and a page that spelled it
+	// differently from the terminal caption beside it would be its own bug.
+	Window string
 	// Reports are every swept resource, most severe first, healthy included —
 	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
