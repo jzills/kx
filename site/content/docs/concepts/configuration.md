@@ -36,7 +36,8 @@ out whether the file you are editing is the file it reads.
 `shells` is a list in the file and a comma-separated string in the
 environment: `KX_SHELLS=zsh,bash,sh`.
 
-`diag_max_age` is a duration — `30m`, `12h`, `7d` — and `0` means no limit,
+`diag_max_age` is a duration in `s`, `m`, `h` or `d` — `90s`, `30m`, `12h`,
+`7d` — and `0` means no limit,
 which is also what you get by leaving it out. Setting it is worth it because
 evidence drives a finding, a finding drives the verdict, and a verdict drives
 `--fail-on`: unbounded, one `FailedScheduling` from three weeks ago holds a

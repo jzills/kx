@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+// DurationUnits and DurationExamples are the vocabulary this parser is
+// documented with: the units a reader is told about, and one window per unit
+// so none of them has to be inferred. Every --since help string, the flag's
+// shell completion and the error below quote these rather than restating
+// them, because three commands documenting the same flag had drifted to three
+// near-identical lists — and because a list that short reads as exhaustive
+// when it is only illustrative. `1s` has always parsed and nothing on screen
+// said so.
+//
+// The parser takes more than it advertises. Go's sub-second units (ns, us,
+// ms) are accepted and deliberately unnamed here: the finest window that
+// means anything to a report about events and restarts is a second, and
+// putting nanoseconds on a help screen costs every reader to serve none.
+// Fractions and mixtures are real and useful, so the long help names them,
+// where there is room for the one asymmetry — d takes a fraction but not a
+// mixture.
+const (
+	DurationUnits    = "s, m, h or d"
+	DurationExamples = "90s, 30m, 12h, 7d"
+)
+
 // ParseDuration parses a time window written the way a person writes one.
 //
 // Go's time.ParseDuration stops at hours, so `7d` — the spelling anyone asking
@@ -25,7 +46,8 @@ import (
 // `7d` from the environment but not from the command line would be a trap.
 func ParseDuration(value string) (time.Duration, error) {
 	invalid := fmt.Errorf(
-		"invalid duration %q — use a number and a unit, such as 30m, 12h or 7d", value)
+		"invalid duration %q — use a number and a unit ("+DurationUnits+"): "+
+			DurationExamples, value)
 	negative := fmt.Errorf("duration %q cannot be negative", value)
 
 	parsed := time.Duration(0)
