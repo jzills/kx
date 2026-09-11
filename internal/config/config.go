@@ -125,6 +125,28 @@ func Settings() []Setting {
 	}
 }
 
+// lookupEnv reads a KX_* setting, reporting an exported-but-empty variable as
+// absent rather than as a value.
+//
+// Every setting below is optional and has a default, so "" is never a value any
+// of them can take — but os.LookupEnv reports it as present, and each block
+// then tried to parse it. Five of them failed hard, and because Load runs for
+// every command, `export KX_DIAG_MAX_AGE="$UNSET_VAR"` took down `kx get`,
+// `kx state` and `kx --version` alike, none of which has a window to bound.
+//
+// That is the ordinary shape of environment injection rather than a typo: a
+// shell expanding an unset variable, or a Kubernetes `env:` entry with no
+// value, both export the empty string. KX_STATE and KX_CONFIG have always read
+// it as absent, and resolveWindow reads an empty --since the same way; this is
+// the same rule, applied to the rest of the loader rather than to two of them.
+func lookupEnv(key string) (string, bool) {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return "", false
+	}
+	return value, true
+}
+
 // File returns the config file path.
 //
 // KX_CONFIG overrides it — read directly rather than through Load's usual
@@ -247,7 +269,7 @@ func (l Loader) Load() (Config, error) {
 		return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
 	}
 
-	if value, ok := os.LookupEnv("KX_MAX_HISTORY"); ok {
+	if value, ok := lookupEnv("KX_MAX_HISTORY"); ok {
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return cfg, errors.New("kx: KX_MAX_HISTORY must be an integer")
@@ -257,10 +279,10 @@ func (l Loader) Load() (Config, error) {
 		}
 		cfg.MaxHistory = n
 	}
-	if value, ok := os.LookupEnv("KX_SHELLS"); ok {
+	if value, ok := lookupEnv("KX_SHELLS"); ok {
 		cfg.Shells = strings.Split(value, ",")
 	}
-	if value, ok := os.LookupEnv("KX_THEME_DISABLE"); ok {
+	if value, ok := lookupEnv("KX_THEME_DISABLE"); ok {
 		switch strings.ToLower(value) {
 		case "1", "true", "yes", "on":
 			cfg.ThemeDisable = true
@@ -268,27 +290,27 @@ func (l Loader) Load() (Config, error) {
 			cfg.ThemeDisable = false
 		}
 	}
-	if value, ok := os.LookupEnv("KX_THEME"); ok {
+	if value, ok := lookupEnv("KX_THEME"); ok {
 		cfg.Theme = value
 	}
-	if value, ok := os.LookupEnv("KX_ENGINE"); ok {
+	if value, ok := lookupEnv("KX_ENGINE"); ok {
 		cfg.Engine = value
 	}
-	if value, ok := os.LookupEnv("KX_DIAG_MAX_AGE"); ok {
+	if value, ok := lookupEnv("KX_DIAG_MAX_AGE"); ok {
 		window, err := ParseDuration(value)
 		if err != nil {
 			return cfg, fmt.Errorf("kx: KX_DIAG_MAX_AGE: %w", err)
 		}
 		cfg.DiagMaxAge = window
 	}
-	if value, ok := os.LookupEnv("KX_EVENTS_MAX_AGE"); ok {
+	if value, ok := lookupEnv("KX_EVENTS_MAX_AGE"); ok {
 		window, err := ParseDuration(value)
 		if err != nil {
 			return cfg, fmt.Errorf("kx: KX_EVENTS_MAX_AGE: %w", err)
 		}
 		cfg.EventsMaxAge = window
 	}
-	if value, ok := os.LookupEnv("KX_DEBUG_IMAGE"); ok {
+	if value, ok := lookupEnv("KX_DEBUG_IMAGE"); ok {
 		cfg.DebugImage = value
 	}
 
