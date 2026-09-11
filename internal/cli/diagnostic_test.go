@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -61,6 +64,43 @@ func triageOf(gatherer Gatherer, saved *[]state.State) TriageCommand {
 			*saved = append(*saved, s)
 			return nil
 		},
+	}
+}
+
+// A sweep that found nothing still ran under a window, and the caption has to
+// say which: "0 checked · all healthy" and "0 checked · all healthy · last
+// 30m" are different claims, and only the first is about the cluster. The
+// window came from the flag, not from a row — reading it back off the reports
+// meant an empty sweep silently dropped it, exactly where a reader has least
+// else to go on.
+func TestAnEmptySweepStillReportsItsWindow(t *testing.T) {
+	var saved []state.State
+	command := triageOf(&fakeGatherer{}, &saved)
+	command.Window = 30 * time.Minute
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Checked != 0 {
+		t.Fatalf("Checked = %d, want an empty sweep", result.Checked)
+	}
+	if result.Window != 30*time.Minute {
+		t.Errorf("Window = %v, want the 30m the sweep ran under", result.Window)
+	}
+}
+
+func TestASweepReportsTheWindowItWasGivenNotOneReadOffARow(t *testing.T) {
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: []diagnostics.Data{
+		unhealthy(kinds.Deployment, "api", "prod"),
+	}}, &saved)
+	command.Window = 30 * time.Minute
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Window != 30*time.Minute {
+		t.Errorf("Window = %v, want 30m", result.Window)
 	}
 }
 
@@ -371,7 +411,7 @@ func TestSweepPageScopedNamespaceKeepsItsOwnName(t *testing.T) {
 
 func TestResourcePageIsSingleWithExactlyOneReport(t *testing.T) {
 	report := diagnostics.Report{Name: "web", Kind: kinds.Deployment, Namespace: "prod"}
-	page := resourcePage(report, web.Meta{Title: "t"})
+	page := resourcePage(report, 0, web.Meta{Title: "t"})
 
 	if !page.Single {
 		t.Error("Single = false, want true — a single-resource page must render inline, not as a collapsed sweep row")
@@ -661,5 +701,471 @@ func TestDiagSingleWithHTMLStillAppliesTheFailOnGate(t *testing.T) {
 	}
 	if silent.Code != findingsExitCode {
 		t.Errorf("exit code = %d, want %d", silent.Code, findingsExitCode)
+	}
+}
+
+func TestDiagnosticRegistersSinceFlag(t *testing.T) {
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", []string{"diag"})
+	if cmd.Flags().Lookup("since") == nil {
+		t.Error("--since is not registered, so it will not appear in --help")
+	}
+}
+
+// The flag's help has to name the default it actually falls back to. Written
+// against an unset diag_max_age, the sentence went on claiming "unset" on the
+// one machine whose reader most needs to know otherwise: the one where the
+// key is set.
+func TestSinceHelpNamesTheConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	// 36h rather than a round 12h: the sentence already lists the documented
+	// windows ("90s, 30m, 12h, 7d") as spellings, so asserting on any of
+	// those would pass on the vocabulary alone.
+	cfg.DiagMaxAge = 36 * time.Hour
+	usage := sinceUsageOf(t, cfg)
+	if !strings.Contains(usage, "36h") {
+		t.Errorf("--since help = %q, want it to name the configured 36h", usage)
+	}
+	if strings.Contains(usage, "unset") {
+		t.Errorf("--since help = %q, want it not to call a set diag_max_age unset", usage)
+	}
+}
+
+// And says so plainly when there is nothing to name, since that is the state
+// every default install is in.
+func TestSinceHelpSaysWhenNothingIsConfigured(t *testing.T) {
+	usage := sinceUsageOf(t, config.Default())
+	if !strings.Contains(usage, "unset") {
+		t.Errorf("--since help = %q, want it to say diag_max_age is unset", usage)
+	}
+}
+
+// The long help's --since paragraph carries the same claim about the default,
+// at more length, and was wrong in the same way.
+func TestSinceOverviewNamesTheConfiguredDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.DiagMaxAge = 36 * time.Hour
+	long := newDiagnosticCommand(Services{Config: cfg}, "diagnostic", nil).Long
+	if !strings.Contains(long, "currently 36h") {
+		t.Errorf("long help = %q, want the --since paragraph to name 36h", long)
+	}
+	if strings.Contains(long, "Without it everything is reported") {
+		t.Errorf("long help = %q, want it not to promise an unbounded default "+
+			"a set diag_max_age has taken away", long)
+	}
+	// The way back to the old behaviour is the only thing a reader with the
+	// key set can't work out from the rest of the screen.
+	if !strings.Contains(long, "'--since 0'") {
+		t.Errorf("long help = %q, want it to name --since 0", long)
+	}
+}
+
+func TestSinceOverviewTeachesTheSettingWhenUnset(t *testing.T) {
+	long := newDiagnosticCommand(Services{Config: config.Default()}, "diagnostic", nil).Long
+	if !strings.Contains(long, "Without it everything is reported") {
+		t.Errorf("long help = %q, want the unbounded default described", long)
+	}
+	if !strings.Contains(long, "Set diag_max_age in config.toml") {
+		t.Errorf("long help = %q, want the setting taught to a reader without one", long)
+	}
+}
+
+// Read off the built command rather than from sinceUsage directly: the help a
+// reader sees is the flag's, and a usage string that never reached the
+// registration would agree with itself.
+func sinceUsageOf(t *testing.T, cfg config.Config) string {
+	t.Helper()
+	flag := newDiagnosticCommand(Services{Config: cfg}, "diagnostic", nil).
+		Flags().Lookup("since")
+	if flag == nil {
+		t.Fatal("--since is not registered")
+	}
+	return flag.Usage
+}
+
+// The flag is an override of the setting, not a separate knob: unset means
+// whatever config.toml or KX_DIAG_MAX_AGE resolved to.
+func TestReportWindowFallsBackToTheConfiguredSetting(t *testing.T) {
+	cfg := config.Default()
+	cfg.DiagMaxAge = 12 * time.Hour
+	got, err := resolveWindow("", cfg.DiagMaxAge)
+	if err != nil {
+		t.Fatalf("resolveWindow: %v", err)
+	}
+	if got != 12*time.Hour {
+		t.Errorf("window = %v, want the configured 12h", got)
+	}
+}
+
+func TestReportWindowFlagOverridesTheSetting(t *testing.T) {
+	cfg := config.Default()
+	cfg.DiagMaxAge = 12 * time.Hour
+	got, err := resolveWindow("7d", cfg.DiagMaxAge)
+	if err != nil {
+		t.Fatalf("resolveWindow: %v", err)
+	}
+	if want := 7 * 24 * time.Hour; got != want {
+		t.Errorf("window = %v, want %v", got, want)
+	}
+}
+
+// --since 0 is how someone gets the old unbounded behaviour back for one run,
+// so zero from the flag must not be mistaken for an absent flag.
+func TestReportWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
+	cfg := config.Default()
+	got, err := resolveWindow("0", cfg.DiagMaxAge)
+	if err != nil {
+		t.Fatalf("resolveWindow: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("window = %v, want 0 — --since 0 asks for no window", got)
+	}
+}
+
+func TestReportWindowRejectsAMalformedValue(t *testing.T) {
+	if _, err := resolveWindow("7 weeks", config.Default().DiagMaxAge); err == nil {
+		t.Fatal("resolveWindow accepted '7 weeks'")
+	} else if !strings.Contains(err.Error(), "--since") {
+		t.Errorf("err = %v, want it to name --since", err)
+	}
+}
+
+// Parsed before the cluster is read, like --fail-on: a typo should not cost a
+// sweep of every namespace before it is reported. Services{} has no client, so
+// reaching one would nil-panic rather than return this error.
+func TestDiagRejectsAMalformedSinceBeforeReadingTheCluster(t *testing.T) {
+	quietRender(t)
+	cmd := newDiagnosticCommand(Services{}, "diagnostic", nil)
+	if err := cmd.Flags().Set("since", "7 weeks"); err != nil {
+		t.Fatalf("set --since: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("a malformed --since was accepted")
+	} else if !strings.Contains(err.Error(), "--since") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// stalePod is a running pod carrying one warning event from three weeks ago —
+// the shape the issue describes: nothing wrong now, a verdict stuck at
+// "warnings" because of something that happened last month.
+func stalePod(name, namespace string) []runtime.Object {
+	return []runtime.Object{
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: "app", Ready: true,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				}},
+			},
+		},
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Name: "e1", Namespace: namespace},
+			Type:           "Warning",
+			Reason:         "FailedScheduling",
+			Message:        "no nodes available",
+			Count:          3,
+			LastTimestamp:  metav1.NewTime(time.Now().Add(-21 * 24 * time.Hour)),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: name, Namespace: namespace},
+		},
+	}
+}
+
+// The whole point, end to end: the window has to reach the gatherer, not just
+// be parsed. Asserting on RunE's rendered output is the only way to see that
+// the resolved window was actually handed to the diagnostics service.
+//
+// Configured rather than passed, because a window set once in config.toml has
+// the longer path to travel — through Config, resolveWindow and the service —
+// and is the one a user is most likely to be relying on without thinking
+// about it.
+func TestDiagSweepAppliesTheConfiguredWindow(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	services.Config.DiagMaxAge = 24 * time.Hour
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("a three-week-old warning still drove the sweep:\n%s", sink.String())
+	}
+}
+
+// ...and --since 0 asks for it back, which is what makes the default a
+// default rather than a hard rule.
+func TestDiagSweepWithoutAWindowStillReportsAnOldEvent(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.Flags().Set("since", "0"); err != nil {
+		t.Fatalf("set --since: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("--since 0 dropped an event it was told to keep:\n%s", sink.String())
+	}
+}
+
+// A saved report has to say what it covers. Without the window on the
+// invocation line the page looks like a full account of the namespace while
+// silently omitting everything older than a day.
+func TestDiagSweepHTMLRecordsTheWindowInTheInvocation(t *testing.T) {
+	quietRender(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{
+		"namespace": "prod", "since": "7d", "out": out,
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(page), "--since 7d") {
+		t.Error("the report does not record the event window it was built with")
+	}
+}
+
+// An unbounded run has no window to record, and a page claiming `--since 0`
+// would read as a setting rather than as the absence of one.
+func TestDiagSweepHTMLOmitsAnUnlimitedWindow(t *testing.T) {
+	quietRender(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{
+		"namespace": "prod", "since": "0", "out": out,
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(page), "--since") {
+		t.Error("an unlimited run recorded a --since it was not given")
+	}
+}
+
+// settledPod is a running, ready pod whose container thrashed and OOMKilled
+// weeks ago and has been fine since. Nothing about it is wrong now, and
+// before the window it reported critical forever.
+func settledPod(name, namespace string, terminatedAgo time.Duration) []runtime.Object {
+	return []runtime.Object{&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "app", Ready: true, RestartCount: 21,
+				State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				LastTerminationState: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Reason: "OOMKilled", ExitCode: 137,
+						FinishedAt: metav1.NewTime(time.Now().Add(-terminatedAgo)),
+					},
+				},
+			}},
+		},
+	}}
+}
+
+// The window has to reach a container's own history, not just events — the
+// cutoff travels from the flag, through Sweep, onto every Data, and into the
+// findings layer.
+func TestDiagSweepAppliesTheWindowToContainerHistory(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, settledPod("web", "prod", 21*24*time.Hour)...)
+	services.Config.DiagMaxAge = 24 * time.Hour
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(sink.String(), "OOMKilled") {
+		t.Errorf("a three-week-old OOMKill still drove the sweep:\n%s", sink.String())
+	}
+}
+
+func TestDiagSweepWithoutAWindowStillReportsOldContainerHistory(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, settledPod("web", "prod", 21*24*time.Hour)...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{"namespace": "prod", "since": "0"} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "OOMKilled") {
+		t.Errorf("--since 0 dropped history it was told to keep:\n%s", sink.String())
+	}
+}
+
+// An unbounded sweep names no window, whatever it found — the caption has
+// nothing to qualify, and "last 0" is not a thing a reader can be told.
+func TestAnUnboundedSweepNamesNoWindow(t *testing.T) {
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: []diagnostics.Data{
+		unhealthy(kinds.Deployment, "web", "prod"),
+	}}, &saved)
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Window != 0 {
+		t.Errorf("Window = %v, want zero", result.Window)
+	}
+}
+
+// The terminal dates a finding; a document has to carry the same fact, in a
+// form a pipeline can compare rather than parse out of "3h ago". Present
+// state has no moment, so the field is absent rather than zero.
+func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
+	at := time.Now().Add(-3 * time.Hour).UTC().Truncate(time.Second)
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{
+			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, At: at,
+				Summary: "OOMKilled in pod web-1"},
+			{Severity: diagnostics.Critical, Rank: diagnostics.Aggregate,
+				Summary: "Only 0/1 replicas ready"},
+		},
+	}
+	document, err := diagnosticJSON(report, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+
+	var parsed struct {
+		Resources []struct {
+			Findings []struct {
+				Summary string `json:"summary"`
+				At      string `json:"at"`
+			} `json:"findings"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	findings := parsed.Resources[0].Findings
+	if got := findings[0].At; got != at.Format(time.RFC3339) {
+		t.Errorf("at = %q, want %q", got, at.Format(time.RFC3339))
+	}
+	if findings[1].At != "" {
+		t.Errorf("at = %q, want it absent for a present-state finding", findings[1].At)
+	}
+}
+
+// Unbounded unless asked. A run with no --since and no diag_max_age reports
+// what kx has always reported, so upgrading changes no verdict and no exit
+// code until someone chooses a window.
+func TestDiagSweepWithNothingConfiguredReportsEverything(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	if err := cmd.Flags().Set("namespace", "prod"); err != nil {
+		t.Fatalf("set --namespace: %v", err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(sink.String(), "FailedScheduling") {
+		t.Errorf("a default run hid a three-week-old warning:\n%s", sink.String())
+	}
+	if strings.Contains(sink.String(), "last ") {
+		t.Errorf("a default run claimed a window:\n%s", sink.String())
+	}
+}
+
+// The document carries both halves of a finding's time, and never both on
+// one finding: "at" is a moment a window can hide, "since" is how long
+// something has been true.
+func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
+	moment := time.Now().Add(-3 * time.Minute).UTC().Truncate(time.Second)
+	start := time.Now().Add(-24 * 24 * time.Hour).UTC().Truncate(time.Second)
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "web", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{
+			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, Since: start,
+				Summary: "Image pull failure (ImagePullBackOff) in pod web-1"},
+			{Severity: diagnostics.Warning, Rank: diagnostics.Event, At: moment,
+				Summary: "Failed ×46154 on Pod/web-1"},
+		},
+	}
+	document, err := diagnosticJSON(report, 1)
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	var parsed struct {
+		Resources []struct {
+			Findings []struct {
+				At    string `json:"at"`
+				Since string `json:"since"`
+			} `json:"findings"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(document), &parsed); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	findings := parsed.Resources[0].Findings
+	if findings[0].Since != start.Format(time.RFC3339) || findings[0].At != "" {
+		t.Errorf("ongoing finding = %+v, want only since=%s", findings[0], start.Format(time.RFC3339))
+	}
+	if findings[1].At != moment.Format(time.RFC3339) || findings[1].Since != "" {
+		t.Errorf("dated finding = %+v, want only at=%s", findings[1], moment.Format(time.RFC3339))
+	}
+}
+
+// The page builders are where the window reaches the HTML report, and both
+// spell it through render.WindowLabel so a page and the terminal caption
+// beside it cannot disagree. An unbounded report carries no label at all,
+// which is what keeps the template's separator from rendering alone.
+func TestPageBuildersCarryTheWindow(t *testing.T) {
+	report := diagnostics.Report{Name: "web", Kind: kinds.Deployment, Namespace: "prod"}
+
+	if got := resourcePage(report, 24*time.Hour, web.Meta{}).Window; got != "last 24h" {
+		t.Errorf("resourcePage Window = %q, want \"last 24h\"", got)
+	}
+	if got := resourcePage(report, 0, web.Meta{}).Window; got != "" {
+		t.Errorf("an unbounded resourcePage carried Window = %q, want empty", got)
+	}
+
+	result := render.TriageResult{Namespace: "prod", Checked: 1, Window: 90 * time.Minute}
+	if got := sweepPage(result, web.Meta{}).Window; got != "last 1h30m" {
+		t.Errorf("sweepPage Window = %q, want \"last 1h30m\"", got)
+	}
+	result.Window = 0
+	if got := sweepPage(result, web.Meta{}).Window; got != "" {
+		t.Errorf("an unbounded sweepPage carried Window = %q, want empty", got)
 	}
 }

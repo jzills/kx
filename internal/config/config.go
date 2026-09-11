@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultTheme is the palette used when none is configured. It lives here until
@@ -19,6 +20,33 @@ const DefaultTheme = "github-dark"
 // DefaultTheme: a hardcoded literal here rather than importing scanner, same
 // stopgap as DefaultTheme not importing theme.
 const DefaultEngine = "scout"
+
+// DefaultDiagMaxAge is how far back kx diag looks when nothing is configured:
+// all the way, as it always has.
+//
+// Unbounded rather than a day, so a window is something a user chooses rather
+// than something an upgrade does to them. A verdict — and with it a --fail-on
+// exit code — is the same before and after this feature until someone passes
+// --since or sets diag_max_age, and nothing kx used to report goes missing
+// from a report nobody asked to narrow.
+//
+// The cost of that choice is that the stale-verdict problem stays until it is
+// opted out of: a FailedScheduling from three weeks ago, or an OOMKill a
+// container recovered from last month, still holds a resource at "warnings"
+// on a default run. `diag_max_age = "24h"` in config.toml is the one line
+// that fixes it everywhere, and CI wants --since on the command line where
+// the gate can be read next to it.
+const DefaultDiagMaxAge = 0
+
+// DefaultEventsMaxAge is how far back kx events looks when nothing is
+// configured: all the way, for the same reason DefaultDiagMaxAge does.
+//
+// A separate key rather than a share of diag's. The two answer different
+// questions — diag's window bounds the evidence behind a verdict, this one
+// bounds a listing someone asked to read — and narrowing a triage sweep is not
+// a request for a shorter event listing. Nothing is inherited in either
+// direction, so each is set where it is meant.
+const DefaultEventsMaxAge = 0
 
 // DefaultDebugImage is the image kx debug attaches when none is configured.
 // Small, ubiquitous, and carries a shell — which is the whole point, since the
@@ -34,6 +62,12 @@ type Config struct {
 	Theme        string
 	Engine       string
 	DebugImage   string
+	// DiagMaxAge bounds how long ago something may have happened and still
+	// be reported by kx diag. Zero — the default — means no bound.
+	DiagMaxAge time.Duration
+	// EventsMaxAge is the same bound for kx events, kept separate from
+	// DiagMaxAge — see DefaultEventsMaxAge.
+	EventsMaxAge time.Duration
 }
 
 // Default returns the configuration used when nothing is set.
@@ -45,6 +79,8 @@ func Default() Config {
 		Theme:        DefaultTheme,
 		Engine:       DefaultEngine,
 		DebugImage:   DefaultDebugImage,
+		DiagMaxAge:   DefaultDiagMaxAge,
+		EventsMaxAge: DefaultEventsMaxAge,
 	}
 }
 
@@ -80,9 +116,35 @@ func Settings() []Setting {
 		{"max_history", "KX_MAX_HISTORY", "Number of kx get results kept in history"},
 		{"shells", "KX_SHELLS", "Shell candidates for kx exec, comma-separated"},
 		{"debug_image", "KX_DEBUG_IMAGE", "Image kx debug attaches to a pod"},
+		{"diag_max_age", "KX_DIAG_MAX_AGE",
+			"How far back kx diag looks for evidence; unset for no limit"},
+		{"events_max_age", "KX_EVENTS_MAX_AGE",
+			"How far back kx events lists events; unset for no limit"},
 		{"theme_disable", "KX_THEME_DISABLE", "Disable styled output, like --no-color"},
 		{"", "KX_CONFIG", "Config file path, instead of ~/.kx/config.toml"},
 	}
+}
+
+// lookupEnv reads a KX_* setting, reporting an exported-but-empty variable as
+// absent rather than as a value.
+//
+// Every setting below is optional and has a default, so "" is never a value any
+// of them can take — but os.LookupEnv reports it as present, and each block
+// then tried to parse it. Five of them failed hard, and because Load runs for
+// every command, `export KX_DIAG_MAX_AGE="$UNSET_VAR"` took down `kx get`,
+// `kx state` and `kx --version` alike, none of which has a window to bound.
+//
+// That is the ordinary shape of environment injection rather than a typo: a
+// shell expanding an unset variable, or a Kubernetes `env:` entry with no
+// value, both export the empty string. KX_STATE and KX_CONFIG have always read
+// it as absent, and resolveWindow reads an empty --since the same way; this is
+// the same rule, applied to the rest of the loader rather than to two of them.
+func lookupEnv(key string) (string, bool) {
+	value, ok := os.LookupEnv(key)
+	if !ok || value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 // File returns the config file path.
@@ -172,6 +234,30 @@ func (l Loader) Load() (Config, error) {
 			}
 			cfg.Engine = name
 		}
+		if value, ok := raw["diag_max_age"]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return cfg, errors.New(
+					"kx: diag_max_age must be a string, such as \"7d\"")
+			}
+			window, err := ParseDuration(text)
+			if err != nil {
+				return cfg, fmt.Errorf("kx: diag_max_age: %w", err)
+			}
+			cfg.DiagMaxAge = window
+		}
+		if value, ok := raw["events_max_age"]; ok {
+			text, ok := value.(string)
+			if !ok {
+				return cfg, errors.New(
+					"kx: events_max_age must be a string, such as \"7d\"")
+			}
+			window, err := ParseDuration(text)
+			if err != nil {
+				return cfg, fmt.Errorf("kx: events_max_age: %w", err)
+			}
+			cfg.EventsMaxAge = window
+		}
 		if value, ok := raw["debug_image"]; ok {
 			name, ok := value.(string)
 			if !ok {
@@ -183,7 +269,7 @@ func (l Loader) Load() (Config, error) {
 		return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
 	}
 
-	if value, ok := os.LookupEnv("KX_MAX_HISTORY"); ok {
+	if value, ok := lookupEnv("KX_MAX_HISTORY"); ok {
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return cfg, errors.New("kx: KX_MAX_HISTORY must be an integer")
@@ -193,10 +279,10 @@ func (l Loader) Load() (Config, error) {
 		}
 		cfg.MaxHistory = n
 	}
-	if value, ok := os.LookupEnv("KX_SHELLS"); ok {
+	if value, ok := lookupEnv("KX_SHELLS"); ok {
 		cfg.Shells = strings.Split(value, ",")
 	}
-	if value, ok := os.LookupEnv("KX_THEME_DISABLE"); ok {
+	if value, ok := lookupEnv("KX_THEME_DISABLE"); ok {
 		switch strings.ToLower(value) {
 		case "1", "true", "yes", "on":
 			cfg.ThemeDisable = true
@@ -204,13 +290,27 @@ func (l Loader) Load() (Config, error) {
 			cfg.ThemeDisable = false
 		}
 	}
-	if value, ok := os.LookupEnv("KX_THEME"); ok {
+	if value, ok := lookupEnv("KX_THEME"); ok {
 		cfg.Theme = value
 	}
-	if value, ok := os.LookupEnv("KX_ENGINE"); ok {
+	if value, ok := lookupEnv("KX_ENGINE"); ok {
 		cfg.Engine = value
 	}
-	if value, ok := os.LookupEnv("KX_DEBUG_IMAGE"); ok {
+	if value, ok := lookupEnv("KX_DIAG_MAX_AGE"); ok {
+		window, err := ParseDuration(value)
+		if err != nil {
+			return cfg, fmt.Errorf("kx: KX_DIAG_MAX_AGE: %w", err)
+		}
+		cfg.DiagMaxAge = window
+	}
+	if value, ok := lookupEnv("KX_EVENTS_MAX_AGE"); ok {
+		window, err := ParseDuration(value)
+		if err != nil {
+			return cfg, fmt.Errorf("kx: KX_EVENTS_MAX_AGE: %w", err)
+		}
+		cfg.EventsMaxAge = window
+	}
+	if value, ok := lookupEnv("KX_DEBUG_IMAGE"); ok {
 		cfg.DebugImage = value
 	}
 

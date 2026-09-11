@@ -39,7 +39,7 @@ func table() (string, error) {
 			return "", fmt.Errorf("command %q is listed in the help sections but not registered", name)
 		}
 		description := strings.Join(strings.Fields(cmd.Short), " ")
-		rows = append(rows, fmt.Sprintf("| `%s` | %s |", cmddoc.Signature(cmd), description))
+		rows = append(rows, fmt.Sprintf("| `%s` | %s |", cmddoc.ShortSignature(cmd), description))
 	}
 	return strings.Join(rows, "\n"), nil
 }

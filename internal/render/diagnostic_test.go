@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
@@ -26,6 +27,16 @@ func sampleReport() diagnostics.Report {
 			Message: "Failed to pull image",
 		}},
 	})
+}
+
+func reportWithFinding(summary string) diagnostics.Report {
+	return diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Verdict: diagnostics.Critical,
+		Findings: []diagnostics.Finding{{
+			Severity: diagnostics.Critical, Rank: diagnostics.Cause, Summary: summary,
+		}},
+	}
 }
 
 // A deliberate deviation from the Python renderer: Rich's summary grid pads
@@ -97,6 +108,26 @@ func TestUnfilteredLogsAreLabelled(t *testing.T) {
 	}
 }
 
+// The RESTARTS column and the restart-count finding deliberately date
+// themselves differently, and RestartedAt's doc says so. A container with
+// state.terminated and no lastState has no previous instance to point at, so
+// the column prints a bare count the way kubectl get pods does, while the
+// finding falls back to this instance's own termination as a bound. Pinned
+// because the tempting "fix" — pointing the column at RestartedAt too —
+// would put an age in a kubectl column that kubectl leaves empty.
+func TestRestartsColumnStaysBareWithoutAPreviousInstance(t *testing.T) {
+	container := diagnostics.ContainerDiagnostic{
+		Name: "app", RestartCount: 5,
+		TerminatedAt: time.Now().Add(-46 * 24 * time.Hour), TerminatedReason: "Error",
+	}
+	if got := restarts(container); got != "5" {
+		t.Errorf("restarts() = %q, want a bare count: the API recorded no previous state", got)
+	}
+	if age := FormatAge(container.RestartedAt()); age == "" {
+		t.Error("RestartedAt() carries no age, so the finding has nothing to date the count by")
+	}
+}
+
 func TestTriageAllHealthy(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{Namespace: "prod", Checked: 5, Healthy: 5})
@@ -125,6 +156,53 @@ func TestTriageFullOmitsNotShownFooter(t *testing.T) {
 	}
 	if !strings.Contains(out, "kx diag <index> for detail") {
 		t.Errorf("--full footer dropped the index hint:\n%s", out)
+	}
+}
+
+// A sweep where nothing was healthy has nothing to say about healthy
+// resources. The footer counted before it decided whether to speak, so a
+// namespace with no healthy resource left got "0 healthy resources not shown"
+// — a count restating the absence of what it counts.
+func TestTriageWithNothingHealthySaysNothingAboutHealthy(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			Namespace: "prod", Checked: 1, Healthy: 0,
+			Reports: []diagnostics.Report{
+				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
+			},
+		})
+	})
+	if strings.Contains(out, "not shown") {
+		t.Errorf("footer claims resources are hidden when none were:\n%s", out)
+	}
+	if !strings.Contains(out, "kx diag <index> for detail") {
+		t.Errorf("footer dropped the index hint:\n%s", out)
+	}
+}
+
+// The count still speaks when there is something to count, in both
+// spellings — dropping the footer at zero must not drop it at one.
+func TestTriageCountsTheHealthyItDidHide(t *testing.T) {
+	for _, tc := range []struct {
+		healthy int
+		want    string
+	}{
+		{1, "1 healthy resource not shown"},
+		{3, "3 healthy resources not shown"},
+	} {
+		out := capture(func(r *Renderer) {
+			r.Triage(TriageResult{
+				Namespace: "prod", Checked: tc.healthy + 1, Healthy: tc.healthy,
+				Reports: []diagnostics.Report{
+					{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
+						Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
+				},
+			})
+		})
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("Healthy = %d, want %q in:\n%s", tc.healthy, tc.want, out)
+		}
 	}
 }
 
@@ -321,5 +399,451 @@ func TestDiagnosticHeaderKeepsANamespace(t *testing.T) {
 	})
 	if !strings.Contains(out, "Pod/web · prod · ") {
 		t.Errorf("header does not name the namespace:\n%s", out)
+	}
+}
+
+// A report that hides what it found has to say so. Without this the banner's
+// issue count, and "No warning events", are both silently conditional on a
+// window the terminal never mentions — the HTML report says it on its
+// invocation line, and the terminal had no equivalent.
+func TestDiagnosticBannerNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 24 * time.Hour
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if first := strings.SplitN(out, "\n", 2)[0]; !strings.Contains(first, "· last 24h") {
+		t.Errorf("banner = %q, want it to name the window", first)
+	}
+}
+
+func TestDiagnosticBannerOmitsAnUnboundedWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "last ") {
+		t.Errorf("an unbounded report named a window:\n%s", out)
+	}
+}
+
+// "No warning events" means two different things once a window exists —
+// there are none, or there are and they were hidden. Only one of them is
+// worth reading as reassurance.
+func TestNoWarningEventsNamesTheWindow(t *testing.T) {
+	report := reportWithFinding("Only 0/1 replicas ready")
+	report.Window = 90 * time.Minute
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "No warning events in the last 1h30m") {
+		t.Errorf("output does not qualify the empty event section:\n%s", out)
+	}
+}
+
+func TestNoWarningEventsUnqualifiedWithoutAWindow(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if !strings.Contains(out, "No warning events\n") {
+		t.Errorf("output does not carry the plain empty state:\n%s", out)
+	}
+}
+
+// A sweep hides on the same terms, and its caption is the only line it has
+// to say so on.
+func TestTriageCaptionNamesTheWindow(t *testing.T) {
+	result := TriageResult{
+		Namespace: "prod", Checked: 2, Window: 7 * 24 * time.Hour,
+		Reports: []diagnostics.Report{{
+			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+			Verdict: diagnostics.Critical,
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Triage(result) })
+	if !strings.Contains(out, "last 7d") {
+		t.Errorf("caption does not name the window:\n%s", out)
+	}
+}
+
+// An all-healthy sweep is the one most worth qualifying: "all healthy" is a
+// claim about what was looked at.
+func TestTriageAllHealthyCaptionNamesTheWindow(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{Namespace: "prod", Checked: 3, Window: 24 * time.Hour})
+	})
+	if !strings.Contains(out, "last 24h") {
+		t.Errorf("caption does not name the window:\n%s", out)
+	}
+}
+
+// An age on a finding is not decoration: it is how a reader tells which
+// lines --since governs. A finding that carries one can be filtered away by
+// a narrower window; one that does not is present state, and no window will
+// ever hide it.
+func TestDatedFindingCarriesItsAge(t *testing.T) {
+	report := reportWithFinding("OOMKilled in pod api-1")
+	report.Findings[0].At = time.Now().Add(-3 * time.Hour)
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "OOMKilled in pod api-1 · 3h ago") {
+		t.Errorf("finding is not dated:\n%s", out)
+	}
+}
+
+func TestPresentStateFindingCarriesNoAge(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "ready · ") {
+		t.Errorf("an undated finding was given an age:\n%s", out)
+	}
+}
+
+// kubectl's own spelling for the same fact — `kubectl get pods` prints
+// "21 (3h ago)" — so the column reads the way a reader already expects, and
+// says whether the restarts fall inside the window.
+func TestRestartsCarryTheirLastRestartTime(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 21,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "21 (3h ago)") {
+		t.Errorf("restart column does not say when:\n%s", out)
+	}
+}
+
+func TestRestartsWithoutATerminationStayBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 2,
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "(") {
+		t.Errorf("a bare restart count was given a parenthetical:\n%s", out)
+	}
+}
+
+// A log tail from a dead instance is an excerpt of a crash that happened at
+// some point, and reading it without knowing when is how an old crash gets
+// mistaken for the current one.
+func TestPreviousLogTailSaysHowOldItIs(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Waiting", WaitingReason: "CrashLoopBackOff",
+				LogLines: []string{"ERROR boom"}, LogSource: "previous", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "previous instance, 3h ago") {
+		t.Errorf("log heading does not date the instance:\n%s", out)
+	}
+}
+
+func TestCurrentLogTailIsNotDated(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", State: "Running", Ready: true,
+				LogLines: []string{"ERROR boom"}, LogSource: "current", LogFiltered: true,
+				LastTerminatedAt: time.Now().Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "previous instance") {
+		t.Errorf("a current tail was labelled as the previous instance:\n%s", out)
+	}
+}
+
+// A report can now read healthy with corpses still in its table, so the
+// table has to say how old they are — the same treatment RESTARTS gets, in
+// the cell that names the terminal state.
+func TestTerminatedStateCarriesItsAge(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Job, Name: "migrate", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "migrate-1", Phase: "Failed", TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "run", State: "Terminated", TerminatedReason: "Error",
+				TerminatedAt: time.Now().Add(-46 * 24 * time.Hour),
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "Terminated (46d ago)") {
+		t.Errorf("state cell does not say when it stopped:\n%s", out)
+	}
+}
+
+func TestRunningStateStaysBare(t *testing.T) {
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []diagnostics.ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running",
+			}},
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if strings.Contains(out, "Running (") {
+		t.Errorf("a running container was given a stop time:\n%s", out)
+	}
+}
+
+// Two shapes, two questions. "(for 24d)" is how long something has been
+// true and no window can hide it; "· 3m ago" is when something happened and
+// a narrow enough window will. A row carrying neither is one the cluster
+// gave no way to date.
+func TestOngoingFindingSaysHowLongItHasBeenTrue(t *testing.T) {
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "in pod api-1 · for 24d") {
+		t.Errorf("ongoing finding does not say how long:\n%s", out)
+	}
+}
+
+func TestOngoingAndFinishedFindingsReadDifferently(t *testing.T) {
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
+	report.Findings = append(report.Findings, diagnostics.Finding{
+		Severity: diagnostics.Warning, Rank: diagnostics.Event,
+		At:      time.Now().Add(-3 * time.Minute),
+		Summary: "Failed ×46154 on Pod/api-1",
+	})
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "· for 24d") || !strings.Contains(out, "· 3m ago") {
+		t.Errorf("the two shapes are not both present:\n%s", out)
+	}
+	if strings.Contains(out, "for 24d · ") || strings.Contains(out, "ago · for") {
+		t.Errorf("a finding carries both shapes at once:\n%s", out)
+	}
+}
+
+// A kind that records no duration says nothing rather than "(for 0s)".
+func TestFindingWithoutADurationStaysBare(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if strings.Contains(out, "for ") {
+		t.Errorf("a finding with no duration invented one:\n%s", out)
+	}
+}
+
+// The constructors make this unreachable — dated() sets one field, ongoing()
+// the other — but the renderer still has to choose, and the moment is the
+// right choice: it is the half a window acts on, so hiding it behind a
+// duration would hide why the line can disappear.
+func TestAFindingCarryingBothPrefersTheMoment(t *testing.T) {
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report.Findings[0].At = time.Now().Add(-3 * time.Minute)
+	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	if !strings.Contains(out, "· 3m ago") {
+		t.Errorf("the moment was not preferred:\n%s", out)
+	}
+	if strings.Contains(out, "· for ") {
+		t.Errorf("both shapes were rendered:\n%s", out)
+	}
+}
+
+// A finding is a sentence, and Kubernetes writes long ones — the scheduler's
+// "0/1 nodes are available…" runs past 200 columns. Left unwrapped the
+// terminal broke it at column 0, so the continuation started under the
+// section header and the block stopped reading as a list.
+const longFinding = "Unschedulable: 0/1 nodes are available: 1 Insufficient cpu. " +
+	"no new claims to deallocate, preemption: 0/1 nodes are available: 1 " +
+	"Preemption is not helpful for scheduling. (pod report-unschedulable-57d7f65ccc-fph56)"
+
+// summaryLines is the SUMMARY block's lines, header excluded.
+func summaryLines(t *testing.T, out string) []string {
+	t.Helper()
+	var lines []string
+	inSummary := false
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, "SUMMARY"):
+			inSummary = true
+		case inSummary && strings.TrimSpace(line) == "":
+			inSummary = false
+		case inSummary:
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		t.Fatalf("no SUMMARY lines in:\n%s", out)
+	}
+	return lines
+}
+
+func TestLongFindingWrapsInsideTheProseWidth(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	lines := summaryLines(t, out)
+	if len(lines) < 2 {
+		t.Fatalf("a %d-column finding was not wrapped:\n%s", len(longFinding), out)
+	}
+	for _, line := range lines {
+		if width := len([]rune(line)); width > proseMaxWidth {
+			t.Errorf("line is %d columns, want at most %d:\n%q", width, proseMaxWidth, line)
+		}
+	}
+}
+
+// Tucked: the icon owns the left margin and every continuation sits inside
+// the text it belongs to, so the eye can still find where one finding ends
+// and the next begins.
+func TestWrappedFindingContinuationsAreIndentedPastTheIcon(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	lines := summaryLines(t, out)
+	if got := lines[0]; !strings.HasPrefix(got, "  ✗ ") {
+		t.Errorf("first line = %q, want it to start with the icon at column 2", got)
+	}
+	for _, line := range lines[1:] {
+		if !strings.HasPrefix(line, "      ") || strings.HasPrefix(line, "       ") {
+			t.Errorf("continuation = %q, want exactly six spaces of indent", line)
+		}
+	}
+}
+
+// Wrapping must not lose or invent a word, and must not break one in half —
+// a truncated pod name is worse than a wrapped line.
+func TestWrappingPreservesTheFindingText(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding(longFinding)) })
+	var words []string
+	for _, line := range summaryLines(t, out) {
+		fields := strings.Fields(line)
+		if len(words) == 0 {
+			fields = fields[1:] // the icon
+		}
+		words = append(words, fields...)
+	}
+	if got := strings.Join(words, " "); got != longFinding {
+		t.Errorf("wrapped text = %q, want %q", got, longFinding)
+	}
+}
+
+func TestShortFindingStaysOnOneLine(t *testing.T) {
+	out := capture(func(r *Renderer) { r.Diagnostic(reportWithFinding("Only 0/1 replicas ready")) })
+	if lines := summaryLines(t, out); len(lines) != 1 {
+		t.Errorf("a short finding took %d lines:\n%s", len(lines), out)
+	}
+}
+
+// The wrapping and the dating meet on the same line, so the time has to be
+// inside the wrap rather than appended after it — appended, it would be the
+// one thing in a wrapped block still able to run past the width.
+//
+// Swept across lengths so the boundary is crossed wherever it falls: the time
+// rides the last line while there is room for it and takes a line of its own
+// when there is not. Both branches are asserted to have happened, or the
+// sweep would pass having only ever exercised one.
+func TestAFindingsTimeNeverPushesALinePastTheWidth(t *testing.T) {
+	var sawInline, sawOwnLine bool
+	for words := 1; words <= 40; words++ {
+		report := reportWithFinding(strings.TrimSpace(strings.Repeat("failing ", words)))
+		report.Findings[0].At = time.Now().Add(-3 * time.Minute)
+		out := capture(func(r *Renderer) { r.Diagnostic(report) })
+
+		for _, line := range summaryLines(t, out) {
+			if width := len([]rune(line)); width > proseMaxWidth {
+				t.Fatalf("%d words: line is %d columns, want at most %d:\n%q",
+					words, width, proseMaxWidth, line)
+			}
+			if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "· ") {
+				sawOwnLine = true
+			} else if strings.Contains(trimmed, "· 3m ago") {
+				sawInline = true
+			}
+		}
+		if !strings.Contains(out, "3m ago") {
+			t.Fatalf("%d words: the time went missing:\n%s", words, out)
+		}
+	}
+	if !sawInline {
+		t.Error("the time never rode the last line")
+	}
+	if !sawOwnLine {
+		t.Error("the time never took a line of its own — the overflow branch is untested")
+	}
+}
+
+// The event message is prose too, and a long one — an image pull error
+// carrying a registry URL and a digest — overflowed the same way.
+func TestLongEventMessageWrapsUnderItsHeading(t *testing.T) {
+	message := "Failed to pull image \"registry.example.com/team/service:1.4.2\": " +
+		"rpc error: code = Unknown desc = failed to pull and unpack image: " +
+		"failed to resolve reference: unexpected status from HEAD request: 401 Unauthorized"
+	report := diagnostics.Report{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		WarningEvents: []diagnostics.EventSummary{{
+			Reason: "Failed", Kind: "Pod", Name: "api-abc", Count: 4, Message: message,
+		}},
+	}
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Failed to pull") || strings.HasPrefix(line, "        ") {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) < 2 {
+		t.Fatalf("a %d-column message was not wrapped:\n%s", len(message), out)
+	}
+	for _, line := range lines {
+		if width := len([]rune(line)); width > proseMaxWidth {
+			t.Errorf("line is %d columns, want at most %d:\n%q", width, proseMaxWidth, line)
+		}
+	}
+	for _, line := range lines[1:] {
+		if !strings.HasPrefix(line, "        ") || strings.HasPrefix(line, "         ") {
+			t.Errorf("continuation = %q, want exactly eight spaces of indent", line)
+		}
+	}
+}
+
+// The WARNING EVENTS section prints the tally a second time, and it needs the
+// span for the same reason the finding summary does.
+func TestWarningEventsSectionCarriesTheSpan(t *testing.T) {
+	// Anchored to one "last" rather than two calls to time.Now, so the span is
+	// exactly 29 days and the assertion cannot drift to 28d on a slow run.
+	last := time.Now().Add(-time.Minute)
+	first := last.Add(-29 * 24 * time.Hour)
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Warning,
+			WarningEvents: []diagnostics.EventSummary{{
+				Reason: "BackOff", Message: "Back-off pulling image", Kind: "Pod", Name: "web",
+				Count: 52122, FirstTimestamp: first, LastTimestamp: last,
+			}},
+		})
+	})
+	if !strings.Contains(out, "×52122 over 29d") {
+		t.Errorf("rendered output did not carry the span:\n%s", out)
+	}
+}
+
+// A single occurrence leaves the line as it was — no "over 0s" on every
+// ordinary event.
+func TestWarningEventsSectionWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Now().Add(-time.Minute)
+	out := capture(func(r *Renderer) {
+		r.Diagnostic(diagnostics.Report{
+			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Warning,
+			WarningEvents: []diagnostics.EventSummary{{
+				Reason: "FailedScheduling", Message: "no nodes", Kind: "Pod", Name: "web",
+				Count: 1, FirstTimestamp: at, LastTimestamp: at,
+			}},
+		})
+	})
+	if strings.Contains(out, "over") {
+		t.Errorf("a single-occurrence event grew a span segment:\n%s", out)
 	}
 }

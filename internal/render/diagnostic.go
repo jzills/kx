@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/jzills/kx/internal/config"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/theme"
@@ -33,6 +36,49 @@ func severityStyle(severity diagnostics.Severity) string {
 	}
 }
 
+// WindowLabel spells the window a report was gathered under, for a caption
+// that has to say what it was allowed to see. Empty when there is no window.
+//
+// The same vocabulary the --since flag reads, so the caption names a value
+// that can be typed straight back at it. Exported for the HTML report, which
+// has the same thing to say and must not invent its own spelling for it.
+func WindowLabel(window time.Duration) string {
+	if window <= 0 {
+		return ""
+	}
+	return "last " + config.FormatDuration(window)
+}
+
+// windowSuffix is WindowLabel as a trailing segment, for the lines that build
+// their own caption rather than going through Caption.
+func windowSuffix(window time.Duration) string {
+	if label := WindowLabel(window); label != "" {
+		return " · " + label
+	}
+	return ""
+}
+
+// A finding and an event message are both sentences the cluster wrote, and
+// Kubernetes writes long ones — the scheduler's "0/1 nodes are available…"
+// runs past 200 columns. Wrapped here rather than left to the terminal, which
+// breaks a line at column 0: the continuation then starts to the left of the
+// section header and the block stops reading as a list at all.
+//
+// Each continuation is tucked one level inside the text it belongs to, so the
+// icon (or the event heading) keeps the left margin to itself and the eye can
+// still find where one entry ends and the next begins.
+const (
+	findingHang      = "      "
+	eventMessageHang = "        "
+)
+
+// proseLines wraps text to what is left of the prose width once a hanging
+// indent of hang columns is paid for, so the first line and every
+// continuation fit the same budget.
+func (r *Renderer) proseLines(text string, hang int) []string {
+	return wrapText(text, r.proseWidth()-hang)
+}
+
 // Diagnostic renders a full report for one resource.
 func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	// The verdict rides in the banner rather than on a line of its own.
@@ -57,7 +103,8 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	if report.Namespace != "" {
 		prefix += report.Namespace + " · "
 	}
-	r.line(r.style(theme.Muted, prefix) + extra)
+	r.line(r.style(theme.Muted, prefix) + extra +
+		r.style(theme.Muted, windowSuffix(report.Window)))
 
 	r.Blank()
 	// Section headers align with the pod table's content, which pads by two.
@@ -67,13 +114,17 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 	} else {
 		for _, finding := range report.Findings {
 			icon := r.style(severityStyle(finding.Severity), severityIcon(finding.Severity))
-			r.line("  " + icon + " " + r.style(theme.Body, finding.Summary))
+			lines := r.findingLines(finding)
+			r.line("  " + icon + " " + lines[0])
+			for _, rest := range lines[1:] {
+				r.line(findingHang + rest)
+			}
 		}
 	}
 
 	r.podTable(report.Pods)
 	r.logs(report.Pods)
-	r.warningEvents(report.WarningEvents)
+	r.warningEvents(report.WarningEvents, report.Window)
 }
 
 // podTable lists every pod and its containers, one container per row with the
@@ -113,14 +164,107 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 			}
 			rows = append(rows, []Cell{
 				name, phaseCell, readyCell,
-				Plain(strconv.Itoa(int(container.RestartCount))),
+				Plain(restarts(container)),
 				Plain(container.Name),
-				Styled(container.State, statusColor(container.State)),
+				Styled(containerState(container), statusColor(container.State)),
 				reasonCell,
 			})
 		}
 	}
 	r.Table(columns, rows)
+}
+
+// restarts spells the restart count with the time of the last one, the way
+// kubectl get pods does — "21 (3h ago)". The count alone is cumulative over
+// the pod's whole life, so it cannot say whether the thrashing is current,
+// which is the question the window turns on.
+func restarts(container diagnostics.ContainerDiagnostic) string {
+	count := strconv.Itoa(int(container.RestartCount))
+	if container.RestartCount == 0 {
+		return count
+	}
+	if age := FormatAge(container.LastTerminatedAt); age != "" {
+		return count + " (" + age + ")"
+	}
+	return count
+}
+
+// eventSpan says how long an aggregated event's ×count took to accumulate, so
+// the tally can be read. Empty when the API dated only one end of it, or when
+// there was a single occurrence with nothing to span.
+//
+// "over", not "for": the trailing "· for 24d" below is reserved for how long
+// something has been true, which no window hides. This is a tally's span, and
+// it sits inside the line rather than at the end of it.
+func eventSpan(event diagnostics.EventSummary) string {
+	if span := event.Span(); span != "" {
+		return " over " + span
+	}
+	return ""
+}
+
+// findingTime is the trailing segment that says when a finding's subject
+// happened, or how long it has been true.
+//
+// Two readings, one shape: "· 2m ago" is a moment, and a narrow enough
+// --since will hide that finding; "· for 24d" is a duration, and no window
+// ever will. The words carry that difference, so the separator does not have
+// to — every other trailing segment kx prints is · -separated, and a
+// parenthetical here would be the only one of its kind on the screen.
+//
+// A finding carries one or neither, never both, and neither when the cluster
+// records no way to date it.
+func findingTime(f diagnostics.Finding) string {
+	if moment := FormatAge(f.At); moment != "" {
+		return " · " + moment
+	}
+	if duration := FormatElapsed(f.Since); duration != "" {
+		return " · for " + duration
+	}
+	return ""
+}
+
+// findingLines is one finding as the lines it renders on: its summary wrapped
+// to the prose width, with the moment or duration from findingTime on the end
+// of the last line — or on a line of its own when that line has no room left.
+//
+// Inside the wrapping rather than appended after it, because the time is part
+// of the sentence: appended, it would be the one thing in the block still able
+// to run past the width the rest of it was just wrapped to.
+func (r *Renderer) findingLines(finding diagnostics.Finding) []string {
+	wrapped := r.proseLines(finding.Summary, len(findingHang))
+	lines := make([]string, len(wrapped))
+	for i, text := range wrapped {
+		lines[i] = r.style(theme.Body, text)
+	}
+
+	suffix := findingTime(finding)
+	if suffix == "" {
+		return lines
+	}
+	last := len(wrapped) - 1
+	if len(wrapped[last])+len(suffix) <= r.proseWidth()-len(findingHang) {
+		lines[last] += r.style(theme.Muted, suffix)
+		return lines
+	}
+	// No room, so the time takes a line of its own — still the entry's own
+	// indent, and still carrying its separator, since what it separates is
+	// the summary above it rather than a neighbour on the same line.
+	return append(lines, r.style(theme.Muted, strings.TrimPrefix(suffix, " ")))
+}
+
+// containerState names the state with the moment it stopped, when it has
+// stopped — "Terminated (46d ago)".
+//
+// A report can read healthy with corpses still in its table, since findings
+// about a container that finished before the window are dropped while the
+// table goes on listing what exists. The age is what keeps those two honest
+// with each other.
+func containerState(container diagnostics.ContainerDiagnostic) string {
+	if age := FormatAge(container.TerminatedAt); age != "" {
+		return container.State + " (" + age + ")"
+	}
+	return container.State
 }
 
 // Log tokens that read as failures rather than warnings.
@@ -161,9 +305,17 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	r.line("  " + r.style(theme.Header, "LOGS"))
 	for _, e := range entries {
 		note := ""
+		// A tail from a dead instance is an excerpt of a crash that
+		// happened at some point; without its age an old one reads as the
+		// current failure.
+		if e.container.LogSource == "previous" {
+			if age := FormatAge(e.container.LastTerminatedAt); age != "" {
+				note = " · previous instance, " + age
+			}
+		}
 		if !e.container.LogFiltered {
 			// Nothing matched a severity token, so this is just the tail.
-			note = " · recent output"
+			note += " · recent output"
 		}
 		r.line("    " + r.style(theme.Muted,
 			"Pod/"+e.pod.Name+" · container "+e.container.Name+note))
@@ -173,11 +325,18 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 	}
 }
 
-func (r *Renderer) warningEvents(events []diagnostics.EventSummary) {
+func (r *Renderer) warningEvents(events []diagnostics.EventSummary, window time.Duration) {
 	r.Blank()
 	r.line("  " + r.style(theme.Header, "WARNING EVENTS"))
 	if len(events) == 0 {
-		r.line("    " + r.style(theme.Muted, "No warning events"))
+		// Qualified when a window is in force: "No warning events" would
+		// otherwise mean both "there are none" and "there are, and they
+		// were older than the window", and only one of those is reassuring.
+		empty := "No warning events"
+		if label := WindowLabel(window); label != "" {
+			empty += " in the " + label
+		}
+		r.line("    " + r.style(theme.Muted, empty))
 		return
 	}
 	for position, event := range events {
@@ -188,12 +347,16 @@ func (r *Renderer) warningEvents(events []diagnostics.EventSummary) {
 		// Object first, matching the LOGS subheadings.
 		line := r.style(theme.Muted, event.Kind+"/"+event.Name+" · ") +
 			r.style(statusColor(event.Reason), event.Reason) +
-			r.style(theme.Muted, " ×"+strconv.Itoa(int(event.Count)))
+			r.style(theme.Muted, " ×"+strconv.Itoa(int(event.Count))+eventSpan(event))
 		if age := FormatAge(event.LastTimestamp); age != "" {
 			line += r.style(theme.Muted, " · "+age)
 		}
 		r.line("    " + line)
-		r.line("      " + event.Message)
+		message := r.proseLines(event.Message, len(eventMessageHang))
+		r.line("      " + message[0])
+		for _, rest := range message[1:] {
+			r.line(eventMessageHang + rest)
+		}
 	}
 }
 

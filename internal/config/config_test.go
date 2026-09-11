@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, contents string) Loader {
@@ -379,5 +380,228 @@ func TestDebugImageEnvOverridesFile(t *testing.T) {
 func TestDebugImageRejectsANonString(t *testing.T) {
 	if _, err := writeConfig(t, "debug_image = 3\n").Load(); err == nil {
 		t.Error("a numeric debug_image was accepted")
+	}
+}
+
+// Unbounded unless asked: kx diag reports what it always reported until
+// someone chooses a window, so an upgrade changes no verdict and no exit
+// code on its own.
+func TestDiagMaxAgeDefaultsToNoWindow(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want no window", cfg.DiagMaxAge)
+	}
+}
+
+func TestDiagMaxAgeFromFile(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7d\"\n")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 7 * 24 * time.Hour; cfg.DiagMaxAge != want {
+		t.Errorf("DiagMaxAge = %v, want %v", cfg.DiagMaxAge, want)
+	}
+}
+
+func TestDiagMaxAgeEnvOverridesFile(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7d\"\n")
+	t.Setenv("KX_DIAG_MAX_AGE", "30m")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 30 * time.Minute; cfg.DiagMaxAge != want {
+		t.Errorf("DiagMaxAge = %v, want %v", cfg.DiagMaxAge, want)
+	}
+}
+
+// Zero is how the file spells "no window", so it has to reach the diagnostics
+// rather than being read as an unset key falling back to the default.
+func TestDiagMaxAgeZeroIsUnlimited(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"0\"\n")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want 0", cfg.DiagMaxAge)
+	}
+}
+
+// A duration is a string in TOML — `diag_max_age = 7` has no unit and cannot
+// be guessed at.
+func TestDiagMaxAgeRejectsANonString(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = 7\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a non-string diag_max_age")
+	} else if !strings.Contains(err.Error(), "diag_max_age") {
+		t.Errorf("error = %q, want it to name diag_max_age", err)
+	}
+}
+
+func TestDiagMaxAgeRejectsAMalformedValue(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7 weeks\"\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed diag_max_age")
+	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
+		!strings.Contains(err.Error(), "diag_max_age") {
+		t.Errorf("error = %q, want a kx: error naming diag_max_age", err)
+	}
+}
+
+func TestDiagMaxAgeRejectsAMalformedEnvValue(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	t.Setenv("KX_DIAG_MAX_AGE", "later")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed KX_DIAG_MAX_AGE")
+	} else if !strings.Contains(err.Error(), "KX_DIAG_MAX_AGE") {
+		t.Errorf("error = %q, want it to name KX_DIAG_MAX_AGE", err)
+	}
+}
+
+// kx events has its own window rather than borrowing diag's. They answer
+// different questions — one is a report's evidence, the other is a listing —
+// and a reader who narrows a triage sweep has not asked for a shorter event
+// listing.
+func TestEventsMaxAgeIsIndependentOfDiagMaxAge(t *testing.T) {
+	loader := writeConfig(t, "diag_max_age = \"7d\"\n")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EventsMaxAge != 0 {
+		t.Errorf("EventsMaxAge = %v, want no window — diag_max_age is not its default",
+			cfg.EventsMaxAge)
+	}
+
+	loader = writeConfig(t, "events_max_age = \"30m\"\n")
+	cfg, err = loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DiagMaxAge != 0 {
+		t.Errorf("DiagMaxAge = %v, want no window — events_max_age is not its default",
+			cfg.DiagMaxAge)
+	}
+	if want := 30 * time.Minute; cfg.EventsMaxAge != want {
+		t.Errorf("EventsMaxAge = %v, want %v", cfg.EventsMaxAge, want)
+	}
+}
+
+// Unbounded unless asked, for the same reason diag is: an upgrade must not
+// silently start hiding events someone was relying on seeing.
+func TestEventsMaxAgeDefaultsToNoWindow(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EventsMaxAge != 0 {
+		t.Errorf("EventsMaxAge = %v, want no window", cfg.EventsMaxAge)
+	}
+}
+
+func TestEventsMaxAgeEnvOverridesFile(t *testing.T) {
+	loader := writeConfig(t, "events_max_age = \"7d\"\n")
+	t.Setenv("KX_EVENTS_MAX_AGE", "90m")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 90 * time.Minute; cfg.EventsMaxAge != want {
+		t.Errorf("EventsMaxAge = %v, want %v", cfg.EventsMaxAge, want)
+	}
+}
+
+func TestEventsMaxAgeRejectsAMalformedValue(t *testing.T) {
+	loader := writeConfig(t, "events_max_age = \"7 weeks\"\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed events_max_age")
+	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
+		!strings.Contains(err.Error(), "events_max_age") {
+		t.Errorf("error = %q, want a kx: error naming events_max_age", err)
+	}
+}
+
+func TestEventsMaxAgeRejectsAMalformedEnvValue(t *testing.T) {
+	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
+	t.Setenv("KX_EVENTS_MAX_AGE", "later")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a malformed KX_EVENTS_MAX_AGE")
+	} else if !strings.Contains(err.Error(), "KX_EVENTS_MAX_AGE") {
+		t.Errorf("error = %q, want it to name KX_EVENTS_MAX_AGE", err)
+	}
+}
+
+// A duration is a string in TOML — `events_max_age = 7` has no unit.
+func TestEventsMaxAgeRejectsANonString(t *testing.T) {
+	loader := writeConfig(t, "events_max_age = 7\n")
+	if _, err := loader.Load(); err == nil {
+		t.Fatal("Load() = nil error for a non-string events_max_age")
+	} else if !strings.Contains(err.Error(), "events_max_age") {
+		t.Errorf("error = %q, want it to name events_max_age", err)
+	}
+}
+
+// An exported-but-empty KX_* variable means unset.
+//
+// This is the normal failure mode of environment injection rather than a typo:
+// `export KX_DIAG_MAX_AGE="$CI_WINDOW"` with CI_WINDOW unset, or a Kubernetes
+// `env:` entry with no value, both produce an exported empty string. Load runs
+// for every command, so treating that as invalid took down `kx get`, `kx state`
+// and even `kx --version` — commands with no notion of a theme or a window.
+//
+// KX_STATE and KX_CONFIG have always read "" as absent, and resolveWindow reads
+// an empty --since the same way. This is that rule, applied across the loader.
+func TestEmptyEnvValuesAreUnset(t *testing.T) {
+	for _, key := range []string{
+		"KX_THEME", "KX_ENGINE", "KX_MAX_HISTORY",
+		"KX_DIAG_MAX_AGE", "KX_EVENTS_MAX_AGE", "KX_DEBUG_IMAGE",
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("KX_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+			t.Setenv(key, "")
+
+			// The registries reject "" — that is how KX_THEME="" and
+			// KX_ENGINE="" took every command down, so a stub that accepts
+			// anything would let both cases pass without testing them.
+			cfg, err := Loader{
+				ThemeKnown:  func(name string) bool { return name != "" },
+				EngineKnown: func(name string) bool { return name != "" },
+			}.Load()
+			if err != nil {
+				t.Fatalf("%s=\"\" failed Load: %v", key, err)
+			}
+			if cfg.DiagMaxAge != 0 || cfg.EventsMaxAge != 0 {
+				t.Errorf("%s=\"\" set a window: diag=%v events=%v",
+					key, cfg.DiagMaxAge, cfg.EventsMaxAge)
+			}
+		})
+	}
+}
+
+// KX_SHELLS="" failed differently: strings.Split("", ",") is []string{""}, so
+// the list was not empty, it held one shell named "" — and kx exec went off to
+// probe for it. A silent wrong answer rather than a loud one.
+func TestEmptyShellsListIsUnsetRatherThanOneEmptyShell(t *testing.T) {
+	t.Setenv("KX_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
+	t.Setenv("KX_SHELLS", "")
+
+	cfg, err := Loader{
+		ThemeKnown:  func(name string) bool { return name != "" },
+		EngineKnown: func(name string) bool { return name != "" },
+	}.Load()
+	if err != nil {
+		t.Fatalf("KX_SHELLS=\"\" failed Load: %v", err)
+	}
+	for _, shell := range cfg.Shells {
+		if shell == "" {
+			t.Fatalf("KX_SHELLS=\"\" produced an empty shell candidate: %#v", cfg.Shells)
+		}
 	}
 }

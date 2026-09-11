@@ -863,3 +863,117 @@ func TestNamespaceListingCaptionFollowsASwitch(t *testing.T) {
 		t.Errorf("output = %q, want the caption to name the namespace the caller moved to", out.String())
 	}
 }
+
+// runLogs drives `kx logs` through real argv and hands back the kubectl it was
+// wired to. The --since rewrite happens in the argv split, which only runs
+// inside RunE — a test that called the helper directly would agree with itself.
+func runLogs(t *testing.T, argv ...string) (*recordingKubectl, error) {
+	t.Helper()
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return kube, Execute(NewRoot(services, "test"), append([]string{"logs"}, argv...))
+}
+
+// sinceValue is the window kubectl was handed, read back with kubectl's own
+// parser.
+//
+// Parsed rather than compared as text, because the requirement is that kubectl
+// accepts what kx emits — pinning the exact spelling would test a cosmetic
+// choice, and pass just as well on a spelling kubectl refuses.
+func sinceValue(t *testing.T, args []string) time.Duration {
+	t.Helper()
+	for _, arg := range args {
+		value, ok := strings.CutPrefix(arg, "--since=")
+		if !ok {
+			continue
+		}
+		window, err := time.ParseDuration(value)
+		if err != nil {
+			t.Fatalf("kubectl parses --since with time.ParseDuration and would "+
+				"reject %q: %v", arg, err)
+		}
+		return window
+	}
+	t.Fatalf("no --since among the args kubectl was given: %v", args)
+	return 0
+}
+
+// kubectl parses --since with time.ParseDuration, which stops at hours, so
+// `kx logs 1 --since 7d` failed with `unknown unit "d"` while `kx diag --since
+// 7d` worked. kx reads the day spelling itself and hands kubectl one it takes.
+func TestLogsAcceptsTheDaySpellingKubectlRejects(t *testing.T) {
+	for _, argv := range [][]string{
+		{"1", "--since", "7d"},
+		{"1", "--since=7d"},
+	} {
+		kube, err := runLogs(t, argv...)
+		if err != nil {
+			t.Fatalf("kx %v: %v", argv, err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kx %v ran kubectl %d times, want 1", argv, len(kube.interactive))
+		}
+		if got := sinceValue(t, kube.interactive[0]); got != 7*24*time.Hour {
+			t.Errorf("kx %v gave kubectl %v, want a week", argv, got)
+		}
+	}
+}
+
+// A duration kubectl already accepts has to survive the round trip unchanged
+// in meaning — the rewrite is a translation, not a reinterpretation.
+func TestLogsKeepsADurationKubectlAlreadyUnderstands(t *testing.T) {
+	kube, err := runLogs(t, "1", "--since=90m")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := sinceValue(t, kube.interactive[0]); got != 90*time.Minute {
+		t.Errorf("kubectl got %v, want the 90m it was given", got)
+	}
+}
+
+// --since-time is a different kubectl flag that takes an RFC3339 instant, and
+// the two are spelled alike enough to be caught by a careless match.
+func TestLogsLeavesSinceTimeAlone(t *testing.T) {
+	const stamp = "--since-time=2026-09-09T06:00:00Z"
+	kube, err := runLogs(t, "1", stamp)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	args := strings.Join(kube.interactive[0], " ")
+	if !strings.Contains(args, stamp) {
+		t.Errorf("kubectl args = %q, want %s passed through untouched", args, stamp)
+	}
+	if strings.Contains(args, "--since=") {
+		t.Errorf("kubectl args = %q, want no --since invented from --since-time", args)
+	}
+}
+
+// A malformed window is kx's error to report, in kx's voice, before a
+// subprocess is spawned — not kubectl's after one is.
+func TestLogsRejectsAMalformedSinceBeforeSpawningKubectl(t *testing.T) {
+	kube, err := runLogs(t, "1", "--since", "7 weeks")
+	if err == nil {
+		t.Fatal("kx logs accepted '7 weeks'")
+	}
+	if !strings.Contains(err.Error(), "--since") {
+		t.Errorf("err = %v, want it to name --since", err)
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.interactive))
+	}
+}
+
+// Parsed by hand, so registration is the only thing putting it on the help
+// screen — the same trap passthrough.go documents for every other kx flag on a
+// DisableFlagParsing command.
+func TestLogsRegistersSinceFlag(t *testing.T) {
+	if newLogsCommand(Services{}).Flags().Lookup("since") == nil {
+		t.Error("--since is not registered, so it will not appear in --help")
+	}
+}

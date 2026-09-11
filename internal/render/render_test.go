@@ -305,6 +305,27 @@ func TestFormatAgeFutureIsJustNow(t *testing.T) {
 	}
 }
 
+// A duration is not an age, and skew has to read differently in each. "just
+// now" is a moment — the word "now" carries it — and a finding that says "· for
+// just now" is a sentence with a moment inside a duration. A signal that
+// started a moment ago has been true for none of it.
+func TestFormatElapsedFutureIsZero(t *testing.T) {
+	now := time.Now()
+	if got := FormatElapsedAt(now, now.Add(time.Minute)); got != "0s" {
+		t.Errorf("future timestamp = %q, want \"0s\" — findings render it as \"for %s\"", got, got)
+	}
+}
+
+// ...and the age it shares its magnitudes with keeps saying "just now",
+// which is the whole reason the two are separate calls.
+func TestFormatAgeAndElapsedPartWaysOnSkew(t *testing.T) {
+	now := time.Now()
+	future := now.Add(30 * time.Second)
+	if age, elapsed := FormatAgeAt(now, future), FormatElapsedAt(now, future); age == elapsed {
+		t.Errorf("age and elapsed both = %q on a skewed timestamp", age)
+	}
+}
+
 func TestEllipsize(t *testing.T) {
 	cases := []struct {
 		text string
@@ -524,5 +545,35 @@ func TestAMultiWordQuotedFragmentStaysOneSpan(t *testing.T) {
 	got := strings.TrimSuffix(buf.String(), "\n")
 	if want := "✗ No state found. Run 'kx get pods' first."; got != want {
 		t.Errorf("Error rendered\n  %q\nwant\n  %q", got, want)
+	}
+}
+
+// "3m ago" answers when something happened; "3m" answers how long something
+// has been true. A finding is one or the other, never both, and the report
+// tells them apart by shape — so the magnitude is shared and the "ago" is
+// not.
+func TestFormatElapsedIsAnAgeWithoutTheAgo(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		since time.Time
+		want  string
+	}{
+		{now.Add(-24 * 24 * time.Hour), "24d"},
+		{now.Add(-3 * time.Hour), "3h"},
+		{now.Add(-12 * time.Minute), "12m"},
+		{now.Add(-45 * time.Second), "45s"},
+	} {
+		if got := FormatElapsedAt(now, tc.since); got != tc.want {
+			t.Errorf("FormatElapsedAt(%v) = %q, want %q", tc.since, got, tc.want)
+		}
+		if got, want := FormatAgeAt(now, tc.since), tc.want+" ago"; got != want {
+			t.Errorf("FormatAgeAt(%v) = %q, want %q", tc.since, got, want)
+		}
+	}
+}
+
+func TestFormatElapsedOfAnUndatedThingIsEmpty(t *testing.T) {
+	if got := FormatElapsedAt(time.Now(), time.Time{}); got != "" {
+		t.Errorf("FormatElapsedAt(zero) = %q, want empty", got)
 	}
 }

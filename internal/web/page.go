@@ -54,6 +54,13 @@ type DiagPage struct {
 	AllNamespaces bool
 	Single        bool
 	Checked       int
+	// Window is the resolved --since window, already spelled the way the
+	// terminal spells it ("last 24h"), or "" when the report is unbounded.
+	//
+	// Formatted by the caller rather than here: render.WindowLabel is the one
+	// place that decides how a window reads, and a page that spelled it
+	// differently from the terminal caption beside it would be its own bug.
+	Window string
 	// Reports are every swept resource, most severe first, healthy included —
 	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
@@ -441,6 +448,12 @@ var funcs = template.FuncMap{
 	// it per call to a closure over the page's own Captured time, so the same
 	// page value always renders the same bytes rather than reading the clock.
 	"age": func(time.Time) string { return "" },
+	// elapsed is the same stub for the other half of a finding's time: how
+	// long it has been true, where age says when it happened.
+	"elapsed": func(time.Time) string { return "" },
+	// window spells a report's own window — "last 24h" — so the page says
+	// what it was allowed to see, the way the terminal banner does.
+	"window": render.WindowLabel,
 	"cpuUsage": func(c diagnostics.ContainerDiagnostic) Usage {
 		return usageOf(c.CPUUsage, c.CPULimit, "cpu")
 	},

@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -459,4 +460,415 @@ func TestGatherWorkloadStillResolvesItsPods(t *testing.T) {
 	if len(data.Pods) != 1 {
 		t.Fatalf("got %d pods, want 1", len(data.Pods))
 	}
+}
+
+// agedWarning is a warning event last seen a given time ago.
+func agedWarning(name, reason, kind, object string, count int32, age time.Duration) *corev1.Event {
+	event := warning(name, reason, kind, object, count)
+	event.LastTimestamp = metav1.NewTime(time.Now().Add(-age))
+	return event
+}
+
+// The point of the window: a warning from three weeks ago is not what is wrong
+// with a workload today, and while it was reported it held the verdict at
+// "warnings" — and any --fail-on gate red — indefinitely.
+func TestGatherDropsEventsOlderThanTheWindow(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 1, 10*time.Minute),
+		agedWarning("e2", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+	s.MaxAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 || data.WarningEvents[0].Reason != "Unhealthy" {
+		t.Fatalf("events = %+v, want only the 10m-old Unhealthy", data.WarningEvents)
+	}
+}
+
+// Zero is "no window", and it has to stay the zero value's meaning: every
+// caller that builds a Service without setting one gets today's behaviour.
+func TestGatherWithoutAWindowKeepsEveryEvent(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 1, 10*time.Minute),
+		agedWarning("e2", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 2 {
+		t.Fatalf("events = %+v, want both", data.WarningEvents)
+	}
+}
+
+// An event carrying neither a last-seen nor a creation time cannot be shown to
+// be stale, and dropping it would hide a live failure on the strength of a
+// missing field. The renderer already omits the age for one of these.
+func TestGatherKeepsAnEventWithNoTimestamp(t *testing.T) {
+	undated := warning("e1", "Unhealthy", "Pod", "solo", 1)
+	undated.LastTimestamp = metav1.Time{}
+	undated.CreationTimestamp = metav1.Time{}
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		undated,
+	)
+	s.MaxAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want the undated event kept", data.WarningEvents)
+	}
+}
+
+// Filtered before grouping, not after: an occurrence outside the window must
+// not inflate the ×count of the one inside it, which is the number the finding
+// and the report both print.
+func TestGatherDoesNotCountFilteredOccurrencesInATally(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "Unhealthy", "Pod", "solo", 2, 10*time.Minute),
+		agedWarning("e2", "Unhealthy", "Pod", "solo", 40, 21*24*time.Hour),
+	)
+	s.MaxAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want one", data.WarningEvents)
+	}
+	if got := data.WarningEvents[0].Count; got != 2 {
+		t.Errorf("count = %d, want 2 — the 40 occurrences outside the window are not this week's", got)
+	}
+}
+
+// A sweep reads the same events through the same helper, so the window has to
+// hold there too — a namespace triage is where a stale warning does the most
+// damage, since it is one row of many nobody re-reads.
+func TestSweepDropsEventsOlderThanTheWindow(t *testing.T) {
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		agedWarning("e1", "FailedScheduling", "Pod", "solo", 1, 21*24*time.Hour),
+	)
+	s.MaxAge = time.Hour
+
+	all, err := s.Sweep(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("Sweep returned nothing to check")
+	}
+	for _, data := range all {
+		if len(data.WarningEvents) != 0 {
+			t.Errorf("%s/%s events = %+v, want none", data.Kind, data.Name, data.WarningEvents)
+		}
+	}
+}
+
+// The grouped summary's timestamp is what the report prints as the most recent
+// occurrence, and what the window is measured against. The API returns events
+// in no particular order, so taking whichever arrived last reported an older
+// occurrence as the newest.
+func TestGroupedEventKeepsTheNewestOccurrence(t *testing.T) {
+	newest := time.Now().Add(-5 * time.Minute)
+	old := warning("e2", "Unhealthy", "Pod", "solo", 1)
+	old.LastTimestamp = metav1.NewTime(time.Now().Add(-6 * time.Hour))
+	old.Message = "the old one"
+	recent := warning("e1", "Unhealthy", "Pod", "solo", 1)
+	recent.LastTimestamp = metav1.NewTime(newest)
+	recent.Message = "the recent one"
+
+	s := service(
+		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
+		// Named so the API lists the newest first — the order in which a
+		// "last one wins" grouping keeps the older occurrence.
+		recent, old,
+	)
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.WarningEvents) != 1 {
+		t.Fatalf("events = %+v, want one group", data.WarningEvents)
+	}
+	summary := data.WarningEvents[0]
+	if !summary.LastTimestamp.Equal(newest) {
+		t.Errorf("LastTimestamp = %v, want the newest occurrence %v", summary.LastTimestamp, newest)
+	}
+	if summary.Message != "the recent one" {
+		t.Errorf("Message = %q, want the newest occurrence's message", summary.Message)
+	}
+}
+
+// settledPod is a healthy, running pod whose container thrashed once and has
+// been fine ever since — the shape the window exists to stop reporting.
+func settledPod(name string, terminatedAgo time.Duration) *corev1.Pod {
+	status := running("app")
+	status.RestartCount = 21
+	status.LastTerminationState = corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{
+			Reason: "OOMKilled", ExitCode: 137,
+			FinishedAt: metav1.NewTime(time.Now().Add(-terminatedAgo)),
+		},
+	}
+	return podWith(name, "p1", corev1.PodRunning, []corev1.ContainerStatus{status})
+}
+
+// The analysis is a pure function of the Data, so the instant the window
+// opened has to travel on it — recomputing a cutoff in the findings layer
+// would measure one gather against two different moments.
+func TestGatherRecordsTheWindowOnTheData(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	s.MaxAge = time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	want := time.Now().Add(-time.Hour)
+	if data.Since.Sub(want) > time.Minute || want.Sub(data.Since) > time.Minute {
+		t.Errorf("Since = %v, want about %v", data.Since, want)
+	}
+}
+
+func TestGatherWithoutAWindowLeavesSinceZero(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.Since.IsZero() {
+		t.Errorf("Since = %v, want zero when no window is set", data.Since)
+	}
+}
+
+// Logs are fetched for a container with history to explain. Once that history
+// falls outside the window nothing will report it, so the previous-instance
+// log tail is both irrelevant and an API call per container to avoid.
+func TestGatherSkipsLogsForASettledContainer(t *testing.T) {
+	s := service(settledPod("solo", 21*24*time.Hour))
+	s.MaxAge = 24 * time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if lines := data.Pods[0].Containers[0].LogLines; len(lines) != 0 {
+		t.Errorf("log lines = %v, want none for a container that settled weeks ago", lines)
+	}
+}
+
+func TestGatherStillReadsLogsForARecentTermination(t *testing.T) {
+	s := service(settledPod("solo", 10*time.Minute))
+	s.MaxAge = 24 * time.Hour
+
+	data, err := s.Gather(context.Background(), kinds.Pod, "solo", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if lines := data.Pods[0].Containers[0].LogLines; len(lines) == 0 {
+		t.Error("no log lines for a container that terminated ten minutes ago")
+	}
+}
+
+// A sweep analyses the same Data the indexed path does, so it has to stamp
+// the window too — otherwise a triage table reports history an indexed run
+// of the same resource would not.
+func TestSweepRecordsTheWindowOnEveryResource(t *testing.T) {
+	s := service(settledPod("solo", time.Minute))
+	s.MaxAge = time.Hour
+
+	all, err := s.Sweep(context.Background(), ns)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("Sweep returned nothing to check")
+	}
+	for _, data := range all {
+		if data.Since.IsZero() {
+			t.Errorf("%s/%s has no window recorded", data.Kind, data.Name)
+		}
+	}
+}
+
+// The three timestamps a Node and a PVC keep, which kx was flattening away.
+func TestGatherNodeKeepsConditionAndCordonTimes(t *testing.T) {
+	changed := metav1.NewTime(time.Now().Add(-3 * time.Hour))
+	cordoned := metav1.NewTime(time.Now().Add(-90 * time.Minute))
+	s := service(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Spec: corev1.NodeSpec{
+			Unschedulable: true,
+			Taints: []corev1.Taint{{
+				Key: "node.kubernetes.io/unschedulable", Effect: corev1.TaintEffectNoSchedule,
+				TimeAdded: &cordoned,
+			}},
+		},
+		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: corev1.NodeReady, Status: corev1.ConditionFalse,
+			Reason: "KubeletNotReady", LastTransitionTime: changed,
+		}}},
+	})
+
+	data, err := s.Gather(context.Background(), kinds.Node, "worker-1", "")
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(data.Node.Conditions) != 1 || !data.Node.Conditions[0].Since.Equal(changed.Time) {
+		t.Errorf("conditions = %+v, want one carrying %v", data.Node.Conditions, changed.Time)
+	}
+	if !data.Node.CordonedSince.Equal(cordoned.Time) {
+		t.Errorf("CordonedSince = %v, want %v", data.Node.CordonedSince, cordoned.Time)
+	}
+}
+
+// A node cordoned before the taint carried a time — or by something that
+// wrote the bool directly — still reports as cordoned, just without saying
+// how long.
+func TestGatherNodeWithoutACordonTaintHasNoCordonTime(t *testing.T) {
+	s := service(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Spec:       corev1.NodeSpec{Unschedulable: true},
+	})
+	data, err := s.Gather(context.Background(), kinds.Node, "worker-1", "")
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.Node.CordonedSince.IsZero() {
+		t.Errorf("CordonedSince = %v, want zero", data.Node.CordonedSince)
+	}
+}
+
+func TestGatherPendingPVCKeepsWhenItWasCreated(t *testing.T) {
+	created := metav1.NewTime(time.Now().Add(-48 * 24 * time.Hour))
+	s := service(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "storage", Namespace: ns, CreationTimestamp: created,
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimPending},
+	})
+	data, err := s.Gather(context.Background(), kinds.PersistentVolumeClaim, "storage", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.PVC.PendingSince.Equal(created.Time) {
+		t.Errorf("PendingSince = %v, want %v", data.PVC.PendingSince, created.Time)
+	}
+}
+
+// A bound claim is not waiting for anything.
+func TestGatherBoundPVCHasNoPendingTime(t *testing.T) {
+	s := service(&corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "storage", Namespace: ns,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour)),
+		},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound},
+	})
+	data, err := s.Gather(context.Background(), kinds.PersistentVolumeClaim, "storage", ns)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !data.PVC.PendingSince.IsZero() {
+		t.Errorf("PendingSince = %v, want zero for a bound claim", data.PVC.PendingSince)
+	}
+}
+
+// A group's span has to cover every Event object folded into it, so it takes
+// the earliest first-timestamp rather than the one that happened to be read
+// first — the API returns events in no useful order, the same reason
+// LastTimestamp takes the newest.
+func TestEventGroupSpansEveryObjectFoldedIntoIt(t *testing.T) {
+	newest := time.Now().Add(-time.Minute)
+	oldest := newest.Add(-29 * 24 * time.Hour)
+
+	warning := func(first, last time.Time, count int32) corev1.Event {
+		return corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "prod"},
+			Type:           "Warning",
+			Reason:         "BackOff",
+			Count:          count,
+			FirstTimestamp: metav1.NewTime(first),
+			LastTimestamp:  metav1.NewTime(last),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web", Namespace: "prod"},
+		}
+	}
+
+	// Deliberately out of order: the recent object is read first.
+	summaries := groupWarnings(t, []corev1.Event{
+		warning(newest.Add(-time.Hour), newest, 10),
+		warning(oldest, newest.Add(-time.Hour), 52112),
+	})
+
+	if len(summaries) != 1 {
+		t.Fatalf("grouped into %d summaries, want 1", len(summaries))
+	}
+	got := summaries[0]
+	if got.Count != 52122 {
+		t.Errorf("Count = %d, want 52122", got.Count)
+	}
+	if !got.FirstTimestamp.Equal(oldest) {
+		t.Errorf("FirstTimestamp = %v, want the earliest end %v", got.FirstTimestamp, oldest)
+	}
+	if span := got.Span(); span != "29d" {
+		t.Errorf("Span() = %q, want \"29d\"", span)
+	}
+}
+
+// An Event the API never dated at its first end must not stretch the group's
+// span back to the zero time.
+func TestAnUndatedObjectDoesNotStretchTheGroupSpan(t *testing.T) {
+	newest := time.Now().Add(-time.Minute)
+	dated := newest.Add(-2 * time.Hour)
+
+	warning := func(first time.Time, count int32) corev1.Event {
+		event := corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "prod"},
+			Type:           "Warning",
+			Reason:         "BackOff",
+			Count:          count,
+			LastTimestamp:  metav1.NewTime(newest),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web", Namespace: "prod"},
+		}
+		if !first.IsZero() {
+			event.FirstTimestamp = metav1.NewTime(first)
+		}
+		return event
+	}
+
+	summaries := groupWarnings(t, []corev1.Event{warning(dated, 5), warning(time.Time{}, 5)})
+	if len(summaries) != 1 {
+		t.Fatalf("grouped into %d summaries, want 1", len(summaries))
+	}
+	if !summaries[0].FirstTimestamp.Equal(dated) {
+		t.Errorf("FirstTimestamp = %v, want the one dated end %v",
+			summaries[0].FirstTimestamp, dated)
+	}
+	if span := summaries[0].Span(); span != "2h" {
+		t.Errorf("Span() = %q, want \"2h\"", span)
+	}
+}
+
+// groupWarnings drives warningEvents directly with a scripted event list. The
+// real APIService.Filter does the matching, so a fixture whose InvolvedObject
+// does not line up with the target is caught here rather than passing vacuously.
+func groupWarnings(t *testing.T, scripted []corev1.Event) []EventSummary {
+	t.Helper()
+	service := Service{Events: events.APIService{}}
+	return service.warningEvents(
+		time.Time{}, kinds.Pod, "web", "prod", nil, scripted,
+	)
 }

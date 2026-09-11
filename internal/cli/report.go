@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
@@ -26,8 +28,18 @@ const reportSchemaVersion = 1
 // Rank is deliberately absent. It orders the findings in the array and the
 // array is already in that order, so exposing it would publish an internal
 // vocabulary a consumer would have to keep up with for no gain.
+// At is when the reported thing happened, RFC 3339, and is present only for
+// the findings that have a moment: a warning event, a container's last
+// termination, a failed run.
+//
+// Since is the other half: when an ongoing signal started, for the findings
+// no --since window can hide. A finding carries one or the other, never both,
+// so a consumer can tell "this failed at 09:41" from "this has been failing
+// since 13 August" without parsing the summary.
 type jsonFinding struct {
 	Severity string `json:"severity"`
+	At       string `json:"at,omitempty"`
+	Since    string `json:"since,omitempty"`
 	Summary  string `json:"summary"`
 }
 
@@ -56,6 +68,8 @@ func reportOf(report diagnostics.Report, index int) jsonReport {
 	for _, finding := range report.Findings {
 		findings = append(findings, jsonFinding{
 			Severity: finding.Severity.Token(),
+			At:       rfc3339(finding.At),
+			Since:    rfc3339(finding.Since),
 			Summary:  finding.Summary,
 		})
 	}
@@ -67,6 +81,25 @@ func reportOf(report diagnostics.Report, index int) jsonReport {
 		Verdict:   report.Verdict.Token(),
 		Findings:  findings,
 	}
+}
+
+// windowLabel spells a document's window in the vocabulary --since reads, so
+// the value a report names is one that can be typed straight back at it. An
+// unbounded run names none.
+func windowLabel(window time.Duration) string {
+	if window <= 0 {
+		return ""
+	}
+	return config.FormatDuration(window)
+}
+
+// rfc3339 formats a timestamp for a document, and an unset one as an absent
+// field rather than as year 1.
+func rfc3339(timestamp time.Time) string {
+	if timestamp.IsZero() {
+		return ""
+	}
+	return timestamp.UTC().Format(time.RFC3339)
 }
 
 // diagnosticJSON serialises one resource's report. index is the one the
@@ -89,6 +122,7 @@ func diagnosticJSON(report diagnostics.Report, index int) (string, error) {
 		Kind:          report.Kind,
 		Name:          report.Name,
 		Namespace:     report.Namespace,
+		Window:        windowLabel(report.Window),
 		Checked:       1,
 		Healthy:       healthy,
 		Resources:     []jsonReport{reportOf(report, index)},
@@ -103,14 +137,25 @@ func diagnosticJSON(report diagnostics.Report, index int) (string, error) {
 // itself still appears in Resources, so nothing has to read the subject to
 // find the findings.
 type diagnosticDocument struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	Kind          kinds.Kind   `json:"kind,omitempty"`
-	Name          string       `json:"name,omitempty"`
-	Namespace     string       `json:"namespace,omitempty"`
-	AllNamespaces bool         `json:"allNamespaces,omitempty"`
-	Checked       int          `json:"checked"`
-	Healthy       int          `json:"healthy"`
-	Resources     []jsonReport `json:"resources"`
+	SchemaVersion int        `json:"schemaVersion"`
+	Kind          kinds.Kind `json:"kind,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	Namespace     string     `json:"namespace,omitempty"`
+	AllNamespaces bool       `json:"allNamespaces,omitempty"`
+	// Window is how far back the run was allowed to look, spelled the way
+	// --since reads it — "24h", "7d". Absent when the run was unbounded,
+	// since "0" would read as a setting rather than as the absence of one.
+	//
+	// The terminal says this in its banner and the HTML report on its
+	// invocation line; a document that omitted it was the one surface that
+	// could not, and it is the surface a CI job parses beside the --fail-on
+	// gate the same window governs. Two runs of the same command differ
+	// otherwise with nothing to say whether the cluster got better or the
+	// window got narrower.
+	Window    string       `json:"window,omitempty"`
+	Checked   int          `json:"checked"`
+	Healthy   int          `json:"healthy"`
+	Resources []jsonReport `json:"resources"`
 }
 
 // triageJSON serialises a sweep.
@@ -134,6 +179,7 @@ func triageJSON(result render.TriageResult) (string, error) {
 		SchemaVersion: reportSchemaVersion,
 		Namespace:     result.Namespace,
 		AllNamespaces: result.AllNamespaces,
+		Window:        windowLabel(result.Window),
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Resources:     resources,

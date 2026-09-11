@@ -58,6 +58,44 @@ func (APIService) Filter(events []corev1.Event, name string, kind kinds.Kind) []
 	return matched
 }
 
+// Cutoff is the instant a window of the given length opens, or the zero time
+// when there is no window.
+//
+// Read once per run and passed down rather than recomputed per event, so every
+// event in one listing is measured against the same moment — two events read
+// milliseconds apart cannot fall on opposite sides of a cutoff that moved
+// between them. Zero and negative both mean no window: nothing configures a
+// negative one, and treating it as a window into the future would hide
+// everything.
+func Cutoff(window time.Duration) time.Time {
+	if window <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(-window)
+}
+
+// Within narrows events to those at or after a cutoff, leaving them in the
+// order they arrived. A zero cutoff is no window and keeps everything.
+//
+// An event the cluster never dated is kept, which is the same rule kx diag's
+// window runs on: hiding a live signal over a missing timestamp is the worse
+// error. Dated through Timestamp, so the window is read through the same lens
+// the AGE column is rendered with — otherwise a row could be dropped for a
+// time it never displayed.
+func Within(events []corev1.Event, since time.Time) []corev1.Event {
+	if since.IsZero() {
+		return events
+	}
+	kept := make([]corev1.Event, 0, len(events))
+	for _, event := range events {
+		at := Timestamp(event)
+		if at.IsZero() || !at.Before(since) {
+			kept = append(kept, event)
+		}
+	}
+	return kept
+}
+
 // Timestamp is an event's last-seen time, falling back to creation.
 //
 // LastTimestamp is unset on events recorded through the newer events API, so
@@ -68,6 +106,18 @@ func Timestamp(event corev1.Event) time.Time {
 		return event.LastTimestamp.Time
 	}
 	return event.CreationTimestamp.Time
+}
+
+// FirstTimestamp is the earliest occurrence an aggregated event covers, or the
+// zero time when the API did not record one.
+//
+// Unlike Timestamp this has no CreationTimestamp fallback. Timestamp's answers
+// "when did this last happen", where a creation time is a fair stand-in; this
+// one is subtracted from Timestamp to produce a span, and a guessed span is
+// worse than an absent one — it would claim a burst was spread out, or that a
+// month of failures happened at once.
+func FirstTimestamp(event corev1.Event) time.Time {
+	return event.FirstTimestamp.Time
 }
 
 // Count is the number of times an event fired. The API leaves it at zero rather

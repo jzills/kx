@@ -1325,3 +1325,212 @@ func TestRenderDiagKeepsANamespaceInTheBanner(t *testing.T) {
 		t.Errorf("banner has %d separators, want 2:\n%s", separators, banner)
 	}
 }
+
+// The HTML report has the same thing to say about what it was allowed to
+// see, and must say it in the same words — a page whose findings are dated
+// while the terminal's are not, or which spells the window differently, is
+// two reports of one gather.
+func TestDiagPageDatesAFindingAndItsRestarts(t *testing.T) {
+	report := criticalReport(t)
+	// Fixed relative to testMeta's Captured, like the event fixture above,
+	// so the page renders the same bytes every time.
+	terminated := time.Date(2026, 8, 1, 7, 41, 22, 0, time.UTC)
+	report.Findings[0].At = terminated
+	report.Pods[0].Containers[0].LastTerminatedAt = terminated
+	report.Pods[0].Containers[0].LogSource = "previous"
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	html := string(page)
+	age := render.FormatAgeAt(testMeta(t).Captured, terminated)
+	for _, want := range []string{
+		"2 of 3 replicas unavailable<span class=\"dim\"> · " + age,
+		"17 <span class=\"dim\">(" + age + ")</span>",
+		"previous instance, " + age,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("page does not carry %q", want)
+		}
+	}
+}
+
+// An undated finding is present state, and giving it an age would claim a
+// moment the cluster never reported.
+func TestDiagPageLeavesAnUndatedFindingBare(t *testing.T) {
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{criticalReport(t)},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if strings.Contains(string(page), "2 of 3 replicas unavailable<span") {
+		t.Error("an undated finding was given an age")
+	}
+}
+
+func TestDiagPageQualifiesAnEmptyEventSectionWithTheWindow(t *testing.T) {
+	report := criticalReport(t)
+	report.WarningEvents = nil
+	report.Window = 24 * time.Hour
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if !strings.Contains(string(page), "No warning events in the last 24h") {
+		t.Error("the empty event section does not name the window")
+	}
+}
+
+// The page has to draw the same distinction the terminal does: a moment the
+// window can hide, or a duration it cannot.
+func TestDiagPageSaysHowLongAnOngoingFindingHasBeenTrue(t *testing.T) {
+	report := criticalReport(t)
+	// Fixed relative to testMeta's Captured, so the page renders the same
+	// bytes every time.
+	report.Findings[0].Since = time.Date(2026, 7, 8, 9, 41, 22, 0, time.UTC)
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	want := render.FormatElapsedAt(testMeta(t).Captured, report.Findings[0].Since)
+	if !strings.Contains(string(page), "· for "+want) {
+		t.Errorf("page does not say how long the finding has been true (%s)", want)
+	}
+}
+
+// A finding with a moment keeps it, and gains no duration alongside.
+func TestDiagPagePrefersAMomentOverADuration(t *testing.T) {
+	report := criticalReport(t)
+	report.Findings[0].At = time.Date(2026, 8, 1, 9, 37, 22, 0, time.UTC)
+	report.Findings[0].Since = time.Date(2026, 7, 8, 9, 41, 22, 0, time.UTC)
+
+	page, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag: %v", err)
+	}
+	if strings.Contains(string(page), "· for ") {
+		t.Error("a finding with a moment also carries a duration")
+	}
+}
+
+// Every other surface this feature touches learned to say its window: the
+// terminal caption gets WindowLabel, the "all healthy" line gets windowSuffix,
+// the JSON document gets a "window" key. The saved HTML page did not, so a
+// sweep captioned "12 checked" over a 24h window read as a full audit — and
+// the page is the one surface a reader opens days later, detached from the
+// command line that made it. The masthead invocation line carries --since, but
+// that is provenance, not the caption a reader takes the result from.
+func TestRenderDiagSweepCaptionCarriesTheWindow(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Checked: 12,
+		Window:  "last 24h",
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "Mixed · diagnostics · 12 checked · last 24h") {
+		t.Error("the sweep caption did not carry the window")
+	}
+}
+
+// The single-resource banner drops the window the same way, and its terminal
+// twin has always shown it: "Pod/x · diagnostics · ✗ critical · 3 issues ·
+// last 1h".
+func TestRenderDiagSingleBannerCarriesTheWindow(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Window:  "last 1h",
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "last 1h") {
+		t.Error("the single-resource banner did not carry the window")
+	}
+}
+
+// An unbounded report must not grow a stray separator where the window would
+// have gone — the same empty-segment trap the cluster-scoped namespace span
+// fell into.
+func TestRenderDiagWithoutAWindowAddsNoSeparator(t *testing.T) {
+	for _, page := range []DiagPage{
+		{Meta: testMeta(t), Scope: "diagnostics", Checked: 12,
+			Reports: []diagnostics.Report{criticalReport(t)}},
+		{Meta: testMeta(t), Scope: "diagnostics", Single: true,
+			Reports: []diagnostics.Report{criticalReport(t)}},
+	} {
+		out, err := RenderDiag(page)
+		if err != nil {
+			t.Fatalf("RenderDiag returned %v", err)
+		}
+		if strings.Contains(string(out), "checked · <") {
+			t.Error("an unbounded sweep caption kept a separator with nothing after it")
+		}
+		if strings.Contains(string(out), "· ·") {
+			t.Error("an unbounded page rendered two separators in a row")
+		}
+	}
+}
+
+// The HTML event head prints the tally too, and a saved page is the surface
+// most detached from the command that made it — so it needs the span most.
+func TestRenderDiagEventHeadCarriesTheSpan(t *testing.T) {
+	last := time.Now().Add(-time.Minute)
+	report := criticalReport(t)
+	report.WarningEvents = []diagnostics.EventSummary{{
+		Reason: "BackOff", Message: "Back-off pulling image", Kind: "Pod", Name: "web",
+		Count: 52122, FirstTimestamp: last.Add(-29 * 24 * time.Hour), LastTimestamp: last,
+	}}
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "×52122 over 29d") {
+		t.Error("the HTML event head did not carry the span")
+	}
+}
+
+func TestRenderDiagEventHeadWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Now().Add(-time.Minute)
+	report := criticalReport(t)
+	report.WarningEvents = []diagnostics.EventSummary{{
+		Reason: "FailedScheduling", Message: "no nodes", Kind: "Pod", Name: "web",
+		Count: 1, FirstTimestamp: at, LastTimestamp: at,
+	}}
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if strings.Contains(string(out), " over ") {
+		t.Error("a single-occurrence event grew a span segment in the HTML")
+	}
+}

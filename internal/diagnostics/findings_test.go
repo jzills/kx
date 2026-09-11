@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/jzills/kx/internal/kinds"
 )
+
+// unbounded is the zero window: every finding a report can produce, which is
+// what every test that is not about the window itself wants.
+var unbounded time.Time
 
 func quantity(value string) *resource.Quantity {
 	parsed := resource.MustParse(value)
@@ -41,6 +46,19 @@ func severityOf(t *testing.T, findings []Finding, substring string) Severity {
 	}
 	t.Fatalf("no finding contains %q; got %v", substring, summaries(findings))
 	return OK
+}
+
+// momentOf is severityOf for the other half of a finding: when the thing it
+// reports happened. Zero for an ongoing one, which carries a duration instead.
+func momentOf(t *testing.T, findings []Finding, substring string) time.Time {
+	t.Helper()
+	for _, finding := range findings {
+		if strings.Contains(finding.Summary, substring) {
+			return finding.At
+		}
+	}
+	t.Fatalf("no finding contains %q; got %v", substring, summaries(findings))
+	return time.Time{}
 }
 
 // The verdict is the highest finding severity, and findings sort most severe
@@ -109,12 +127,12 @@ func TestJobFindings(t *testing.T) {
 		{Active: 1},
 		{Succeeded: 1},
 	} {
-		if findings := jobFindings(job); len(findings) != 0 {
+		if findings := jobFindings(job, unbounded); len(findings) != 0 {
 			t.Errorf("job %+v produced %v, want none", job, summaries(findings))
 		}
 	}
 
-	failed := jobFindings(JobHealth{Failed: 6, BackoffLimit: 5, BackoffLimitExceeded: true})
+	failed := jobFindings(JobHealth{Failed: 6, BackoffLimit: 5, BackoffLimitExceeded: true}, unbounded)
 	if got := severityOf(t, failed, "BackoffLimitExceeded"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
@@ -168,15 +186,15 @@ func TestPVCFindings(t *testing.T) {
 
 // A suspended or never-run CronJob is not enough signal to call broken.
 func TestCronJobFindings(t *testing.T) {
-	if findings := cronJobFindings(CronJobHealth{Suspended: true}); len(findings) != 0 {
+	if findings := cronJobFindings(CronJobHealth{Suspended: true}, unbounded); len(findings) != 0 {
 		t.Errorf("suspended CronJob produced %v, want none", summaries(findings))
 	}
-	if findings := cronJobFindings(CronJobHealth{}); len(findings) != 0 {
+	if findings := cronJobFindings(CronJobHealth{}, unbounded); len(findings) != 0 {
 		t.Errorf("never-run CronJob produced %v, want none", summaries(findings))
 	}
 
 	failed := cronJobFindings(CronJobHealth{MostRecentJob: &JobHealth{
-		Failed: 3, BackoffLimit: 2, BackoffLimitExceeded: true}})
+		Failed: 3, BackoffLimit: 2, BackoffLimitExceeded: true}}, unbounded)
 	if !hasSummaryContaining(failed, "Most recent run: BackoffLimitExceeded") {
 		t.Errorf("findings = %v, want the run prefixed", summaries(failed))
 	}
@@ -197,7 +215,7 @@ func TestContainerWaitingReasons(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			findings := containerFindings("nginx", ContainerDiagnostic{
-				Name: "app", WaitingReason: tc.reason})
+				Name: "app", WaitingReason: tc.reason}, unbounded, unbounded)
 			if got := severityOf(t, findings, tc.contains); got != tc.want {
 				t.Errorf("severity = %v, want %v", got, tc.want)
 			}
@@ -207,7 +225,7 @@ func TestContainerWaitingReasons(t *testing.T) {
 
 func TestOOMKilledFromEitherState(t *testing.T) {
 	current := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", TerminatedReason: "OOMKilled"})
+		Name: "app", TerminatedReason: "OOMKilled"}, unbounded, unbounded)
 	if got := severityOf(t, current, "OOMKilled"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
@@ -215,7 +233,7 @@ func TestOOMKilledFromEitherState(t *testing.T) {
 	// The common case: the container restarted, so the OOM is in its previous
 	// state rather than its current one.
 	previous := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", LastTerminatedReason: "OOMKilled"})
+		Name: "app", LastTerminatedReason: "OOMKilled"}, unbounded, unbounded)
 	if !hasSummaryContaining(previous, "OOMKilled") {
 		t.Errorf("findings = %v, want an OOMKilled finding", summaries(previous))
 	}
@@ -225,18 +243,18 @@ func TestOOMKilledFromEitherState(t *testing.T) {
 func TestCompletedContainerIsNotAFinding(t *testing.T) {
 	exit := int32(0)
 	findings := containerFindings("job-1", ContainerDiagnostic{
-		Name: "run", TerminatedReason: "Completed", ExitCode: &exit, Ready: true})
+		Name: "run", TerminatedReason: "Completed", ExitCode: &exit, Ready: true}, unbounded, unbounded)
 	if len(findings) != 0 {
 		t.Errorf("findings = %v, want none", summaries(findings))
 	}
 }
 
 func TestRestartThreshold(t *testing.T) {
-	below := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 4})
+	below := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 4}, unbounded, unbounded)
 	if hasSummaryContaining(below, "restarted") {
 		t.Errorf("4 restarts produced %v, want none", summaries(below))
 	}
-	at := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 5})
+	at := containerFindings("nginx", ContainerDiagnostic{Name: "app", RestartCount: 5}, unbounded, unbounded)
 	if got := severityOf(t, at, "restarted 5 times"); got != Warning {
 		t.Errorf("severity = %v, want Warning", got)
 	}
@@ -246,7 +264,7 @@ func TestRestartThreshold(t *testing.T) {
 // finding, so repeating it adds nothing.
 func TestRestartFindingSuppressedWhileWaiting(t *testing.T) {
 	findings := containerFindings("nginx", ContainerDiagnostic{
-		Name: "app", RestartCount: 9, WaitingReason: "CrashLoopBackOff"})
+		Name: "app", RestartCount: 9, WaitingReason: "CrashLoopBackOff"}, unbounded, unbounded)
 	if hasSummaryContaining(findings, "restarted 9 times") {
 		t.Errorf("findings = %v, want no separate restart finding", summaries(findings))
 	}
@@ -315,18 +333,18 @@ func TestPodPhaseFindings(t *testing.T) {
 	unschedulable := podFindings(PodDiagnostic{
 		Name: "nginx", Phase: "Pending",
 		Scheduling: SchedulingInfo{Schedulable: false, Message: "0/1 nodes are available"},
-	})
+	}, unbounded)
 	if got := severityOf(t, unschedulable, "Unschedulable: 0/1 nodes"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
 
 	pending := podFindings(PodDiagnostic{
-		Name: "nginx", Phase: "Pending", Scheduling: SchedulingInfo{Schedulable: true}})
+		Name: "nginx", Phase: "Pending", Scheduling: SchedulingInfo{Schedulable: true}}, unbounded)
 	if got := severityOf(t, pending, "pending"); got != Warning {
 		t.Errorf("severity = %v, want Warning", got)
 	}
 
-	failed := podFindings(PodDiagnostic{Name: "nginx", Phase: "Failed"})
+	failed := podFindings(PodDiagnostic{Name: "nginx", Phase: "Failed"}, unbounded)
 	if got := severityOf(t, failed, "failed"); got != Critical {
 		t.Errorf("severity = %v, want Critical", got)
 	}
@@ -338,7 +356,7 @@ func TestReadyShortfallSuppressedWhenAContainerIsWaiting(t *testing.T) {
 	findings := podFindings(PodDiagnostic{
 		Name: "nginx", Phase: "Running", ReadyContainers: 0, TotalContainers: 1,
 		Containers: []ContainerDiagnostic{{Name: "app", WaitingReason: "CrashLoopBackOff"}},
-	})
+	}, unbounded)
 	if hasSummaryContaining(findings, "0/1 containers ready") {
 		t.Errorf("findings = %v, want no generic ready finding", summaries(findings))
 	}
@@ -347,7 +365,7 @@ func TestReadyShortfallSuppressedWhenAContainerIsWaiting(t *testing.T) {
 	notReady := podFindings(PodDiagnostic{
 		Name: "nginx", Phase: "Running", ReadyContainers: 1, TotalContainers: 2,
 		Containers: []ContainerDiagnostic{{Name: "app"}, {Name: "sidecar"}},
-	})
+	}, unbounded)
 	if got := severityOf(t, notReady, "1/2 containers ready"); got != Warning {
 		t.Errorf("severity = %v, want Warning", got)
 	}
@@ -856,5 +874,548 @@ func TestActiveCountsOnlyPodsStillExpectedToRun(t *testing.T) {
 	}
 	if got := counts.Stalled(); got != 1 {
 		t.Errorf("Stalled() = %d, want 1", got)
+	}
+}
+
+// The window that a report was gathered under, and two ages either side of it.
+var (
+	windowStart = time.Now().Add(-24 * time.Hour)
+	recently    = time.Now().Add(-10 * time.Minute)
+	longAgo     = time.Now().Add(-21 * 24 * time.Hour)
+)
+
+// An OOMKill in the *previous* state is history: the container has been
+// running ever since, which is the evidence that the problem passed. Reported
+// forever, it held a healthy workload at critical — the complaint that opened
+// #337, in a signal the event window doesn't touch.
+func TestStaleOOMKillIsNotReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running",
+		LastTerminatedReason: "OOMKilled", LastTerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if hasSummaryContaining(findings, "OOMKilled") {
+		t.Errorf("findings = %v, want no OOMKilled from three weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentOOMKillIsStillReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running",
+		LastTerminatedReason: "OOMKilled", LastTerminatedAt: recently,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "OOMKilled") {
+		t.Errorf("findings = %v, want the OOMKilled from ten minutes ago", summaries(findings))
+	}
+}
+
+// A termination the cluster did not date cannot be shown to be stale.
+func TestUndatedOOMKillIsReportedWhateverItsAge(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
+		LastTerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "OOMKilled") {
+		t.Errorf("findings = %v, want the undated OOMKilled", summaries(findings))
+	}
+}
+
+// The restart count is cumulative over the pod's whole life, so it says
+// nothing about when the thrashing happened. The last termination does.
+func TestStaleRestartsAreNotReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running",
+		RestartCount: 21, LastTerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if hasSummaryContaining(findings, "restarted") {
+		t.Errorf("findings = %v, want no restart finding for a pod that settled", summaries(findings))
+	}
+}
+
+func TestRecentRestartsAreStillReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running",
+		RestartCount: 21, LastTerminatedAt: recently,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "restarted 21 times") {
+		t.Errorf("findings = %v, want the restart finding", summaries(findings))
+	}
+}
+
+// A container thrashing right now is in CrashLoopBackOff, which is current
+// state — the window must not reach it even though its last exit is old.
+func TestCrashLoopBackOffIsReportedWhateverItsAge(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", WaitingReason: "CrashLoopBackOff",
+		RestartCount: 21, LastTerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "CrashLoopBackOff") {
+		t.Errorf("findings = %v, want the CrashLoopBackOff", summaries(findings))
+	}
+}
+
+// Nothing datable, nothing to prove stale — the same rule an undated event
+// gets. Suppressing on a missing field would hide a live failure.
+func TestUndatedHistoryIsStillReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running",
+		RestartCount: 21, LastTerminatedReason: "OOMKilled",
+	}, windowStart, unbounded)
+	for _, want := range []string{"OOMKilled", "restarted 21 times"} {
+		if !hasSummaryContaining(findings, want) {
+			t.Errorf("findings = %v, want %q kept when nothing dates it", summaries(findings), want)
+		}
+	}
+}
+
+// An unbounded report — --since 0, or a caller with no window — is the zero
+// value, and must behave exactly as it did before the window existed.
+func TestWithoutAWindowEveryHistoricalFindingSurvives(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", Ready: true, State: "Running", RestartCount: 21,
+		LastTerminatedReason: "OOMKilled", LastTerminatedAt: longAgo,
+	}, time.Time{}, unbounded)
+	for _, want := range []string{"OOMKilled", "restarted 21 times"} {
+		if !hasSummaryContaining(findings, want) {
+			t.Errorf("findings = %v, want %q with no window set", summaries(findings), want)
+		}
+	}
+}
+
+func TestStaleJobFailureIsNotReported(t *testing.T) {
+	job := JobHealth{Failed: 6, BackoffLimit: 5, BackoffLimitExceeded: true, FailedAt: longAgo}
+	if findings := jobFindings(job, windowStart); len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a run that failed three weeks ago",
+			summaries(findings))
+	}
+}
+
+func TestRecentJobFailureIsStillReported(t *testing.T) {
+	job := JobHealth{Failed: 6, BackoffLimit: 5, BackoffLimitExceeded: true, FailedAt: recently}
+	if !hasSummaryContaining(jobFindings(job, windowStart), "BackoffLimitExceeded") {
+		t.Error("a run that failed ten minutes ago was dropped")
+	}
+}
+
+// A CronJob rolls up its most recent run, so it inherits the same rule — and
+// with it the caveat that a schedule longer than the window needs --since
+// widened to see the last failure.
+func TestStaleCronJobRunIsNotReported(t *testing.T) {
+	cronJob := CronJobHealth{MostRecentJob: &JobHealth{
+		Failed: 1, BackoffLimit: 0, BackoffLimitExceeded: true, FailedAt: longAgo,
+	}}
+	if findings := cronJobFindings(cronJob, windowStart); len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a run from three weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentCronJobRunIsStillReported(t *testing.T) {
+	cronJob := CronJobHealth{MostRecentJob: &JobHealth{
+		Failed: 1, BackoffLimit: 0, BackoffLimitExceeded: true, FailedAt: recently,
+	}}
+	if !hasSummaryContaining(cronJobFindings(cronJob, windowStart), "Most recent run") {
+		t.Error("a run that failed ten minutes ago was dropped")
+	}
+}
+
+// BuildReport is the only caller that knows the window the data was gathered
+// under, so the cutoff has to travel on the Data rather than be recomputed.
+func TestBuildReportAppliesTheDataWindowToHistory(t *testing.T) {
+	data := Data{
+		Kind: kinds.Deployment, Name: "web", Since: windowStart,
+		Pods: []PodDiagnostic{{
+			Name: "web-1", Phase: "Running", ReadyContainers: 1, TotalContainers: 1,
+			Containers: []ContainerDiagnostic{{
+				Name: "app", Ready: true, State: "Running", RestartCount: 21,
+				LastTerminatedReason: "OOMKilled", LastTerminatedAt: longAgo,
+			}},
+		}},
+	}
+	report := BuildReport(data)
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v (%v), want healthy — every signal is three weeks old",
+			report.Verdict, summaries(report.Findings))
+	}
+}
+
+// A stale run goes quiet entirely — the rollup and the corpses it left.
+//
+// This is the whole point of dating terminal state: bounding the run alone
+// achieved nothing, because the pods it failed with kept the verdict red
+// forever. A workload whose last run failed in July is not a workload with a
+// problem today; --since widens the window when it is.
+func TestStaleRunAndThePodsItFailedWithBothGoQuiet(t *testing.T) {
+	exit := int32(1)
+	data := Data{
+		Kind: kinds.CronJob, Name: "nightly", Since: windowStart,
+		CronJob: &CronJobHealth{MostRecentJob: &JobHealth{
+			Failed: 2, BackoffLimit: 1, BackoffLimitExceeded: true, FailedAt: longAgo,
+		}},
+		Pods: []PodDiagnostic{{
+			Name: "nightly-1", Phase: "Failed", TotalContainers: 1,
+			Containers: []ContainerDiagnostic{{
+				Name: "run", State: "Terminated", TerminatedReason: "Error",
+				ExitCode: &exit, TerminatedAt: longAgo,
+			}},
+		}},
+	}
+	report := BuildReport(data)
+
+	if len(report.Findings) != 0 {
+		t.Errorf("findings = %v, want none — every one of them is three weeks old",
+			summaries(report.Findings))
+	}
+	if report.Verdict != OK {
+		t.Errorf("verdict = %v, want healthy", report.Verdict)
+	}
+}
+
+// A container that terminated is not doing anything: it finished, at a
+// moment, and stays finished. Reported forever, a Job whose pods died in
+// July reads critical in September — which is what bounding its run was
+// supposed to stop, and could not while its pods were unbounded.
+func TestStaleTerminatedContainerIsNotReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if hasSummaryContaining(findings, "terminated") {
+		t.Errorf("findings = %v, want none for a container that died weeks ago",
+			summaries(findings))
+	}
+}
+
+func TestRecentTerminatedContainerIsStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: recently,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "terminated: Error (exit 1)") {
+		t.Errorf("findings = %v, want the recent failure", summaries(findings))
+	}
+}
+
+func TestStaleTerminalOOMKillIsNotReported(t *testing.T) {
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "OOMKilled",
+		TerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if hasSummaryContaining(findings, "OOMKilled") {
+		t.Errorf("findings = %v, want none for an OOMKill from three weeks ago",
+			summaries(findings))
+	}
+}
+
+// The pod-level rollup follows its containers: a Failed pod is a pod that
+// finished failing, dated by the last of them to stop.
+func TestStaleFailedPodIsNotReported(t *testing.T) {
+	exit := int32(1)
+	findings := podFindings(PodDiagnostic{
+		Name: "job-1", Phase: "Failed", TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+			ExitCode: &exit, TerminatedAt: longAgo,
+		}},
+	}, windowStart)
+	if len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a pod that failed weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentFailedPodIsStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := podFindings(PodDiagnostic{
+		Name: "job-1", Phase: "Failed", TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "migrate", State: "Terminated", TerminatedReason: "Error",
+			ExitCode: &exit, TerminatedAt: recently,
+		}},
+	}, windowStart)
+	if !hasSummaryContaining(findings, "Pod job-1 failed") {
+		t.Errorf("findings = %v, want the recent failure", summaries(findings))
+	}
+}
+
+// A Failed pod with nothing to date it — evicted before its containers ran,
+// or a status the API never filled in — stays reported.
+func TestUndatedFailedPodIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{Name: "job-1", Phase: "Failed"}, windowStart)
+	if !hasSummaryContaining(findings, "Pod job-1 failed") {
+		t.Errorf("findings = %v, want an undatable failure kept", summaries(findings))
+	}
+}
+
+// A pod that failed in an init container leaves no main-container status to
+// date it by — podDiagnostic reads pod.Status.ContainerStatuses alone, and an
+// eviction can lose those too. Undated, the failure is outside no window at
+// all, so one Job that failed to initialise last month would hold its workload
+// critical and a --fail-on gate red forever. The pod's own UnhealthySince
+// dates it instead.
+func TestFailedPodWithNoContainerDateIsDatedByItsReadyTransition(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "migrate-1", Phase: "Failed", UnhealthySince: longAgo,
+	}, windowStart)
+	if len(findings) != 0 {
+		t.Errorf("findings = %v, want none for a pod that failed weeks ago", summaries(findings))
+	}
+}
+
+func TestRecentlyFailedPodWithNoContainerDateIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "migrate-1", Phase: "Failed", UnhealthySince: recently,
+	}, windowStart)
+	if at := momentOf(t, findings, "Pod migrate-1 failed"); !at.Equal(recently) {
+		t.Errorf("failure dated %v, want the moment it stopped being ready, %v", at, recently)
+	}
+}
+
+// The other half of the line: a container still failing is still failing,
+// however long it has been doing it. An ImagePullBackOff from three weeks ago
+// is not old news — it is a pod that has never run.
+func TestOngoingFailuresAreReportedWhateverTheirAge(t *testing.T) {
+	for _, reason := range []string{"CrashLoopBackOff", "ImagePullBackOff", "CreateContainerConfigError"} {
+		findings := containerFindings("nginx", ContainerDiagnostic{
+			Name: "app", State: "Waiting", WaitingReason: reason,
+			WaitingMessage: "still broken", LastTerminatedAt: longAgo, TerminatedAt: longAgo,
+		}, windowStart, unbounded)
+		if len(findings) == 0 {
+			t.Errorf("%s produced no finding — an ongoing failure was bounded", reason)
+		}
+	}
+}
+
+// A pod that has been Pending for three weeks has been failing to schedule
+// for three weeks. Nothing about it has finished.
+func TestStalePendingPodIsStillReported(t *testing.T) {
+	findings := podFindings(PodDiagnostic{
+		Name: "web-1", Phase: "Pending",
+		Scheduling: SchedulingInfo{Schedulable: false, Reason: "Unschedulable",
+			Message: "0/1 nodes are available"},
+	}, windowStart)
+	if !hasSummaryContaining(findings, "Unschedulable") {
+		t.Errorf("findings = %v, want the ongoing scheduling failure", summaries(findings))
+	}
+}
+
+// A container that has stopped cannot have restarted since, so its own
+// termination dates the count when there is no previous one to date it —
+// the shape a pod carries when the API recorded state but no lastState.
+func TestRestartsOnAStoppedContainerAreDatedByItsTermination(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+		RestartCount: 21, TerminatedAt: longAgo,
+	}, windowStart, unbounded)
+	if hasSummaryContaining(findings, "restarted") {
+		t.Errorf("findings = %v, want no restart finding for a container that stopped weeks ago",
+			summaries(findings))
+	}
+}
+
+func TestRestartsOnARecentlyStoppedContainerAreStillReported(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("nginx", ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Error", ExitCode: &exit,
+		RestartCount: 21, TerminatedAt: recently,
+	}, windowStart, unbounded)
+	if !hasSummaryContaining(findings, "restarted 21 times") {
+		t.Errorf("findings = %v, want the restart finding", summaries(findings))
+	}
+}
+
+// The restart count is dated by the restart it counts, not by whatever the
+// container did afterwards. A container that last restarted three weeks ago
+// and then stopped ten minutes ago has no restarting inside a day-wide
+// window — and the RESTARTS column beside it says "21 (21d ago)", so a
+// finding claiming 10m would contradict the table on the same screen.
+func TestRestartsAreDatedByTheRestartTheyCount(t *testing.T) {
+	container := ContainerDiagnostic{
+		Name: "app", State: "Terminated", TerminatedReason: "Completed",
+		RestartCount: 21, TerminatedAt: recently, LastTerminatedAt: longAgo,
+	}
+	findings := containerFindings("nginx", container, windowStart, unbounded)
+	if hasSummaryContaining(findings, "restarted") {
+		t.Errorf("findings = %v, want no restart finding — the last restart was weeks ago",
+			summaries(findings))
+	}
+	findings = containerFindings("nginx", container, unbounded, unbounded)
+	if at := momentOf(t, findings, "restarted 21 times"); !at.Equal(longAgo) {
+		t.Errorf("restart finding dated %v, want the restart itself, %v", at, longAgo)
+	}
+}
+
+// Every ongoing finding says how long it has been going on, so a summary
+// does not read as though one row is dated and the rest are unknowable. The
+// duration is not a moment: no window can filter these away.
+func TestOngoingFindingsSayHowLongTheyHaveBeenTrue(t *testing.T) {
+	since := time.Now().Add(-24 * 24 * time.Hour)
+	pod := PodDiagnostic{
+		Name: "api-1", Phase: "Pending", UnhealthySince: since, TotalContainers: 1,
+		Containers: []ContainerDiagnostic{{
+			Name: "app", State: "Waiting", WaitingReason: "ImagePullBackOff",
+		}},
+	}
+	for _, finding := range podFindings(pod, unbounded) {
+		if finding.Since.IsZero() {
+			t.Errorf("%q carries no duration", finding.Summary)
+		}
+		if !finding.At.IsZero() {
+			t.Errorf("%q carries a moment as well as a duration", finding.Summary)
+		}
+	}
+}
+
+func TestReplicaFindingsSayHowLongTheyHaveBeenShort(t *testing.T) {
+	since := time.Now().Add(-53 * 24 * time.Hour)
+	findings := replicaFindings(ReplicaHealth{Desired: 1, UnavailableSince: since})
+	if len(findings) == 0 {
+		t.Fatal("a Deployment with no ready replicas produced no findings")
+	}
+	for _, finding := range findings {
+		if !finding.Since.Equal(since) {
+			t.Errorf("%q: Since = %v, want %v", finding.Summary, finding.Since, since)
+		}
+	}
+}
+
+// A kind that records no conditions — a DaemonSet — leaves the duration
+// unset rather than inventing one, and the finding simply says less.
+func TestReplicaFindingsWithoutAConditionCarryNoDuration(t *testing.T) {
+	for _, finding := range replicaFindings(ReplicaHealth{Desired: 1}) {
+		if !finding.Since.IsZero() {
+			t.Errorf("%q invented a duration", finding.Summary)
+		}
+	}
+}
+
+// A finished thing keeps its moment and gains no duration: the two answer
+// different questions and a finding only ever asks one of them.
+func TestFinishedFindingsKeepAMomentAndNoDuration(t *testing.T) {
+	exit := int32(1)
+	findings := containerFindings("job-1", ContainerDiagnostic{
+		Name: "run", State: "Terminated", TerminatedReason: "Error",
+		ExitCode: &exit, TerminatedAt: recently,
+	}, windowStart, time.Time{})
+	if len(findings) == 0 {
+		t.Fatal("no findings for a container that failed ten minutes ago")
+	}
+	for _, finding := range findings {
+		if finding.At.IsZero() {
+			t.Errorf("%q lost its moment", finding.Summary)
+		}
+		if !finding.Since.IsZero() {
+			t.Errorf("%q carries a duration as well as a moment", finding.Summary)
+		}
+	}
+}
+
+// A Node's conditions carry their own transition times, so a node report has
+// no reason to be the one place a summary reads as undated.
+func TestNodeConditionFindingsSayHowLongTheyHaveBeenTrue(t *testing.T) {
+	since := time.Now().Add(-3 * time.Hour)
+	findings := nodeFindings(NodeHealth{Conditions: []NodeCondition{
+		{Type: "Ready", Status: "False", Reason: "KubeletNotReady", Since: since},
+		{Type: "MemoryPressure", Status: "True", Reason: "KubeletHasInsufficientMemory", Since: since},
+	}})
+	if len(findings) != 2 {
+		t.Fatalf("findings = %v, want two", summaries(findings))
+	}
+	for _, finding := range findings {
+		if !finding.Since.Equal(since) {
+			t.Errorf("%q: Since = %v, want %v", finding.Summary, finding.Since, since)
+		}
+	}
+}
+
+// Cordoning is dated by the taint the API server adds with it — the bare
+// spec.unschedulable bool says nothing about when.
+func TestCordonedFindingSaysHowLongItHasBeenCordoned(t *testing.T) {
+	since := time.Now().Add(-90 * time.Minute)
+	findings := nodeFindings(NodeHealth{Unschedulable: true, CordonedSince: since})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one", summaries(findings))
+	}
+	if !findings[0].Since.Equal(since) {
+		t.Errorf("Since = %v, want %v", findings[0].Since, since)
+	}
+}
+
+// A PVC that binds never returns to Pending, so it has been pending since it
+// was created — no guess involved.
+func TestPendingPVCSaysHowLongItHasBeenPending(t *testing.T) {
+	since := time.Now().Add(-48 * 24 * time.Hour)
+	findings := pvcFindings(PVCHealth{Phase: "Pending", PendingSince: since})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one", summaries(findings))
+	}
+	if !findings[0].Since.Equal(since) {
+		t.Errorf("Since = %v, want %v", findings[0].Since, since)
+	}
+}
+
+// The findings that cannot honestly be dated stay bare: a Service's own
+// creation says when the Service was made, not when its endpoints went away,
+// and usage is instantaneous.
+func TestUndatableFindingsStayBare(t *testing.T) {
+	bare := append(
+		serviceFindings(ServiceHealth{HasSelector: true}),
+		ingressFindings(IngressHealth{MissingBackends: []string{"api"}})...)
+	bare = append(bare, nodeFindings(NodeHealth{
+		Pods: PodPhaseCounts{Total: 24, Running: 23, Pending: 1},
+	})...)
+	if len(bare) == 0 {
+		t.Fatal("no findings produced")
+	}
+	for _, finding := range bare {
+		if !finding.Since.IsZero() || !finding.At.IsZero() {
+			t.Errorf("%q claims a time the cluster does not record", finding.Summary)
+		}
+	}
+}
+
+// The finding summary is where the ×count is first written down, and it has to
+// carry the span for the same reason the rendered line does — a bare tally on
+// a windowed report claims the window's span.
+func TestEventFindingSummaryCarriesTheSpan(t *testing.T) {
+	first := time.Date(2026, 8, 13, 1, 20, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "BackOff", Kind: "Pod", Name: "web", Count: 52122,
+		FirstTimestamp: first, LastTimestamp: first.Add(29 * 24 * time.Hour),
+	}})
+
+	if len(findings) != 1 {
+		t.Fatalf("built %d findings, want 1", len(findings))
+	}
+	if got := findings[0].Summary; got != "BackOff ×52122 over 29d on Pod/web" {
+		t.Errorf("Summary = %q, want the span beside the count", got)
+	}
+}
+
+// "over", not "for". The trailing "· for 24d" segment means "has been true this
+// long, and no window hides it"; a tally's span is a different claim, and
+// reusing the word would blur the distinction the finding model rests on.
+func TestEventFindingSpanDoesNotBorrowTheOngoingWord(t *testing.T) {
+	first := time.Date(2026, 8, 13, 1, 20, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "BackOff", Kind: "Pod", Name: "web", Count: 52122,
+		FirstTimestamp: first, LastTimestamp: first.Add(29 * 24 * time.Hour),
+	}})
+	if strings.Contains(findings[0].Summary, "for ") {
+		t.Errorf("Summary = %q used \"for\", which is reserved for ongoing findings",
+			findings[0].Summary)
+	}
+}
+
+// A single occurrence spans nothing, and the line must stay exactly as it was
+// — this is the common case on every healthy-ish resource.
+func TestEventFindingWithoutASpanIsUnchanged(t *testing.T) {
+	at := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	findings := eventFindings([]EventSummary{{
+		Reason: "FailedScheduling", Kind: "Pod", Name: "web", Count: 1,
+		FirstTimestamp: at, LastTimestamp: at,
+	}})
+	if got := findings[0].Summary; got != "FailedScheduling ×1 on Pod/web" {
+		t.Errorf("Summary = %q, want no span segment", got)
 	}
 }

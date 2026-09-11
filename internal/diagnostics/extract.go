@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -59,7 +60,15 @@ func lastN(values []string, n int) []string {
 func replicaHealthFrom(kind kinds.Kind, object any) *ReplicaHealth {
 	switch workload := object.(type) {
 	case *appsv1.Deployment:
+		var unavailableSince time.Time
+		for _, condition := range workload.Status.Conditions {
+			if condition.Type == appsv1.DeploymentAvailable &&
+				condition.Status == corev1.ConditionFalse {
+				unavailableSince = condition.LastTransitionTime.Time
+			}
+		}
 		return &ReplicaHealth{
+			UnavailableSince:   unavailableSince,
 			Desired:            derefInt32(workload.Spec.Replicas),
 			Ready:              workload.Status.ReadyReplicas,
 			Available:          workload.Status.AvailableReplicas,
@@ -94,12 +103,20 @@ func replicaHealthFrom(kind kinds.Kind, object any) *ReplicaHealth {
 // jobHealthFrom extracts job health from an already-fetched Job.
 func jobHealthFrom(job *batchv1.Job) *JobHealth {
 	failedReasons := map[string]bool{}
+	// The Failed condition's transition is the only date a failed run has:
+	// CompletionTime is set on success, and StartTime says when it began
+	// rather than when it went wrong.
+	var failedAt time.Time
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed {
 			failedReasons[condition.Reason] = true
+			if at := condition.LastTransitionTime.Time; at.After(failedAt) {
+				failedAt = at
+			}
 		}
 	}
 	return &JobHealth{
+		FailedAt:             failedAt,
 		Succeeded:            job.Status.Succeeded,
 		Failed:               job.Status.Failed,
 		Active:               job.Status.Active,
@@ -108,6 +125,35 @@ func jobHealthFrom(job *batchv1.Job) *JobHealth {
 		BackoffLimitExceeded: failedReasons["BackoffLimitExceeded"],
 		DeadlineExceeded:     failedReasons["DeadlineExceeded"],
 	}
+}
+
+// pvcHealthFrom extracts claim health, dating a pending one by its creation:
+// a claim that binds never returns to Pending, so one that is pending now has
+// been pending for its whole life. A bound claim is waiting for nothing and
+// carries no time.
+func pvcHealthFrom(claim *corev1.PersistentVolumeClaim) *PVCHealth {
+	health := &PVCHealth{Phase: phaseOr(string(claim.Status.Phase))}
+	if health.Phase == "Pending" {
+		health.PendingSince = claim.CreationTimestamp.Time
+	}
+	return health
+}
+
+// cordonedSince is when a node was cordoned, read from the taint the API
+// server adds alongside spec.unschedulable.
+//
+// The bool records only that it happened. The taint carries timeAdded, which
+// is populated here despite being a NoSchedule rather than a NoExecute taint
+// — verified against a live cluster rather than assumed. A node cordoned by
+// something that wrote the bool without the taint reports no time, and the
+// finding says less rather than guessing.
+func cordonedSince(node *corev1.Node) time.Time {
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == corev1.TaintNodeUnschedulable && taint.TimeAdded != nil {
+			return taint.TimeAdded.Time
+		}
+	}
+	return time.Time{}
 }
 
 // serviceHealthFrom extracts service health from a Service and its Endpoints.
@@ -177,6 +223,7 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		phase = "Unknown"
 	}
 	return PodDiagnostic{
+		UnhealthySince:  unhealthySince(pod),
 		Name:            pod.Name,
 		Phase:           phase,
 		Node:            pod.Spec.NodeName,
@@ -185,6 +232,36 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		Containers:      containers,
 		Scheduling:      schedulingInfo(pod.Status),
 	}
+}
+
+// unhealthySince is how long a pod has been failing: since it stopped being
+// ready, or since it was created if it never became ready.
+//
+// The creation fallback is not a guess. A pod with no Ready condition has not
+// been through the scheduler, and one whose Ready condition has always been
+// False has been failing for its whole life — both of which started when it
+// was created. A ready pod gets nothing, having no duration to report.
+//
+// For a pod that flaps this is the current episode rather than the whole
+// history: a crashlooping container with no readiness probe counts as ready
+// while it runs, so the condition transitions on every restart and a pod
+// broken for weeks can read "for 2m". That is what the cluster records, and
+// the restart count beside it — "4673 (57s ago)" — is what carries the rest
+// of the story.
+func unhealthySince(pod *corev1.Pod) time.Time {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type != corev1.PodReady {
+			continue
+		}
+		if condition.Status == corev1.ConditionTrue {
+			return time.Time{}
+		}
+		if !condition.LastTransitionTime.IsZero() {
+			return condition.LastTransitionTime.Time
+		}
+		break
+	}
+	return pod.CreationTimestamp.Time
 }
 
 func containerDiagnostic(status *corev1.ContainerStatus, spec *corev1.Container) ContainerDiagnostic {
@@ -208,11 +285,13 @@ func containerDiagnostic(status *corev1.ContainerStatus, spec *corev1.Container)
 		diagnostic.State = "Terminated"
 		diagnostic.TerminatedReason = status.State.Terminated.Reason
 		diagnostic.ExitCode = int32Ptr(status.State.Terminated.ExitCode)
+		diagnostic.TerminatedAt = status.State.Terminated.FinishedAt.Time
 	}
 
-	if status.LastTerminationState.Terminated != nil {
-		diagnostic.LastTerminatedReason = status.LastTerminationState.Terminated.Reason
-		diagnostic.LastExitCode = int32Ptr(status.LastTerminationState.Terminated.ExitCode)
+	if last := status.LastTerminationState.Terminated; last != nil {
+		diagnostic.LastTerminatedReason = last.Reason
+		diagnostic.LastExitCode = int32Ptr(last.ExitCode)
+		diagnostic.LastTerminatedAt = last.FinishedAt.Time
 	}
 
 	if spec != nil {
@@ -242,11 +321,25 @@ func schedulingInfo(status corev1.PodStatus) SchedulingInfo {
 // containerNeedsLogs reports whether a container is unhealthy in some way: not
 // ready, not running, restarted, or previously terminated. Fully healthy
 // containers are skipped so healthy reports stay clean and fast.
-func containerNeedsLogs(container ContainerDiagnostic) bool {
-	return !container.Ready ||
-		container.State != "Running" ||
-		container.RestartCount > 0 ||
-		container.LastTerminatedReason != ""
+//
+// A container whose only trouble is outside the window is skipped too. Nothing
+// will report that history, so the previous instance's tail would be an
+// excerpt of a crash no finding mentions — and one API call per container to
+// produce it.
+func containerNeedsLogs(container ContainerDiagnostic, since time.Time) bool {
+	// A container that stopped before the window opened is one no finding
+	// will mention, so its tail would be an excerpt of a crash the report
+	// does not report.
+	if outsideWindow(container.TerminatedAt, since) {
+		return false
+	}
+	if !container.Ready || container.State != "Running" {
+		return true
+	}
+	if outsideWindow(container.LastTerminatedAt, since) {
+		return false
+	}
+	return container.RestartCount > 0 || container.LastTerminatedReason != ""
 }
 
 func derefInt32(value *int32) int32 {

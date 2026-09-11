@@ -42,11 +42,18 @@ underneath that is worse than one it can check for.
 {
   "schemaVersion": 1,
   "namespace": "prod",
+  "window": "24h",
   "checked": 12,
   "healthy": 1,
   "resources": [ … ]
 }
 ```
+
+`window` is how far back that run was allowed to look, spelled the way
+`--since` reads it. A run with no window carries no such field. It is what
+tells two runs of the same job apart when the second one is quieter — the
+cluster got better, or the window got narrower — which a document that only
+counted what it found could not say.
 
 All four commands that emit `--json` name their subject with the same fields,
 so a pipeline that reads one does not have to learn a second shape to read the
@@ -97,6 +104,33 @@ than after a sweep has already run.
 An image whose scan failed breaches every threshold, for the same reason a
 missing test is not a passing one: an image kx could not read has not been
 shown to be clean.
+
+### Old news doesn't hold the gate red
+
+Evidence drives a finding, a finding drives the verdict, and the verdict
+drives the gate — so by default one `FailedScheduling` from three weeks ago,
+or one OOMKill a container recovered from last month, fails the job forever on
+a cluster with nothing currently wrong with it. `--since` bounds what the
+report is allowed to look at, and only ever hides what *finished* — what is
+still going wrong is always reported, however long it has been going wrong:
+
+```bash
+kx diag -A --fail-on warning --since 24h   # today's failures only
+kx diag -A --fail-on warning --since 7d    # a week's worth
+kx diag -A --fail-on warning               # everything, however old
+```
+
+A gate is the place this matters most: without `--since`, a job that went red
+once stays red until somebody deletes the evidence.
+
+A schedule longer than the window wants `--since` widened: a weekly CronJob
+whose last run failed six days ago needs `--since 7d` to fail the gate on it.
+
+Set it once with `diag_max_age` in
+[`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
+job's environment. Events are the least of it — most clusters discard those
+after an hour anyway; what a window really reaches is a container's own
+history, which the kubelet keeps for as long as the pod lives.
 
 ## The exit code is 2
 

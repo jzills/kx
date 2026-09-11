@@ -20,15 +20,15 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
 | [`kx delete <index>... [--yes/-y]`](delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int] [--since str]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](drain/) | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
-| [`kx events <index>...`](events/) | Show Kubernetes events for one or more indexed resources. |
+| [`kx events <index>... [--since str]`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--overwrite] [--remove str]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| [`kx logs <index>... [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | [`kx namespace [<index>]`](namespace/) | List namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx rollout <action> <index>`](rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |

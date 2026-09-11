@@ -1,0 +1,89 @@
+# A workload whose every failure is old news, plus one that is not.
+#
+# The pods are bound to a node that does not exist. Nothing schedules them, so
+# no kubelet ever writes their status — which is what lets status.yaml give
+# them terminations weeks in the past and have those stick. A pod on a real
+# node has its status rewritten within seconds, so aged history cannot be
+# faked on one.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kx-stale-history
+---
+# Failed 46 days ago, having restarted 21 times before it gave up. Every
+# finding it produces is dated, so every one is hidden by a window narrower
+# than its age.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ancient-crash
+  namespace: kx-stale-history
+  labels:
+    scenario: stale-history
+spec:
+  nodeName: node-that-does-not-exist
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "exit 1"]
+---
+# The control: the same failure, ten minutes old. It survives a 24h window and
+# disappears from a 1m one, which is how you tell the window is working rather
+# than the report being empty.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: recent-crash
+  namespace: kx-stale-history
+  labels:
+    scenario: stale-history
+spec:
+  nodeName: node-that-does-not-exist
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "exit 1"]
+---
+# A run that failed six weeks ago. Suspended so the Job controller creates no
+# pods for it: the failure is written by status.yaml rather than earned, which
+# is the only way to have one older than the fixture itself.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ancient-run
+  namespace: kx-stale-history
+  labels:
+    scenario: stale-history
+spec:
+  suspend: true
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: run
+          image: busybox
+          command: ["sh", "-c", "exit 1"]
+---
+# A warning event from three weeks ago, against the pod that is otherwise
+# recent — so one resource carries both a live failure and stale noise.
+apiVersion: v1
+kind: Event
+metadata:
+  name: stale-failed-scheduling
+  namespace: kx-stale-history
+type: Warning
+reason: FailedScheduling
+message: "0/1 nodes are available: 1 Insufficient cpu."
+count: 3
+firstTimestamp: "@-21d"
+lastTimestamp: "@-21d"
+involvedObject:
+  kind: Pod
+  name: recent-crash
+  namespace: kx-stale-history
+source:
+  component: kx-scenario

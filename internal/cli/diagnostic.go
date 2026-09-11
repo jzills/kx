@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
@@ -46,6 +48,13 @@ func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.
 type TriageCommand struct {
 	Diagnostics Gatherer
 	Save        func(state.State) error
+	// Window is how far back the sweep was allowed to look — the same value
+	// the caller set on the service. Carried in rather than read back off a
+	// report because a sweep that found nothing has no report to read it
+	// from, and that is the case where a caption saying "last 30m" matters
+	// most: "0 checked · all healthy" would otherwise be indistinguishable
+	// from a cluster that is genuinely quiet.
+	Window time.Duration
 }
 
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
@@ -100,6 +109,7 @@ func (c TriageCommand) Execute(
 		All:           reports,
 		Healthy:       len(reports) - len(unhealthy),
 		Full:          full,
+		Window:        c.Window,
 	}
 
 	// Every swept resource is indexed, not just the unhealthy ones printed by
@@ -148,6 +158,7 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 		Scope:         scope,
 		AllNamespaces: result.AllNamespaces,
 		Checked:       result.Checked,
+		Window:        render.WindowLabel(result.Window),
 		Reports:       result.All,
 	}
 }
@@ -155,13 +166,53 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 // resourcePage builds the HTML page for one indexed resource: a sweep of one,
 // always Single so the template renders it inline rather than behind a
 // <details>.
-func resourcePage(report diagnostics.Report, meta web.Meta) web.DiagPage {
+func resourcePage(report diagnostics.Report, window time.Duration, meta web.Meta) web.DiagPage {
 	return web.DiagPage{
 		Meta:    meta,
 		Scope:   report.Namespace,
 		Single:  true,
+		Window:  render.WindowLabel(window),
 		Reports: []diagnostics.Report{report},
 	}
+}
+
+// sinceFlag renders the resolved window for an HTML report's invocation line,
+// so a saved page says how far back it was allowed to look.
+//
+// Printed even when it came from the setting rather than the flag: the line
+// exists to say what the page covers, and a reader cannot know the config the
+// report was produced under. An unlimited window prints nothing — there is no
+// window to record, and "--since 0" would read as a setting rather than as the
+// absence of one.
+func sinceFlag(window time.Duration) string {
+	if window == 0 {
+		return ""
+	}
+	return "--since " + config.FormatDuration(window)
+}
+
+// sinceOverview is the --since paragraph of the long help, which says the same
+// thing sinceUsage does at more length: what the report looks at when the flag
+// is absent.
+//
+// Split on the setting for the same reason — "without it everything is
+// reported" is the behaviour of an unset diag_max_age, not of kx — and the
+// half that no longer applies is replaced rather than merely qualified: a
+// reader who has already set the key does not need to be told to set it, and
+// does need to be told how to get the unbounded run back.
+func sinceOverview(configured time.Duration) string {
+	const lead = "--since bounds how far back the report looks, in " + config.DurationUnits +
+		": " + config.DurationExamples + ". A fraction or a mixture works too — 1.5h, 1h30m — " +
+		"except with d, which takes a fraction but not a mixture: 1.5d, never 1d12h. "
+	if configured == 0 {
+		return lead + "Without it everything is reported, however old — which " +
+			"is what holds a resource at warnings, and a --fail-on gate red, " +
+			"over a failure from last month. Set diag_max_age in config.toml " +
+			"to choose a window once rather than per run."
+	}
+	return lead + "Without it the window is diag_max_age, currently " +
+		config.FormatDuration(configured) + " — set in config.toml or " +
+		"KX_DIAG_MAX_AGE. '--since 0' reports everything, however old."
 }
 
 func newDiagnosticCommand(services Services, use string, aliases []string) *cobra.Command {
@@ -172,9 +223,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Aliases:    aliases,
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
-			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.",
+			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
+			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
+			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.\n\n" +
+			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
+			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
+			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -187,6 +243,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			out, _ := cmd.Flags().GetString("out")
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
+			since, _ := cmd.Flags().GetString("since")
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -218,6 +275,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					return err
 				}
 				threshold = parsed
+			}
+
+			// Parsed here for the same reason --fail-on is: a typo should
+			// cost nothing, not a sweep of every namespace first.
+			window, err := resolveWindow(since, services.Config.DiagMaxAge)
+			if err != nil {
+				return err
 			}
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
@@ -253,6 +317,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return err
 			}
 			service := diagnostics.New(client)
+			service.MaxAge = window
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
@@ -265,7 +330,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				stop := render.Status(sweeping)
 				result, err := TriageCommand{
-					Diagnostics: service, Save: services.State.Save,
+					Diagnostics: service, Save: services.State.Save, Window: window,
 				}.Execute(ctx, namespace, allNamespaces, full)
 				stop()
 				if err != nil {
@@ -290,7 +355,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						scope = render.AllNamespaces
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
-						invocation(use, scopeArgs(namespace, allNamespaces), portFlag(port)))
+						invocation(use, scopeArgs(namespace, allNamespaces),
+							sinceFlag(window), portFlag(port)))
 					if err != nil {
 						return err
 					}
@@ -331,11 +397,11 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if htmlOpts.Enabled {
 				meta, err := pageMeta(services.Config.Theme,
 					"diag · "+string(report.Kind)+"/"+report.Name,
-					invocation(use, args[0], portFlag(port)))
+					invocation(use, args[0], sinceFlag(window), portFlag(port)))
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderDiag(resourcePage(report, meta))
+				page, err := web.RenderDiag(resourcePage(report, window, meta))
 				if err != nil {
 					return err
 				}
@@ -354,6 +420,10 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
+	cmd.Flags().String("since", "", sinceUsage(
+		"Ignore anything that happened longer ago than this — events, past "+
+			"restarts, failed runs; "+config.DurationUnits+": "+config.DurationExamples+".",
+		"diag_max_age", services.Config.DiagMaxAge, "everything is reported"))
 	cmd.Flags().String("fail-on", "",
 		"Exit 2 when a verdict reaches this severity or worse (critical, warning)")
 	cmd.Flags().Bool("html", false,

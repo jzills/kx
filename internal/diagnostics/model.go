@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -51,19 +52,34 @@ func (s Severity) Token() string {
 
 // ContainerDiagnostic is one container's flattened status.
 type ContainerDiagnostic struct {
-	Name                 string
-	Ready                bool
-	Started              *bool
-	RestartCount         int32
-	State                string // "Running" | "Waiting" | "Terminated" | "Unknown"
-	WaitingReason        string
-	WaitingMessage       string
-	TerminatedReason     string
-	ExitCode             *int32
+	Name             string
+	Ready            bool
+	Started          *bool
+	RestartCount     int32
+	State            string // "Running" | "Waiting" | "Terminated" | "Unknown"
+	WaitingReason    string
+	WaitingMessage   string
+	TerminatedReason string
+	ExitCode         *int32
+	// TerminatedAt is when the container this diagnostic describes stopped,
+	// set only while it is in the terminated state.
+	//
+	// A terminated container is not doing anything: it finished, at this
+	// moment, and stays finished. That makes it history like the rest —
+	// Kubernetes keeps a terminated pod's object until GC, so without a date
+	// a Job whose pods died in July reads critical in September.
+	TerminatedAt         time.Time
 	LastTerminatedReason string
 	LastExitCode         *int32
-	LogLines             []string
-	LogSource            string // "previous" | "current"
+	// LastTerminatedAt is when the previous run of this container ended.
+	// Zero when it has never terminated, or when the API did not record it.
+	//
+	// It is what dates the container's history: LastTerminatedReason says
+	// what went wrong last time, and RestartCount is cumulative over the
+	// pod's whole life, so neither says whether the trouble is current.
+	LastTerminatedAt time.Time
+	LogLines         []string
+	LogSource        string // "previous" | "current"
 	// LogFiltered is false when LogLines is a raw tail rather than lines
 	// matching a severity token.
 	LogFiltered bool
@@ -71,6 +87,68 @@ type ContainerDiagnostic struct {
 	CPULimit    *resource.Quantity
 	MemoryUsage *resource.Quantity
 	MemoryLimit *resource.Quantity
+}
+
+// RestartedAt is when this container last restarted: the moment the previous
+// instance ended, which is the moment the one after it began.
+//
+// It dates the restart count, which is cumulative over the pod's whole life
+// and so says nothing on its own about when the thrashing happened.
+//
+// The RESTARTS column does not use it. render.restarts and the HTML report
+// both read LastTerminatedAt directly, and print a bare count when there is
+// none — which is what kubectl get pods does, and the column is a kubectl
+// column. So for a container carrying state.terminated and no lastState the
+// finding says "restarted 5 times · 46d ago" while the column says "5". The
+// divergence is deliberate: the fallback below is a bound, and a bound is
+// worth stating in a sentence that has room to say so, not in a table cell
+// that would read as a measurement.
+//
+// The fallback to this instance's own termination is a bound rather than a
+// measurement: a container that has stopped cannot have restarted since, so
+// when the API recorded no previous state that termination is the latest the
+// restarting can have been. It is what dates the count for a pod carrying
+// state.terminated and no lastState.
+func (c ContainerDiagnostic) RestartedAt() time.Time {
+	if !c.LastTerminatedAt.IsZero() {
+		return c.LastTerminatedAt
+	}
+	return c.TerminatedAt
+}
+
+// FinishedAt is when this pod stopped, taken from the last of its containers
+// to terminate. Zero while any container is still running, and for a pod that
+// failed without leaving a dated container status behind — an eviction before
+// the containers started, or a status the API never filled in.
+func (p PodDiagnostic) FinishedAt() time.Time {
+	var latest time.Time
+	for _, container := range p.Containers {
+		if container.TerminatedAt.After(latest) {
+			latest = container.TerminatedAt
+		}
+	}
+	return latest
+}
+
+// StoppedAt is when a failed pod's failure happened: the last of its
+// containers to terminate, or when it stopped being ready if none of them
+// carries a date.
+//
+// The fallback is what keeps such a failure datable at all. FinishedAt reads
+// the container statuses, which a pod that failed in an init container never
+// fills in — podDiagnostic flattens pod.Status.ContainerStatuses alone — and
+// which an eviction can drop entirely. An undated failure falls outside no
+// window, so without this one Job that failed to initialise last month holds
+// its workload critical, and a --fail-on gate red, forever: the case the
+// window exists to end.
+//
+// Zero remains possible, for a pod carrying neither. That one stays reported
+// under every window, by the same rule an undated event does.
+func (p PodDiagnostic) StoppedAt() time.Time {
+	if finished := p.FinishedAt(); !finished.IsZero() {
+		return finished
+	}
+	return p.UnhealthySince
 }
 
 // SchedulingInfo records why a pod could not be placed.
@@ -82,6 +160,11 @@ type SchedulingInfo struct {
 
 // PodDiagnostic is one pod's flattened status.
 type PodDiagnostic struct {
+	// UnhealthySince is when this pod stopped being ready, or when it was
+	// created if it never was. It answers "how long has this been failing",
+	// which is a different question from Finding.At's "when did this
+	// happen" — and unlike that one, no window can filter it away.
+	UnhealthySince  time.Time
 	Name            string
 	Phase           string
 	Node            string
@@ -94,6 +177,12 @@ type PodDiagnostic struct {
 // ReplicaHealth is the replica rollup shared by Deployments, StatefulSets and
 // DaemonSets.
 type ReplicaHealth struct {
+	// UnavailableSince is when the workload last became unavailable, which
+	// is how long it has been short rather than when anything happened to
+	// it. Zero when it is available, and for the kinds that record no
+	// conditions to read it from — a DaemonSet has none, and a duration
+	// nobody recorded is better left unsaid than guessed at.
+	UnavailableSince   time.Time
 	Desired            int32
 	Ready              int32
 	Available          int32
@@ -114,11 +203,20 @@ type ServiceHealth struct {
 // PVCHealth is self-contained: no pod fan-out, no ownership.
 type PVCHealth struct {
 	Phase string // "Pending" | "Bound" | "Lost" | "Unknown"
+	// PendingSince is when the claim was created, which for a pending one
+	// is how long it has been waiting: a claim that binds never returns to
+	// Pending, so it has been pending for its whole life. Zero once bound,
+	// having no wait to report.
+	PendingSince time.Time
 }
 
 // JobHealth does not reuse ReplicaHealth: a Job has no desired/ready replica
 // concept, only completion and failure counts against a backoff limit.
 type JobHealth struct {
+	// FailedAt is when the run was declared failed — the Failed condition's
+	// transition time. Zero for a run that has not failed, and for one whose
+	// failure the API did not date.
+	FailedAt             time.Time
 	Succeeded            int32
 	Failed               int32
 	Active               int32
@@ -152,12 +250,50 @@ type IngressHealth struct {
 
 // EventSummary is a grouped warning event.
 type EventSummary struct {
-	Reason        string
-	Message       string
-	Kind          string
-	Name          string
-	Count         int32
-	LastTimestamp time.Time
+	Reason  string
+	Message string
+	Kind    string
+	Name    string
+	Count   int32
+	// FirstTimestamp is the earliest occurrence the aggregate covers, and
+	// LastTimestamp the most recent. Kubernetes folds repeats of the same
+	// event into one object with a tally and these two ends rather than
+	// writing an object per occurrence, so Count spans the gap between them.
+	//
+	// Zero when the API recorded no first timestamp, in which case the span
+	// is unknown and nothing about it is claimed.
+	FirstTimestamp time.Time
+	LastTimestamp  time.Time
+}
+
+// Span is how long the aggregate took to accumulate, spelled in the vocabulary
+// --since reads, or "" when there is nothing to say.
+//
+// The count is unreadable without it. ×52122 over 29 days is about 75 an hour,
+// a pod nobody got round to fixing; ×52122 within an hour is a meltdown. The
+// window did not create that ambiguity, but it sharpened it: --since 1h
+// captioned a report "last 1h" above a count covering 29 days, because the
+// window keeps or drops a whole Event object on its last occurrence and the
+// API exposes no per-occurrence timestamps to bound the tally with.
+//
+// Spelled coarsely through config.FormatSpan — the largest unit it fills — so
+// it reads like every other age on the screen. Not FormatDuration: that spells
+// a configured window and round-trips through ParseDuration, which a measured
+// span never does, and a 29-day aggregate came back as "695h59m0.000034494s".
+//
+// Empty for a single occurrence, for an aggregate the API did not date at both
+// ends, and for a backwards span — clock skew between the API server and here
+// can land last before first, and a negative duration is never printed, the
+// same rule ages follow.
+func (e EventSummary) Span() string {
+	if e.FirstTimestamp.IsZero() || e.LastTimestamp.IsZero() {
+		return ""
+	}
+	span := e.LastTimestamp.Sub(e.FirstTimestamp)
+	if span <= 0 {
+		return ""
+	}
+	return config.FormatSpan(span)
 }
 
 // NodeCondition is one of a Node's status conditions, flattened to what a
@@ -169,6 +305,9 @@ type NodeCondition struct {
 	Status  string
 	Reason  string
 	Message string
+	// Since is when the condition last changed to the status it holds now,
+	// which for a bad one is how long the node has been in trouble.
+	Since time.Time
 }
 
 // PodPhaseCounts is a tally of the pods on a Node, by phase.
@@ -199,8 +338,11 @@ type PodPhaseCounts struct {
 // shipped) failing a CI gate forever on a cluster with nothing wrong with it.
 //
 // The pod itself is not lost: a pod that failed is a fact about the workload
-// that owns it, and kx diag on that workload reports it. A node is not the
-// right place to be told about something that finished days ago.
+// that owns it, and kx diag on that workload reports it while it is recent —
+// dated by the container that stopped last, under the same window as
+// everything else that has finished. A node is not the right place to be told
+// about something that finished days ago, and after long enough neither is
+// the workload.
 func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Unknown }
 
 // Active is the pods the node is still expected to be running: everything
@@ -224,12 +366,29 @@ func (c PodPhaseCounts) Active() int { return c.Running + c.Pending + c.Unknown 
 type NodeHealth struct {
 	Conditions    []NodeCondition
 	Unschedulable bool
+	// CordonedSince is when the node was cordoned, read from the taint the
+	// API server adds alongside spec.unschedulable — the bool itself says
+	// nothing about when, and the taint's timeAdded is set for it despite
+	// being a NoSchedule rather than a NoExecute one.
+	CordonedSince time.Time
 	Pods          PodPhaseCounts
 }
 
 // Data is the raw, already-flattened result of a gather. It carries no
 // findings — the analysis layer produces those.
 type Data struct {
+	// Window is how long that window is. Since is what the analysis
+	// compares against; this is what a reader is told, because an instant
+	// is not a caption and "24h0m0.001s" is not a duration anyone typed.
+	Window time.Duration
+	// Since is the instant this report's window opens: nothing that
+	// happened before it is reported. Zero means no window.
+	//
+	// An instant rather than a duration, and recorded here rather than
+	// recomputed, so the analysis stays a pure function of the data — one
+	// gather is measured against one moment, and a findings test needs no
+	// clock.
+	Since         time.Time
 	Kind          kinds.Kind
 	Name          string
 	Namespace     string
@@ -242,6 +401,17 @@ type Data struct {
 	Ingress       *IngressHealth
 	Pods          []PodDiagnostic
 	WarningEvents []EventSummary
+}
+
+// outsideWindow reports whether something that happened at falls before the
+// window opened.
+//
+// Two things are never outside it: anything at all when no window is set, and
+// anything the cluster did not date. A missing timestamp cannot be shown to be
+// stale, and hiding a live failure over one is the worse error — the same rule
+// an undated event gets.
+func outsideWindow(at, since time.Time) bool {
+	return !since.IsZero() && !at.IsZero() && at.Before(since)
 }
 
 // Rank orders findings of equal severity by how specific they are.
@@ -273,10 +443,47 @@ const (
 )
 
 // Finding is one distilled health signal.
+//
+// At is when the thing it reports happened, and is set only for the signals
+// the window bounds: a warning event, a container's last termination, a run
+// that failed. A finding about present state — a container waiting now, a
+// replica count that is short now — has no At, because there is no moment to
+// name; it is true until it stops being true.
+//
+// That split is visible in the rendered report, and deliberately so: a line
+// that carries an age is a line --since can filter away, and a line without
+// one is a line no window will ever hide.
 type Finding struct {
 	Severity Severity
 	Rank     Rank
-	Summary  string
+	At       time.Time
+	// Since is when an ongoing signal started, and is set instead of At for
+	// the findings a window can never hide: how long a pod has been failing
+	// to pull, how long a Deployment has been short. A finding answers one
+	// of the two questions, never both.
+	Since   time.Time
+	Summary string
+}
+
+// finding builds a finding about present state, which carries no moment.
+//
+// A constructor rather than a literal so the fields stay positional: Rank
+// ascends from most specific, so its zero value claims a finding names a
+// cause, and a keyed literal that omits it would make that claim silently.
+func finding(severity Severity, rank Rank, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, Summary: summary}
+}
+
+// dated builds a finding about something that happened at a moment.
+func dated(severity Severity, rank Rank, at time.Time, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, At: at, Summary: summary}
+}
+
+// ongoing builds a finding about something still happening, carrying how long
+// it has been true. A zero since is legal and simply says less: some kinds
+// record no condition to read a duration from.
+func ongoing(severity Severity, rank Rank, since time.Time, summary string) Finding {
+	return Finding{Severity: severity, Rank: rank, Since: since, Summary: summary}
 }
 
 // Report is the analysed result.
@@ -285,6 +492,10 @@ type Finding struct {
 // available and updated shortfalls, so the rendered report needs no separate
 // replica section.
 type Report struct {
+	// Window is the length of the window the data was gathered under, so
+	// the rendered report can say what it was allowed to see. Zero means
+	// no window, and nothing is said.
+	Window        time.Duration
 	Kind          kinds.Kind
 	Name          string
 	Namespace     string
