@@ -209,7 +209,13 @@ func installCompletion(root *cobra.Command) {
 	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
 	completion.Long = "Generates a shell completion script for kx. See each subcommand's " +
 		"own --help for how to install it."
-	completion.Example = "  kx completion zsh > \"${fpath[1]}/_kx\"\n  source <(kx completion bash)"
+	// Labelled by shell because the help screen prints each example on its
+	// own "$ " line with nothing between them, so an unlabelled pair reads as
+	// a sequence to run. Someone on zsh ran both: the bash script registers
+	// its own completer over the zsh one where bashcompinit is loaded, and
+	// then fails on a bash-completion helper zsh has no equivalent for.
+	completion.Example = "  kx completion zsh > \"${fpath[1]}/_kx\"   # zsh, then start a new shell\n" +
+		"  source <(kx completion bash)            # bash, this shell only"
 }
 
 func newGetCommand(services Services) *cobra.Command {
