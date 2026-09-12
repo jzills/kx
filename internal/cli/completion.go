@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
@@ -150,13 +151,36 @@ func argCompletion(cmd *cobra.Command, services Services) func(
 
 func isPathArg(name string) bool { return name == "src" || name == "dest" }
 
-// flagValues maps a flag name to what completes its value. Keyed by name
-// rather than by command because a flag spelled the same means the same thing
-// everywhere in kx — every -n is a namespace.
+// flagValues maps a flag name to what completes its value. Keyed by name,
+// because a flag spelled the same almost always means the same thing in kx —
+// every -n is a namespace, every --since is a window.
+//
+// --fail-on is the exception, and the reason this map grew the same
+// "<command>.<flag>" precedence argCompleters uses for arguments: kx diag
+// gates on a verdict and kx scan on a vulnerability severity, which share only
+// the word "critical". Until a command could say so, --fail-on could not be
+// completed at all and fell through to the shell's filenames — the least
+// useful answer for a flag that takes one of four words.
 var flagValues = map[string]completer{
-	"engine":    completeEngine,
-	"namespace": completeNamespaceNames,
-	"since":     completeWindow,
+	"engine":             completeEngine,
+	"namespace":          completeNamespaceNames,
+	"since":              completeWindow,
+	"diagnostic.fail-on": completeDiagnosticThreshold,
+	"scan.fail-on":       completeScanThreshold,
+}
+
+// lookupFlagValue prefers a command's own completer for a flag, the way
+// lookupCompleter does for an argument.
+//
+// Keyed on cmd.Name(), which is the command's canonical name whatever the user
+// typed: cobra resolves an alias before completing, so `kx diag --fail-on` and
+// `kx diagnostic --fail-on` both land on "diagnostic".
+func lookupFlagValue(cmd *cobra.Command, name string) (completer, bool) {
+	if complete, ok := flagValues[cmd.Name()+"."+name]; ok {
+		return complete, true
+	}
+	complete, ok := flagValues[name]
+	return complete, ok
 }
 
 // flagValueCompletion answers when the cursor is on a flag's value rather than
@@ -167,7 +191,7 @@ func flagValueCompletion(
 	cmd *cobra.Command, services Services, args []string, toComplete string,
 ) ([]string, bool) {
 	if name, prefix, found := strings.Cut(toComplete, "="); found && strings.HasPrefix(name, "--") {
-		complete, ok := flagValues[strings.TrimPrefix(name, "--")]
+		complete, ok := lookupFlagValue(cmd, strings.TrimPrefix(name, "--"))
 		if !ok {
 			return nil, false
 		}
@@ -187,7 +211,7 @@ func flagValueCompletion(
 	if flag == "" {
 		return nil, false
 	}
-	complete, ok := flagValues[flag]
+	complete, ok := lookupFlagValue(cmd, flag)
 	if !ok {
 		// A flag that takes a value, but not one kx can suggest values for —
 		// a label selector, say. Still not a filename.
@@ -392,21 +416,78 @@ func completeWindow(Services, string) []string {
 	return strings.Split(config.DurationExamples, ", ")
 }
 
+// completeDiagnosticThreshold offers the verdicts kx diag's --fail-on accepts,
+// read from the map the flag is validated against so the shell cannot suggest
+// a word the flag would reject.
+//
+// One spelling per threshold. "warnings" parses too — a verdict prints as
+// "Deployment/api · warnings", so anyone reading one and typing it back is
+// accommodated — but offering both would list four choices where there are
+// three, and Token() is the spelling the document uses.
+//
+// Most severe first, matching how the flag's own help and error name them, and
+// how kx orders severities everywhere else.
+func completeDiagnosticThreshold(Services, string) []string {
+	seen := map[diagnostics.Severity]bool{}
+	severities := make([]diagnostics.Severity, 0, len(diagnosticThresholds))
+	for _, severity := range diagnosticThresholds {
+		if !seen[severity] {
+			seen[severity] = true
+			severities = append(severities, severity)
+		}
+	}
+	sort.Slice(severities, func(i, j int) bool { return severities[i] > severities[j] })
+
+	candidates := make([]string, 0, len(severities))
+	for _, severity := range severities {
+		candidates = append(candidates,
+			severity.Token()+"\tExit 2 on "+severity.Token()+" or worse")
+	}
+	return candidates
+}
+
+// completeScanThreshold offers the vulnerability severities kx scan's --fail-on
+// accepts, read from scanner.Severities for the same reason.
+//
+// UNSPECIFIED is dropped exactly where the validator drops it: it is a bucket
+// rather than a level, so "fail on unspecified or worse" means nothing.
+// Lowercased because that is how the flag's help spells them, and the parser
+// upper-cases whatever it is given.
+func completeScanThreshold(Services, string) []string {
+	candidates := make([]string, 0, len(scanner.Severities))
+	for _, severity := range scanner.Severities {
+		if severity == "UNSPECIFIED" {
+			continue
+		}
+		name := strings.ToLower(severity)
+		candidates = append(candidates, name+"\tExit 2 on "+name+" or worse")
+	}
+	return candidates
+}
+
 // registerFlagCompletions completes flag values that come from a fixed set or
 // from state, for every command that registers the flag.
+//
+// Driven by each command's own flags rather than by the keys of flagValues,
+// which is what lets a key be qualified: "diagnostic.fail-on" is not a flag
+// name and looking it up as one would find nothing.
 func registerFlagCompletions(root *cobra.Command, services Services) {
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
-		for name, complete := range flagValues {
-			if cmd.Flags().Lookup(name) == nil {
-				continue
+		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+			complete, ok := lookupFlagValue(cmd, flag.Name)
+			if !ok || complete == nil {
+				return
 			}
-			_ = cmd.RegisterFlagCompletionFunc(name, func(
+			// The error is ignored deliberately: an inherited persistent flag
+			// is the same *pflag.Flag on parent and child, and cobra refuses
+			// the second registration. The parent's is already correct.
+			_ = cmd.RegisterFlagCompletionFunc(flag.Name, func(
 				_ *cobra.Command, _ []string, toComplete string,
 			) ([]string, cobra.ShellCompDirective) {
 				return complete(services, toComplete), cobra.ShellCompDirectiveNoFileComp
 			})
-		}
+		})
 		for _, child := range cmd.Commands() {
 			walk(child)
 		}

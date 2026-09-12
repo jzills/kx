@@ -402,3 +402,100 @@ func TestSinceCompletesTheDocumentedWindows(t *testing.T) {
 		t.Errorf("kx diag --since <TAB> directive in %q, want NoFileComp", out.String())
 	}
 }
+
+// --fail-on is the one flag in kx whose meaning is narrower than its name:
+// kx diag gates on a verdict (critical, warning) and kx scan on a vulnerability
+// severity (critical, high, medium, low). flagValues was keyed on the premise
+// that a flag spelled the same means the same thing everywhere, so --fail-on
+// could not join it at all and fell through to filename completion — the worst
+// answer for a flag that takes one of four words.
+func TestFailOnCompletesPerCommand(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+
+	diag, _ := complete(t, root, "diagnostic", "--fail-on", "")
+	if spellings(diag) != "critical warning" {
+		t.Errorf("kx diagnostic --fail-on <TAB> = %v, want the verdicts", diag)
+	}
+
+	scan, _ := complete(t, root, "scan", "--fail-on", "")
+	if spellings(scan) != "critical high medium low" {
+		t.Errorf("kx scan --fail-on <TAB> = %v, want the vulnerability severities", scan)
+	}
+}
+
+// The alias is what anyone actually types. Cobra resolves it to the command
+// before completing, so cmd.Name() is "diagnostic" either way — but that is
+// cobra's behaviour rather than kx's, and the per-command key is worthless if
+// it only works for the spelling nobody uses.
+func TestFailOnCompletesThroughTheDiagAlias(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+
+	candidates, _ := complete(t, root, "diag", "--fail-on", "")
+	if spellings(candidates) != "critical warning" {
+		t.Errorf("kx diag --fail-on <TAB> = %v, want the verdicts", candidates)
+	}
+}
+
+// The shell replaces the whole word, so an attached value comes back carrying
+// its flag — and the per-command lookup has to happen on that path too, which
+// is a separate branch of flagValueCompletion.
+func TestFailOnCompletesAttachedValues(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+
+	// Compared on the value alone: a candidate is "value\tdescription", and
+	// only the value is what the shell substitutes into the line.
+	diag, _ := complete(t, root, "diagnostic", "--fail-on=")
+	if spellings(diag) != "--fail-on=critical --fail-on=warning" {
+		t.Errorf("kx diagnostic --fail-on=<TAB> = %v, want candidates carrying the flag", diag)
+	}
+	scan, _ := complete(t, root, "scan", "--fail-on=")
+	if spellings(scan) != "--fail-on=critical --fail-on=high --fail-on=medium --fail-on=low" {
+		t.Errorf("kx scan --fail-on=<TAB> = %v, want candidates carrying the flag", scan)
+	}
+}
+
+// The invariant worth pinning, rather than the two lists above: a completion
+// must never offer a value the flag would reject. Both completers are derived
+// from the same source their validator reads, and this is what says so — it
+// fails if either list is ever hardcoded and drifts.
+func TestEveryFailOnCandidateIsAccepted(t *testing.T) {
+	for _, candidate := range completeDiagnosticThreshold(Services{}, "") {
+		value, _, _ := strings.Cut(candidate, "\t")
+		if _, err := parseDiagnosticThreshold(value); err != nil {
+			t.Errorf("kx diag offers --fail-on %q, which its own parser rejects: %v", value, err)
+		}
+	}
+	for _, candidate := range completeScanThreshold(Services{}, "") {
+		value, _, _ := strings.Cut(candidate, "\t")
+		if _, err := scanThresholdBreached(nil, value); err != nil {
+			t.Errorf("kx scan offers --fail-on %q, which its own parser rejects: %v", value, err)
+		}
+	}
+}
+
+// "warnings" parses too — a verdict prints as "Deployment/api · warnings", so
+// anyone reading one and typing it back is accommodated. It is not offered:
+// two spellings of one threshold is a list that reads as four choices where
+// there are three, and "fail on warnings or worse" is the wrong reading.
+func TestFailOnOffersOneSpellingPerThreshold(t *testing.T) {
+	candidates := completeDiagnosticThreshold(Services{}, "")
+	if got := len(candidates); got != 2 {
+		t.Errorf("offered %d verdicts, want 2: %v", got, candidates)
+	}
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "warnings") {
+			t.Error("offered the plural spelling beside the singular")
+		}
+	}
+}
+
+// spellings reduces candidates to their values, dropping the tab-separated
+// descriptions, so an assertion reads as the line the shell shows.
+func spellings(candidates []string) string {
+	values := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		value, _, _ := strings.Cut(candidate, "\t")
+		values = append(values, value)
+	}
+	return strings.Join(values, " ")
+}
