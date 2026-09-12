@@ -199,8 +199,14 @@ kx diag -A --fail-on warning --since 24h             # ignore what failed before
 `--since` bounds how far back the report looks — a warning event, an OOMKill a
 container recovered from, a pod or run that failed. Without it a failure from
 last month holds the gate red forever. Whatever is still going wrong — a
-CrashLoopBackOff, a Pending pod — is reported either way. `diag_max_age` sets
-a window once, for every run.
+CrashLoopBackOff, a Pending pod — is reported either way. Set the window once
+with `diag_max_age` in `config.toml`, or `KX_DIAG_MAX_AGE` in the job's
+environment.
+
+`kx events` and `kx logs` take `--since` too. `kx events` has a key of its own,
+`events_max_age` / `KX_EVENTS_MAX_AGE`, and it does not affect `kx diag` —
+narrowing the evidence behind a verdict is not a request for a shorter event
+listing. Neither key falls back to the other.
 
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".

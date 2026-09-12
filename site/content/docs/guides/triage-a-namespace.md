@@ -91,9 +91,10 @@ kx diag               # everything, however old
 ```
 
 A schedule longer than the window wants `--since` widened: a weekly CronJob
-whose last run failed six days ago needs `--since 7d` to see it. `diag_max_age`
-in [config.toml](../../reference/configuration/) sets a window once, for every
-run.
+whose last run failed six days ago needs `--since 7d` to see it. Set the window
+once with `diag_max_age` in
+[config.toml](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
+environment.
 
 ## Usage as a signal, not just state
 
