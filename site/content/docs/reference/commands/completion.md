@@ -33,6 +33,6 @@ kx completion [OPTIONS]
 ## Examples
 
 ```bash
-kx completion zsh > "${fpath[1]}/_kx"
-source <(kx completion bash)
+kx completion zsh > "${fpath[1]}/_kx"   # zsh, then start a new shell
+source <(kx completion bash)            # bash, this shell only
 ```
