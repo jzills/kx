@@ -316,3 +316,6 @@ commands it documents. Tests are not in the hook — run them yourself.
 The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)
 tapes — see [`demo/README.md`](demo/README.md) for seeding the demo namespace
 and re-recording.
+
+Releases are cut by pushing a `release/vX.Y.Z` branch — see
+[`RELEASING.md`](RELEASING.md).
