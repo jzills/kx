@@ -100,7 +100,7 @@ Check the artifacts themselves:
 git fetch --tags && git tag -l v0.5.3
 
 # six archives plus SHA256SUMS
-gh release view v0.5.3 --json assets --jq '[.assets[]|select(.name|startswith("kx_v"))]|length'
+gh release view v0.5.3 --json assets --jq '.assets|length'    # expect 7
 
 curl -s https://pypi.org/pypi/kx-cli/json | jq -r .info.version    # expect 0.5.3
 gh run list --workflow=krew.yml --limit 1                          # expect success
@@ -109,12 +109,6 @@ gh run list --workflow=krew.yml --limit 1                          # expect succ
 curl -sL -o kx.tgz https://github.com/jzills/kx/releases/download/v0.5.3/kx_v0.5.3_linux_amd64.tar.gz
 tar xzf kx.tgz && ./kx/kx --version && test -f kx/LICENSE && echo "LICENSE ok"
 ```
-
-Count the archives rather than the assets: the release also carries the
-repository's own `assets/` images — `banner.svg`, the three screenshots —
-because `download-artifact` stages the archives into the directory checkout
-already put them in, and `gh release create assets/*` uploads whatever is
-there. Harmless, and not deliberate; see the note at the end.
 
 ## Why the pipeline is shaped the way it is
 
@@ -138,6 +132,12 @@ Each of these is a scar.
 - **`fetch-depth: 0` on the release job.** The notes are built from the tag
   list and the commit range between the last two releases. A shallow clone has
   neither and produces empty notes rather than an error.
+
+- **Artifacts are staged in `RUNNER_TEMP`, not the workspace.** `assets/` is a
+  real directory here — the banner and the screenshots the README embeds — and
+  downloading the archives into it merged the two, so the upload's glob shipped
+  those five images with every release from v0.0.6 to v0.5.2. A step now checks
+  that the staging directory holds nothing but archives and `SHA256SUMS`.
 
 - **The tag is pushed with `GITHUB_TOKEN`,** which never triggers downstream
   workflows — so the krew update is an explicit `workflow_dispatch` rather
@@ -166,14 +166,3 @@ gh workflow run krew.yml --ref v0.5.3
 tagged yet, delete the branch (`git push origin --delete release/v0.5.3`) and
 the run stops mattering. Once the tag exists, the release exists — go forward,
 not back.
-
-## A known wart
-
-Every release carries five extra assets — `banner.svg`, `banner_orig.svg`,
-`diag-html.png`, `scan-html.png`, `tree-html.png` — which are the repository's
-own `assets/` directory, not build output. The release job checks out the repo,
-stages the downloaded archives into `assets/`, and then uploads `assets/*`.
-
-Nothing depends on them being there and nothing breaks because they are, which
-is why it has gone unnoticed since the first release. Staging the artifacts
-into a directory of their own would fix it.
