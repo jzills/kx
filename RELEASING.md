@@ -44,9 +44,12 @@ Release notes have three tiers, and you write only the first:
 
 | tier | comes from |
 |---|---|
-| the opening paragraph | `release-notes/vX.Y.Z.md` — you |
-| `### Features` / `### Fixes` / `### Dependencies` | derived from what merged |
+| `## Highlights` | `release-notes/vX.Y.Z.md` — you |
+| `## Features` / `## Fixes` / `## Dependencies` | derived from what merged |
 | `## What's Changed` | GitHub, unchanged |
+
+All four are siblings at the same heading level, which is the one GitHub's
+own generated block already uses.
 
 The bullets are derived rather than written so they cannot advertise something
 that never shipped. The paragraph is written rather than derived because no
