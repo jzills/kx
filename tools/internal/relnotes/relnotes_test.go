@@ -133,11 +133,15 @@ func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
 	)
 
+	heading := strings.Index(notes, "## Highlights")
 	highlights := strings.Index(notes, "Sharpens shell completion")
-	features := strings.Index(notes, "### Features")
+	features := strings.Index(notes, "## Features")
 	changed := strings.Index(notes, "## What's Changed")
-	if highlights < 0 || features < 0 || changed < 0 {
+	if heading < 0 || highlights < 0 || features < 0 || changed < 0 {
 		t.Fatalf("a tier is missing entirely:\n%s", notes)
+	}
+	if !(heading < highlights) {
+		t.Errorf("the summary's heading does not precede its paragraph:\n%s", notes)
 	}
 	if !(highlights < features && features < changed) {
 		t.Errorf("tiers out of order — highlights=%d features=%d changed=%d:\n%s",
@@ -162,7 +166,12 @@ func TestAssembleKeepsTheHighlightsVerbatim(t *testing.T) {
 // generated list — no stray heading between them.
 func TestAssembleWithNoSections(t *testing.T) {
 	notes := Assemble("Docs only.\n", nil, "## What's Changed\n* docs\n")
-	if strings.Contains(notes, "###") {
-		t.Errorf("rendered an empty category block:\n%s", notes)
+	for _, absent := range []string{"## Features", "## Fixes", "## Dependencies"} {
+		if strings.Contains(notes, absent) {
+			t.Errorf("rendered an empty %q block:\n%s", absent, notes)
+		}
+	}
+	if !strings.Contains(notes, "## Highlights") {
+		t.Errorf("a release with no categories still has a summary:\n%s", notes)
 	}
 }

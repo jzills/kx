@@ -28,6 +28,11 @@ type Change struct {
 	Summary string // the title with its prefix and any trailing (#N) removed
 }
 
+// summaryHeading names the tier a person wrote. "Highlights" rather than
+// "Summary" because the paragraph is meant to pick out what matters, not to
+// restate the list underneath it.
+const summaryHeading = "Highlights"
+
 // Section is one category of the bullet block.
 type Section struct {
 	Title   string
@@ -144,12 +149,20 @@ func Sections(changes []Change) []Section {
 // release exists, what changed by kind, then every commit for anyone who wants
 // them.
 //
-// The paragraph is copied verbatim. It is the one part a person wrote, and
-// reflowing or re-heading it would be this tool editing prose it did not
-// author.
+// Every section is an h2, including the summary's, because GitHub's own
+// generated block opens with "## What's Changed" and these are its siblings
+// rather than its children. Rendered at h3 they were orphans — three headings
+// one level down from a parent that did not exist — and the summary, with no
+// heading at all, read as a preamble to the Features list rather than as the
+// release's own statement.
+//
+// The paragraph itself is copied verbatim under that heading. It is the one
+// part a person wrote, and reflowing it would be this tool editing prose it
+// did not author.
 func Assemble(highlights string, sections []Section, generated string) string {
 	var out strings.Builder
 	if trimmed := strings.TrimSpace(highlights); trimmed != "" {
+		out.WriteString("## " + summaryHeading + "\n\n")
 		out.WriteString(highlights)
 		if !strings.HasSuffix(highlights, "\n") {
 			out.WriteString("\n")
@@ -157,7 +170,7 @@ func Assemble(highlights string, sections []Section, generated string) string {
 		out.WriteString("\n")
 	}
 	for _, section := range sections {
-		out.WriteString("### " + section.Title + "\n\n")
+		out.WriteString("## " + section.Title + "\n\n")
 		for _, change := range section.Changes {
 			out.WriteString("- " + change.Summary +
 				" (#" + strconv.Itoa(change.Number) + ")\n")
