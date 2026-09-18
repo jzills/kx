@@ -516,6 +516,25 @@ const clusterScopedNodesTable = "NAME      STATUS   ROLES           AGE   VERSIO
 	"node-a    Ready    control-plane   1d    v1.34.3\n" +
 	"node-b    Ready    <none>          1d    v1.34.3"
 
+// A relist naming a bad index fetches nothing. The relist resolved as it
+// grouped, so kx get pods 1 99 issued the kubectl call for index 1 and then
+// failed — a listing of some of what was asked for, saved as state.
+func TestRelistValidatesEveryIndexBeforeFetching(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	before := len(kube.calls)
+
+	if err := runGet(services, "pods", []string{"1", "99"}, getOptions{}); err == nil {
+		t.Fatal("relist succeeded despite an out-of-range index")
+	}
+	if after := len(kube.calls); after != before {
+		t.Errorf("made %d kubectl calls for a refused relist, want 0", after-before)
+	}
+}
+
 // An empty listing replaces the one before it, so the way back is offered at
 // the moment it becomes necessary rather than left to be discovered in
 // --help. The note names the listing it displaced, because "kx state back"
