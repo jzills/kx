@@ -202,10 +202,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				scopeFlag = "--all-namespaces"
 			}
 			if len(args) > 0 && scopeFlag != "" {
-				return fmt.Errorf(
-					"'%s' cannot be combined with an index — an index already "+
-						"carries the namespace it was listed from. Drop the flag, "+
-						"or drop the index to sweep the namespace instead.", scopeFlag)
+				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 
 			client, err := services.Kubernetes()

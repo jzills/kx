@@ -1,8 +1,14 @@
 package cli
 
 import (
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/state"
 )
 
 func joined(args []string) string { return strings.Join(args, " ") }
@@ -189,5 +195,399 @@ func TestExtractStringConsumesFlagLikeValue(t *testing.T) {
 	}
 	if joined(rest) != "pods" {
 		t.Errorf("rest = %q, want pods", joined(rest))
+	}
+}
+
+// One sentence, one spelling, wherever the rule is enforced — the sweep
+// commands only add what they can offer instead.
+func TestScopeFlagBesideIndexErrorQuotesTheSpellingTyped(t *testing.T) {
+	err := scopeFlagBesideIndexError("-n", "")
+	if err == nil {
+		t.Fatal("scopeFlagBesideIndexError returned nil")
+	}
+	for _, want := range []string{
+		"'-n' cannot be combined with an index",
+		"already carries the namespace it was listed from",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "sweep") {
+		t.Errorf("err = %q, want no sweep hint where there is no sweep to offer", err)
+	}
+	swept := scopeFlagBesideIndexError("--namespace", sweepInsteadHint)
+	if !strings.Contains(swept.Error(), "sweep the namespace instead") {
+		t.Errorf("err = %q, want the sweep hint appended", swept)
+	}
+}
+
+// A namespaced index already says where the resource is, so a scope flag next
+// to one is a contradiction: kubectl takes the last -n, which for kx delete
+// meant a prompt naming one namespace and a deletion in another.
+func TestRefuseScopeFlagRejectsAScopeFlagBesideANamespacedIndex(t *testing.T) {
+	for _, args := range [][]string{
+		{"-n", "other"}, {"--namespace=other"}, {"-nother"}, {"-A"}, {"--all-namespaces"},
+	} {
+		if err := refuseScopeFlag(args, "diagnostics"); err == nil {
+			t.Errorf("refuseScopeFlag(%v) = nil, want a refusal", args)
+		}
+	}
+}
+
+// A cluster-scoped index carries no namespace for -n to contradict. It is not
+// always meaningless either: `kx debug <node-index>` creates a pod, and -n is
+// where that pod lands — see DebugCommand.Execute.
+func TestRefuseScopeFlagAllowsNamespaceForAClusterScopedIndex(t *testing.T) {
+	if err := refuseScopeFlag([]string{"-n", "kube-system"}, ""); err != nil {
+		t.Errorf("refuseScopeFlag = %v, want -n allowed for a cluster-scoped index", err)
+	}
+}
+
+// -A is never a refinement of an index, whatever the index is scoped to:
+// there is no listing here for it to widen.
+func TestRefuseScopeFlagRejectsAllNamespacesEvenForAClusterScopedIndex(t *testing.T) {
+	if err := refuseScopeFlag([]string{"-A"}, ""); err == nil {
+		t.Error("refuseScopeFlag(-A) = nil for a cluster-scoped index, want a refusal")
+	}
+}
+
+// Nothing to refuse leaves the args alone.
+func TestRefuseScopeFlagPassesOtherFlags(t *testing.T) {
+	if err := refuseScopeFlag([]string{"--force", "--grace-period=0"}, "prod"); err != nil {
+		t.Errorf("refuseScopeFlag = %v, want kubectl's own flags untouched", err)
+	}
+}
+
+// The refusal has to come before any output. describe and logs print a banner
+// per index and then run kubectl, so guarding inside the per-index work put a
+// banner above the error for a command that never ran.
+func TestRefuseScopeFlagForIndexesRefusesBeforeResolvingWork(t *testing.T) {
+	resolver := refOf(
+		[3]string{"desktop-control-plane", "", "Node"},
+		[3]string{"web-abc", "prod", "Pod"},
+	)
+
+	if err := refuseScopeFlagForIndexes(resolver, []int{1, 2}, []string{"-n", "other"}); err == nil {
+		t.Error("a namespaced index among cluster-scoped ones did not refuse -n")
+	}
+	if err := refuseScopeFlagForIndexes(resolver, []int{1}, []string{"-n", "other"}); err != nil {
+		t.Errorf("refuseScopeFlagForIndexes = %v, want -n allowed for a cluster-scoped index", err)
+	}
+}
+
+// No scope flag means no resolution: the guard must not spend a lookup per
+// index on the ordinary path, which is every invocation.
+func TestRefuseScopeFlagForIndexesResolvesNothingWithoutAScopeFlag(t *testing.T) {
+	counter := &countingResolver{}
+	if err := refuseScopeFlagForIndexes(counter, []int{1, 2, 3}, []string{"--force"}); err != nil {
+		t.Fatalf("refuseScopeFlagForIndexes: %v", err)
+	}
+	if counter.calls != 0 {
+		t.Errorf("resolved %d indexes with no scope flag present, want 0", counter.calls)
+	}
+}
+
+// -A widens a listing, and there is no listing beside an index to widen — so
+// it is refused even when no index resolves to a namespace at all.
+func TestRefuseScopeFlagForIndexesRefusesAllNamespacesWithNoIndexes(t *testing.T) {
+	if err := refuseScopeFlagForIndexes(refOf(), nil, []string{"-A"}); err == nil {
+		t.Error("refuseScopeFlagForIndexes(-A) with no indexes = nil, want a refusal")
+	}
+}
+
+// Every command that resolves an index and forwards flags refuses a scope
+// flag, because kubectl takes the last -n and kx appends its own from the
+// index — so a second one silently retargets the command. Enforced as one
+// table rather than per command: the rule is the same everywhere, and a new
+// pass-through command that forgets it should fail here.
+func TestPassthroughCommandsRefuseAScopeFlagBesideAnIndex(t *testing.T) {
+	commands := map[string]struct {
+		build func(Services) *cobra.Command
+		args  []string
+	}{
+		"describe":     {newDescribeCommand, []string{"1", "-n", "other"}},
+		"logs":         {newLogsCommand, []string{"1", "-n", "other"}},
+		"edit":         {newEditCommand, []string{"1", "-n", "other"}},
+		"exec":         {newExecCommand, []string{"1", "-n", "other"}},
+		"debug":        {newDebugCommand, []string{"1", "-n", "other"}},
+		"port-forward": {newPortForwardCommand, []string{"1", "8080:80", "-n", "other"}},
+		"cp":           {newCopyCommand, []string{"1:/tmp/x", "./y", "-n", "other"}},
+		"drain":        {newDrainCommand, []string{"1", "-n", "other"}},
+		"delete":       {newDeleteCommand, []string{"1", "-y", "-n", "other"}},
+		"scale":        {newScaleCommand, []string{"1", "3", "-n", "other"}},
+		"rollout":      {newRolloutCommand, []string{"status", "1", "-n", "other"}},
+		"yaml":         {newYamlCommand, []string{"1", "-n", "other"}},
+	}
+	for name, spec := range commands {
+		t.Run(name, func(t *testing.T) {
+			kube := &recordingKubectl{output: "ok"}
+			services := switchServices(t, kube)
+			services.Confirm = func(string) error { return nil }
+			if err := services.State.Save(state.State{
+				Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+				Namespace: "prod",
+			}); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			cmd := spec.build(services)
+			cmd.SetArgs(spec.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("kx %s %v succeeded, want a refusal", name, spec.args)
+			}
+			if !strings.Contains(err.Error(), "cannot be combined with an index") {
+				t.Errorf("err = %q, want the scope-flag refusal", err)
+			}
+			if calls := len(kube.runs) + len(kube.interactive); calls != 0 {
+				t.Errorf("made %d kubectl calls for a refused command, want 0", calls)
+			}
+		})
+	}
+}
+
+// The four commands that swallowed kubectl's flags now forward them. Asserted
+// on the exact argv, because "no error" is what the old behaviour looked like
+// from the outside too — it just dropped the flag.
+func TestDeleteForwardsKubectlFlags(t *testing.T) {
+	kube := &recordingKubectl{output: ""}
+	services := switchServices(t, kube)
+	services.Confirm = func(string) error { return nil }
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"1", "-y", "--force", "--grace-period=0"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx delete 1 --force --grace-period=0: %v", err)
+	}
+	if len(kube.runs) != 1 {
+		t.Fatalf("kubectl calls = %d, want 1", len(kube.runs))
+	}
+	if got := joined(kube.runs[0]); got != "delete Pod nginx -n prod --force --grace-period=0" {
+		t.Errorf("argv = %q, want the flags forwarded after kx's own", got)
+	}
+}
+
+func TestScaleForwardsKubectlFlags(t *testing.T) {
+	kube := &recordingKubectl{output: ""}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newScaleCommand(services)
+	cmd.SetArgs([]string{"1", "3", "--timeout=30s"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx scale 1 3 --timeout=30s: %v", err)
+	}
+	if got := joined(kube.runs[0]); got != "scale Deployment/web --replicas=3 -n prod --timeout=30s" {
+		t.Errorf("argv = %q, want --timeout forwarded", got)
+	}
+}
+
+// --to-revision is the flag that made rollout's missing passthrough hurt:
+// `kx rollout undo 1 --to-revision=2` was impossible.
+func TestRolloutForwardsKubectlFlags(t *testing.T) {
+	kube := &recordingKubectl{output: "deployment.apps/web rolled back"}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newRolloutCommand(services)
+	cmd.SetArgs([]string{"undo", "1", "--to-revision=2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx rollout undo 1 --to-revision=2: %v", err)
+	}
+	if got := joined(kube.runs[0]); got != "rollout undo Deployment/web -n prod --to-revision=2" {
+		t.Errorf("argv = %q, want --to-revision forwarded", got)
+	}
+}
+
+// kx yaml hardcoded -o yaml, so a user's -o arrived alongside it and won only
+// by being last. kx now leaves the output format alone once the user names one.
+func TestYamlUsesTheCallersOutputFormat(t *testing.T) {
+	kube := &recordingKubectl{output: "{}"}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newYamlCommand(services)
+	cmd.SetArgs([]string{"1", "-o", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx yaml 1 -o json: %v", err)
+	}
+	got := joined(kube.runs[0])
+	if got != "get Pod nginx -n prod -o json" {
+		t.Errorf("argv = %q, want one -o, the caller's", got)
+	}
+	if strings.Count(got, "-o ") != 1 {
+		t.Errorf("argv = %q, want kx's own -o yaml dropped", got)
+	}
+}
+
+// --show parses the YAML it narrows, so naming another output format is a
+// contradiction rather than a refinement.
+func TestYamlRefusesShowWithAnExplicitOutputFormat(t *testing.T) {
+	kube := &recordingKubectl{output: "{}"}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newYamlCommand(services)
+	cmd.SetArgs([]string{"1", "--show", "metadata", "-o", "json"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx yaml --show -o json succeeded, want a refusal")
+	}
+	// Asserted on the message, not just on failure: before the flags passed
+	// through at all, cobra refused this with "unknown flag: -o" — the right
+	// outcome for the wrong reason, which a bare err != nil could not tell
+	// apart from the refusal this is testing for.
+	if !strings.Contains(err.Error(), "--show") {
+		t.Errorf("err = %q, want kx's own refusal naming --show", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
+	}
+}
+
+// kx builds --replicas from the positional, so a second one contradicts it.
+func TestScaleRefusesAnExplicitReplicasFlag(t *testing.T) {
+	kube := &recordingKubectl{output: ""}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newScaleCommand(services)
+	cmd.SetArgs([]string{"1", "3", "--replicas=5"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx scale 1 3 --replicas=5 succeeded, want a refusal")
+	}
+	// The message matters for the same reason it does in the --show case:
+	// cobra's "unknown flag" would have passed a bare err != nil check.
+	if !strings.Contains(err.Error(), "--replicas") || strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("err = %q, want kx's own refusal naming --replicas", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
+	}
+}
+
+// Cobra's arity check runs against the unstripped argv, so a command whose
+// arguments are all kx's own flags reaches its index lookup with nothing —
+// and --help is a single argument that an Args gate would reject before
+// passthrough could resolve it.
+func TestNewlyForwardingCommandsHaveNoArgsValidator(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"delete":  newDeleteCommand(Services{}),
+		"scale":   newScaleCommand(Services{}),
+		"rollout": newRolloutCommand(Services{}),
+		"yaml":    newYamlCommand(Services{}),
+	} {
+		if cmd.Args != nil {
+			t.Errorf("%s has an Args validator; cobra runs it against the raw argv, "+
+				"which counts forwarded kubectl flags as positional arguments", name)
+		}
+		if !cmd.DisableFlagParsing {
+			t.Errorf("%s does not disable flag parsing, so kubectl's flags cannot pass through", name)
+		}
+	}
+}
+
+// A flags-only argv is the shape the missing Args gate lets through, so the
+// real "needs an index" check has to live in RunE.
+func TestNewlyForwardingCommandsRejectAFlagsOnlyArgv(t *testing.T) {
+	for name, spec := range map[string]struct {
+		build func(Services) *cobra.Command
+		args  []string
+	}{
+		"delete":  {newDeleteCommand, []string{"-y"}},
+		"scale":   {newScaleCommand, []string{"--timeout=30s"}},
+		"rollout": {newRolloutCommand, []string{"--timeout=30s"}},
+		"yaml":    {newYamlCommand, []string{"--show", "metadata"}},
+	} {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		cmd := spec.build(services)
+		cmd.SetArgs(spec.args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("kx %s %v succeeded with no index", name, spec.args)
+		}
+		if calls := len(kube.runs) + len(kube.interactive); calls != 0 {
+			t.Errorf("%s made %d kubectl calls with no index", name, calls)
+		}
+	}
+}
+
+// Every flag these commands parse by hand must stay registered, or it works
+// and vanishes from --help.
+func TestNewlyForwardingCommandsRegisterTheirOwnFlags(t *testing.T) {
+	if newDeleteCommand(Services{}).Flags().Lookup("yes") == nil {
+		t.Error("delete --yes is not registered, so it is absent from --help")
+	}
+	if newYamlCommand(Services{}).Flags().Lookup("show") == nil {
+		t.Error("yaml --show is not registered, so it is absent from --help")
+	}
+}
+
+// Forwarding --dry-run made kx's own success message reachable for a delete
+// that did not happen: "✓ Deleted Pod/web-healthy-…" for a client-side dry
+// run. kx replaces kubectl's output with its own line, so the line has to say
+// which it was.
+func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
+	for _, value := range []string{"--dry-run=client", "--dry-run=server"} {
+		kube := &recordingKubectl{output: ""}
+		message, err := DeleteCommand{
+			Kubectl: kube, State: pod("nginx"), Confirm: func(string) error { return nil },
+			Status: noStatus,
+		}.Execute(1, true, []string{value})
+		if err != nil {
+			t.Fatalf("Execute(%s): %v", value, err)
+		}
+		if !strings.Contains(message, "dry run") {
+			t.Errorf("message = %q for %s, want it to say nothing was deleted", message, value)
+		}
+	}
+}
+
+// Only the two values that mean a dry run are labelled. Anything else —
+// --dry-run=none, or a spelling kubectl may add — is left unlabelled rather
+// than guessed at: a wrong "(dry run)" on a real delete is the worse failure,
+// and kx does not otherwise read kubectl's flag semantics.
+func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
+	for _, args := range [][]string{{"--dry-run=none"}, {"--force"}, nil} {
+		message, err := DeleteCommand{
+			Kubectl: &recordingKubectl{}, State: pod("nginx"),
+			Confirm: func(string) error { return nil }, Status: noStatus,
+		}.Execute(1, true, args)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", args, err)
+		}
+		if strings.Contains(message, "dry run") {
+			t.Errorf("message = %q for %v, want no dry-run claim", message, args)
+		}
 	}
 }

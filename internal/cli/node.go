@@ -176,6 +176,9 @@ func newDrainCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+				return err
+			}
 			return DrainCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,

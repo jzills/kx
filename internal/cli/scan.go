@@ -534,10 +534,7 @@ func newScanCommand(services Services) *cobra.Command {
 				scopeFlag = "--all-namespaces"
 			}
 			if len(indexArgs) > 0 && scopeFlag != "" {
-				return fmt.Errorf(
-					"'%s' cannot be combined with an index — an index already "+
-						"carries the namespace it was listed from. Drop the flag, "+
-						"or drop the index to sweep the namespace instead.", scopeFlag)
+				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 			// pageScope captions the HTML page. Captured in each branch
 			// because an indexed scan is scoped by the workload it resolved

@@ -349,7 +349,7 @@ func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(m string) error { prompted = m; return nil },
 		Status:  noStatus,
-	}.Execute(1, false)
+	}.Execute(1, false, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(string) error { return errors.New("aborted") },
 		Status:  noStatus,
-	}.Execute(1, false)
+	}.Execute(1, false, nil)
 	if err == nil {
 		t.Fatal("Execute succeeded despite an aborted confirmation")
 	}
@@ -389,7 +389,7 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(string) error { prompted = true; return nil },
 		Status:  noStatus,
-	}.Execute(1, true)
+	}.Execute(1, true, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 func TestScaleSupportedKinds(t *testing.T) {
 	for _, kind := range []kinds.Kind{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet} {
 		kubectl := &recordingKubectl{}
-		message, err := ScaleCommand{Kubectl: kubectl, State: workload("api", kind)}.Execute(1, 3)
+		message, err := ScaleCommand{Kubectl: kubectl, State: workload("api", kind)}.Execute(1, 3, nil)
 		if err != nil {
 			t.Fatalf("Execute(%s): %v", kind, err)
 		}
@@ -418,7 +418,7 @@ func TestScaleSupportedKinds(t *testing.T) {
 func TestScaleSingularReplica(t *testing.T) {
 	message, err := ScaleCommand{
 		Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment),
-	}.Execute(1, 1)
+	}.Execute(1, 1, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestScaleSingularReplica(t *testing.T) {
 
 func TestScaleRejectsUnsupportedKind(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := ScaleCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, 3)
+	_, err := ScaleCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, 3, nil)
 	if err == nil {
 		t.Fatal("scaled a Pod, want an error")
 	}
@@ -443,7 +443,7 @@ func TestScaleRejectsUnsupportedKind(t *testing.T) {
 func TestRolloutStatusStreams(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	output, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
-		Execute("status", 1)
+		Execute("status", 1, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestRolloutStatusStreams(t *testing.T) {
 func TestRolloutStatusProbesOnFailure(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
 	_, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
-		Execute("status", 1)
+		Execute("status", 1, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -475,7 +475,7 @@ func TestRolloutStatusProbesOnFailure(t *testing.T) {
 func TestRolloutStatusFailureOnLiveWorkloadForwardsTheExitCode(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
 	_, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
-		Execute("status", 1)
+		Execute("status", 1, nil)
 
 	var silent SilentError
 	if !errors.As(err, &silent) {
@@ -489,7 +489,7 @@ func TestRolloutStatusFailureOnLiveWorkloadForwardsTheExitCode(t *testing.T) {
 func TestRolloutNonStatusIsCaptured(t *testing.T) {
 	kubectl := &recordingKubectl{output: "deployment.apps/api restarted\n"}
 	output, err := RolloutCommand{Kubectl: kubectl, State: workload("api", kinds.Deployment)}.
-		Execute("restart", 1)
+		Execute("restart", 1, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestRolloutNonStatusIsCaptured(t *testing.T) {
 // rolloutActionNames already existing for exactly this.
 func TestRolloutRejectsUnknownAction(t *testing.T) {
 	_, err := RolloutCommand{Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment)}.
-		Execute("explode", 1)
+		Execute("explode", 1, nil)
 	if err == nil {
 		t.Fatal("accepted an unknown rollout action")
 	}
@@ -520,7 +520,7 @@ func TestRolloutRejectsUnknownAction(t *testing.T) {
 }
 
 func TestRolloutRejectsUnsupportedKind(t *testing.T) {
-	_, err := RolloutCommand{Kubectl: &recordingKubectl{}, State: pod("nginx")}.Execute("restart", 1)
+	_, err := RolloutCommand{Kubectl: &recordingKubectl{}, State: pod("nginx")}.Execute("restart", 1, nil)
 	if err == nil {
 		t.Fatal("rolled out a Pod, want an error")
 	}
@@ -1309,11 +1309,11 @@ func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T
 	const wrong = kinds.ConfigMap
 	refusals := map[string]func() error{
 		"scale": func() error {
-			_, err := ScaleCommand{State: workload("cm", wrong)}.Execute(1, 2)
+			_, err := ScaleCommand{State: workload("cm", wrong)}.Execute(1, 2, nil)
 			return err
 		},
 		"rollout": func() error {
-			_, err := RolloutCommand{State: workload("cm", wrong)}.Execute("status", 1)
+			_, err := RolloutCommand{State: workload("cm", wrong)}.Execute("status", 1, nil)
 			return err
 		},
 		"port-forward": func() error {
@@ -1356,7 +1356,7 @@ func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T
 // The supported list is generated from the same set the guard checks, so a
 // kind can never be advertised as supported and then refused.
 func TestUnsupportedKindMessageListsTheSetTheGuardUses(t *testing.T) {
-	_, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(1, 2)
+	_, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(1, 2, nil)
 	if err == nil {
 		t.Fatal("scale accepted a ConfigMap")
 	}

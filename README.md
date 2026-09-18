@@ -85,6 +85,12 @@ kx get pods -m api              # --match/-m filters rows by name substring
 kx get pods -n prod -l app=api  # anything else passes through to kubectl
 ```
 
+kubectl's own flags pass through everywhere they mean something — `kx delete 3
+--force --grace-period=0`, `kx rollout undo 3 --to-revision=2`, `kx scale 3 0
+--timeout=1m`, `kx logs 3 -f --tail=100`. A namespace flag is the exception: an
+index already carries the namespace it was listed from, so `-n` beside one is
+refused rather than silently retargeting the command.
+
 `-A` listings are indexed too: each row records its own namespace, so
 `kx describe 7` reaches a resource in a namespace you aren't in, and two pods
 sharing a name keep separate numbers.
