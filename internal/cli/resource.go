@@ -79,7 +79,7 @@ type DeleteCommand struct {
 	Status func(string) func()
 }
 
-func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
+func (c DeleteCommand) Execute(index int, yes bool, extraArgs []string) (string, error) {
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return "", err
@@ -92,12 +92,35 @@ func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
 		}
 	}
 	stop := c.Status("deleting")
-	_, err = c.Kubectl.Run([]string{"delete", string(kind), name, "-n", namespace})
+	_, err = c.Kubectl.Run(append(
+		[]string{"delete", string(kind), name, "-n", namespace}, extraArgs...))
 	stop()
 	if err != nil {
 		return "", err
 	}
+	if isDryRun(extraArgs) {
+		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), nil
+	}
 	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
+}
+
+// isDryRun reports whether extraArgs ask kubectl for a dry run, so kx's own
+// success line does not claim a deletion that did not happen — it replaces
+// kubectl's output ("pod \"x\" deleted (dry run)") with its own, so the
+// distinction is only there if kx puts it there.
+//
+// Deliberately narrow: only the two values that mean a dry run are recognised.
+// --dry-run=none is a real delete, and a spelling kubectl adds later is
+// unlabelled rather than guessed at — a missing "(dry run)" on a dry run is a
+// smaller failure than the label on a real one. This is the only place kx
+// reads a forwarded flag's meaning; the confirmation prompt deliberately does
+// not, since getting that wrong skips a safety step rather than a label.
+func isDryRun(extraArgs []string) bool {
+	value, _, err := extractString(extraArgs, "--dry-run", "")
+	if err != nil {
+		return false
+	}
+	return value == "client" || value == "server"
 }
 
 var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}
@@ -108,7 +131,7 @@ type ScaleCommand struct {
 	State   IndexResolver
 }
 
-func (c ScaleCommand) Execute(index, replicas int) (string, error) {
+func (c ScaleCommand) Execute(index, replicas int, extraArgs []string) (string, error) {
 	name, namespace, kind, err := c.State.Fields(index)
 	if err != nil {
 		return "", err
@@ -116,10 +139,10 @@ func (c ScaleCommand) Execute(index, replicas int) (string, error) {
 	if !scalableKinds.Has(kind) {
 		return "", unsupportedKindError("scale", kind, scalableKinds)
 	}
-	_, err = c.Kubectl.Run([]string{
+	_, err = c.Kubectl.Run(append([]string{
 		"scale", string(kind) + "/" + name,
 		"--replicas=" + strconv.Itoa(replicas), "-n", namespace,
-	})
+	}, extraArgs...))
 	if err != nil {
 		return "", err
 	}
@@ -189,7 +212,7 @@ type RolloutCommand struct {
 }
 
 // Execute returns the captured output, or "" for actions that stream directly.
-func (c RolloutCommand) Execute(action string, index int) (string, error) {
+func (c RolloutCommand) Execute(action string, index int, extraArgs []string) (string, error) {
 	if !isRolloutAction(action) {
 		return "", fmt.Errorf("kx rollout does not support '%s' — only %s.",
 			action, joinAnd(rolloutActionNames()))
@@ -201,7 +224,8 @@ func (c RolloutCommand) Execute(action string, index int) (string, error) {
 	if !rolloutKinds.Has(kind) {
 		return "", unsupportedKindError("rollout", kind, rolloutKinds)
 	}
-	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
+	args := append(
+		[]string{"rollout", action, string(kind) + "/" + name, "-n", namespace}, extraArgs...)
 	if interactiveRolloutActions[action] {
 		code, err := c.Kubectl.RunInteractive(args, false)
 		if err != nil {
@@ -269,6 +293,17 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	dest, destPod, err := c.resolve(dest)
 	if err != nil {
 		return err
+	}
+	// Guarded here rather than in RunE, unlike every other pass-through
+	// command: cp's index is embedded in a path argument ("1:/var/log/app.log"),
+	// so the namespace it resolves to is not known until resolve has run.
+	for _, pod := range []*resolvedPod{srcPod, destPod} {
+		if pod == nil {
+			continue
+		}
+		if err := refuseScopeFlag(extraArgs, pod.Namespace); err != nil {
+			return err
+		}
 	}
 	args := append([]string{"cp", src, dest}, extraArgs...)
 	code, err := c.Kubectl.RunInteractive(args, false)

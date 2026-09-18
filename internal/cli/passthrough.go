@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -110,4 +111,79 @@ func extractBool(args []string, names ...string) (present bool, rest []string) {
 		rest = append(rest, arg)
 	}
 	return present, rest
+}
+
+// sweepInsteadHint is what the commands that can sweep a namespace offer as
+// the alternative to dropping the flag. The commands that only act on an index
+// have no such alternative, and say nothing rather than inventing one.
+const sweepInsteadHint = "Drop the flag, or drop the index to sweep the namespace instead."
+
+// scopeFlagBesideIndexError reports a namespace-scope flag given alongside an
+// index, quoting the spelling that was typed.
+//
+// One sentence in one place: the rule is enforced by every command that
+// resolves an index, and a reader moving between them should meet the same
+// explanation rather than working out whether two wordings mean the same
+// thing. hint is appended when the caller has something to offer instead.
+func scopeFlagBesideIndexError(flag, hint string) error {
+	message := fmt.Sprintf(
+		"'%s' cannot be combined with an index — an index already carries the "+
+			"namespace it was listed from.", flag)
+	if hint != "" {
+		message += " " + hint
+	}
+	return errors.New(message)
+}
+
+// refuseScopeFlag rejects a namespace-scope flag in args that would contradict
+// a resolved index, given the namespace that index resolved to.
+//
+// kubectl takes the last -n it is given, and kx appends its own from the index
+// — so a second one silently won. For `kx delete` that meant a confirmation
+// prompt naming the namespace the index came from and a deletion somewhere
+// else entirely.
+//
+// A cluster-scoped index is the exception, and not merely a harmless one:
+// state records no namespace for a Node, so there is nothing for -n to
+// contradict, and `kx debug <node-index>` creates a pod whose namespace is
+// exactly what -n chooses (see DebugCommand.Execute). -A is refused either
+// way — there is no listing here for it to widen.
+func refuseScopeFlag(args []string, namespace string) error {
+	flag := scopeFlagIn(args)
+	switch flag {
+	case "":
+		return nil
+	case "--namespace", "-n":
+		if namespace == "" {
+			return nil
+		}
+	}
+	return scopeFlagBesideIndexError(flag, "")
+}
+
+// refuseScopeFlagForIndexes applies refuseScopeFlag across every index a
+// command resolved, so the refusal lands before any output rather than after
+// the first banner of a command that will not run.
+//
+// Returns immediately when there is no scope flag to refuse — which is every
+// ordinary invocation — so the guard costs no index resolution on the path
+// that does not need it. With no indexes at all it still asks once, since -A
+// is refused whatever an index would have resolved to.
+func refuseScopeFlagForIndexes(resolver IndexResolver, indexes []int, args []string) error {
+	if scopeFlagIn(args) == "" {
+		return nil
+	}
+	if len(indexes) == 0 {
+		return refuseScopeFlag(args, "")
+	}
+	for _, index := range indexes {
+		_, namespace, _, err := resolver.Fields(index)
+		if err != nil {
+			return err
+		}
+		if err := refuseScopeFlag(args, namespace); err != nil {
+			return err
+		}
+	}
+	return nil
 }

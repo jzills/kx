@@ -270,10 +270,16 @@ func TestMissingRequiredArgsSpeakInKxsVoiceNotCobras(t *testing.T) {
 		if err != nil {
 			t.Fatalf("root.Find(%q): %v", name, err)
 		}
-		if cmd.Args == nil {
-			t.Fatalf("%q has no Args validator", name)
-		}
-		got := cmd.Args(cmd, nil)
+		// A command that forwards kubectl's flags has no Args validator —
+		// cobra would run it against the unstripped argv — so its arity
+		// check lives in RunE, and that is the path to drive for the
+		// message. Both spellings must speak in kx's voice.
+		got := func() error {
+			if cmd.Args != nil {
+				return cmd.Args(cmd, nil)
+			}
+			return cmd.RunE(cmd, nil)
+		}()
 		if got == nil {
 			t.Fatalf("kx %s accepted zero arguments", name)
 		}

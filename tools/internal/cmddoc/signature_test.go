@@ -11,7 +11,7 @@ func TestShortSignatureDropsFlags(t *testing.T) {
 	if !ok {
 		t.Fatal("delete is not registered")
 	}
-	if got, want := Signature(cmd), "kx delete <index>... [--yes/-y]"; got != want {
+	if got, want := Signature(cmd), "kx delete <index>... [--yes/-y] [kubectl flags...]"; got != want {
 		t.Fatalf("Signature = %q, want %q", got, want)
 	}
 	if got, want := ShortSignature(cmd), "kx delete <index>..."; got != want {

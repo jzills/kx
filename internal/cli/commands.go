@@ -219,6 +219,9 @@ func newDescribeCommand(services Services) *cobra.Command {
 			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
+			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
+				return err
+			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
 			for _, index := range indexes {
 				name, namespace, kind, err := services.State.Fields(index)
@@ -280,6 +283,9 @@ func newLogsCommand(services Services) *cobra.Command {
 				return err
 			}
 			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
+			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
 				return err
 			}
 			if err := checkFollow(extra, len(indexes)); err != nil {
@@ -389,6 +395,9 @@ func newEditCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+				return err
+			}
 			return EditCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(index, rest[1:])
 		},
@@ -416,6 +425,9 @@ func newExecCommand(services Services) *cobra.Command {
 			}
 			index, err := parseIndex("index", rest[0])
 			if err != nil {
+				return err
+			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
 				return err
 			}
 			return ExecCommand{
@@ -470,6 +482,9 @@ func newDebugCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+				return err
+			}
 			return DebugCommand{
 				Kubectl: services.Kubectl, State: services.State,
 				Image: services.Config.DebugImage,
@@ -487,21 +502,47 @@ func newDebugCommand(services Services) *cobra.Command {
 }
 
 func newDeleteCommand(services Services) *cobra.Command {
-	var yes bool
 	cmd := &cobra.Command{
-		Use:        "delete <index>...",
+		Use:        "delete <index>... [kubectl flags]",
 		SuggestFor: []string{"rm", "remove", "destroy"},
 		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
 		Long: "Deletes one or more indexed resources, confirming each one individually " +
-			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.",
-		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
-		Args:    minArgs(1),
+			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.\n\n" +
+			"kubectl's own flags pass through: --force --grace-period=0 for a pod that " +
+			"will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still " +
+			"prompts — kx does not read kubectl's flag semantics, and reading " +
+			"--dry-run=none as a dry run would skip the prompt on a real delete.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..\n" +
+			"  kx delete 3 --force --grace-period=0",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			yes, rest := extractBool(rest, "--yes", "-y")
+			indexArgs, extra := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return requiredArgsError(cmd)
+			}
+			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
 			if err := validateIndexes(services.State, indexes); err != nil {
+				return err
+			}
+			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
 				return err
 			}
 			command := DeleteCommand{
@@ -513,7 +554,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			// Confirmed and reported one at a time, so declining one resource
 			// doesn't silently take the rest with it.
 			for _, index := range indexes {
-				message, err := command.Execute(index, yes)
+				message, err := command.Execute(index, yes, extra)
 				if err != nil {
 					return err
 				}
@@ -522,30 +563,58 @@ func newDeleteCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt")
+	// Parsed by hand, registered only so it appears in --help instead of
+	// vanishing.
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 	return cmd
 }
 
 func newScaleCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "scale <index> <replicas>",
+		Use:   "scale <index> <replicas> [kubectl flags]",
 		Short: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
 		Long: "Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. " +
-			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.",
-		Example: "  kx scale 1 3",
-		Args:    exactArgs(2),
+			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.\n\n" +
+			"kubectl's own flags pass through — --current-replicas to make the scale " +
+			"conditional, --timeout, --dry-run. --replicas is the exception: kx builds it " +
+			"from the replica count given here, so a second one is refused rather than " +
+			"left for kubectl to choose between.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx scale 1 3\n  kx scale 1 3 --current-replicas=2\n  kx scale 1 0 --timeout=1m",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return requiredArgsError(cmd)
+			}
+			index, err := parseIndex("index", rest[0])
 			if err != nil {
 				return err
 			}
-			replicas, err := strconv.Atoi(args[1])
+			replicas, err := strconv.Atoi(rest[1])
 			if err != nil {
 				return fmt.Errorf(
-					"Invalid value for 'replicas': '%s' is not a valid int.", args[1])
+					"Invalid value for 'replicas': '%s' is not a valid int.", rest[1])
+			}
+			extra := rest[2:]
+			if hasFlag(extra, "--replicas", "") {
+				return fmt.Errorf(
+					"'--replicas' cannot be combined with a replica count — kx builds " +
+						"the flag from the count given here. Drop one of the two.")
+			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, extra); err != nil {
+				return err
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, replicas)
+				Execute(index, replicas, extra)
 			if err != nil {
 				return err
 			}
@@ -561,19 +630,39 @@ func newRolloutCommand(services Services) *cobra.Command {
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
 		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
-			"live and blocks until the rollout settles; the other actions run and return immediately.",
-		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
+			"live and blocks until the rollout settles; the other actions run and return immediately.\n\n" +
+			"kubectl's own flags pass through, which is how undo reaches a particular " +
+			"revision: --to-revision, --revision for history, --timeout for status.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1\n" +
+			"  kx rollout undo 1 --to-revision=2\n  kx rollout status 1 --timeout=2m",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
 		// left `kx rollout status <TAB>` offering filenames instead of the
 		// index it wants. installCompletions covers both positions.
-		Args: exactArgs(2),
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[1])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return requiredArgsError(cmd)
+			}
+			index, err := parseIndex("index", rest[1])
 			if err != nil {
 				return err
 			}
+			extra := rest[2:]
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, extra); err != nil {
+				return err
+			}
 			output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(args[0], index)
+				Execute(rest[0], index, extra)
 			if err != nil {
 				return err
 			}
@@ -612,6 +701,9 @@ func newPortForwardCommand(services Services) *cobra.Command {
 			}
 			index, err := parseIndex("index", rest[0])
 			if err != nil {
+				return err
+			}
+			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[2:]); err != nil {
 				return err
 			}
 			return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -658,23 +750,60 @@ func newCopyCommand(services Services) *cobra.Command {
 }
 
 func newYamlCommand(services Services) *cobra.Command {
-	var show string
 	cmd := &cobra.Command{
-		Use:        "yaml <index>...",
+		Use:        "yaml <index>... [kubectl flags]",
 		SuggestFor: []string{"manifest", "spec"},
 		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
 		Long: "Prints the raw YAML manifest for one or more indexed resources. --show fetches the " +
 			"same full manifest and narrows it client-side to the named top-level fields, so it " +
-			"works with anything kubectl's own YAML output has.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
-		Args:    minArgs(1),
+			"works with anything kubectl's own YAML output has.\n\n" +
+			"kubectl's own flags pass through. Naming an output format yourself replaces " +
+			"kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints " +
+			"JSON. --show cannot be combined with one: it parses the YAML it narrows.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
+			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			show, rest, err := extractString(rest, "--show", "")
+			if err != nil {
+				return err
+			}
+			indexArgs, rest := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return requiredArgsError(cmd)
+			}
+			extra := rest
+			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
 			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
+			}
+			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
+				return err
+			}
+			// --show narrows the YAML it parsed, so another output format is a
+			// contradiction rather than a refinement — and left to kubectl the
+			// two would silently produce whichever -o came last.
+			if show != "" && hasFlag(extra, "--output", "-o") {
+				return fmt.Errorf(
+					"'--show' cannot be combined with an output format — it narrows the " +
+						"YAML manifest it parsed. Drop one of the two.")
 			}
 			var fields []string
 			if show != "" {
@@ -697,7 +826,7 @@ func newYamlCommand(services Services) *cobra.Command {
 				// together with nothing saying which is which.
 				render.Banner(string(kind), name, namespace, "")
 				stop := render.Status("fetching manifest")
-				output, err := command.Execute(index, fields)
+				output, err := command.Execute(index, fields, extra)
 				stop()
 				if err != nil {
 					return err
@@ -709,7 +838,9 @@ func newYamlCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&show, "show", "", "Comma-separated fields to display (e.g. metadata,spec)")
+	// Parsed by hand, registered only so it appears in --help instead of
+	// vanishing.
+	cmd.Flags().String("show", "", "Comma-separated fields to display (e.g. metadata,spec)")
 	return cmd
 }
 

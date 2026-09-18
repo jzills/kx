@@ -8,10 +8,16 @@ weight: 22
 
 Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.
 
+kubectl's own flags pass through — --current-replicas to make the scale conditional, --timeout, --dry-run. --replicas is the exception: kx builds it from the replica count given here, so a second one is refused rather than left for kubectl to choose between.
+
+Unrecognized flags are passed through to kubectl.
+
+Unrecognized flags are passed through to kubectl.
+
 ## Usage
 
 ```text
-kx scale [OPTIONS] <index> <replicas>
+kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 ```
 
 ## Arguments
@@ -32,4 +38,6 @@ kx scale [OPTIONS] <index> <replicas>
 
 ```bash
 kx scale 1 3
+kx scale 1 3 --current-replicas=2
+kx scale 1 0 --timeout=1m
 ```

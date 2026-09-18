@@ -212,3 +212,14 @@ func podEntry() state.State {
 		Namespace: "diagnostics",
 	}
 }
+
+// countingResolver counts resolutions, for the guards that must not pay for
+// one on the ordinary path.
+type countingResolver struct{ calls int }
+
+func (c *countingResolver) Fields(int) (string, string, kinds.Kind, error) {
+	c.calls++
+	return "web-abc", "prod", kinds.Pod, nil
+}
+
+func (c *countingResolver) Count() (int, error) { return 1, nil }
