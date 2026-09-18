@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -19,8 +20,15 @@ type indexedResolver struct {
 }
 
 func (r indexedResolver) Fields(index int) (string, string, kinds.Kind, error) {
+	if index < 1 || index > len(r.entries) {
+		return "", "", "", fmt.Errorf("Index %d is out of range.", index)
+	}
 	entry := r.entries[index-1]
 	return entry.name, entry.namespace, entry.kind, nil
+}
+
+func (r indexedResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return r.Fields(ref.Index)
 }
 
 func (r indexedResolver) Count() (int, error) { return len(r.entries), nil }
@@ -220,6 +228,10 @@ type countingResolver struct{ calls int }
 func (c *countingResolver) Fields(int) (string, string, kinds.Kind, error) {
 	c.calls++
 	return "web-abc", "prod", kinds.Pod, nil
+}
+
+func (c *countingResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return c.Fields(ref.Index)
 }
 
 func (c *countingResolver) Count() (int, error) { return 1, nil }

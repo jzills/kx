@@ -9,6 +9,7 @@ import (
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/state"
 )
 
 // fakeResolver resolves indexes without touching a state file.
@@ -28,6 +29,10 @@ func (f fakeResolver) Fields(int) (string, string, kinds.Kind, error) {
 		return "", "", "", f.err
 	}
 	return f.name, f.namespace, f.kind, nil
+}
+
+func (f fakeResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return f.Fields(ref.Index)
 }
 
 func (f fakeResolver) Count() (int, error) {

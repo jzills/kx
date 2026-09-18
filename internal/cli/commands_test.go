@@ -301,6 +301,10 @@ func (f indexResolverFunc) Fields(idx int) (string, string, kinds.Kind, error) {
 	return f(idx)
 }
 
+func (f indexResolverFunc) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return f(ref.Index)
+}
+
 func (f indexResolverFunc) Count() (int, error) {
 	return 0, nil
 }
