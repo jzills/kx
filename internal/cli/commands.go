@@ -102,6 +102,31 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 		return nil, true, fmt.Errorf(
 			"Invalid value for '%s': '%s' spans more than %d indexes.", name, arg, maxRangeSpan)
 	}
+	// Clamped to the listing, so a closed range that overshoots acts on the
+	// rows that exist rather than failing outright — which is what the
+	// open-ended form has always done, since it reads its end from Count().
+	// `13..` ending at the last row while `13..20` died on index 15 was the
+	// same gesture answered two ways.
+	//
+	// After the span check above, not before: an absurd range ("1..999999")
+	// keeps its own refusal rather than being quietly narrowed to the
+	// listing. Clamping is for a range that overshoots, not for one that was
+	// never plausible.
+	if count, countErr := resolver.Count(); countErr != nil {
+		return nil, true, countErr
+	} else if count > 0 {
+		// An empty listing is left unclamped on purpose: resolution reports
+		// it as the empty listing it is (see state.emptyListing), which says
+		// more than "starts past the current listing (0 items)".
+		if start > count && end > count {
+			return nil, true, fmt.Errorf(
+				"Invalid value for '%s': '%s' starts past the current listing (%s).",
+				name, arg, itemCount(count))
+		}
+		start = clampIndex(start, count)
+		end = clampIndex(end, count)
+	}
+
 	step := 1
 	if start > end {
 		step = -1
@@ -116,24 +141,57 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 	return indexes, true, nil
 }
 
+// clampIndex pulls an index inside the current listing, which is the only
+// range of positions that can resolve to anything.
+func clampIndex(index, count int) int {
+	if index < 1 {
+		return 1
+	}
+	if index > count {
+		return count
+	}
+	return index
+}
+
+// parseIndexes turns argv into the indexes a command acts on, expanding ranges
+// and dropping repeats.
+//
+// An index named twice is one resource, and the repeat is nearly always
+// accidental: overlapping ranges ("1..3 2..4") are how it actually happens,
+// and they printed 2 and 3 twice — or, for kx delete, asked kubectl to delete
+// something already gone. First occurrence wins, so the order the user wrote
+// survives.
+//
+// Dropped silently: the output shows each resource once, which says it, and a
+// count of what was ignored would only restate what is already visible.
 func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
 	}
 	indexes := make([]int, 0, len(args))
+	seen := make(map[int]bool, len(args))
+	keep := func(candidates ...int) {
+		for _, index := range candidates {
+			if seen[index] {
+				continue
+			}
+			seen[index] = true
+			indexes = append(indexes, index)
+		}
+	}
 	for _, arg := range args {
 		if expanded, ok, err := expandRange(resolver, name, arg); ok {
 			if err != nil {
 				return nil, err
 			}
-			indexes = append(indexes, expanded...)
+			keep(expanded...)
 			continue
 		}
 		index, err := parseIndex(name, arg)
 		if err != nil {
 			return nil, err
 		}
-		indexes = append(indexes, index)
+		keep(index)
 	}
 	return indexes, nil
 }
@@ -1029,7 +1087,10 @@ func listSwitchTargets(services Services, isContext bool) error {
 	// of the screen — and per #240 that answer lives in the kubeconfig, not in
 	// a slot that froze whenever the listing was taken. The contexts branch
 	// above takes its own caption the same way, and for the same reason.
-	render.IndexedTable(output, "namespaces", services.Kubectl.CurrentNamespace())
+	// SwitchListing rather than IndexedTable: this is the screen you pick a
+	// number off, so the row you are on is marked as well as named in the
+	// caption — the way kx theme and kx engine mark theirs.
+	render.SwitchListing(output, "namespaces", services.Kubectl.CurrentNamespace())
 	return nil
 }
 

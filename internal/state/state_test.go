@@ -1961,3 +1961,18 @@ func TestOutOfRangeBackHintNamesTheCanonicalSpelling(t *testing.T) {
 		t.Errorf("err = %q, want the hint spelled 'kx state back'", err)
 	}
 }
+
+// Commands are quoted with single quotes everywhere in kx — the out-of-range
+// message, the kind mismatch, the empty-listing refusal, the scope-flag
+// refusal, and five other uses of this very string. ErrNoState was the one
+// backtick in the codebase, and render's own error-style test documents the
+// single-quoted form.
+func TestErrNoStateQuotesTheCommandLikeEveryOtherMessage(t *testing.T) {
+	if strings.Contains(ErrNoState.Error(), "`") {
+		t.Errorf("ErrNoState = %q, want 'kx get <resource>' quoted the way kx quotes everywhere else",
+			ErrNoState.Error())
+	}
+	if !strings.Contains(ErrNoState.Error(), "'kx get <resource>'") {
+		t.Errorf("ErrNoState = %q, want it to name 'kx get <resource>'", ErrNoState.Error())
+	}
+}

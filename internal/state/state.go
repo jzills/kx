@@ -179,7 +179,7 @@ type History struct {
 }
 
 // ErrNoState is returned when no state file exists yet.
-var ErrNoState = errors.New("No state found. Run `kx get <resource>` first.")
+var ErrNoState = errors.New("No state found. Run 'kx get <resource>' first.")
 
 // ContextMismatchError reports that an index was counted in one kubeconfig
 // context and is being spent in another.

@@ -86,3 +86,69 @@ func TestIndexedTableCaptionsAnEmptyParsedTable(t *testing.T) {
 		t.Errorf("output = %q, want an empty-listing caption", out)
 	}
 }
+
+// kx marks the active row with → in its other switch-style listings (kx theme,
+// kx engine, kx state --all). kx ns marked nothing, so "you are here" lived
+// only in the caption — which on that screen is what the caption is for, but
+// the row itself said nothing.
+func TestSwitchListingMarksTheCurrentRow(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS", "AGE"},
+		Rows: [][]string{
+			{"1", "default", "Active", "155d"},
+			{"2", "diagnostics", "Active", "65d"},
+		},
+	}
+
+	out := capture(func(r *Renderer) { r.SwitchListing(table, "namespaces", "diagnostics") })
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("output = %q, want a caption, a header and two rows", out)
+	}
+	if strings.Contains(lines[2], "→") {
+		t.Errorf("row = %q, want no marker on a namespace that is not current", lines[2])
+	}
+	if !strings.Contains(lines[3], "→") {
+		t.Errorf("row = %q, want the current namespace marked", lines[3])
+	}
+	// The marker sits between the index and the name, the way every other
+	// marked listing in kx places it.
+	if position := strings.Index(lines[3], "→"); position > strings.Index(lines[3], "diagnostics") {
+		t.Errorf("row = %q, want the marker before the name", lines[3])
+	}
+}
+
+// Status colouring and the caption are the ordinary listing's, unchanged: the
+// marker column is the only difference, so a switch listing and a kx get
+// listing of the same resource do not drift apart.
+func TestSwitchListingKeepsTheOrdinaryCaption(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS", "AGE"},
+		Rows:    [][]string{{"1", "default", "Active", "155d"}},
+	}
+
+	out := capture(func(r *Renderer) { r.SwitchListing(table, "namespaces", "default") })
+
+	for _, want := range []string{"Namespaces", "default", "1 item"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q\n  missing %q", out, want)
+		}
+	}
+}
+
+// Nothing to mark is not an error: a current namespace outside the listing —
+// or none at all — leaves every row unmarked rather than guessing at one.
+func TestSwitchListingMarksNothingWhenTheCurrentRowIsAbsent(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS", "AGE"},
+		Rows:    [][]string{{"1", "default", "Active", "155d"}},
+	}
+
+	for _, current := range []string{"", "somewhere-else"} {
+		out := capture(func(r *Renderer) { r.SwitchListing(table, "namespaces", current) })
+		if strings.Contains(out, "→") {
+			t.Errorf("output = %q for current %q, want no marker", out, current)
+		}
+	}
+}

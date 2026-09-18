@@ -219,6 +219,13 @@ func IndexedTable(table index.Table, resourceType, namespace string) {
 
 func PreviousListingNote(previous state.State) { current.PreviousListingNote(previous) }
 
+// active rather than current: the package-level renderer is named current, and
+// shadowing it inside a wrapper whose whole job is to call it invites exactly
+// the mistake that reads correctly.
+func SwitchListing(table index.Table, resourceType, active string) {
+	current.SwitchListing(table, resourceType, active)
+}
+
 func KeyValueTable(header string, keys []string, values map[string]string) {
 	current.KeyValueTable(header, keys, values)
 }

@@ -78,7 +78,7 @@ Indexes come several at a time, as ranges, or narrowed.
 
 ```bash
 kx delete 3 5                   # several at once
-kx delete 3..7                  # an inclusive range, walking either direction
+kx delete 3..7                  # an inclusive range, walking either direction, trimmed to the listing
 kx delete ..5                   # open at the start
 kx delete 5..                   # open to the end of the listing
 kx get pods -m api              # --match/-m filters rows by name substring
