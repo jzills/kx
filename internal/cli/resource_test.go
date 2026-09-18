@@ -49,7 +49,12 @@ type recordingKubectl struct {
 	interactive [][]string
 	probes      [][]string
 	output      string
+	outputs     []string
 	err         error
+	// errs answers successive calls alongside outputs, for a command whose
+	// first call is expected to fail and be retried another way — a metadata
+	// read falls back to named fetches when the collection cannot be listed.
+	errs        []error
 	exitCode    int
 	probeCode   int
 	quietStderr bool
@@ -63,7 +68,20 @@ type recordingKubectl struct {
 
 func (k *recordingKubectl) Run(args []string) (string, error) {
 	k.runs = append(k.runs, args)
-	return k.output, k.err
+	// outputs answers successive calls when set, for a command that issues
+	// more than one — a batched metadata read makes one call per
+	// kind/namespace group. Falls back to output once exhausted.
+	err := k.err
+	if len(k.errs) > 0 {
+		err = k.errs[0]
+		k.errs = k.errs[1:]
+	}
+	if len(k.outputs) > 0 {
+		next := k.outputs[0]
+		k.outputs = k.outputs[1:]
+		return next, err
+	}
+	return k.output, err
 }
 
 func (k *recordingKubectl) RunInteractive(args []string, quiet bool) (int, error) {
