@@ -88,6 +88,13 @@ func pad(text string, n int, right bool) string {
 // are padded with empty cells, which is what the history and theme listings
 // rely on for their blank marker column.
 func (r *Renderer) Table(columns []Column, rows [][]Cell) {
+	r.table(columns, rows, r.width())
+}
+
+// table is Table with the available width injected, so a test can exercise
+// the flex fitting against a buffer — which is not a terminal, and would
+// otherwise always report pipeWidth.
+func (r *Renderer) table(columns []Column, rows [][]Cell, available int) {
 	if len(columns) == 0 {
 		return
 	}
@@ -104,7 +111,7 @@ func (r *Renderer) Table(columns []Column, rows [][]Cell) {
 		}
 	}
 
-	rows = fitFlexColumn(columns, rows, widths, r.width())
+	rows = fitFlexColumn(columns, rows, widths, available)
 
 	var out strings.Builder
 

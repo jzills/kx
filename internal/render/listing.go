@@ -163,6 +163,16 @@ func itemLabel(count int) string {
 // cell reads as column padding, so a blank the parser had recovered vanished
 // again on the way here. Rows carry it intact.
 func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace string) {
+	r.indexedTable(table, resourceType, namespace, r.width())
+}
+
+// indexedTable is IndexedTable with the available width injected, the same
+// seam redrawTable takes its terminal check through: a test writes to a
+// buffer, which is not a terminal, so r.width() answers pipeWidth and no
+// flexing would ever be exercised.
+func (r *Renderer) indexedTable(
+	table index.Table, resourceType, namespace string, available int,
+) {
 	if table.Empty() {
 		r.emptyListing(resourceType, namespace)
 		return
@@ -176,9 +186,20 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 	}
 
 	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
+	// The snapshot listing shrinks NAME exactly as the live watch does. It was
+	// wired into RedrawTable alone, on the grounds that its cursor arithmetic
+	// needs one physical line per row — true, and it undersold the mechanism:
+	// a row wider than the terminal wraps in a static listing too, and two
+	// physical lines per row is what `-o wide`, `--show-labels` and `-A` all
+	// produced.
+	//
+	// Ellipsizing the name costs less here than it would in kubectl, which is
+	// why kx can default to it: rows are addressed by number, and `kx ref 3
+	// --name` prints the whole name when something else needs it.
+	enableNameFlex(table.Headers, columns)
 
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
-	r.Table(columns, cells)
+	r.table(columns, cells, available)
 }
 
 // SwitchListing renders the listing a switch command indexes into — kx ns —
@@ -196,11 +217,24 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 // difference, so the switch screen and a `kx get ns` listing of the same
 // namespaces cannot drift apart.
 func (r *Renderer) SwitchListing(table index.Table, resourceType, current string) {
+	r.switchListing(table, resourceType, current, r.width())
+}
+
+// switchListing is SwitchListing with the available width injected; see
+// indexedTable for why the seam exists.
+func (r *Renderer) switchListing(
+	table index.Table, resourceType, current string, available int,
+) {
 	if table.Empty() {
 		r.emptyListing(resourceType, current)
 		return
 	}
 	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
+	// Before the marker is spliced in below: enableNameFlex finds NAME by its
+	// position among the headers, and the marker column shifts everything
+	// after the index one place along — set afterwards, the flag would land on
+	// the marker instead of the name.
+	enableNameFlex(table.Headers, columns)
 	r.Caption(kinds.PluralDisplay(resourceType), current, itemLabel(len(table.Rows)))
 
 	// After the index, before the name — where every other marked listing in
@@ -216,7 +250,7 @@ func (r *Renderer) SwitchListing(table index.Table, resourceType, current string
 		}
 		marked[i] = append([]Cell{row[0], Styled(marker, headerStyle)}, row[1:]...)
 	}
-	r.Table(append([]Column{columns[0], {Header: ""}}, columns[1:]...), marked)
+	r.table(append([]Column{columns[0], {Header: ""}}, columns[1:]...), marked, available)
 }
 
 // emptyListing captions a listing that resolved to nothing. "none found"

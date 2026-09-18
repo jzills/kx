@@ -1976,3 +1976,107 @@ func TestErrNoStateQuotesTheCommandLikeEveryOtherMessage(t *testing.T) {
 		t.Errorf("ErrNoState = %q, want it to name 'kx get <resource>'", ErrNoState.Error())
 	}
 }
+
+// Re-running kx get is the refresh idiom, so the stack filled with copies of
+// one listing: eight of ten entries were "Pods · diagnostics · 14 items" in an
+// ordinary session, and kx state back could not reach the Deployments listing
+// two commands earlier. A listing that repeats the query the cursor is already
+// on replaces it, so the stack holds distinct views.
+func TestSaveReplacesTheCurrentEntryWhenTheQueryRepeats(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query { return &Query{Resource: "pods", Args: []string{"-n", "prod"}} }
+
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("len(States) = %d, want 1 — the same query twice is one view", len(history.States))
+	}
+	// Replaced, not ignored: the second listing is what the cluster looks like
+	// now, and the whole reason to re-run.
+	if names := history.States[0].Resources.Names(); len(names) != 2 {
+		t.Errorf("entry holds %v, want the fresher listing's resources", names)
+	}
+}
+
+// A different query is a different view and pushes, so the stack is still a
+// history of what was looked at.
+func TestSaveKeepsListingsWithDifferentQueriesApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "deploy"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "staging",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — three different queries", len(history.States))
+	}
+}
+
+// Only against the entry the cursor is on. Comparing the whole stack would let
+// a re-list rewrite history at a distance: jump back two entries, re-run that
+// query, and an entry further forward would vanish.
+func TestSaveOnlyReplacesTheEntryAtTheCursor(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("web"), Namespace: "prod",
+		Query: &Query{Resource: "deploy"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — pods, deploy, pods is what was looked at",
+			len(history.States))
+	}
+}
+
+// Entries with no query — a tree walk, a triage sweep — compare by what they
+// hold instead, so repeating one of those does not fill the stack either.
+func TestSaveReplacesAnIdenticalQuerylessEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	entry := func() State {
+		return State{Resources: pods("api", "web"), Namespace: "prod"}
+	}
+	save(t, service, entry())
+	save(t, service, entry())
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — the same walk twice is one view", len(history.States))
+	}
+}
+
+// A queryless entry holding something else still pushes: two tree walks of
+// different namespaces are two views.
+func TestSaveKeepsDifferentQuerylessEntriesApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	save(t, service, State{Resources: pods("api"), Namespace: "staging"})
+	save(t, service, State{Resources: pods("other"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3", len(history.States))
+	}
+}

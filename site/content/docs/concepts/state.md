@@ -32,6 +32,13 @@ kx state drop --empty  # drop the entries whose listing found nothing
 Jumping does not re-run anything: the entry already holds the listing, so the
 indexes it carries resolve immediately.
 
+Re-running the listing you are already on refreshes that entry instead of
+pushing another copy of it. Re-running `kx get` is how you see what changed, so
+without that the stack filled with one listing — five runs of `kx get pods`
+around a single `kx get deploy` left nine entries, eight of them the same, and
+`kx state back` could not reach the Deployments listing. The same session now
+leaves three: pods, deployments, pods.
+
 ## Reading an index back out
 
 `kx state` shows what every index means. `kx ref` prints one of them in a form

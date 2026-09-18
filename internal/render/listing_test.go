@@ -152,3 +152,87 @@ func TestSwitchListingMarksNothingWhenTheCurrentRowIsAbsent(t *testing.T) {
 		}
 	}
 }
+
+// The mechanism that keeps a row inside the terminal was wired into the live
+// watch only, so `kx get pods -o wide` and `-A` wrapped every row onto two
+// physical lines while `kx get pods -w` of the same resources fitted. The
+// snapshot listing shrinks NAME the same way.
+//
+// Ellipsizing the name is cheaper here than in kubectl, which is why the
+// default differs: you address a row by its number, and `kx ref 3 --name`
+// prints the whole name when you need it.
+func TestIndexedTableShrinksTheNameColumnToTheTerminal(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS", "AGE"},
+		Rows: [][]string{
+			{"1", strings.Repeat("a", 120), "Running", "5d"},
+		},
+	}
+
+	out := captureWidth(60, func(r *Renderer) {
+		r.indexedTable(table, "pods", "prod", 60)
+	})
+
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if width(line) > 60 {
+			t.Errorf("line is %d columns wide, want no more than 60:\n%s", width(line), line)
+		}
+	}
+	if !strings.Contains(out, "…") {
+		t.Errorf("output = %q, want the name ellipsized rather than the row wrapped", out)
+	}
+	// Only NAME gives way: the columns the name was crowding out are what the
+	// listing is being read for.
+	for _, want := range []string{"Running", "5d"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q\n  missing %q", out, want)
+		}
+	}
+}
+
+// A listing that already fits is untouched — no ellipsis, no truncation.
+func TestIndexedTableLeavesAFittingListingAlone(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS"},
+		Rows:    [][]string{{"1", "nginx", "Running"}},
+	}
+
+	out := captureWidth(200, func(r *Renderer) {
+		r.indexedTable(table, "pods", "prod", 200)
+	})
+
+	if strings.Contains(out, "…") {
+		t.Errorf("output = %q, want no ellipsis in a listing that fits", out)
+	}
+	if !strings.Contains(out, "nginx") {
+		t.Errorf("output = %q, want the whole name", out)
+	}
+}
+
+// The switch listing shrinks NAME too. It carries an extra marker column, so
+// the flag has to be set on the parsed columns before the marker is spliced
+// in — set afterwards by header position it would land on the marker.
+func TestSwitchListingShrinksTheNameColumn(t *testing.T) {
+	table := index.Table{
+		Headers: []string{"X", "NAME", "STATUS", "AGE"},
+		Rows: [][]string{
+			{"1", "prod", "Active", "9d"},
+			{"2", strings.Repeat("n", 120), "Active", "9d"},
+		},
+	}
+
+	out := captureWidth(60, func(r *Renderer) {
+		r.switchListing(table, "namespaces", "prod", 60)
+	})
+
+	// Rows only: a caption is one line and wraps at worst, where a row that
+	// overflows costs a physical line per resource.
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n")[1:] {
+		if width(line) > 60 {
+			t.Errorf("line is %d columns wide, want no more than 60:\n%s", width(line), line)
+		}
+	}
+	if !strings.Contains(out, "→") {
+		t.Errorf("output = %q, want the current row still marked", out)
+	}
+}
