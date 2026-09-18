@@ -8,6 +8,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
 )
 
 func sortStrings(values []string) { sort.Strings(values) }
@@ -19,11 +20,17 @@ func sortStrings(values []string) { sort.Strings(values) }
 func fetchMetadataField(
 	kubectl kubectl.Service, resolver IndexResolver, index int, field string,
 ) (keys []string, values map[string]string, err error) {
-	results, err := fetchMetadataFields(kubectl, resolver, []int{index}, field)
+	ref := state.Ref{Index: index}
+	name, namespace, kind, err := resolver.Resolve(ref)
 	if err != nil {
 		return nil, nil, err
 	}
-	return results[index].keys, results[index].values, nil
+	resolved := []Resolved{{Ref: ref, Name: name, Namespace: namespace, Kind: kind}}
+	results, err := fetchMetadataFields(kubectl, resolved, field)
+	if err != nil {
+		return nil, nil, err
+	}
+	return results[ref].keys, results[ref].values, nil
 }
 
 // metadataGroup is the resources of one kind in one namespace that a batched
@@ -31,7 +38,7 @@ func fetchMetadataField(
 type metadataGroup struct {
 	kind, namespace string
 	names           []string
-	indexes         []int
+	refs            []state.Ref
 }
 
 // metadataResult is one resource's metadata field, ready to render.
@@ -55,33 +62,29 @@ type metadataResult struct {
 // and a mismatch would attribute one resource's labels to another with nothing
 // on screen to give it away.
 func fetchMetadataFields(
-	kubectl kubectl.Service, resolver IndexResolver, indexes []int, field string,
-) (map[int]metadataResult, error) {
+	kubectl kubectl.Service, resolved []Resolved, field string,
+) (map[state.Ref]metadataResult, error) {
 	var groups []*metadataGroup
 	byKey := map[string]*metadataGroup{}
-	for _, index := range indexes {
-		name, namespace, kind, err := resolver.Fields(index)
-		if err != nil {
-			return nil, err
-		}
-		key := string(kind) + "\x00" + namespace
+	for _, target := range resolved {
+		key := string(target.Kind) + "\x00" + target.Namespace
 		existing, ok := byKey[key]
 		if !ok {
-			existing = &metadataGroup{kind: string(kind), namespace: namespace}
+			existing = &metadataGroup{kind: string(target.Kind), namespace: target.Namespace}
 			byKey[key] = existing
 			groups = append(groups, existing)
 		}
-		existing.names = append(existing.names, name)
-		existing.indexes = append(existing.indexes, index)
+		existing.names = append(existing.names, target.Name)
+		existing.refs = append(existing.refs, target.Ref)
 	}
 
-	results := make(map[int]metadataResult, len(indexes))
+	results := make(map[state.Ref]metadataResult, len(resolved))
 	for _, g := range groups {
 		byName, sole, err := g.read(kubectl, field)
 		if err != nil {
 			return nil, err
 		}
-		for i, index := range g.indexes {
+		for i, ref := range g.refs {
 			values, ok := byName[g.names[i]]
 			// Asked for one name, kubectl either errored or answered about
 			// that resource, so the sole object is it — whether or not the
@@ -98,7 +101,7 @@ func fetchMetadataFields(
 				// fact about the resource instead.
 				return nil, StaleResourceError{Kind: kinds.Kind(g.kind), Name: g.names[i]}
 			}
-			results[index] = newMetadataResult(values)
+			results[ref] = newMetadataResult(values)
 		}
 	}
 	return results, nil

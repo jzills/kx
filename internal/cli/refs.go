@@ -61,3 +61,14 @@ func resolveRefs(resolver IndexResolver, name string, args []string) ([]Resolved
 	}
 	return resolved, nil
 }
+
+// indexesOf returns the underlying indexes of a resolved batch, for callers
+// that have not yet converted from []int — such as refuseScopeFlagForIndexes,
+// which converts alongside the single-reference commands in a later PR.
+func indexesOf(resolved []Resolved) []int {
+	indexes := make([]int, len(resolved))
+	for i, target := range resolved {
+		indexes[i] = target.Ref.Index
+	}
+	return indexes
+}
