@@ -30,6 +30,17 @@ func capture(render func(*Renderer)) string {
 	return buf.String()
 }
 
+// captureWidth captures output for a renderer asked to fit a given width.
+// The width is passed to the call under test rather than read off the writer:
+// a bytes.Buffer is not a terminal, so r.width() answers pipeWidth and no
+// flexing would ever be exercised.
+func captureWidth(_ int, render func(*Renderer)) string {
+	var buf bytes.Buffer
+	renderer := New(&buf, &buf, "github-dark", true)
+	render(renderer)
+	return buf.String()
+}
+
 const esc = "\x1b["
 
 // Styling reaches a terminal that wants it.

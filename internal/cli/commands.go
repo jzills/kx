@@ -1105,6 +1105,9 @@ func newStateCommand(services Services) *cobra.Command {
 			"10 by default — with a cursor marking the current one. `--all` lists " +
 			"the stack, a position jumps to an entry, and `back`/`forward` step " +
 			"through it.\n\n" +
+			"Re-running the listing you are already on refreshes that entry rather " +
+			"than pushing another copy, so the stack holds distinct views and " +
+			"`back` reaches the one before.\n\n" +
 			"Namespaces and contexts sit in slots of their own, outside that " +
 			"stack: `kx ns 2` counts against the namespaces you last listed " +
 			"however much you have listed since, and switching namespace never " +

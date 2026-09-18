@@ -499,7 +499,21 @@ func (s *Service) Save(state State) error {
 		}
 		named = history.Named
 	}
-	states = append(states, state)
+	// A listing that repeats the one the cursor is already on replaces it
+	// instead of pushing. Re-running `kx get` is the refresh idiom, so the
+	// stack filled with copies of a single listing — eight of ten entries in
+	// an ordinary session — and `kx state back` could not reach the listing
+	// two commands earlier. Replaced rather than ignored: the fresher listing
+	// is what the cluster looks like now, which is the whole reason to re-run.
+	//
+	// Only against the cursor's entry. Comparing the whole stack would let a
+	// re-list rewrite history at a distance: jump back two entries, re-run
+	// that query, and an entry further forward would vanish.
+	if len(states) > 0 && sameListing(states[len(states)-1], state) {
+		states[len(states)-1] = state
+	} else {
+		states = append(states, state)
+	}
 	if len(states) > maxHistory {
 		states = states[len(states)-maxHistory:]
 	}
@@ -510,6 +524,65 @@ func (s *Service) Save(state State) error {
 		named[kind] = state
 	}
 	return s.saveHistory(History{States: states, Cursor: len(states) - 1, Named: named})
+}
+
+// sameListing reports whether two entries are the same view, so the newer one
+// can replace the older rather than pushing beside it.
+//
+// The query decides it when both have one: it is what produced the listing,
+// and two runs of it are one view whose contents moved. Entries saved without
+// a query — a tree walk, a triage sweep — have only what they hold to compare,
+// so an identical walk repeated is one view and a walk of somewhere else is
+// not. A queried entry and a queryless one are never the same view, whatever
+// they hold: one can be re-run and the other cannot.
+func sameListing(current, next State) bool {
+	if (current.Query == nil) != (next.Query == nil) {
+		return false
+	}
+	if current.Namespace != next.Namespace || current.AllNamespaces != next.AllNamespaces {
+		return false
+	}
+	if current.Query != nil {
+		return sameQuery(*current.Query, *next.Query)
+	}
+	return sameResources(current.Resources, next.Resources)
+}
+
+// sameQuery compares the invocation, including the match term — `kx get pods`
+// and `kx get pods -m api` are different views of the same kind.
+func sameQuery(current, next Query) bool {
+	if current.Resource != next.Resource || len(current.Args) != len(next.Args) {
+		return false
+	}
+	for i := range current.Args {
+		if current.Args[i] != next.Args[i] {
+			return false
+		}
+	}
+	switch {
+	case current.Match == nil && next.Match == nil:
+		return true
+	case current.Match == nil || next.Match == nil:
+		return false
+	default:
+		return *current.Match == *next.Match
+	}
+}
+
+// sameResources compares what two entries hold, in order — order is what an
+// index resolves against, so two entries holding the same resources in a
+// different order are not the same listing.
+func sameResources(current, next Resources) bool {
+	a, b := current.Entries(), next.Entries()
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Load returns the entry at the cursor.
