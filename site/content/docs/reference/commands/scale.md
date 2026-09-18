@@ -3,7 +3,7 @@
 title: "kx scale"
 linkTitle: "scale"
 description: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count."
-weight: 21
+weight: 22
 ---
 
 Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.

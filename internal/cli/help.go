@@ -29,7 +29,7 @@ var helpSections = []struct {
 	{"Resources", []string{
 		"annotate", "annotations", "context", "cordon", "cp", "debug", "delete",
 		"describe", "diagnostic", "drain", "edit", "events", "exec", "get",
-		"label", "labels", "logs", "namespace", "port-forward", "rollout",
+		"label", "labels", "logs", "namespace", "port-forward", "ref", "rollout",
 		"scale", "scan", "secret", "top", "tree", "uncordon", "yaml",
 	}},
 	{"History", []string{"state"}},

@@ -32,6 +32,28 @@ kx state drop --empty  # drop the entries whose listing found nothing
 Jumping does not re-run anything: the entry already holds the listing, so the
 indexes it carries resolve immediately.
 
+## Reading an index back out
+
+`kx state` shows what every index means. `kx ref` prints one of them in a form
+another command can take:
+
+```bash
+kx ref 3                          # pod/web-abc-xyz -n prod
+kubectl exec $(kx ref 3) -- sh
+kubectl get $(kx ref 1..3)        # one line per index
+```
+
+That is what keeps the index model from being limited to the verbs kx wraps:
+anything that takes a resource — another kubectl subcommand, `stern`, `velero`,
+a script of your own — can be handed one. `--name`, `--namespace` and `--kind`
+print a single field for tools that want the pieces separately, and a
+cluster-scoped resource comes back without `-n`, since there is no namespace for
+it to be in.
+
+`kx ref` never contacts the cluster. It reports what the index means, not what
+still exists, so it answers instantly — and a stale index prints the name it was
+assigned, leaving the command you spend it on to discover the resource is gone.
+
 ## A listing that found nothing is still a listing
 
 `kx get pods -n empty-namespace` saves its result like any other listing, even

@@ -122,6 +122,10 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
+	// withoutRefresh: the wrapper re-runs a saved query when kubectl reports a
+	// resource gone, and kx ref never asks kubectl anything. It reports what
+	// the index means, which is knowable with no cluster reachable at all.
+	root.AddCommand(withoutRefresh(newRefCommand(services)))
 
 	stateCmd := newStateCommand(services)
 	stateCmd.AddCommand(

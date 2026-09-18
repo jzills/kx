@@ -183,6 +183,28 @@ you want in CI — `kx diag --out report.html` is the whole command.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/browser-reports/)
 
+## Spend an index anywhere
+
+`kx` wraps two dozen of kubectl's verbs. `kx ref` covers the rest, and every
+tool that isn't kubectl: it prints what an index refers to, as an argument
+fragment that drops straight into another command.
+
+```bash
+kx ref 3                                     # pod/web-abc-xyz -n prod
+kubectl exec $(kx ref 3) -- sh               # a verb kx doesn't wrap
+kubectl get $(kx ref 1..3)                   # one line each, so ranges work too
+stern $(kx ref 3 --name) -n $(kx ref 3 --namespace)
+kx ref 1..9 --name | xargs -n1 some-tool
+```
+
+`--name`, `--namespace` and `--kind` print that field alone, for tools that take
+the pieces separately. A cluster-scoped resource gets no `-n`, because there is
+no namespace for it to be in.
+
+Nothing here touches the cluster: `kx ref` reports what the index *means*, so it
+answers instantly and works with nothing reachable. The command you spend it on
+is what discovers whether the resource is still there.
+
 ## Use kx in CI
 
 `--fail-on <severity>` turns a sweep into a build gate, and `--json` prints the
@@ -288,6 +310,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| `kx ref <index>...` | Print what an index refers to, for commands kx doesn't wrap. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |

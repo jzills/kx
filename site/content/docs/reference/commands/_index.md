@@ -31,6 +31,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
 | [`kx namespace [<index>]`](namespace/) | List namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| [`kx ref <index>... [--kind] [--name] [--namespace]`](ref/) | Print what an index refers to, for commands kx doesn't wrap. |
 | [`kx rollout <action> <index>`](rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | [`kx scale <index> <replicas>`](scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int] [scanner flags...]`](scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
