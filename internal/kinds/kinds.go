@@ -278,7 +278,7 @@ func PluralDisplay(resourceType string) string {
 }
 
 // PreviousLister reports whether the history entry one step back lists kind,
-// so EnsureKind can offer the `kx back` hint. Implemented by the state service;
+// so EnsureKind can offer the `kx state back` hint. Implemented by the state service;
 // declared here to keep kinds free of a state import (the Python version defers
 // the import to break the same cycle).
 type PreviousLister interface {
@@ -307,7 +307,7 @@ func ListCommand(kind Kind) string {
 // than whatever shorthand was typed — `kx get deployments`, never `kx get deploy`.
 //
 // Given a state service, an entry one step back that does list expected adds
-// the `kx back` clause: relisting re-runs kubectl, while the listing the index
+// the `kx state back` clause: relisting re-runs kubectl, while the listing the index
 // came from is often still sitting in history.
 func EnsureKind(index int, name string, kind, expected Kind, state PreviousLister) error {
 	if kind == expected {
@@ -315,7 +315,7 @@ func EnsureKind(index int, name string, kind, expected Kind, state PreviousListe
 	}
 	back := ""
 	if state != nil && state.PreviousLists(expected) {
-		back = fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
+		back = fmt.Sprintf(", or 'kx state back' for the previous %s listing", expected)
 	}
 	return fmt.Errorf(
 		"Index %d is %s/%s, not %s — run '%s' to relist%s.",

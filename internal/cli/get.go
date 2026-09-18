@@ -134,30 +134,37 @@ func (c GetCommand) Execute(
 	// whatever namespace the caller happened to be standing in and reported the
 	// misses as resources that no longer exist. Printing it unnumbered says the
 	// same thing kx already says about `-o json`: this is output it cannot index.
-	if allNamespaces(extraArgs) && !indexed.Placed() {
+	// Rows it cannot place, not rows it did not find: an empty listing has
+	// nothing to place, and it is saved below like any other. Only a listing
+	// that actually returned rows kx can't resolve is printed unnumbered.
+	if allNamespaces(extraArgs) && len(indexed.Entries) > 0 && !indexed.Placed() {
 		return index.Table{Raw: output}, namespace, nil
 	}
-	if len(indexed.Entries) > 0 {
-		var match *string
-		if filterTerm != "" {
-			match = &filterTerm
-		}
-		if extraArgs == nil {
-			extraArgs = []string{}
-		}
-		entry := state.State{
-			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
-			Namespace:     namespace,
-			AllNamespaces: allNamespaces(extraArgs),
-			Query: &state.Query{
-				Resource: resource,
-				Args:     extraArgs,
-				Match:    match,
-			},
-		}
-		if err := c.State.Save(entry); err != nil {
-			return index.Table{}, "", err
-		}
+	// Saved unconditionally, including when the listing found nothing. An
+	// empty listing that saved no entry left the *previous* listing resolving
+	// indexes: `kx get pods -n a` (14 rows), `kx get pods -n b` (none), then
+	// `kx delete 1` deleted a pod in a — a namespace and two commands away
+	// from anything the screen had shown. The entry carries its query, so the
+	// refusal it produces can name what found nothing.
+	var match *string
+	if filterTerm != "" {
+		match = &filterTerm
+	}
+	if extraArgs == nil {
+		extraArgs = []string{}
+	}
+	entry := state.State{
+		Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+		Namespace:     namespace,
+		AllNamespaces: allNamespaces(extraArgs),
+		Query: &state.Query{
+			Resource: resource,
+			Args:     extraArgs,
+			Match:    match,
+		},
+	}
+	if err := c.State.Save(entry); err != nil {
+		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
 }

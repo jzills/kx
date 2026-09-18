@@ -596,3 +596,25 @@ func TestTreeInvocationOmitsTheFlagWhenIndexing(t *testing.T) {
 		t.Errorf("invocation = %q, want no --no-index when indexing", line)
 	}
 }
+
+// A namespace with nothing in it is still the listing indexes now count
+// against. Saving no entry left the previous listing addressable — the same
+// hazard TestGetEmptyOutputSavesTheEmptyListing describes.
+func TestEmptyNamespaceTreeSavesTheEmptyEntry(t *testing.T) {
+	states := &fakeState{}
+	command := TreeCommand{
+		Builder: graph.Builder{Client: fake.NewSimpleClientset()}, Save: states.Save,
+	}
+	if _, err := command.ExecuteNamespace(context.Background(), "empty", true); err != nil {
+		t.Fatalf("ExecuteNamespace: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty walk, want 1", len(states.saved))
+	}
+	if states.saved[0].Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", states.saved[0].Resources.Len())
+	}
+	if states.saved[0].Namespace != "empty" {
+		t.Errorf("entry.Namespace = %q, want empty", states.saved[0].Namespace)
+	}
+}

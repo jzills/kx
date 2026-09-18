@@ -59,6 +59,12 @@ func runGet(services Services, resource string, args []string, options getOption
 	// ".." (JSONPath's recursive descent, e.g. -o jsonpath={..metadata.name}),
 	// and a scan-anywhere loop that expanded it as a range broke that
 	// passthrough outright instead of erroring or ignoring it.
+	// Read before anything saves over it: a listing that finds nothing still
+	// becomes the current one, and the note offering the way back has to name
+	// what it displaced. Errors are ignored deliberately — no state yet is the
+	// ordinary first-run case, and it means there is nothing to offer.
+	previous, _ := services.State.Load()
+
 	indexArgs, extra := splitLeadingIndexes(args)
 	var indexes []int
 	if len(indexArgs) > 0 {
@@ -137,6 +143,9 @@ func runGet(services Services, resource string, args []string, options getOption
 				return err
 			}
 			render.IndexedTable(output, resource, render.AllNamespaces)
+			if output.Empty() {
+				render.PreviousListingNote(previous)
+			}
 			return nil
 		}
 
@@ -180,6 +189,9 @@ func runGet(services Services, resource string, args []string, options getOption
 		namespace = render.AllNamespaces
 	}
 	render.IndexedTable(output, resource, namespace)
+	if output.Empty() {
+		render.PreviousListingNote(previous)
+	}
 	return nil
 }
 

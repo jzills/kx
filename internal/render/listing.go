@@ -163,19 +163,15 @@ func itemLabel(count int) string {
 // cell reads as column padding, so a blank the parser had recovered vanished
 // again on the way here. Rows carry it intact.
 func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace string) {
-	if !table.Indexable() {
-		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
-		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
-		// stderr) shows the empty caption instead of silence.
-		if strings.TrimSpace(table.Raw) != "" {
-			r.Raw(table.Raw)
-			return
-		}
+	if table.Empty() {
 		r.emptyListing(resourceType, namespace)
 		return
 	}
-	if len(table.Rows) == 0 {
-		r.emptyListing(resourceType, namespace)
+	if !table.Indexable() {
+		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
+		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
+		// stderr) takes the empty caption above instead of silence.
+		r.Raw(table.Raw)
 		return
 	}
 
@@ -191,7 +187,22 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 // nothing was there — this says the same thing without repeating the
 // namespace the caption already carries a segment for.
 func (r *Renderer) emptyListing(resourceType, namespace string) {
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, "none found")
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, noneFound)
+}
+
+// noneFound is how kx says a listing held nothing, wherever a count would
+// otherwise go — the caption on an empty `kx get`, and the same entry seen
+// later through `kx state`. One spelling, for the reason AllNamespaces has
+// one: they answer the same question.
+const noneFound = "none found"
+
+// countLabel is itemLabel with the empty case spelled out. A bare "0 items"
+// reads as a miscount rather than as "this found nothing".
+func countLabel(count int) string {
+	if count == 0 {
+		return noneFound
+	}
+	return itemLabel(count)
 }
 
 // styledColumnsAndCells applies status/usage-percentage styling and

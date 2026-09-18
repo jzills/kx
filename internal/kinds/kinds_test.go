@@ -110,15 +110,18 @@ type fakeLister struct{ has Kind }
 
 func (f fakeLister) PreviousLists(kind Kind) bool { return kind == f.has }
 
-// When the previous history entry lists the expected kind, `kx back` reaches it
-// without re-running kubectl, so the error offers that too.
+// When the previous history entry lists the expected kind, `kx state back`
+// reaches it without re-running kubectl, so the error offers that too.
+//
+// Spelled `kx state back`, not `kx back`: the top-level alias was removed, and
+// an error offering a command that no longer exists is worse than no hint.
 func TestEnsureKindOffersBackWhenPreviousListsKind(t *testing.T) {
 	err := EnsureKind(3, "nginx-abc", Pod, Deployment, fakeLister{has: Deployment})
 	if err == nil {
 		t.Fatal("EnsureKind on a mismatch succeeded, want an error")
 	}
-	if !strings.Contains(err.Error(), "or 'kx back' for the previous Deployment listing") {
-		t.Errorf("error = %q, want it to offer 'kx back'", err)
+	if !strings.Contains(err.Error(), "or 'kx state back' for the previous Deployment listing") {
+		t.Errorf("error = %q, want it to offer 'kx state back'", err)
 	}
 }
 

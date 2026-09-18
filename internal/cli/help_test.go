@@ -448,10 +448,10 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// `help` is cobra's and isn't part of kx's surface. Hidden commands are
-		// the pre-restructure kx back/forward/drop spellings, deliberately
-		// absent from --help now that kx state back/forward/drop are
-		// canonical — see NewRoot.
+		// `help` is cobra's and isn't part of kx's surface. A hidden command
+		// is deliberately absent from --help, so it cannot be required to
+		// appear in a section — there are none today, and the skip is what
+		// keeps adding one from failing this test for the wrong reason.
 		if name == "help" || cmd.Hidden {
 			continue
 		}
@@ -818,8 +818,8 @@ func TestSuggestForAddsWhatEditDistanceMisses(t *testing.T) {
 }
 
 // A suggestion for a spelling that already runs something is never seen, and
-// would be wrong if it were: `kx forward` is a real command, so offering
-// port-forward for it would contradict what the word does.
+// would be wrong if it were: cobra resolves the command before it ever reaches
+// suggestions, so the suggestion would contradict what the word already does.
 func TestSuggestForDoesNotShadowRealSpellings(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 

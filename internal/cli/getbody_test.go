@@ -515,3 +515,45 @@ func TestGetClusterScopedRelistByIndexIsNotScopedToANamespace(t *testing.T) {
 const clusterScopedNodesTable = "NAME      STATUS   ROLES           AGE   VERSION\n" +
 	"node-a    Ready    control-plane   1d    v1.34.3\n" +
 	"node-b    Ready    <none>          1d    v1.34.3"
+
+// An empty listing replaces the one before it, so the way back is offered at
+// the moment it becomes necessary rather than left to be discovered in
+// --help. The note names the listing it displaced, because "kx state back"
+// alone doesn't say what you would be going back to.
+func TestEmptyListingOffersTheWayBack(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{podsOutput, ""}, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	for _, want := range []string{"none found", "kx state back", "Pods", "prod", "2 items"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q\n  missing %q", out.String(), want)
+		}
+	}
+}
+
+// Nothing to go back to, so nothing is offered: the note would point at a
+// listing that does not exist.
+func TestFirstListingBeingEmptyOffersNoWayBack(t *testing.T) {
+	kube := &fakeKubectl{output: "", namespace: "prod"}
+	services := switchServices(t, kube)
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if strings.Contains(out.String(), "kx state back") {
+		t.Errorf("output = %q, want no way back offered with no previous listing", out.String())
+	}
+}

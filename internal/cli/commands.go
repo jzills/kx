@@ -923,7 +923,12 @@ func newStateCommand(services Services) *cobra.Command {
 			"disagree about what 2 means.",
 		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
 			"  kx state 2",
-		SuggestFor: []string{"history", "stack", "cursor"},
+		// back/forward/drop were top-level commands once. Removed, cobra
+		// suggested by edit distance alone and answered `kx drop` with "did
+		// you mean top?" — listing them here points the old spellings at the
+		// command that replaced them. No command is added: SuggestFor is
+		// consulted only after a lookup has already failed.
+		SuggestFor: []string{"history", "stack", "cursor", "back", "forward", "drop"},
 		Args:       cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Both read the whole file, and the slots live outside the stack, so
@@ -999,21 +1004,39 @@ func newNavigateCommand(services Services, use, short, long string, delta int) *
 	}
 }
 
-// prefix is the invocation the examples show — "kx state drop" for the
-// documented subcommand, "kx drop" for the hidden top-level alias kept for
-// existing scripts and muscle memory. Both share this constructor, so
-// without it the alias's own --help would show examples for a command it
-// isn't.
-func newDropCommand(services Services, prefix string) *cobra.Command {
-	var all bool
+func newDropCommand(services Services) *cobra.Command {
+	const prefix = "kx state drop"
+	var all, empty bool
 	cmd := &cobra.Command{
 		Use:   "drop <position>",
-		Short: "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
-		Long: "Removes a history entry by position, or clears the whole stack — including the " +
-			"namespace and context slots — with --all.",
-		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
+		Short: "Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything.",
+		Long: "Removes a history entry by position, drops every entry that found nothing with " +
+			"--empty, or clears the whole stack — including the namespace and context slots — " +
+			"with --all.\n\n" +
+			"A listing that found nothing is still saved, so the indexes it replaced stop " +
+			"resolving; --empty is how those entries are swept back up. It needs no " +
+			"confirmation, unlike --all: an entry holding nothing is not work anyone can lose.",
+		Example: fmt.Sprintf("  %s 2\n  %s --empty\n  %s --all", prefix, prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && empty {
+				return fmt.Errorf("drop --all and --empty are different requests; pick one")
+			}
+			if empty {
+				if len(args) > 0 {
+					return fmt.Errorf("drop --empty takes no position argument")
+				}
+				history, dropped, err := services.State.DropEmpty()
+				if err != nil {
+					return err
+				}
+				if dropped == 0 {
+					render.Caption("No empty entries to drop.")
+					return nil
+				}
+				render.StateHistory(history)
+				return nil
+			}
 			if all {
 				if len(args) > 0 {
 					return fmt.Errorf("drop --all takes no position argument")
@@ -1045,5 +1068,7 @@ func newDropCommand(services Services, prefix string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Clear all history and namespace/context slots")
+	cmd.Flags().BoolVarP(&empty, "empty", "e", false,
+		"Drop every history entry whose listing found nothing")
 	return cmd
 }

@@ -698,7 +698,7 @@ func TestDropAllConfirmsBeforeClearing(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services, "kx state drop")
+	cmd := newDropCommand(services)
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kx state drop --all: %v", err)
@@ -730,7 +730,7 @@ func TestDropAllAbortsWithoutConfirmation(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services, "kx state drop")
+	cmd := newDropCommand(services)
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("kx state drop --all succeeded despite an aborted confirmation")
@@ -975,5 +975,85 @@ func TestLogsRejectsAMalformedSinceBeforeSpawningKubectl(t *testing.T) {
 func TestLogsRegistersSinceFlag(t *testing.T) {
 	if newLogsCommand(Services{}).Flags().Lookup("since") == nil {
 		t.Error("--since is not registered, so it will not appear in --help")
+	}
+}
+
+// Saving a listing that found nothing is what stops an index resolving against
+// the listing before it, and the entry it saves costs a history slot. --empty
+// is how those are swept back up, without the confirmation --all needs: an
+// entry holding nothing is not work anyone can lose.
+func TestDropEmptySweepsTheEmptyEntries(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	for _, entry := range []state.State{
+		{Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "default"},
+		{Namespace: "empty", Query: &state.Query{Resource: "pods"}},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	var prompted string
+	services.Confirm = func(m string) error { prompted = m; return nil }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--empty"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --empty: %v", err)
+	}
+	if prompted != "" {
+		t.Errorf("kx state drop --empty prompted %q, want no confirmation", prompted)
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("len(States) = %d, want 1 — only the empty entry goes", len(history.States))
+	}
+	if names := history.States[0].Resources.Names(); len(names) != 1 || names[0] != "nginx" {
+		t.Errorf("kept %v, want the entry that holds something", names)
+	}
+}
+
+// Nothing to sweep is not an error, and not a silent reprint of an unchanged
+// stack either — reprinting reads as though something happened.
+func TestDropEmptyWithNothingToSweepSaysSo(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--empty"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --empty: %v", err)
+	}
+	if !strings.Contains(out.String(), "No empty") {
+		t.Errorf("output = %q, want it to say there was nothing to drop", out.String())
+	}
+}
+
+// --empty and a position are two different requests, and --all is a third.
+func TestDropEmptyRefusesToBeCombined(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	services.Confirm = func(string) error { return nil }
+
+	for _, args := range [][]string{{"--empty", "2"}, {"--empty", "--all"}} {
+		var out bytes.Buffer
+		render.SetOutput(&out, &out, "github-dark")
+		cmd := newDropCommand(services)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("kx state drop %v succeeded, want a refusal", args)
+		}
 	}
 }

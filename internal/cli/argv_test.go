@@ -10,7 +10,6 @@ import (
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/index"
-	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
@@ -126,26 +125,21 @@ func TestArgvOfOnlyStrippedFlagsIsAnErrorNotAPanic(t *testing.T) {
 	}
 }
 
-// The pre-restructure spellings (kx back/forward) must keep working — they're
-// hidden from --help, not removed — so scripts and muscle memory written
-// before kx state back/forward/drop existed don't break.
-func TestLegacyTopLevelHistoryCommandsStillWork(t *testing.T) {
-	services := argvServices(t)
-	if err := services.State.Save(state.State{
-		Resources: state.NewResources([]string{"one"}, kinds.Pod), Namespace: "default",
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if err := services.State.Save(state.State{
-		Resources: state.NewResources([]string{"two"}, kinds.Pod), Namespace: "default",
-	}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	for _, name := range []string{"back", "forward"} {
-		quietRender(t)
-		if err := Execute(NewRoot(services, "test"), []string{name}); err != nil {
-			t.Errorf("kx %s: %v", name, err)
+// The pre-restructure top-level spellings are gone, not hidden. They were kept
+// registered-but-hidden for scripts and muscle memory; `kx state back`,
+// `kx state forward` and `kx state drop` have been canonical and documented
+// long enough that carrying a second spelling of each cost more than it bought
+// — including a --help screen that had to explain why three commands it never
+// lists still run.
+func TestLegacyTopLevelHistoryCommandsAreGone(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	for _, name := range []string{"back", "forward", "drop"} {
+		// cobra's Find falls back to the deepest command it matched, so a
+		// missing top-level command resolves to the root itself rather than
+		// erroring. The resolved command has to be checked, not just the error.
+		found, _, err := root.Find([]string{name})
+		if err == nil && found != root {
+			t.Errorf("kx %s still runs %q, want it removed", name, found.Name())
 		}
 	}
 }
@@ -176,20 +170,6 @@ func TestStateSubcommandsAreRegistered(t *testing.T) {
 	for _, child := range stateCmd.Commands() {
 		if child.Hidden {
 			t.Errorf("kx state %s is hidden, want it visible", child.Name())
-		}
-	}
-}
-
-// The legacy top-level spellings are hidden from --help, not removed.
-func TestLegacyTopLevelHistoryCommandsAreHidden(t *testing.T) {
-	root := NewRoot(argvServices(t), "test")
-	for _, name := range []string{"back", "forward", "drop"} {
-		cmd, _, err := root.Find([]string{name})
-		if err != nil {
-			t.Fatalf("root.Find(%s): %v", name, err)
-		}
-		if !cmd.Hidden {
-			t.Errorf("kx %s is not hidden, want it hidden (kx state %s is now canonical)", name, name)
 		}
 	}
 }
@@ -435,6 +415,29 @@ func TestJSONFlagIsRegisteredOnTreeAndTop(t *testing.T) {
 		}
 		if cmd.Flags().Lookup("json") == nil {
 			t.Errorf("--json is not registered on kx %s", name)
+		}
+	}
+}
+
+// Removing the aliases left cobra suggesting by edit distance alone: `kx drop`
+// answered "Did you mean this? top". The three removed spellings point at the
+// command that replaced them instead, which costs no command — SuggestFor is
+// resolved only after a lookup has already failed.
+func TestRemovedAliasesSuggestTheStateCommand(t *testing.T) {
+	root := NewRoot(argvServices(t), "test")
+	stateCmd, _, err := root.Find([]string{"state"})
+	if err != nil {
+		t.Fatalf("root.Find(state): %v", err)
+	}
+	for _, name := range []string{"back", "forward", "drop"} {
+		var suggested bool
+		for _, value := range stateCmd.SuggestFor {
+			if value == name {
+				suggested = true
+			}
+		}
+		if !suggested {
+			t.Errorf("kx state does not suggest for %q, so kx %s suggests by edit distance", name, name)
 		}
 	}
 }
