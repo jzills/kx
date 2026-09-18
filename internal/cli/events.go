@@ -71,11 +71,8 @@ func newEventsCommand(services Services) *cobra.Command {
 			"  kx events 1..3\n  kx events 3..",
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
-				return err
-			}
-			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			// Parsed before the API server is read, so a typo fails on the
@@ -95,13 +92,9 @@ func newEventsCommand(services Services) *cobra.Command {
 				Events:  events.APIService{Client: client},
 				Since:   events.Cutoff(window),
 			}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
+			for position, target := range resolved {
 				stop := render.Status("fetching events")
-				rows, err := command.Execute(cmd.Context(), index)
+				rows, err := command.Execute(cmd.Context(), target.Ref.Index)
 				stop()
 				if err != nil {
 					return err
@@ -113,7 +106,7 @@ func newEventsCommand(services Services) *cobra.Command {
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, extra,
+				render.Banner(string(target.Kind), target.Name, target.Namespace, extra,
 					render.WindowLabel(window))
 				render.EventsTable(rows, window)
 			}
