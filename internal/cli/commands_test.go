@@ -326,10 +326,15 @@ func TestValidateIndexesAcceptsAWhollyValidBatch(t *testing.T) {
 	}
 }
 
-// A range that runs past the current listing must not delete anything —
-// not even the indexes that were in range — because there is no way to undo
-// a delete once it has run. Validating every index before acting on any of
-// them is the only way to make a bad range fail cleanly instead of partially.
+// An out-of-range index in a batch must not delete anything — not even the
+// indexes that were in range — because there is no way to undo a delete once
+// it has run. Validating every index before acting on any of them is the only
+// way to make a bad batch fail cleanly instead of partially.
+//
+// Spelled with an explicit index rather than a range: a range is now clamped
+// to the listing (see TestDeleteClampsARangeRatherThanRefusingTheBatch), so
+// "2..5" no longer carries an out-of-range index to be caught. An index the
+// user typed out still does, and this is the guarantee that matters for it.
 func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	kube := &recordingKubectl{}
 	services := switchServices(t, kube)
@@ -341,7 +346,7 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	}
 
 	cmd := newDeleteCommand(services)
-	cmd.SetArgs([]string{"1", "2..5", "-y"})
+	cmd.SetArgs([]string{"1", "99", "-y"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("delete succeeded despite an out-of-range index in the batch")
 	}
@@ -1056,4 +1061,62 @@ func TestDropEmptyRefusesToBeCombined(t *testing.T) {
 			t.Errorf("kx state drop %v succeeded, want a refusal", args)
 		}
 	}
+}
+
+// The deliberate consequence of clamping, on the command where it matters
+// most. `kx delete 1 2..5` on a two-row listing used to refuse the whole
+// batch; it now deletes the two rows that exist, because that is what the
+// range names once intersected with the listing.
+//
+// The all-or-nothing guarantee is unchanged for an index the user typed out —
+// see TestDeleteValidatesAllIndexesBeforeDeletingAny — and a range entirely
+// past the end is still refused rather than clamped to nothing.
+func TestDeleteClampsARangeRatherThanRefusingTheBatch(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"1", "2..5", "-y"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx delete 1 2..5: %v", err)
+	}
+	if len(kube.runs) != 2 {
+		t.Fatalf("kubectl calls = %d, want 2 — the rows that exist, each once", len(kube.runs))
+	}
+
+	cmd = newDeleteCommand(services)
+	cmd.SetArgs([]string{"5..9", "-y"})
+	if err := cmd.Execute(); err == nil {
+		t.Error("kx delete 5..9 succeeded on a two-row listing, want the past-the-listing refusal")
+	}
+}
+
+// kx ns is the switch screen, so it takes the marked listing. Asserted
+// through the real call path, because the marker is only useful if the
+// command that shows the screen is the one that asks for it.
+func TestNamespaceListingMarksTheCurrentNamespace(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "prod") && !strings.HasPrefix(line, "Namespaces") {
+			if !strings.Contains(line, "→") {
+				t.Errorf("row = %q, want the current namespace marked", line)
+			}
+			return
+		}
+	}
+	t.Errorf("output = %q, want a row for the current namespace", out.String())
 }

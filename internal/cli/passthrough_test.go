@@ -591,3 +591,112 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 		}
 	}
 }
+
+// An index named twice is one resource. Overlapping ranges are how this
+// actually happens — `kx labels 1..3 2..4` printed 2 and 3 twice — and for
+// kx delete a repeat meant a second delete of something already gone.
+func TestParseIndexesDropsRepeats(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 10}
+
+	for _, tc := range []struct {
+		args []string
+		want []int
+	}{
+		{[]string{"2", "2", "2"}, []int{2}},
+		{[]string{"1..3", "2..4"}, []int{1, 2, 3, 4}},
+		{[]string{"3", "1", "3"}, []int{3, 1}},
+		{[]string{"2..4", "3"}, []int{2, 3, 4}},
+	} {
+		got, err := parseIndexes(resolver, "indexes", tc.args)
+		if err != nil {
+			t.Fatalf("parseIndexes(%v): %v", tc.args, err)
+		}
+		if len(got) != len(tc.want) {
+			t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("parseIndexes(%v) = %v, want %v — first occurrence wins, in order",
+					tc.args, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+// A closed range that overshoots the listing is clamped to it, the way the
+// open-ended form already is: `13..` ends at the last row, and `13..20`
+// failing outright on the same listing was the inconsistency.
+func TestExpandRangeClampsAClosedRangeToTheListing(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 14}
+
+	for _, tc := range []struct {
+		arg  string
+		want []int
+	}{
+		{"13..20", []int{13, 14}},
+		{"1..100", nil}, // 1..14, checked by length below
+		{"20..13", []int{14, 13}},
+		{"0..3", []int{1, 2, 3}},
+	} {
+		got, ok, err := expandRange(resolver, "indexes", tc.arg)
+		if !ok || err != nil {
+			t.Fatalf("expandRange(%q) ok=%v err=%v", tc.arg, ok, err)
+		}
+		if tc.want == nil {
+			if len(got) != 14 || got[0] != 1 || got[13] != 14 {
+				t.Errorf("expandRange(%q) = %v, want the whole 14-row listing", tc.arg, got)
+			}
+			continue
+		}
+		if len(got) != len(tc.want) {
+			t.Errorf("expandRange(%q) = %v, want %v", tc.arg, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("expandRange(%q) = %v, want %v", tc.arg, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+// Clamping to nothing is not a silent no-op: a range entirely past the end
+// gets the sentence the open-ended form already uses, rather than a command
+// that appears to succeed having done nothing.
+func TestExpandRangeRefusesARangeEntirelyPastTheListing(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 14}
+
+	for _, arg := range []string{"20..30", "30..20"} {
+		_, ok, err := expandRange(resolver, "indexes", arg)
+		if !ok {
+			t.Fatalf("expandRange(%q) was not recognised as a range", arg)
+		}
+		if err == nil {
+			t.Errorf("expandRange(%q) = nil error, want a refusal", arg)
+			continue
+		}
+		if !strings.Contains(err.Error(), "starts past the current listing") {
+			t.Errorf("expandRange(%q) error = %q, want the past-the-listing sentence", arg, err)
+		}
+	}
+}
+
+// The open-ended form must keep behaving exactly as it did — it is the
+// behaviour the closed form is being brought into line with.
+func TestExpandRangeOpenEndStillEndsAtTheListing(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 14}
+
+	got, ok, err := expandRange(resolver, "indexes", "13..")
+	if !ok || err != nil {
+		t.Fatalf("expandRange(13..) ok=%v err=%v", ok, err)
+	}
+	if len(got) != 2 || got[0] != 13 || got[1] != 14 {
+		t.Errorf("expandRange(13..) = %v, want [13 14]", got)
+	}
+	if _, _, err := expandRange(resolver, "indexes", "20.."); err == nil {
+		t.Error("expandRange(20..) = nil error, want the past-the-listing refusal")
+	}
+}

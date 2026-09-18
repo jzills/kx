@@ -181,6 +181,44 @@ func (r *Renderer) IndexedTable(table index.Table, resourceType, namespace strin
 	r.Table(columns, cells)
 }
 
+// SwitchListing renders the listing a switch command indexes into — kx ns —
+// with the row you are currently on marked.
+//
+// The caption on that screen answers "where am I now", read live from
+// kubeconfig rather than from the frozen slot (see #240), and that is the
+// whole point of the screen. But the caption was the only place it was said:
+// every other switch-style listing in kx marks the active row with an arrow
+// (kx theme, kx engine, the history cursor in kx state --all), and this one
+// marked nothing.
+//
+// Everything else is IndexedTable's: the same caption, the same status
+// colouring, the same column widths. The marker column is the only
+// difference, so the switch screen and a `kx get ns` listing of the same
+// namespaces cannot drift apart.
+func (r *Renderer) SwitchListing(table index.Table, resourceType, current string) {
+	if table.Empty() {
+		r.emptyListing(resourceType, current)
+		return
+	}
+	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
+	r.Caption(kinds.PluralDisplay(resourceType), current, itemLabel(len(table.Rows)))
+
+	// After the index, before the name — where every other marked listing in
+	// kx puts it. An unnamed column, so the header row carries no label for
+	// something that is a mark rather than a field.
+	marked := make([][]Cell, len(cells))
+	nameColumn := indexOf(table.Headers, "NAME")
+	for i, row := range cells {
+		marker := ""
+		if current != "" && nameColumn >= 0 && nameColumn < len(table.Rows[i]) &&
+			table.Rows[i][nameColumn] == current {
+			marker = "→"
+		}
+		marked[i] = append([]Cell{row[0], Styled(marker, headerStyle)}, row[1:]...)
+	}
+	r.Table(append([]Column{columns[0], {Header: ""}}, columns[1:]...), marked)
+}
+
 // emptyListing captions a listing that resolved to nothing. "none found"
 // rather than itemLabel(0)'s "0 items": a bare zero count reads as silence,
 // where kubectl's own "No resources found in X namespace" at least says
