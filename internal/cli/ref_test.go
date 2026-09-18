@@ -33,6 +33,11 @@ func (r indexedResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, err
 	return r.Fields(ref.Index)
 }
 
+func (r indexedResolver) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := r.Resolve(ref)
+	return name, namespace, err
+}
+
 func (r indexedResolver) Count() (int, error) { return len(r.entries), nil }
 
 func refOf(entries ...[3]string) indexedResolver {
@@ -265,6 +270,11 @@ func (c *countingResolver) Fields(int) (string, string, kinds.Kind, error) {
 
 func (c *countingResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
 	return c.Fields(ref.Index)
+}
+
+func (c *countingResolver) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := c.Resolve(ref)
+	return name, namespace, err
 }
 
 func (c *countingResolver) Count() (int, error) { return 1, nil }

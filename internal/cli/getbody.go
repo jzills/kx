@@ -103,23 +103,18 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	if len(indexes) > 0 {
 		expected := kinds.Normalize(resource)
-		// resolveRefs resolves every index before any of them is acted on, so
-		// an out-of-range index late in the batch is caught before the first
-		// kubectl call rather than after some of them have already run.
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		// resolveRefsExpecting resolves every index before any of them is
+		// acted on, so an out-of-range index late in the batch is caught
+		// before the first kubectl call rather than after some of them have
+		// already run. Expecting rather than resolveRefs's plain Resolve: the
+		// resource type was named on the command line, so a failure — out of
+		// range, no state, or an index left over from a listing of a
+		// different kind — is reported against that kind, the way
+		// FieldsExpecting always has, instead of generically or silently
+		// fetched as whatever the index actually names.
+		resolved, err := resolveRefsExpecting(services.State, "indexes", indexArgs, expected)
 		if err != nil {
 			return err
-		}
-		// The resource type was named on the command line, so a reference
-		// that resolved to a different kind — an index left over from a
-		// listing of something else — is reported against that kind instead
-		// of silently fetched as whatever it actually is.
-		for _, target := range resolved {
-			if err := kinds.EnsureKind(
-				target.Ref.Index, target.Name, target.Kind, expected, services.State,
-			); err != nil {
-				return err
-			}
 		}
 		groups := groupByNamespace(resolved)
 

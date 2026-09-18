@@ -9,6 +9,11 @@ import (
 // commands need: turning a reference into the resource it names.
 type IndexResolver interface {
 	Resolve(ref state.Ref) (name, namespace string, kind kinds.Kind, err error)
+	// ResolveExpecting is Resolve for a caller that has already named the kind
+	// it wants, so a failure — out of range, no state, or the wrong kind — is
+	// reported against that kind rather than against whatever listing happens
+	// to be current.
+	ResolveExpecting(ref state.Ref, expected kinds.Kind) (name, namespace string, err error)
 	Fields(index int) (name, namespace string, kind kinds.Kind, err error)
 	// Count returns how many resources are in the current listing, used to
 	// resolve the open end of a "5.." range and to trim a closed one.
@@ -38,6 +43,33 @@ type Resolved struct {
 // spellings of one resource are one resource, which an []int could not see.
 // First occurrence wins, so the order the user wrote survives.
 func resolveRefs(resolver IndexResolver, name string, args []string) ([]Resolved, error) {
+	return resolveIndexes(resolver, name, args, resolver.Resolve)
+}
+
+// resolveRefsExpecting is resolveRefs for a caller that has already named the
+// kind it wants — the kx get relist, so far. It resolves through
+// ResolveExpecting rather than Resolve, so every failure (out of range, no
+// state, or the wrong kind) is reported against the kind named on the command
+// line, the way FieldsExpecting always has. Parsing and identity-dedupe are
+// shared with resolveRefs via resolveIndexes rather than duplicated.
+func resolveRefsExpecting(
+	resolver IndexResolver, name string, args []string, expected kinds.Kind,
+) ([]Resolved, error) {
+	return resolveIndexes(resolver, name, args, func(ref state.Ref) (string, string, kinds.Kind, error) {
+		resourceName, namespace, err := resolver.ResolveExpecting(ref, expected)
+		return resourceName, namespace, expected, err
+	})
+}
+
+// resolveIndexes parses a command's resource arguments and resolves every one
+// of them through resolve, deduping by resolved identity before any of them
+// is acted on. Shared by resolveRefs and resolveRefsExpecting so the two
+// differ only in how a single reference resolves, not in how a batch is
+// parsed or deduped.
+func resolveIndexes(
+	resolver IndexResolver, name string, args []string,
+	resolve func(ref state.Ref) (name, namespace string, kind kinds.Kind, err error),
+) ([]Resolved, error) {
 	indexes, err := parseIndexes(resolver, name, args)
 	if err != nil {
 		return nil, err
@@ -46,7 +78,7 @@ func resolveRefs(resolver IndexResolver, name string, args []string) ([]Resolved
 	seen := make(map[Resolved]bool, len(indexes))
 	for _, index := range indexes {
 		ref := state.Ref{Index: index}
-		resourceName, namespace, kind, err := resolver.Resolve(ref)
+		resourceName, namespace, kind, err := resolve(ref)
 		if err != nil {
 			return nil, err
 		}

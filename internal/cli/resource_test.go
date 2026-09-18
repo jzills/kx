@@ -35,6 +35,11 @@ func (f fakeResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error)
 	return f.Fields(ref.Index)
 }
 
+func (f fakeResolver) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := f.Resolve(ref)
+	return name, namespace, err
+}
+
 func (f fakeResolver) Count() (int, error) {
 	return f.count, f.countErr
 }

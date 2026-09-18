@@ -305,6 +305,11 @@ func (f indexResolverFunc) Resolve(ref state.Ref) (string, string, kinds.Kind, e
 	return f(ref.Index)
 }
 
+func (f indexResolverFunc) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := f(ref.Index)
+	return name, namespace, err
+}
+
 func (f indexResolverFunc) Count() (int, error) {
 	return 0, nil
 }
