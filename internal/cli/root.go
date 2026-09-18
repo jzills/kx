@@ -129,23 +129,9 @@ func NewRoot(services Services, version string) *cobra.Command {
 			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
 		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
 			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
-		newDropCommand(services, "kx state drop"),
+		newDropCommand(services),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
-
-	// kx back/forward/drop predate kx state gaining subcommands. They stay
-	// registered and fully working — just hidden from --help and the README
-	// table — so existing scripts and muscle memory don't break.
-	for _, cmd := range []*cobra.Command{
-		newNavigateCommand(services, "back", "Navigate to the previous kx get result.",
-			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
-		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
-			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
-		newDropCommand(services, "kx drop"),
-	} {
-		cmd.Hidden = true
-		root.AddCommand(withoutRefresh(cmd))
-	}
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),

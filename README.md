@@ -224,7 +224,13 @@ kx state --all        # the whole history, with positions
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
 kx state drop 2       # remove position 2 (--all clears everything, slots included)
+kx state drop --empty # drop the entries whose listing found nothing
 ```
+
+A listing that found nothing is saved like any other, so the indexes it
+replaced stop resolving rather than quietly pointing at the listing before it.
+`kx` offers the way back when it happens, and `kx state drop --empty` sweeps
+those entries up.
 
 Each entry remembers the context it was listed in, so a staging index is never
 resolved against production — `kx` refuses and relists instead. `KX_STATE`

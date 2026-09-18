@@ -759,6 +759,91 @@ func TestFieldsOutOfRangeNamesWhatTheListingHolds(t *testing.T) {
 	}
 }
 
+// An empty listing is still a listing, and it is the one an index now counts
+// against. "the current listing has 0 items" is technically true and useless:
+// it reads as a miscount rather than as "what you just listed found nothing",
+// and it points at kx state, where the fix is kx state back.
+func TestFieldsRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "pods"},
+	})
+
+	name, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatalf("Fields(1) = %q against an empty listing, want an error", name)
+	}
+	if name != "" {
+		t.Errorf("Fields(1) resolved to %q, which came from the previous listing", name)
+	}
+	for _, want := range []string{
+		"The current listing is empty",
+		"Pods · kube-public found none",
+		"Run 'kx state back' for the previous listing",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "out of range") {
+		t.Errorf("err = %q, want the empty listing named rather than an out-of-range count", err)
+	}
+}
+
+// The kind-checking path is the one kx scale, kx rollout and kx cordon take —
+// the destructive half of the command set — so it needs the same refusal, and
+// it keeps its own relist clause the way its out-of-range sibling does.
+func TestFieldsExpectingRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Deployment),
+		Namespace: "prod",
+	})
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "deploy"},
+	})
+
+	name, _, err := service.FieldsExpecting(1, kinds.Deployment)
+	if err == nil {
+		t.Fatalf("FieldsExpecting(1) = %q against an empty listing, want an error", name)
+	}
+	if name != "" {
+		t.Errorf("FieldsExpecting(1) resolved to %q, which came from the previous listing", name)
+	}
+	for _, want := range []string{
+		"The current listing is empty",
+		"Deployments · kube-public found none",
+		"kx state back",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// A listing with no query to name it still refuses the index; only the segment
+// naming what was listed drops out. kx tree and kx diag save entries with no
+// query, so this is the shape their empty sweeps take.
+func TestEmptyListingWithNoQueryStillRefusesTheIndex(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	save(t, service, State{Namespace: "prod"})
+
+	name, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatalf("Fields(1) = %q against an empty listing, want an error", name)
+	}
+	if !strings.Contains(err.Error(), "The current listing is empty") {
+		t.Errorf("err = %q, want it to say the listing is empty", err)
+	}
+	if strings.Contains(err.Error(), "found none") {
+		t.Errorf("err = %q, want no \"found none\" clause with nothing to name", err)
+	}
+}
+
 func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 	t.Run("out of range names the current listing and the relist", func(t *testing.T) {
 		service := newTestService(t, 10)
@@ -1713,5 +1798,166 @@ func TestLoadLeavesAClusterScopedListingWithoutANamespace(t *testing.T) {
 	}
 	if current.Namespace != "" {
 		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", current.Namespace)
+	}
+}
+
+// Empty entries are the cost of saving a listing that found nothing (see
+// Fields' refusal), and this is how they are swept back up. Only the empty
+// ones go: an entry holding resources is work the stack exists to keep.
+func TestDropEmptyRemovesOnlyTheEmptyEntries(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty-a", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty-b", Query: &Query{Resource: "pods"}})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 2 {
+		t.Errorf("dropped = %d, want 2", dropped)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2", len(history.States))
+	}
+	for i, want := range []string{"one", "two"} {
+		if names := history.States[i].Resources.Names(); len(names) != 1 || names[0] != want {
+			t.Errorf("States[%d] = %v, want [%s] — order did not survive", i, names, want)
+		}
+	}
+}
+
+// The cursor is a position in a slice that just got shorter. It has to follow
+// the entry it was on, or kx state back lands somewhere the user never was.
+func TestDropEmptyKeepsTheCursorOnItsEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+	if _, err := service.Navigate(-1); err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if history.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0 — it was on 'one', now the first entry", history.Cursor)
+	}
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if names := current.Resources.Names(); len(names) != 1 || names[0] != "one" {
+		t.Errorf("current entry = %v, want the one the cursor was on", names)
+	}
+}
+
+// Dropping the entry the cursor is on leaves it clamped inside the stack
+// rather than one past the end.
+func TestDropEmptyClampsTheCursorWhenItsOwnEntryGoes(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if history.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0", history.Cursor)
+	}
+	if _, err := service.Load(); err != nil {
+		t.Fatalf("Load after DropEmpty: %v", err)
+	}
+}
+
+// Nothing to drop is a no-op, not an error: the caller says so rather than
+// reprinting an unchanged stack as though something happened.
+func TestDropEmptyWithNothingToDropChangesNothing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 0 {
+		t.Errorf("dropped = %d, want 0", dropped)
+	}
+	if len(history.States) != 2 {
+		t.Errorf("len(States) = %d, want both entries kept", len(history.States))
+	}
+}
+
+// Unlike Drop, which refuses to remove the last entry so something stays
+// addressable, DropEmpty will empty the stack: keeping one entry that holds
+// nothing addressable is not worth the exception.
+func TestDropEmptyWillEmptyTheStack(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Namespace: "a", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Namespace: "b", Query: &Query{Resource: "pods"}})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 2 || len(history.States) != 0 {
+		t.Errorf("dropped %d leaving %d entries, want 2 and 0", dropped, len(history.States))
+	}
+	if _, err := service.Load(); !errors.Is(err, ErrNoState) {
+		t.Errorf("Load error = %v, want ErrNoState for an emptied stack", err)
+	}
+}
+
+// Slots live outside the stack and are not history; only --all clears those.
+func TestDropEmptyLeavesTheSlotsAlone(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{
+		Resources: namespaces("default", "prod"), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if _, ok := history.Named[kinds.Namespace]; !ok {
+		t.Errorf("Named = %+v, want the namespace slot kept", history.Named)
+	}
+}
+
+// No state at all is the same failure Drop reports: there is no history to
+// sweep.
+func TestDropEmptyWithNoStateSaysSo(t *testing.T) {
+	service := newTestService(t, 10)
+	if _, _, err := service.DropEmpty(); !errors.Is(err, ErrNoState) {
+		t.Errorf("DropEmpty error = %v, want ErrNoState", err)
+	}
+}
+
+// The out-of-range hint offers the previous listing by its canonical spelling.
+// `kx back` was removed, and an error naming a command that no longer exists
+// sends the reader somewhere that answers "unknown command".
+func TestOutOfRangeBackHintNamesTheCanonicalSpelling(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	})
+	save(t, service, State{
+		Resources: NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	})
+
+	_, _, err := service.FieldsExpecting(9, kinds.Deployment)
+	if err == nil {
+		t.Fatal("index 9 of a 1-item listing resolved")
+	}
+	if !strings.Contains(err.Error(), "'kx state back'") {
+		t.Errorf("err = %q, want the hint spelled 'kx state back'", err)
 	}
 }

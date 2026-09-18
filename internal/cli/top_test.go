@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"io"
 	"path/filepath"
 	"strings"
@@ -854,5 +855,124 @@ func TestTopNodesJSONNamesNoNamespace(t *testing.T) {
 	}
 	if got := document["resource"]; got != "nodes" {
 		t.Errorf("resource = %v, want nodes", got)
+	}
+}
+
+// An empty listing is saved like any other, so the indexes it replaces stop
+// resolving. `kx top` in a namespace whose pods have no metrics yet used to
+// leave the previous listing addressable — see TestGetEmptyOutputSavesTheEmptyListing.
+func TestTopEmptyListingSavesTheEmptyEntry(t *testing.T) {
+	kubectl := &fakeKubectl{output: "NAME   CPU(cores)   MEMORY(bytes)\n", namespace: "prod"}
+	states := &fakeState{}
+
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute("", nil, true); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty listing, want 1", len(states.saved))
+	}
+	if states.saved[0].Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", states.saved[0].Resources.Len())
+	}
+	if states.saved[0].Query == nil || states.saved[0].Query.Resource != "pods" {
+		t.Errorf("Query = %+v, want the pods query kx top records", states.saved[0].Query)
+	}
+}
+
+func TestTopNodesEmptyListingSavesTheEmptyEntry(t *testing.T) {
+	kubectl := &fakeKubectl{output: "NAME   CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%\n"}
+	states := &fakeState{}
+
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		ExecuteNodes("", nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty listing, want 1", len(states.saved))
+	}
+	if states.saved[0].Query == nil || states.saved[0].Query.Resource != "nodes" {
+		t.Errorf("Query = %+v, want the nodes query kx top records", states.saved[0].Query)
+	}
+}
+
+// kx top replaces the listing like kx get does, so an empty one offers the
+// same way back. Without it, the note appeared for `kx get pods` in an empty
+// namespace and not for `kx top` in the same one.
+func TestTopEmptyListingOffersTheWayBack(t *testing.T) {
+	kube := &fakeKubectl{
+		outputs:   []string{podsOutput, "", "NAME   CPU(cores)   MEMORY(bytes)\n"},
+		namespace: "prod",
+	}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newTopCommand(services)
+	cmd.SetArgs([]string{"--no-limits"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("top: %v", err)
+	}
+
+	for _, want := range []string{"none found", "kx state back", "Pods", "prod"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q\n  missing %q", out.String(), want)
+		}
+	}
+}
+
+// kubectl top prints nothing at all when it finds nothing — "No resources
+// found" goes to stderr — so the real empty listing has no header row to
+// parse, which is the shape that skipped the save and left the previous
+// listing resolving indexes. Found by driving kx top against an empty
+// namespace on a live cluster, after the header-only test above passed.
+func TestTopWithNoOutputAtAllStillSavesTheEmptyListing(t *testing.T) {
+	kubectl := &fakeKubectl{output: "", namespace: "kube-public"}
+	states := &fakeState{}
+
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute("", nil, true); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty listing, want 1", len(states.saved))
+	}
+	if states.saved[0].Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", states.saved[0].Resources.Len())
+	}
+}
+
+func TestTopNodesWithNoOutputAtAllStillSavesTheEmptyListing(t *testing.T) {
+	kubectl := &fakeKubectl{output: ""}
+	states := &fakeState{}
+
+	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		ExecuteNodes("", nil); err != nil {
+		t.Fatalf("ExecuteNodes: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty listing, want 1", len(states.saved))
+	}
+}
+
+// Output kx cannot number but that says something still prints as-is and
+// saves nothing: it is not a listing that found nothing.
+func TestTopUnparseableOutputSavesNothing(t *testing.T) {
+	kubectl := &fakeKubectl{output: "error: metrics not available in this form\n"}
+	states := &fakeState{}
+
+	table, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
+		Execute("", nil, true)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.saved) != 0 {
+		t.Errorf("saved %d entries for unparseable output, want 0", len(states.saved))
+	}
+	if !strings.Contains(table.Raw, "metrics not available") {
+		t.Errorf("table.Raw = %q, want the output passed through", table.Raw)
 	}
 }

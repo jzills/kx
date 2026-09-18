@@ -594,6 +594,43 @@ func positionOutOfRange(position, count int) error {
 // kinds, which a tree walk and a triage sweep both produce — so it points at
 // `kx state` the way an out-of-range position does. FieldsExpecting and
 // FieldsNamed have a kind and name the relist instead.
+// emptyListing reports that the current listing holds nothing, which is a
+// different failure from an index past the end of a listing that holds
+// something: "the current listing has 0 items" reads as a miscount rather than
+// as "the thing you just listed found nothing", and it points at kx state
+// where the fix is kx state back.
+//
+// where is the caller's own "what to do next" clause, the same division of
+// labour outOfRange has with describeCurrent: this names what went wrong, the
+// caller names where to look, because a kind-checking command can offer a
+// relist that a generic one cannot.
+func emptyListing(entry State, where string) error {
+	if label := listingLabel(entry); label != "" {
+		return fmt.Errorf("The current listing is empty — %s found none. %s", label, where)
+	}
+	return fmt.Errorf("The current listing is empty. %s", where)
+}
+
+// listingLabel names an empty listing the way its caption did, from the query
+// that produced it — the resources are gone, so they cannot name themselves.
+// Empty when there is no query to read (a tree walk or a triage sweep), which
+// drops the segment rather than inventing one.
+//
+// A spanning listing keeps the kind alone. "all namespaces" is
+// render.AllNamespaces, deliberately spelled in exactly one place, and render
+// imports this package — so naming the scope here would mean a second spelling
+// of it, which is the thing that constant exists to prevent.
+func listingLabel(entry State) string {
+	if entry.Query == nil {
+		return ""
+	}
+	plural := kinds.PluralDisplay(entry.Query.Resource)
+	if entry.AllNamespaces || entry.Namespace == "" {
+		return plural
+	}
+	return plural + " · " + entry.Namespace
+}
+
 func outOfRange(idx int, entry State) error {
 	return fmt.Errorf(
 		"Index %d is out of range — the current listing has %s (run 'kx state' to view).",
@@ -620,7 +657,7 @@ func (s *Service) Navigate(delta int) (State, error) {
 // NavigateTo moves the cursor to a 1-based position.
 //
 // Unlike Navigate, a position out of range is refused rather than clamped:
-// Navigate's delta comes from `kx back`/`kx forward` stepping past an end
+// Navigate's delta comes from `kx state back`/`kx state forward` stepping past an end
 // they can't see, where clamping is the right answer, but a position is a
 // number the caller typed — usually copied from `kx state --all` — and
 // clamping a wrong one to the nearest end would silently jump somewhere the
@@ -676,6 +713,58 @@ func (s *Service) Drop(position int) (History, error) {
 	return history, nil
 }
 
+// DropEmpty removes every entry that holds no resources, returning the
+// resulting history and how many went.
+//
+// Empty entries are what saving a listing that found nothing costs: the entry
+// has to exist so an index stops resolving against the listing before it (see
+// emptyListing), but a run of them is history holding nothing, and the stack
+// is only MaxHistory deep. This is the broom.
+//
+// Unlike Drop, there is no "cannot remove the last entry" guard: that guard
+// exists so something stays addressable, and an entry holding nothing is not
+// addressable in the first place. An emptied stack reads as ErrNoState, which
+// is the honest answer.
+//
+// Slots are left alone. They sit outside the stack by design, and --all is
+// what clears those.
+func (s *Service) DropEmpty() (History, int, error) {
+	history, err := s.loadHistory()
+	if err != nil {
+		return History{}, 0, err
+	}
+	if len(history.States) == 0 {
+		return History{}, 0, ErrNoState
+	}
+
+	kept := make([]State, 0, len(history.States))
+	cursor := history.Cursor
+	dropped := 0
+	for i, entry := range history.States {
+		if entry.Resources.Len() > 0 {
+			kept = append(kept, entry)
+			continue
+		}
+		dropped++
+		// The cursor is an index into a slice that is getting shorter, so it
+		// follows the entry it was on: every removal before it shifts it down
+		// by one. A removal *at* it leaves it pointing one place further along
+		// than it did, which the clamp below pulls back into the stack.
+		if i < history.Cursor {
+			cursor--
+		}
+	}
+	if dropped == 0 {
+		return history, 0, nil
+	}
+	history.States = kept
+	history.Cursor = clamp(cursor, len(kept)-1)
+	if err := s.saveHistory(history); err != nil {
+		return History{}, 0, err
+	}
+	return history, dropped, nil
+}
+
 // DropAll clears the entire on-disk state — the navigation stack and the
 // namespace/context slots together — resetting to what a fresh install has.
 // Unlike Drop, which refuses to remove the last remaining entry, DropAll has
@@ -727,6 +816,10 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	}
 	if err := s.checkContext(current, idx, ""); err != nil {
 		return "", "", "", err
+	}
+	if current.Resources.Len() == 0 {
+		return "", "", "", emptyListing(current,
+			"Run 'kx state back' for the previous listing.")
 	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
@@ -829,6 +922,11 @@ func (s *Service) FieldsExpecting(
 		return "", "", err
 	}
 
+	if current.Resources.Len() == 0 {
+		return "", "", emptyListing(current, fmt.Sprintf(
+			"Run '%s' to relist %s, or 'kx state back' for the previous listing.",
+			relist, plural))
+	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
 		return "", "", fmt.Errorf(
@@ -846,17 +944,17 @@ func (s *Service) FieldsExpecting(
 	return name, namespaceAt(current, idx), nil
 }
 
-// backHint offers `kx back` when the entry one step back lists the kind asked
+// backHint offers `kx state back` when the entry one step back lists the kind asked
 // for, matching the clause EnsureKind appends.
 func (s *Service) backHint(expected kinds.Kind) string {
 	if !s.PreviousLists(expected) {
 		return ""
 	}
-	return fmt.Sprintf(", or 'kx back' for the previous %s listing", expected)
+	return fmt.Sprintf(", or 'kx state back' for the previous %s listing", expected)
 }
 
 // PreviousLists reports whether the entry one step back lists kind, so
-// `kx back` would reach it.
+// `kx state back` would reach it.
 //
 // Best-effort: this only decorates an error message, so an unreadable history
 // yields no hint rather than displacing the real error.
@@ -908,7 +1006,7 @@ func listCommandFor(kind kinds.Kind) string {
 //
 // This is the `kx ns` path. Keeping it out of the stack is the point: switching
 // namespaces is the most frequent thing kx does, and every switch used to cost
-// a history entry, so `kx back` walked through namespace listings instead of
+// a history entry, so `kx state back` walked through namespace listings instead of
 // the work between them.
 func (s *Service) SaveNamed(entry State) error {
 	kind := soleKind(entry)

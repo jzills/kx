@@ -26,11 +26,38 @@ kx state back        # step back one
 kx state forward     # step forward one
 kx state drop 2      # remove position 2
 kx state drop --all  # clear everything, slots included
+kx state drop --empty  # drop the entries whose listing found nothing
 ```
 
 Jumping does not re-run anything: the entry already holds the listing, so the
-indexes it carries resolve immediately. The older `kx back`, `kx forward` and
-`kx drop` spellings still work.
+indexes it carries resolve immediately.
+
+## A listing that found nothing is still a listing
+
+`kx get pods -n empty-namespace` saves its result like any other listing, even
+though the result is nothing. It has to: an empty listing that saved no entry
+would leave the *previous* one resolving indexes, so `kx get pods -n a`
+followed by `kx get pods -n b` and then `kx delete 1` deleted a pod in `a` —
+a namespace and two commands away from anything on screen.
+
+So the numbers retire when a listing finds nothing, and kx says so on the spot:
+
+```
+Pods · empty-namespace · none found
+'kx state back' returns to Pods · prod · 14 items
+```
+
+Spending an index against it explains itself the same way, at the moment it
+matters rather than one command earlier:
+
+```
+✗ The current listing is empty — Pods · empty-namespace found none.
+  Run 'kx state back' for the previous listing.
+```
+
+Those entries cost a history slot each. `kx state drop --empty` removes all of
+them at once, and needs no confirmation the way `--all` does — an entry holding
+nothing is not work anyone can lose.
 
 Every entry records the context it was listed in, because a resource name
 means nothing without the cluster it was read from. `kx state` names it beside

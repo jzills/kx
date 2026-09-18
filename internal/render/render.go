@@ -177,13 +177,21 @@ func withinWord(runes []rune, i int) bool {
 // Caption prints the muted "·"-joined context line above a listing, skipping
 // empty parts.
 func (r *Renderer) Caption(parts ...string) {
+	r.line(r.style(theme.Muted, strings.Join(captionParts(parts...), " · ")))
+}
+
+// captionParts drops the empty segments and leaves the rest in order, which is
+// what lets a caller pass a namespace that may not exist without deciding
+// whether to include it. Shared with the callers that need the joined text
+// rather than a printed line.
+func captionParts(parts ...string) []string {
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {
 			kept = append(kept, part)
 		}
 	}
-	r.line(r.style(theme.Muted, strings.Join(kept, " · ")))
+	return kept
 }
 
 // Section prints a divider label between blocks of output.
@@ -208,6 +216,8 @@ func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
 func IndexedTable(table index.Table, resourceType, namespace string) {
 	current.IndexedTable(table, resourceType, namespace)
 }
+
+func PreviousListingNote(previous state.State) { current.PreviousListingNote(previous) }
 
 func KeyValueTable(header string, keys []string, values map[string]string) {
 	current.KeyValueTable(header, keys, values)

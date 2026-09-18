@@ -25,7 +25,7 @@ kx state [OPTIONS] [position]
 | Command | Description |
 |---|---|
 | `kx state back` | Navigate to the previous kx get result. |
-| `kx state drop` | Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots. |
+| `kx state drop` | Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything. |
 | `kx state forward` | Navigate to the next kx get result. |
 
 ## Arguments

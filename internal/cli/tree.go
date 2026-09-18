@@ -97,7 +97,12 @@ func (c TreeCommand) ExecuteAllNamespaces(
 func (c TreeCommand) save(
 	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
 ) error {
-	if !indexed || len(resources) == 0 {
+	// --no-index is display-only and must not disturb the listing the user is
+	// working through. An empty walk is a different thing: it *is* the listing
+	// now, and saving nothing for it left the previous one resolving indexes
+	// (see GetCommand.Execute), so `kx tree -n empty` then `kx delete 1` acted
+	// on whatever was listed before it.
+	if !indexed {
 		return nil
 	}
 	// Order is the order the indexes were assigned during the walk.
