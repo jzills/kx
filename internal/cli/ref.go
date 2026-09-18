@@ -9,7 +9,8 @@ import (
 	"github.com/jzills/kx/internal/render"
 )
 
-// RefCommand resolves indexes to the references a shell can spend.
+// RefCommand formats already-resolved references into the lines a shell can
+// spend.
 //
 // It is the escape hatch for everything kx does not wrap. kx implements two
 // dozen of kubectl's verbs, kubectl has twice that, and the ecosystem around
@@ -22,9 +23,7 @@ import (
 // is instant and works with no connectivity. It reports what an index *means*,
 // not what still exists — a stale index prints the name it was assigned, and
 // the command the caller then runs is what discovers the resource is gone.
-type RefCommand struct {
-	State IndexResolver
-}
+type RefCommand struct{}
 
 // Field names, as the flags spell them. The empty field is the default: the
 // whole reference, as a kubectl argument fragment.
@@ -34,17 +33,20 @@ const (
 	refFieldKind      = "kind"
 )
 
-// Execute resolves each index to one line.
+// Execute formats each already-resolved reference to one line.
+//
+// Takes []Resolved rather than resolving indexes itself, so a bad reference
+// anywhere in the batch is caught by resolveRefs before any line is formatted
+// — kx ref is read-only, so a partial list isn't destructive, but handing a
+// caller half the references and a non-zero exit is worse than handing it
+// none.
 //
 // Lines rather than printed output so the shape is testable as data, and so
 // the caller decides how they reach the terminal.
-func (c RefCommand) Execute(indexes []int, field string) ([]string, error) {
-	lines := make([]string, 0, len(indexes))
-	for _, index := range indexes {
-		name, namespace, kind, err := c.State.Fields(index)
-		if err != nil {
-			return nil, err
-		}
+func (c RefCommand) Execute(resolved []Resolved, field string) ([]string, error) {
+	lines := make([]string, 0, len(resolved))
+	for _, target := range resolved {
+		index, name, namespace, kind := target.Ref.Index, target.Name, target.Namespace, target.Kind
 		// Lowercased canonical kind, not kubectl's shorthand: `rs` and
 		// `deploy` are kubectl's own spellings, and this exists to compose
 		// with tools that are not kubectl. Lowercase because `pod/x` is the
@@ -101,11 +103,11 @@ func newRefCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
 				return err
 			}
-			lines, err := RefCommand{State: services.State}.Execute(indexes, field)
+			lines, err := RefCommand{}.Execute(resolved, field)
 			if err != nil {
 				return err
 			}

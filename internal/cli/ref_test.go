@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -47,9 +49,11 @@ func refOf(entries ...[3]string) indexedResolver {
 // The default form is a kubectl argument fragment, so `kubectl exec $(kx ref 3)`
 // works without the caller assembling anything.
 func TestRefPrintsAKubectlFragment(t *testing.T) {
-	command := RefCommand{State: refOf([3]string{"web-abc", "diagnostics", "Pod"})}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "web-abc", Namespace: "diagnostics", Kind: kinds.Pod},
+	}
 
-	lines, err := command.Execute([]int{1}, "")
+	lines, err := RefCommand{}.Execute(resolved, "")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -65,13 +69,13 @@ func TestRefPrintsAKubectlFragment(t *testing.T) {
 // kubectl's shorthand: `rs` and `deploy` are kubectl's own, and the point of
 // this command is composing with tools that are not kubectl.
 func TestRefLowercasesTheCanonicalKind(t *testing.T) {
-	command := RefCommand{State: refOf(
-		[3]string{"web", "prod", "Deployment"},
-		[3]string{"web-abc", "prod", "ReplicaSet"},
-		[3]string{"widget-1", "prod", "widgets.example.com"},
-	)}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "web", Namespace: "prod", Kind: kinds.Deployment},
+		{Ref: state.Ref{Index: 2}, Name: "web-abc", Namespace: "prod", Kind: kinds.ReplicaSet},
+		{Ref: state.Ref{Index: 3}, Name: "widget-1", Namespace: "prod", Kind: kinds.Kind("widgets.example.com")},
+	}
 
-	lines, err := command.Execute([]int{1, 2, 3}, "")
+	lines, err := RefCommand{}.Execute(resolved, "")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -89,9 +93,11 @@ func TestRefLowercasesTheCanonicalKind(t *testing.T) {
 // A cluster-scoped resource gets no -n. The flag is wrong there, not merely
 // redundant — kubectl takes it, and then the reference means something else.
 func TestRefOmitsTheNamespaceForAClusterScopedResource(t *testing.T) {
-	command := RefCommand{State: refOf([3]string{"desktop-control-plane", "", "Node"})}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "desktop-control-plane", Namespace: "", Kind: kinds.Node},
+	}
 
-	lines, err := command.Execute([]int{1}, "")
+	lines, err := RefCommand{}.Execute(resolved, "")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -103,12 +109,12 @@ func TestRefOmitsTheNamespaceForAClusterScopedResource(t *testing.T) {
 // One line per index, each complete and independent, so a spanning listing
 // carries its own namespace on every line.
 func TestRefPrintsOneCompleteLinePerIndex(t *testing.T) {
-	command := RefCommand{State: refOf(
-		[3]string{"waypoint", "default", "Pod"},
-		[3]string{"istiod", "istio-system", "Pod"},
-	)}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "waypoint", Namespace: "default", Kind: kinds.Pod},
+		{Ref: state.Ref{Index: 2}, Name: "istiod", Namespace: "istio-system", Kind: kinds.Pod},
+	}
 
-	lines, err := command.Execute([]int{1, 2}, "")
+	lines, err := RefCommand{}.Execute(resolved, "")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -123,14 +129,16 @@ func TestRefPrintsOneCompleteLinePerIndex(t *testing.T) {
 // Each field flag prints exactly one field per line, so a caller always knows
 // how many words a line holds.
 func TestRefFieldFlagsPrintOneFieldEach(t *testing.T) {
-	command := RefCommand{State: refOf([3]string{"web-abc", "diagnostics", "Pod"})}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "web-abc", Namespace: "diagnostics", Kind: kinds.Pod},
+	}
 
 	for field, want := range map[string]string{
 		"name":      "web-abc",
 		"namespace": "diagnostics",
 		"kind":      "pod",
 	} {
-		lines, err := command.Execute([]int{1}, field)
+		lines, err := RefCommand{}.Execute(resolved, field)
 		if err != nil {
 			t.Fatalf("Execute(%s): %v", field, err)
 		}
@@ -143,9 +151,11 @@ func TestRefFieldFlagsPrintOneFieldEach(t *testing.T) {
 // Printing an empty line would hand `-n $(kx ref 1 --namespace)` a bare flag
 // with no value, and kubectl fails somewhere less obvious than here.
 func TestRefNamespaceOfAClusterScopedResourceIsAnError(t *testing.T) {
-	command := RefCommand{State: refOf([3]string{"desktop-control-plane", "", "Node"})}
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "desktop-control-plane", Namespace: "", Kind: kinds.Node},
+	}
 
-	lines, err := command.Execute([]int{1}, "namespace")
+	lines, err := RefCommand{}.Execute(resolved, "namespace")
 	if err == nil {
 		t.Fatalf("Execute = %v, want an error for a resource with no namespace", lines)
 	}
@@ -210,6 +220,29 @@ func TestRefIsRegistered(t *testing.T) {
 	}
 	if cmd.Name() != "ref" {
 		t.Errorf("root.Find(ref) resolved to %q", cmd.Name())
+	}
+}
+
+// A bad index in the batch prints nothing. kx ref is read-only, so a partial
+// list is not destructive — but a caller substituting it into another command
+// gets half the references and a non-zero exit, which is worse than neither.
+func TestRefPrintsNothingWhenOneReferenceIsBad(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	cmd := newRefCommand(services)
+	cmd.SetArgs([]string{"1", "99"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx ref 1 99 succeeded despite an out-of-range index")
+	}
+	if strings.Contains(out.String(), "pod/api") {
+		t.Errorf("output = %q, want nothing printed for a refused batch", out.String())
 	}
 }
 
