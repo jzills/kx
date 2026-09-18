@@ -164,6 +164,12 @@ func clampIndex(index, count int) int {
 //
 // Dropped silently: the output shows each resource once, which says it, and a
 // count of what was ignored would only restate what is already visible.
+//
+// This is a dedupe by argument, before anything resolves — it only catches an
+// index spelled twice. resolveIndexes (refs.go) dedupes again afterward, by
+// what each index resolved to, which is the dedupe that actually matters:
+// two different indexes can name the same resource. The dedupe here remains
+// only so a repeated index is not resolved twice for no reason.
 func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
@@ -194,22 +200,6 @@ func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, er
 		keep(index)
 	}
 	return indexes, nil
-}
-
-// validateIndexes resolves every index against the current state before a
-// batch command acts on any of them. Without this, a command that loops
-// index-by-index (delete, describe, logs, yaml, label/annotation reads) only
-// discovers a bad index — e.g. a range that overruns the current listing —
-// after it has already acted on the indexes ahead of it. For delete that
-// partial action can't be undone, so the whole batch must validate clean
-// before any of it runs.
-func validateIndexes(resolver IndexResolver, indexes []int) error {
-	for _, index := range indexes {
-		if _, _, _, err := resolver.Fields(index); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func itemCount(count int) string {

@@ -248,11 +248,11 @@ func mixedListing(t *testing.T, resources ...state.Resource) *state.Service {
 	return store
 }
 
-// validateIndexes exists so a batch does not half-apply, and the kind is as
-// much a precondition as the index resolving at all. The check used to live
-// inside Execute, one index at a time, so `kx cordon 1..3` over a listing
-// whose third entry is a Deployment cordoned the two nodes ahead of it,
-// printed two successes and then failed.
+// resolveRefs resolves every index before a batch acts on any of them, and
+// the kind is as much a precondition as the index resolving at all. The
+// check used to live inside Execute, one index at a time, so `kx cordon 1..3`
+// over a listing whose third entry is a Deployment cordoned the two nodes
+// ahead of it, printed two successes and then failed.
 func TestCordonRefusesAMixedBatchBeforeActingOnAnyOfIt(t *testing.T) {
 	for _, verb := range []string{"cordon", "uncordon"} {
 		kubectl := &recordingKubectl{}

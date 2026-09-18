@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/state"
 )
 
 // resolveRefs is the one place a command's resource arguments are parsed and
@@ -75,5 +76,74 @@ func TestResolveRefsRefusesNoArguments(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "indexes") {
 		t.Errorf("err = %q, want it to name the missing argument", err)
+	}
+}
+
+// resolveRefsExpecting is resolveRefs for a caller that has already named the
+// kind it wants — the kx get relist, so far. When the index's actual kind
+// matches, it resolves exactly as resolveRefs would.
+func TestResolveRefsExpectingResolvesWhenKindMatches(t *testing.T) {
+	services := switchServices(t, nil)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api", "web"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	resolved, err := resolveRefsExpecting(services.State, "indexes", []string{"1"}, kinds.Pod)
+	if err != nil {
+		t.Fatalf("resolveRefsExpecting: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("resolved %d references, want 1", len(resolved))
+	}
+	if resolved[0].Name != "api" || resolved[0].Namespace != "prod" || resolved[0].Kind != kinds.Pod {
+		t.Errorf("resolved[0] = %+v, want api/prod/Pod", resolved[0])
+	}
+}
+
+// An index that resolves to a kind other than the one the caller named is
+// refused with the same message FieldsExpecting has always given — naming
+// what the index actually is and what was expected, not a generic parse
+// failure. This is what "run 'kx get pods' to relist" depends on: it comes
+// from ResolveExpecting, not from anything resolveRefsExpecting adds itself.
+func TestResolveRefsExpectingRefusesTheWrongKind(t *testing.T) {
+	services := switchServices(t, nil)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err := resolveRefsExpecting(services.State, "indexes", []string{"1"}, kinds.Pod)
+	if err == nil {
+		t.Fatal("resolveRefsExpecting accepted an index that resolved to the wrong kind")
+	}
+	for _, want := range []string{"Deployment/web", "not Pod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// resolveRefsExpecting shares resolveRefs's identity dedupe via
+// resolveIndexes: two arguments that resolve to the same resource collapse
+// to one, the same as resolveRefs.
+func TestResolveRefsExpectingDedupesByResolvedIdentity(t *testing.T) {
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"api", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefsExpecting(resolver, "indexes", []string{"1", "2"}, kinds.Pod)
+	if err != nil {
+		t.Fatalf("resolveRefsExpecting: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("resolved %d references, want 1 — indexes 1 and 2 are one resource",
+			len(resolved))
+	}
+	if resolved[0].Name != "api" {
+		t.Errorf("resolved = %+v, want api", resolved)
 	}
 }
