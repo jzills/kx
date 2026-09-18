@@ -346,3 +346,27 @@ func TestDrainProceedsWhenThePreflightFailsForAnotherReason(t *testing.T) {
 		t.Errorf("drain ran %d times, want 1: %v", len(kubectl.interactive), kubectl.interactive)
 	}
 }
+
+// An out-of-range index in the batch must cordon nothing. kx delete has
+// guaranteed this since it was written; cordon parsed without validating, so
+// it cordoned node 1 and then reported the failure — leaving the cluster in a
+// state the command had not been asked for.
+func TestCordonValidatesEveryIndexBeforeCordoningAny(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"node-a"}, kinds.Node),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newCordonCommand(services, "cordon")
+	cmd.SetArgs([]string{"1", "99"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("cordon succeeded despite an out-of-range index in the batch")
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 — index 99 is out of range and "+
+			"should be caught before node 1 is cordoned", len(kube.runs))
+	}
+}
