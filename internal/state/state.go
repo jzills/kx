@@ -683,6 +683,52 @@ func (s *Service) SaveMark(name string, mark Mark) error {
 	return s.saveHistory(history)
 }
 
+// Marks returns every mark, keyed by name. Absent state is no marks rather
+// than an error: nothing has been marked yet.
+func (s *Service) Marks() (map[string]Mark, error) {
+	history, err := s.loadHistory()
+	if err != nil {
+		if errors.Is(err, ErrNoState) {
+			return map[string]Mark{}, nil
+		}
+		return nil, err
+	}
+	if history.Marks == nil {
+		return map[string]Mark{}, nil
+	}
+	return history.Marks, nil
+}
+
+// DropMark removes one mark, reporting a name that was never marked rather
+// than succeeding silently — a typo should not look like a removal.
+func (s *Service) DropMark(name string) error {
+	history, err := s.loadHistory()
+	if err != nil {
+		return err
+	}
+	if _, ok := history.Marks[name]; !ok {
+		return fmt.Errorf(
+			"No mark named '%s' — run 'kx mark' to see the marks you have.", name)
+	}
+	delete(history.Marks, name)
+	return s.saveHistory(history)
+}
+
+// DropAllMarks removes every mark and leaves the history stack alone. It is
+// the counterpart to DropAll, which leaves marks: a mark is something the user
+// deliberately created and named, where the stack accumulates by itself.
+func (s *Service) DropAllMarks() error {
+	history, err := s.loadHistory()
+	if err != nil {
+		if errors.Is(err, ErrNoState) {
+			return nil
+		}
+		return err
+	}
+	history.Marks = nil
+	return s.saveHistory(history)
+}
+
 // backfilled defaults an entry's namespace, for the entry being read.
 //
 // An entry can legitimately carry no namespace three ways — a spanning
@@ -912,8 +958,19 @@ func (s *Service) DropEmpty() (History, int, error) {
 // namespace/context slots together — resetting to what a fresh install has.
 // Unlike Drop, which refuses to remove the last remaining entry, DropAll has
 // no such guard: clearing everything is the point.
+//
+// Marks survive it. A mark is something the user deliberately created and
+// named, where the stack and the slots accumulate on their own — `kx unmark
+// --all` is the command that removes marks, not this one.
 func (s *Service) DropAll() error {
-	return s.saveHistory(History{})
+	marks, err := s.Marks()
+	if err != nil {
+		return err
+	}
+	if len(marks) == 0 {
+		return s.saveHistory(History{})
+	}
+	return s.saveHistory(History{Marks: marks})
 }
 
 // namespaceAt reports the namespace the resource at a 1-based index lives in.

@@ -2187,3 +2187,121 @@ func TestRefStringSpellsMarksWithTheSigil(t *testing.T) {
 		t.Errorf("Ref{Index: 3}.String() = %q, want 3", got)
 	}
 }
+
+func TestMarksListsWhatWasSaved(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-pod", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 2 || marks["api"].Name != "api-pod" || marks["web"].Name != "web-pod" {
+		t.Errorf("Marks() = %+v, want api and web", marks)
+	}
+}
+
+// Re-marking a name moves the pointer rather than adding a second entry.
+func TestSaveMarkReplacesAnExistingName(t *testing.T) {
+	service := newTestService(t, 10)
+	first := Mark{Resource: Resource{Name: "old", Kind: kinds.Pod, Namespace: "prod"}}
+	second := Mark{Resource: Resource{Name: "new", Kind: kinds.Pod, Namespace: "prod"}}
+	for _, mark := range []Mark{first, second} {
+		if err := service.SaveMark("api", mark); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 || marks["api"].Name != "new" {
+		t.Errorf("Marks() = %+v, want one entry naming new", marks)
+	}
+}
+
+func TestDropMarkRemovesOnlyThatName(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name, Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+	}
+	if err := service.DropMark("api"); err != nil {
+		t.Fatalf("DropMark: %v", err)
+	}
+
+	marks, _ := service.Marks()
+	if _, gone := marks["api"]; gone {
+		t.Error("api survived DropMark")
+	}
+	if _, kept := marks["web"]; !kept {
+		t.Error("DropMark removed web as well")
+	}
+}
+
+// Removing a name that was never marked says so rather than succeeding
+// silently — a typo should not look like a removal.
+func TestDropMarkReportsAnUnknownName(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.DropMark("nope"); err == nil {
+		t.Error("DropMark on an unknown name succeeded")
+	}
+}
+
+// kx state drop --all leaves marks alone; this is the call that removes them.
+func TestDropAllMarksLeavesTheHistoryStack(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	if err := service.DropAllMarks(); err != nil {
+		t.Fatalf("DropAllMarks: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.Marks) != 0 {
+		t.Errorf("Marks = %v, want none", history.Marks)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want the history stack untouched", len(history.States))
+	}
+}
+
+// And the converse: clearing history leaves marks, which is the rule the
+// drop --all help text has to state.
+func TestDropAllLeavesMarks(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll: %v", err)
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Errorf("Marks = %+v, want marks to survive drop --all", marks)
+	}
+}
