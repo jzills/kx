@@ -2313,11 +2313,11 @@ func TestDropAllLeavesMarks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadHistory: %v", err)
 	}
+	// Only the stack is asserted on: loadHistory forces the cursor to 0
+	// whenever the stack is empty, so a cursor assertion here would hold no
+	// matter what DropAll wrote.
 	if len(history.States) != 0 {
 		t.Errorf("len(States) = %d, want the stack cleared", len(history.States))
-	}
-	if history.Cursor != 0 {
-		t.Errorf("Cursor = %d, want 0", history.Cursor)
 	}
 }
 

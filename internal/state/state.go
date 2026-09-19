@@ -987,14 +987,15 @@ func (s *Service) DropEmpty() (History, int, error) {
 func (s *Service) DropAll() error {
 	marks, err := s.Marks()
 	if err != nil {
-		// drop --all is reached precisely when state has gone wrong (corrupt file,
-		// partial write, etc.). It must never be the command that fails on broken state.
-		// Lose the marks along with the rest — a resettable file beats a preserved mark.
+		// drop --all is reached precisely when state has gone wrong, so it must
+		// never be the command that fails on broken state. Any unreadable file
+		// takes this path, not only a corrupt one — an out-of-range cursor makes
+		// marks that decode perfectly unreachable to every other command, and
+		// this is their only exit. A resettable file beats a preserved mark.
 		return s.saveHistory(History{})
 	}
-	if len(marks) == 0 {
-		return s.saveHistory(History{})
-	}
+	// An empty map needs no special case: Marks is tagged omitempty, so it
+	// writes the same file a zero History would.
 	return s.saveHistory(History{Marks: marks})
 }
 
