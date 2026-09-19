@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -431,6 +432,80 @@ func TestDescribeCarriesAMarkOntoAStaleResourceError(t *testing.T) {
 	}
 	if stale.Ref.Mark != "api" {
 		t.Errorf("Ref.Mark = %q, want %q — the mark was lost on the way to the error", stale.Ref.Mark, "api")
+	}
+}
+
+// The Describe test above pins one ref use per command — the call into
+// Resolve that makes the command work at all, and that a human reviewer would
+// notice breaking immediately. Three more commands use ref a second time,
+// independently, to build the same StaleResourceError on their not-found
+// path: NodeCommand.Execute, EventsCommand.Execute and LogsCommand.Execute's
+// Pod branch. Nothing above exercises that second use, and it is exactly
+// where a dropped mark does damage — isStale declines a stale mark and
+// reports it, where a stale index is refreshable, so a command that resolved
+// correctly but then rebuilt state.Ref{Index: ref.Index} for the error would
+// have `kx cordon @worker` on a vanished node relist an unrelated listing
+// instead of reporting that the mark needs to be retaken. DrainCommand.Execute
+// has the identical second use and is included here too, even though it
+// wasn't one of the eight int-to-Ref conversions — it already took a Ref, and
+// the same gap applies to it in the same file.
+func TestNodeCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{
+		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},
+	}
+	_, err := NodeCommand{Kubectl: kube, State: node("node-a"), Verb: "cordon"}.
+		Execute(state.Ref{Mark: "worker"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "worker" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "worker")
+	}
+}
+
+func TestDrainCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{
+		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},
+	}
+	err := DrainCommand{Kubectl: kube, State: node("node-a")}.
+		Execute(state.Ref{Mark: "worker"}, true, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "worker" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "worker")
+	}
+}
+
+func TestEventsCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{probeCode: 1}
+	command := EventsCommand{Kubectl: kube, State: pod("api-7d8f"), Events: noEventsService{}}
+	_, err := command.Execute(context.Background(), state.Ref{Mark: "api"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "api")
+	}
+}
+
+func TestLogsCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := LogsCommand{Kubectl: kube, State: pod("api-7d8f"), Status: noStatus}.
+		Execute(state.Ref{Mark: "api"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "api")
 	}
 }
 
