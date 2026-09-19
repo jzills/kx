@@ -1,0 +1,156 @@
+// Named marks: pinning a resource to a chosen name so it survives the
+// re-listings that move every index. Storage and resolution live in
+// internal/state; this file is where a mark is created and removed.
+package cli
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
+	"github.com/spf13/cobra"
+)
+
+// newMarkCommand pins a resource to a name, or — with no arguments — lists
+// the marks already set.
+//
+// The index is resolved through resolveRefs before SaveMark is ever called,
+// so a bad index refuses without leaving a half-made mark behind. Listing
+// saves no state: a mark is spent by name, not by position, so numbering the
+// list would invite `kx mark 2` to mean something it doesn't.
+func newMarkCommand(services Services) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mark [name] [index]",
+		Short: "Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.",
+		Long: "Pins whatever `<index>` currently resolves to under `<name>`, so 'kx logs @name' keeps " +
+			"working after a later listing moves every index around it.\n\n" +
+			"With no arguments, lists the marks that are set. That listing carries no index " +
+			"column and saves no state — a mark is spent by the name it was given, never by " +
+			"position.",
+		Example: "  kx mark\n  kx mark api 3",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 || len(args) == 2 {
+				return nil
+			}
+			return fmt.Errorf(
+				"kx mark takes a name and an index, or no arguments to list marks — see 'kx mark --help' for usage.")
+		},
+		Annotations: map[string]string{
+			"arg.name": "Name to give the mark",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return listMarks(services)
+			}
+			name, indexArg := args[0], args[1]
+			if err := validMarkName(name); err != nil {
+				return err
+			}
+			resolved, err := resolveRefs(services.State, "index", []string{indexArg})
+			if err != nil {
+				return err
+			}
+			resource := resolved[0]
+			if err := services.State.SaveMark(name, state.Mark{
+				Resource: state.Resource{
+					Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
+				},
+				Context: services.Kubectl.CurrentContext(),
+			}); err != nil {
+				return err
+			}
+			render.Success(fmt.Sprintf("Marked @%s → %s/%s", name, resource.Kind, resource.Name))
+			return nil
+		},
+	}
+	return cmd
+}
+
+// listMarks renders the marks currently set, sorted by name so the output is
+// stable — Marks() returns a map, whose iteration order is not.
+func listMarks(services Services) error {
+	marks, err := services.State.Marks()
+	if err != nil {
+		return err
+	}
+	if len(marks) == 0 {
+		render.Caption("No marks set — see 'kx mark --help'.")
+		return nil
+	}
+	names := make([]string, 0, len(marks))
+	for name := range marks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	render.Caption("Marks", markCountLabel(len(names)))
+	columns := []render.Column{
+		{Header: "NAME"}, {Header: "KIND"}, {Header: "RESOURCE"}, {Header: "NAMESPACE"},
+	}
+	rows := make([][]render.Cell, 0, len(names))
+	for _, name := range names {
+		mark := marks[name]
+		rows = append(rows, []render.Cell{
+			render.Plain("@" + name),
+			render.Plain(string(mark.Kind)),
+			render.Plain(mark.Name),
+			render.Plain(mark.Namespace),
+		})
+	}
+	render.Table(columns, rows)
+	return nil
+}
+
+// markCountLabel matches the "N items" shape the rest of kx's listings use,
+// which render's own itemLabel isn't exported to reuse here.
+func markCountLabel(n int) string {
+	if n == 1 {
+		return "1 mark"
+	}
+	return fmt.Sprintf("%d marks", n)
+}
+
+// newUnmarkCommand removes one mark by name, or every mark with --all.
+func newUnmarkCommand(services Services) *cobra.Command {
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "unmark [name]",
+		Short: "Remove a mark by name; --all removes every mark.",
+		Long: "Removes a mark by name, or every mark at once with --all — the marks 'kx state " +
+			"drop --all' deliberately leaves behind.",
+		Example: "  kx unmark api\n  kx unmark --all",
+		Args:    cobra.MaximumNArgs(1),
+		Annotations: map[string]string{
+			"arg.name": "Mark name to remove",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) > 0 {
+					return fmt.Errorf("kx unmark --all takes no name argument")
+				}
+				if err := services.confirm()(
+					"Remove every mark? Listings and slots are untouched.",
+				); err != nil {
+					return err
+				}
+				if err := services.State.DropAllMarks(); err != nil {
+					return err
+				}
+				render.Success("Removed all marks.")
+				return nil
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("kx unmark requires a name, or --all to remove every mark")
+			}
+			name := args[0]
+			if err := services.State.DropMark(name); err != nil {
+				return err
+			}
+			render.Success(fmt.Sprintf("Removed mark @%s", name))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "Remove every mark")
+	return cmd
+}

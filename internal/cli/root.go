@@ -126,6 +126,11 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// resource gone, and kx ref never asks kubectl anything. It reports what
 	// the index means, which is knowable with no cluster reachable at all.
 	root.AddCommand(withoutRefresh(newRefCommand(services)))
+	// withoutRefresh: neither resolves an index into a listing that could go
+	// stale — mark resolves once and stores the result, and unmark never
+	// resolves an index at all.
+	root.AddCommand(withoutRefresh(newMarkCommand(services)))
+	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
 
 	stateCmd := newStateCommand(services)
 	stateCmd.AddCommand(

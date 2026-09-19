@@ -1166,13 +1166,15 @@ func newDropCommand(services Services) *cobra.Command {
 	var all, empty bool
 	cmd := &cobra.Command{
 		Use:   "drop <position>",
-		Short: "Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything.",
+		Short: "Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything but marks.",
 		Long: "Removes a history entry by position, drops every entry that found nothing with " +
 			"--empty, or clears the whole stack — including the namespace and context slots — " +
 			"with --all.\n\n" +
 			"A listing that found nothing is still saved, so the indexes it replaced stop " +
 			"resolving; --empty is how those entries are swept back up. It needs no " +
-			"confirmation, unlike --all: an entry holding nothing is not work anyone can lose.",
+			"confirmation, unlike --all: an entry holding nothing is not work anyone can lose.\n\n" +
+			"--all leaves marks in place — they were named deliberately, not accumulated the way " +
+			"the stack is. 'kx unmark --all' is what removes them.",
 		Example: fmt.Sprintf("  %s 2\n  %s --empty\n  %s --all", prefix, prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1199,7 +1201,7 @@ func newDropCommand(services Services) *cobra.Command {
 					return fmt.Errorf("drop --all takes no position argument")
 				}
 				if err := services.confirm()(
-					"Clear all kx history, including namespace and context slots?",
+					"Clear all kx history, including namespace and context slots, but not marks — run 'kx unmark --all' for those?",
 				); err != nil {
 					return err
 				}

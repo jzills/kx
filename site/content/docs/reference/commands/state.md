@@ -3,7 +3,7 @@
 title: "kx state"
 linkTitle: "state"
 description: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets."
-weight: 29
+weight: 31
 ---
 
 Shows the listing that indexes currently resolve against.
@@ -27,7 +27,7 @@ kx state [OPTIONS] [position]
 | Command | Description |
 |---|---|
 | `kx state back` | Navigate to the previous kx get result. |
-| `kx state drop` | Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything. |
+| `kx state drop` | Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything but marks. |
 | `kx state forward` | Navigate to the next kx get result. |
 
 ## Arguments

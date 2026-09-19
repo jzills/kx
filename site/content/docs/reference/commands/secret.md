@@ -3,7 +3,7 @@
 title: "kx secret"
 linkTitle: "secret"
 description: "List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."
-weight: 24
+weight: 25
 ---
 
 Lists Secrets exactly as kx get does. With --decode, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.
