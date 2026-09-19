@@ -2321,6 +2321,34 @@ func TestDropAllLeavesMarks(t *testing.T) {
 	}
 }
 
+// Save must preserve marks across a new listing.
+func TestSaveKeepsMarks(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	save(t, service, State{Resources: pods("web"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	// The whole mark is checked, not just the key: Save rebuilding History
+	// carried the map across while losing what was in it would satisfy a
+	// presence check and still leave every `kx logs @api` unresolvable.
+	mark, ok := history.Marks["api"]
+	if !ok {
+		t.Fatalf("Marks[api] missing after Save, want marks to survive")
+	}
+	if mark.Name != "api" || mark.Kind != kinds.Pod || mark.Namespace != "prod" {
+		t.Errorf("Marks[api] = %+v, want api/Pod/prod intact", mark)
+	}
+}
+
 // A marks entry missing its name would decode to the zero Mark — a mark
 // naming the empty string in the empty namespace — the same failure
 // decodeEntry exists to prevent for a stack entry with no "resources". It
@@ -2358,5 +2386,106 @@ func TestDropAllResetsACorruptFile(t *testing.T) {
 
 	if _, err := service.Load(); !errors.Is(err, ErrNoState) {
 		t.Errorf("Load after DropAll on a corrupt file = %v, want ErrNoState", err)
+	}
+}
+
+// The point of a mark: it survives a re-list that moves every index.
+func TestResolveAMarkSurvivesARelist(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	// A re-list that reverses the order: index 1 is now web.
+	save(t, service, State{Resources: pods("web", "api"), Namespace: "prod"})
+
+	name, namespace, kind, err := service.Resolve(Ref{Mark: "api"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("Resolve(@api) = (%q, %q, %q), want api/prod/Pod", name, namespace, kind)
+	}
+}
+
+func TestResolveAnUnknownMarkSaysHowToMakeOne(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Resolve(Ref{Mark: "nope"})
+	if err == nil {
+		t.Fatal("Resolve(@nope) succeeded with no such mark")
+	}
+	for _, want := range []string{
+		"No mark named 'nope'", "kx mark nope <index>", "kx mark",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// Names repeat across clusters, so a mark taken in staging must not resolve in
+// prod. This is the same hazard State.Context exists to prevent.
+func TestResolveAMarkFromAnotherContextRefuses(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "docker-desktop" }
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	_, _, _, err := service.Resolve(Ref{Mark: "api"})
+	if err == nil {
+		t.Fatal("a staging mark resolved in docker-desktop")
+	}
+	for _, want := range []string{"@api", "staging", "docker-desktop"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// Either side unknown waives the check, matching checkContext's rule for
+// listings: a kubeconfig with no current context is a legitimate setup.
+func TestResolveAMarkWithNoRecordedContextIsAllowed(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "docker-desktop" }
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	if _, _, _, err := service.Resolve(Ref{Mark: "api"}); err != nil {
+		t.Errorf("Resolve = %v, want a mark with no recorded context to resolve", err)
+	}
+}
+
+// A mark of the wrong kind is refused by the kind-checking path, the way an
+// index of the wrong kind already is.
+func TestResolveExpectingRefusesAMarkOfTheWrongKind(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	_, _, err := service.ResolveExpecting(Ref{Mark: "api"}, kinds.Deployment)
+	if err == nil {
+		t.Fatal("a Pod mark resolved where a Deployment was expected")
+	}
+	for _, want := range []string{
+		"@api", "Pod/api", "not Deployment", "kx get deployments", "kx mark api",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
 	}
 }

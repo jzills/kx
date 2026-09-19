@@ -568,14 +568,24 @@ func (s *Service) Save(state State) error {
 	}
 	state = s.stamp(state)
 
-	var states []State
-	var named map[kinds.Kind]State
-	if history, err := s.loadHistory(); err == nil {
-		// A slots-only file has no stack to truncate against.
-		if len(history.States) > 0 {
-			states = append(states, history.States[:history.Cursor+1]...)
-		}
-		named = history.Named
+	history, err := s.loadHistory()
+	if err != nil {
+		// Every load error — ErrNoState, ErrSchemaChanged, a corrupt or unreadable
+		// file — heals here rather than failing the save: a listing the user just
+		// ran is the one thing that can rebuild an unusable file, so refusing to
+		// write it would strand them with no way back.
+		//
+		// The cost, now that marks exist, is that healing discards them along with
+		// the slots. A file this path can reach has already lost its stack, and a
+		// mark whose cluster and kind cannot be read is not worth resurrecting —
+		// but it means `kx get` is what a broken file usually meets first, not
+		// `kx state drop --all`.
+		history = History{}
+	}
+
+	// A slots-only file has no stack to truncate against.
+	if len(history.States) > 0 {
+		history.States = history.States[:history.Cursor+1]
 	}
 	// A listing that repeats the one the cursor is already on replaces it
 	// instead of pushing. Re-running `kx get` is the refresh idiom, so the
@@ -587,21 +597,22 @@ func (s *Service) Save(state State) error {
 	// Only against the cursor's entry. Comparing the whole stack would let a
 	// re-list rewrite history at a distance: jump back two entries, re-run
 	// that query, and an entry further forward would vanish.
-	if len(states) > 0 && sameListing(states[len(states)-1], state) {
-		states[len(states)-1] = state
+	if len(history.States) > 0 && sameListing(history.States[len(history.States)-1], state) {
+		history.States[len(history.States)-1] = state
 	} else {
-		states = append(states, state)
+		history.States = append(history.States, state)
 	}
-	if len(states) > maxHistory {
-		states = states[len(states)-maxHistory:]
+	if len(history.States) > maxHistory {
+		history.States = history.States[len(history.States)-maxHistory:]
+	}
+	if history.Named == nil {
+		history.Named = map[kinds.Kind]State{}
 	}
 	if kind := soleKind(state); slottedKinds[kind] {
-		if named == nil {
-			named = map[kinds.Kind]State{}
-		}
-		named[kind] = state
+		history.Named[kind] = state
 	}
-	return s.saveHistory(History{States: states, Cursor: len(states) - 1, Named: named})
+	history.Cursor = len(history.States) - 1
+	return s.saveHistory(history)
 }
 
 // sameListing reports whether two entries are the same view, so the newer one
@@ -990,8 +1001,12 @@ func (s *Service) DropAll() error {
 		// drop --all is reached precisely when state has gone wrong, so it must
 		// never be the command that fails on broken state. Any unreadable file
 		// takes this path, not only a corrupt one — an out-of-range cursor makes
-		// marks that decode perfectly unreachable to every other command, and
-		// this is their only exit. A resettable file beats a preserved mark.
+		// marks that decode perfectly unreachable. A resettable file beats a
+		// preserved mark.
+		//
+		// Rarely the first thing such a file meets, though: Save heals it on the
+		// next `kx get`, discarding the marks there. This is the deliberate exit,
+		// not the usual one.
 		return s.saveHistory(History{})
 	}
 	// An empty map needs no special case: Marks is tagged omitempty, so it
@@ -1057,11 +1072,65 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	return name, namespaceAt(current, idx), kind, nil
 }
 
+// resolveMark looks a mark up and refuses one taken in another cluster.
+//
+// Names repeat across clusters, so a mark taken in staging resolving in prod
+// is the hazard State.Context exists to prevent. Either side unknown waives
+// the check, matching checkContext: a kubeconfig with no current context is a
+// legitimate setup, not a mismatch.
+//
+// The mismatch is reported as a plain error and must not be reported as a
+// state.ContextMismatchError, however tempting it is to unify the two mismatch
+// messages behind one type. isStale (internal/cli/refresh.go) treats that type
+// with an empty Relist as recoverable and hands it to withRefresh, which replays
+// the cursor entry's query — so `kx logs @api` would answer with a fresh, correct
+// listing of something else entirely. A mark carries no query for withRefresh to
+// replay, which is exactly why it must never claim to be recoverable.
+//
+// A separate error type would be safe, since it would fail that errors.As; a
+// plain error is used because there is nothing for a type to carry here.
+func (s *Service) resolveMark(ref Ref) (name, namespace string, kind kinds.Kind, err error) {
+	marks, err := s.Marks()
+	if err != nil {
+		return "", "", "", err
+	}
+	mark, ok := marks[ref.Mark]
+	if !ok {
+		return "", "", "", fmt.Errorf(
+			"No mark named '%s' — run 'kx mark %s <index>' to create one, or 'kx mark' to list them.",
+			ref.Mark, ref.Mark)
+	}
+	if current := s.context(); mark.Context != "" && current != "" && mark.Context != current {
+		return "", "", "", fmt.Errorf(
+			"%s was marked in context '%s'; you are in '%s'.",
+			ref, mark.Context, current)
+	}
+	return mark.Name, mark.Namespace, mark.Kind, nil
+}
+
+// checkMarkKind refuses a mark of the wrong kind without reusing EnsureKind,
+// because EnsureKind's error message names an index the user never typed and
+// offers a relist that cannot fix a mark — a mark carries no query, so re-running
+// it answers with somebody else's listing. The list command is named as a step
+// on the way rather than as a repair: re-marking needs an index of the right
+// kind, and there is no listing of that kind on screen to take one from.
+func checkMarkKind(ref Ref, name string, kind, expected kinds.Kind) error {
+	if kind == expected {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s is %s/%s, not %s — run '%s', then re-mark it with 'kx mark %s <index>'.",
+		ref, kind, name, expected, kinds.ListCommand(expected), ref.Mark)
+}
+
 // Resolve turns a Ref into the resource it names.
 //
-// Fields is the index branch: this is the seam a mark will resolve through
+// Fields is the index branch: this is the seam a mark resolves through
 // without every caller learning a second lookup.
 func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err error) {
+	if ref.Mark != "" {
+		return s.resolveMark(ref)
+	}
 	if ref.Index == 0 {
 		return "", "", "", errEmptyRef
 	}
@@ -1069,10 +1138,22 @@ func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err
 }
 
 // ResolveExpecting is Resolve for a command that has already named the kind it
-// wants.
+// wants. A mark's kind can only be checked after resolving it, because the mark
+// is where the kind is recorded — unlike an index, which is checked against the
+// listing it was counted in.
 func (s *Service) ResolveExpecting(
 	ref Ref, expected kinds.Kind,
 ) (name, namespace string, err error) {
+	if ref.Mark != "" {
+		name, namespace, kind, err := s.resolveMark(ref)
+		if err != nil {
+			return "", "", err
+		}
+		if err := checkMarkKind(ref, name, kind, expected); err != nil {
+			return "", "", err
+		}
+		return name, namespace, nil
+	}
 	if ref.Index == 0 {
 		return "", "", errEmptyRef
 	}
