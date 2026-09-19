@@ -1201,7 +1201,7 @@ func newDropCommand(services Services) *cobra.Command {
 					return fmt.Errorf("drop --all takes no position argument")
 				}
 				if err := services.confirm()(
-					"Clear all kx history, including namespace and context slots, but not marks — run 'kx unmark --all' for those?",
+					"Clear all kx history, including namespace and context slots? Marks are untouched — run 'kx unmark --all' for those.",
 				); err != nil {
 					return err
 				}

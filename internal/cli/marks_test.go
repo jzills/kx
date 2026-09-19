@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -39,6 +40,35 @@ func TestMarkPinsTheResolvedResource(t *testing.T) {
 	}
 	if mark.Context == "" {
 		t.Error("mark recorded no context; a mark must not be portable between clusters")
+	}
+}
+
+// A bad index must refuse before anything is stored. TestMarkRefusesANumericName
+// cannot pin this: it fails on name validation before resolveRefs is ever
+// reached, so it would still pass if SaveMark ran ahead of resolveRefs. This
+// test marks against an out-of-range index — the name is valid, so the only
+// thing that can stop it is the resolve — and checks both that it errors and
+// that no mark was left behind.
+func TestMarkRefusesABadIndexBeforeStoringAnything(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newMarkCommand(services)
+	cmd.SetArgs([]string{"api", "99"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx mark api 99 succeeded; index 99 is out of range")
+	}
+
+	marks, err := services.State.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 0 {
+		t.Errorf("marks = %+v, want none — a bad index must refuse before anything is stored", marks)
 	}
 }
 
@@ -102,5 +132,88 @@ func TestMarkWithNoArgumentsListsAndSavesNothing(t *testing.T) {
 	after, _ := services.State.LoadHistory()
 	if len(after.States) != len(before.States) {
 		t.Error("kx mark pushed a history entry; listing marks must not disturb the stack")
+	}
+}
+
+// --all is destructive, so it confirms first — mirroring TestDropAllConfirmsBeforeClearing.
+func TestUnmarkAllConfirmsBeforeClearing(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	for _, name := range []string{"api", "web"} {
+		if err := services.State.SaveMark(name, state.Mark{
+			Resource: state.Resource{Name: name, Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	var prompted string
+	services.Confirm = func(m string) error { prompted = m; return nil }
+
+	cmd := newUnmarkCommand(services)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx unmark --all: %v", err)
+	}
+	if prompted == "" {
+		t.Error("kx unmark --all did not prompt for confirmation")
+	}
+
+	marks, err := services.State.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 0 {
+		t.Errorf("marks = %+v, want none after unmark --all", marks)
+	}
+}
+
+// Declining the prompt must remove nothing.
+func TestUnmarkAllAbortsWithoutConfirmation(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	services.Confirm = func(string) error { return errors.New("aborted") }
+
+	cmd := newUnmarkCommand(services)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx unmark --all succeeded despite an aborted confirmation")
+	}
+
+	marks, err := services.State.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Errorf("marks = %+v, want the mark still present", marks)
+	}
+}
+
+// --all clears every mark by name; combining it with a name is a different,
+// unsupported request rather than a filter on which mark --all removes.
+func TestUnmarkAllTakesNoNameArgument(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	services.Confirm = func(string) error { return nil }
+
+	cmd := newUnmarkCommand(services)
+	cmd.SetArgs([]string{"--all", "api"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx unmark --all api succeeded; --all takes no name argument")
+	}
+
+	marks, err := services.State.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Errorf("marks = %+v, want the mark untouched by the refusal", marks)
 	}
 }

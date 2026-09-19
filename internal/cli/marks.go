@@ -5,7 +5,6 @@ package cli
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -67,48 +66,16 @@ func newMarkCommand(services Services) *cobra.Command {
 	return cmd
 }
 
-// listMarks renders the marks currently set, sorted by name so the output is
-// stable — Marks() returns a map, whose iteration order is not.
+// listMarks fetches the marks currently set and hands them to render.MarkList
+// — the presentation, including the empty-state message and the sort order,
+// lives in internal/render beside every other listing renderer.
 func listMarks(services Services) error {
 	marks, err := services.State.Marks()
 	if err != nil {
 		return err
 	}
-	if len(marks) == 0 {
-		render.Caption("No marks set — see 'kx mark --help'.")
-		return nil
-	}
-	names := make([]string, 0, len(marks))
-	for name := range marks {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	render.Caption("Marks", markCountLabel(len(names)))
-	columns := []render.Column{
-		{Header: "NAME"}, {Header: "KIND"}, {Header: "RESOURCE"}, {Header: "NAMESPACE"},
-	}
-	rows := make([][]render.Cell, 0, len(names))
-	for _, name := range names {
-		mark := marks[name]
-		rows = append(rows, []render.Cell{
-			render.Plain("@" + name),
-			render.Plain(string(mark.Kind)),
-			render.Plain(mark.Name),
-			render.Plain(mark.Namespace),
-		})
-	}
-	render.Table(columns, rows)
+	render.MarkList(marks)
 	return nil
-}
-
-// markCountLabel matches the "N items" shape the rest of kx's listings use,
-// which render's own itemLabel isn't exported to reuse here.
-func markCountLabel(n int) string {
-	if n == 1 {
-		return "1 mark"
-	}
-	return fmt.Sprintf("%d marks", n)
 }
 
 // newUnmarkCommand removes one mark by name, or every mark with --all.

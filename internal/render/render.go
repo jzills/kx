@@ -235,6 +235,7 @@ func EngineList(active string)                       { current.EngineList(active
 func StateHistory(history state.History)             { current.StateHistory(history) }
 func State(entry state.State)                        { current.State(entry) }
 func SwitchTargets(history state.History, live Live) { current.SwitchTargets(history, live) }
+func MarkList(marks map[string]state.Mark)           { current.MarkList(marks) }
 
 // proseMaxWidth is the width prose wraps to: the help screens, and the
 // findings and event messages a diagnostic report is mostly made of.
