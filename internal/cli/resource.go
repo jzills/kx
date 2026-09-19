@@ -44,8 +44,8 @@ type EditCommand struct {
 	State   IndexResolver
 }
 
-func (c EditCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c EditCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -122,8 +122,8 @@ type ScaleCommand struct {
 	State   IndexResolver
 }
 
-func (c ScaleCommand) Execute(index, replicas int, extraArgs []string) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c ScaleCommand) Execute(ref state.Ref, replicas int, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -203,12 +203,12 @@ type RolloutCommand struct {
 }
 
 // Execute returns the captured output, or "" for actions that stream directly.
-func (c RolloutCommand) Execute(action string, index int, extraArgs []string) (string, error) {
+func (c RolloutCommand) Execute(action string, ref state.Ref, extraArgs []string) (string, error) {
 	if !isRolloutAction(action) {
 		return "", fmt.Errorf("kx rollout does not support '%s' — only %s.",
 			action, joinAnd(rolloutActionNames()))
 	}
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -241,8 +241,8 @@ type PortForwardCommand struct {
 	State   IndexResolver
 }
 
-func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c PortForwardCommand) Execute(ref state.Ref, port string, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -475,8 +475,8 @@ func execTarget(kind kinds.Kind, name string) string {
 	return string(kind) + "/" + name
 }
 
-func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -551,8 +551,8 @@ type DebugCommand struct {
 	Image string
 }
 
-func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}

@@ -425,20 +425,20 @@ func newEditCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("edit requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return EditCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, rest[1:])
+				Execute(ref, rest[1:])
 		},
 	}
 }
@@ -462,21 +462,21 @@ func newExecCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("exec requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return ExecCommand{
 				Kubectl: services.Kubectl, State: services.State, Shells: services.Config.Shells,
-			}.Execute(index, command, rest[1:])
+			}.Execute(ref, command, rest[1:])
 		},
 	}
 }
@@ -522,22 +522,22 @@ func newDebugCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("debug requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return DebugCommand{
 				Kubectl: services.Kubectl, State: services.State,
 				Image: services.Config.DebugImage,
-			}.Execute(index, command, rest[1:])
+			}.Execute(ref, command, rest[1:])
 		},
 	}
 	// Read by hand out of the passthrough args — kx acts on both, rather than
@@ -641,7 +641,7 @@ func newScaleCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
@@ -656,16 +656,16 @@ func newScaleCommand(services Services) *cobra.Command {
 					"'--replicas' cannot be combined with a replica count — kx builds " +
 						"the flag from the count given here. Drop one of the two.")
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, replicas, extra)
+				Execute(ref, replicas, extra)
 			if err != nil {
 				return err
 			}
@@ -704,21 +704,21 @@ func newRolloutCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
-			index, err := parseIndex("index", rest[1])
+			ref, err := parseRef("index", rest[1])
 			if err != nil {
 				return err
 			}
 			extra := rest[2:]
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(rest[0], index, extra)
+				Execute(rest[0], ref, extra)
 			if err != nil {
 				return err
 			}
@@ -755,20 +755,20 @@ func newPortForwardCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return fmt.Errorf("port-forward requires an index and a port")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, rest[2:]); err != nil {
 				return err
 			}
 			return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, rest[1], rest[2:])
+				Execute(ref, rest[1], rest[2:])
 		},
 	}
 }
@@ -958,7 +958,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 		Args:    minArgs(1),
 		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
@@ -968,7 +968,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 			}
 			message, err := MetadataWriteCommand{
 				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
-			}.Execute(index, keys, values, removes, overwrite)
+			}.Execute(ref, keys, values, removes, overwrite)
 			if err != nil {
 				return err
 			}
@@ -996,13 +996,13 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 			if len(args) == 0 {
 				return listSwitchTargets(services, isContext)
 			}
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
 			// Shared with `kx get contexts <index>`, which routes here too, so
 			// the stale-namespace relist lives in one place.
-			return switchTo(services, use, index, isContext)
+			return switchTo(services, use, ref.Index, isContext)
 		},
 	}
 }

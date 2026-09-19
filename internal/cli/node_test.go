@@ -89,7 +89,7 @@ func TestDrainAbortsWithoutConfirmation(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return declined },
 	}
-	if err := command.Execute(1, false, nil); !errors.Is(err, declined) {
+	if err := command.Execute(state.Ref{Index: 1}, false, nil); !errors.Is(err, declined) {
 		t.Fatalf("err = %v, want the confirmation's own error", err)
 	}
 	if len(kubectl.interactive) != 0 {
@@ -112,7 +112,7 @@ func TestDrainSkipsTheatPromptWithYes(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { asked = true; return nil },
 	}
-	if err := command.Execute(1, true, nil); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if asked {
@@ -131,7 +131,7 @@ func TestDrainStreamsAndForwardsFlags(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	if err := command.Execute(1, true, []string{"--ignore-daemonsets", "--force"}); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, []string{"--ignore-daemonsets", "--force"}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	args := kubectl.interactive[0]
@@ -150,7 +150,7 @@ func TestDrainRefusesANonNode(t *testing.T) {
 		Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment),
 		Confirm: func(string) error { return nil },
 	}
-	err := command.Execute(1, true, nil)
+	err := command.Execute(state.Ref{Index: 1}, true, nil)
 	if err == nil || !strings.Contains(err.Error(), "'Deployment'") ||
 		!strings.Contains(err.Error(), "only Nodes") {
 		t.Errorf("err = %v, want it to name Deployment and Nodes", err)
@@ -165,7 +165,7 @@ func TestDrainForwardsAFailingExitCode(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	err := command.Execute(1, true, nil)
+	err := command.Execute(state.Ref{Index: 1}, true, nil)
 
 	var silent SilentError
 	if !errors.As(err, &silent) || silent.Code != 1 {
@@ -316,7 +316,7 @@ func TestDrainReportsAVanishedNodeAsStale(t *testing.T) {
 	}
 
 	var stale StaleResourceError
-	err := command.Execute(1, false, nil)
+	err := command.Execute(state.Ref{Index: 1}, false, nil)
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %#v, want StaleResourceError", err)
 	}
@@ -339,7 +339,7 @@ func TestDrainProceedsWhenThePreflightFailsForAnotherReason(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	if err := command.Execute(1, true, nil); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(kubectl.interactive) != 1 {

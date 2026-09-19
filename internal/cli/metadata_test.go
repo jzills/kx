@@ -48,7 +48,7 @@ func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAnnotateUsesItsOwnVerb(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"annotations":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "annotate", Field: "annotations",
-	}.Execute(1, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev","app":"web"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
 	if err == nil {
 		t.Fatal("overwrote existing labels without --overwrite")
 	}
@@ -100,7 +100,7 @@ func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, nil, nil, nil, false)
+	}.Execute(state.Ref{Index: 1}, nil, nil, nil, false)
 	if err == nil {
 		t.Fatal("accepted a write with nothing to set or remove")
 	}

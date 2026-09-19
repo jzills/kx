@@ -29,6 +29,17 @@ type Resolved struct {
 	Kind      kinds.Kind
 }
 
+// parseRef parses one argument into a reference. Marks arrive in Task 8; today
+// every reference is an index, and this exists so the single-reference
+// commands stop passing a bare int around.
+func parseRef(name, arg string) (state.Ref, error) {
+	index, err := parseIndex(name, arg)
+	if err != nil {
+		return state.Ref{}, err
+	}
+	return state.Ref{Index: index}, nil
+}
+
 // resolveRefs parses a command's resource arguments and resolves every one of
 // them before the command acts on any.
 //

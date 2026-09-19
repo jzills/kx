@@ -65,8 +65,8 @@ type DrainCommand struct {
 }
 
 // Execute drains one indexed node, streaming kubectl's own progress.
-func (c DrainCommand) Execute(index int, yes bool, extraArgs []string) error {
-	name, _, kind, err := c.State.Fields(index)
+func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error {
+	name, _, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -173,15 +173,15 @@ func newDrainCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("drain requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			_, namespace, kind, err := services.State.Fields(index)
+			_, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
-			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
 			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
@@ -189,7 +189,7 @@ func newDrainCommand(services Services) *cobra.Command {
 				Kubectl: services.Kubectl,
 				State:   services.State,
 				Confirm: services.confirm(),
-			}.Execute(index, yes, rest[1:])
+			}.Execute(ref, yes, rest[1:])
 		},
 	}
 	// Registered so they appear in --help; parsing is by hand.

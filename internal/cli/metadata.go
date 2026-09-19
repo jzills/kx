@@ -250,7 +250,7 @@ type MetadataWriteCommand struct {
 }
 
 func (c MetadataWriteCommand) Execute(
-	index int, setKeys []string, sets map[string]string, removes []string, overwrite bool,
+	ref state.Ref, setKeys []string, sets map[string]string, removes []string, overwrite bool,
 ) (string, error) {
 	if len(sets) == 0 && len(removes) == 0 {
 		return "", fmt.Errorf(
@@ -258,7 +258,7 @@ func (c MetadataWriteCommand) Execute(
 			c.Verb)
 	}
 
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +266,7 @@ func (c MetadataWriteCommand) Execute(
 	if !overwrite {
 		// kubectl would refuse the write anyway, but its error names only the
 		// first conflict; listing them all saves a round trip.
-		_, current, err := fetchMetadataField(c.Kubectl, c.State, index, c.Field)
+		_, current, err := fetchMetadataField(c.Kubectl, c.State, ref.Index, c.Field)
 		if err != nil {
 			return "", err
 		}
