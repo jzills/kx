@@ -87,6 +87,8 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 }
 
 // forwardExit turns a non-zero kubectl exit into the error kx should return.
+// ref is passed straight through to ensureExists, so the caller's mark or
+// index rides along onto whichever error comes back.
 //
 // A vanished resource becomes StaleResourceError, so the caller refreshes.
 // Anything else forwards kubectl's own exit code: kubectl has already printed

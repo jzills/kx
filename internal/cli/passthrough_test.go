@@ -561,7 +561,7 @@ func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
 		message, err := DeleteCommand{
 			Kubectl: kube, State: pod("nginx"), Confirm: func(string) error { return nil },
 			Status: noStatus,
-		}.Execute(1, true, []string{value})
+		}.Execute(state.Ref{Index: 1}, true, []string{value})
 		if err != nil {
 			t.Fatalf("Execute(%s): %v", value, err)
 		}
@@ -580,7 +580,7 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 		message, err := DeleteCommand{
 			Kubectl: &recordingKubectl{}, State: pod("nginx"),
 			Confirm: func(string) error { return nil }, Status: noStatus,
-		}.Execute(1, true, args)
+		}.Execute(state.Ref{Index: 1}, true, args)
 		if err != nil {
 			t.Fatalf("Execute(%v): %v", args, err)
 		}

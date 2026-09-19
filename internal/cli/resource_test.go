@@ -129,7 +129,7 @@ func noStatus(string) func() { return func() {} }
 func TestDescribeBuildsKubectlCommand(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.
-		Execute(1, []string{"--show-events=false"})
+		Execute(state.Ref{Index: 1}, []string{"--show-events=false"})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestDescribeBuildsKubectlCommand(t *testing.T) {
 // genuinely gone; otherwise kubectl already explained itself.
 func TestDescribeProbesOnFailure(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
-	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -156,7 +156,7 @@ func TestDescribeProbesOnFailure(t *testing.T) {
 
 func TestDescribeSucceedingDoesNotProbe(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	if err := (DescribeCommand{Kubectl: kubectl, State: pod("nginx")}).Execute(1, nil); err != nil {
+	if err := (DescribeCommand{Kubectl: kubectl, State: pod("nginx")}).Execute(state.Ref{Index: 1}, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(kubectl.probes) != 0 {
@@ -172,7 +172,7 @@ func TestDescribeSucceedingDoesNotProbe(t *testing.T) {
 // error and then exit 0, so a shell could not tell it had failed.
 func TestDescribeFailureOnLiveResourceForwardsTheExitCode(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 3, probeCode: 0}
-	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, nil)
 
 	var silent SilentError
 	if !errors.As(err, &silent) {
@@ -191,7 +191,7 @@ func TestDescribeFailureOnLiveResourceForwardsTheExitCode(t *testing.T) {
 // routing into the refresh instead.
 func TestDescribeFailureOnVanishedResourceStaysStale(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
-	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(1, nil)
+	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -225,7 +225,7 @@ func TestEditAndPortForwardForwardTheExitCode(t *testing.T) {
 func TestLogsForwardsTheExitCode(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 4, probeCode: 0}
 	err := LogsCommand{Kubectl: kubectl, State: pod("nginx"), Status: noStatus}.
-		Execute(1, nil)
+		Execute(state.Ref{Index: 1}, nil)
 	var silent SilentError
 	if !errors.As(err, &silent) || silent.Code != 4 {
 		t.Errorf("err = %#v, want SilentError{4}", err)
@@ -377,7 +377,7 @@ func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(m string) error { prompted = m; return nil },
 		Status:  noStatus,
-	}.Execute(1, false, nil)
+	}.Execute(state.Ref{Index: 1}, false, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(string) error { return errors.New("aborted") },
 		Status:  noStatus,
-	}.Execute(1, false, nil)
+	}.Execute(state.Ref{Index: 1}, false, nil)
 	if err == nil {
 		t.Fatal("Execute succeeded despite an aborted confirmation")
 	}
@@ -417,7 +417,7 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 		State:   pod("nginx"),
 		Confirm: func(string) error { prompted = true; return nil },
 		Status:  noStatus,
-	}.Execute(1, true, nil)
+	}.Execute(state.Ref{Index: 1}, true, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestPortForwardBuildsCommand(t *testing.T) {
 func TestLogsForPodReadsDirectly(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	if err := (LogsCommand{Kubectl: kubectl, State: pod("nginx"), Status: noStatus}).
-		Execute(1, []string{"-f"}); err != nil {
+		Execute(state.Ref{Index: 1}, []string{"-f"}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if want := "logs nginx -n prod -f"; joinArgs(kubectl.interactive[0]) != want {
@@ -594,7 +594,7 @@ func TestLogsForDeploymentAggregatesBySelector(t *testing.T) {
 	}
 	if err := (LogsCommand{
 		Kubectl: kubectl, State: workload("web", kinds.Deployment), Status: noStatus,
-	}).Execute(1, nil); err != nil {
+	}).Execute(state.Ref{Index: 1}, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	want := "logs -l app=web,tier=api --prefix=true -n prod"
@@ -608,7 +608,7 @@ func TestLogsForServiceUsesFlatSelector(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"spec":{"selector":{"app":"web"}}}`}
 	if err := (LogsCommand{
 		Kubectl: kubectl, State: workload("web", kinds.Service), Status: noStatus,
-	}).Execute(1, nil); err != nil {
+	}).Execute(state.Ref{Index: 1}, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.Contains(joinArgs(kubectl.interactive[0]), "-l app=web") {
@@ -620,7 +620,7 @@ func TestLogsForWorkloadWithoutSelectorFails(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"spec":{}}`}
 	err := LogsCommand{
 		Kubectl: kubectl, State: workload("web", kinds.Deployment), Status: noStatus,
-	}.Execute(1, nil)
+	}.Execute(state.Ref{Index: 1}, nil)
 	if err == nil {
 		t.Fatal("aggregated logs with no selector, want an error")
 	}
@@ -632,7 +632,7 @@ func TestLogsForWorkloadWithoutSelectorFails(t *testing.T) {
 func TestLogsRejectsUnsupportedKind(t *testing.T) {
 	err := LogsCommand{
 		Kubectl: &recordingKubectl{}, State: workload("cm", kinds.ConfigMap), Status: noStatus,
-	}.Execute(1, nil)
+	}.Execute(state.Ref{Index: 1}, nil)
 	want := "kx logs does not support 'ConfigMap' — only Pods, Deployments, " +
 		"StatefulSets, DaemonSets and Services."
 	if err == nil || err.Error() != want {
@@ -1353,7 +1353,7 @@ func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T
 		"logs": func() error {
 			return LogsCommand{
 				Kubectl: &recordingKubectl{}, State: workload("cm", wrong), Status: noStatus,
-			}.Execute(1, nil)
+			}.Execute(state.Ref{Index: 1}, nil)
 		},
 		"scan": func() error {
 			_, err := ScanCommand{State: workload("cm", wrong), Status: noStatus}.Execute(state.Ref{Index: 1}, "trivy")

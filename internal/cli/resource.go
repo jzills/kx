@@ -19,8 +19,8 @@ type DescribeCommand struct {
 	State   IndexResolver
 }
 
-func (c DescribeCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DescribeCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func (c DescribeCommand) Execute(index int, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way.
-		return forwardExit(c.Kubectl, kind, name, namespace, code, state.Ref{Index: index})
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -70,8 +70,8 @@ type DeleteCommand struct {
 	Status func(string) func()
 }
 
-func (c DeleteCommand) Execute(index int, yes bool, extraArgs []string) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -314,9 +314,12 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	if pod == nil {
 		return SilentError{Code: code}
 	}
-	// cp resolves its pod out of an "<index>:<path>" argument, so there is no
-	// Ref in hand here the way the other commands have one — the zero Ref
-	// keeps today's refreshable behaviour, which is right for an index path.
+	// cp resolves its pod out of an "<index>:<path>" argument via strconv.Atoi,
+	// so there is no Ref in hand here the way the other commands have one — the
+	// zero Ref keeps today's refreshable behaviour, which is right for an index
+	// path. cp does not support marks: this parsing has no sigil branch, so
+	// `kx cp @api:/f .` would hand kubectl the literal string "@api:/f" rather
+	// than resolving a mark.
 	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, state.Ref{})
 }
 
@@ -362,8 +365,8 @@ type LogsCommand struct {
 	Status  func(string) func()
 }
 
-func (c LogsCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c LogsCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -376,7 +379,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			return forwardExit(c.Kubectl, kind, name, namespace, code, state.Ref{Index: index})
+			return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 		}
 		return nil
 

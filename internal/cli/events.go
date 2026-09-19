@@ -30,8 +30,8 @@ type EventsCommand struct {
 	Since time.Time
 }
 
-func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c EventsCommand) Execute(ctx context.Context, ref state.Ref) ([]events.Row, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 		// whose events are all older than --since has plainly not been deleted,
 		// and probing for it would spend a kubectl subprocess to learn what its
 		// events already said.
-		if err := ensureExists(c.Kubectl, kind, name, namespace, state.Ref{Index: index}); err != nil {
+		if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -95,7 +95,7 @@ func newEventsCommand(services Services) *cobra.Command {
 			}
 			for position, target := range resolved {
 				stop := render.Status("fetching events")
-				rows, err := command.Execute(cmd.Context(), target.Ref.Index)
+				rows, err := command.Execute(cmd.Context(), target.Ref)
 				stop()
 				if err != nil {
 					return err

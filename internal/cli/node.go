@@ -23,8 +23,8 @@ type NodeCommand struct {
 }
 
 // Execute runs the verb against one indexed node, returning the line to report.
-func (c NodeCommand) Execute(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+func (c NodeCommand) Execute(ref state.Ref) (string, error) {
+	name, _, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -32,12 +32,13 @@ func (c NodeCommand) Execute(index int) (string, error) {
 		return "", unsupportedKindError(c.Verb, kind, kinds.Set{kinds.Node})
 	}
 	// No -n: a Node is cluster-scoped, and kubectl cordon takes no namespace.
+	// Namespace is left unset on the error below for the same reason — see the
+	// Namespace field's own doc on StaleResourceError.
 	if _, err := c.Kubectl.Run([]string{c.Verb, name}); err != nil {
 		// A vanished node reads as stale so the caller can relist, rather than
 		// as whatever kubectl said about a name that is no longer there.
 		if IsNotFound(err) {
-			// No Namespace: a Node is cluster-scoped, and there is none to name.
-			return "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: state.Ref{Index: index}}
+			return "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 		}
 		return "", err
 	}
@@ -85,7 +86,6 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	// and report for itself, so a preflight can add information but never take
 	// the command away.
 	if _, err := c.Kubectl.Run([]string{"get", "node", name}); IsNotFound(err) {
-		// No Namespace: a Node is cluster-scoped, and there is none to name.
 		return StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 	}
 	if !yes {
@@ -138,7 +138,7 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 			// Reported one at a time, so a failure partway through leaves the
 			// successes visible rather than swallowing them.
 			for _, target := range resolved {
-				message, err := command.Execute(target.Ref.Index)
+				message, err := command.Execute(target.Ref)
 				if err != nil {
 					return err
 				}

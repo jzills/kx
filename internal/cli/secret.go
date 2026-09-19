@@ -12,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -58,8 +59,8 @@ func decodeData(object map[string]json.RawMessage) ([]string, map[string][]byte,
 }
 
 // Execute returns the decoded data for one indexed Secret.
-func (c SecretCommand) Execute(index int) (secretData, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c SecretCommand) Execute(ref state.Ref) (secretData, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return secretData{}, err
 	}
@@ -194,7 +195,7 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 
 	for position, target := range resolved {
 		stop := render.Status("fetching secret")
-		secret, err := command.Execute(target.Ref.Index)
+		secret, err := command.Execute(target.Ref)
 		stop()
 		if err != nil {
 			// A NotFound here means the saved index outlived the Secret; the

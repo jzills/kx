@@ -27,7 +27,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 		command := NodeCommand{
 			Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment), Verb: verb,
 		}
-		_, err := command.Execute(1)
+		_, err := command.Execute(state.Ref{Index: 1})
 		if err == nil {
 			t.Fatalf("%s: succeeded on a Deployment", verb)
 		}
@@ -45,7 +45,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	message, err := command.Execute(1)
+	message, err := command.Execute(state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 func TestCordonReportsAVanishedNodeAsStale(t *testing.T) {
 	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}, probeCode: 1}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	_, err := command.Execute(1)
+	_, err := command.Execute(state.Ref{Index: 1})
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {

@@ -99,14 +99,6 @@ func TestAStaleMarkWithNoNamespaceOmitsIn(t *testing.T) {
 	}
 }
 
-// An index failure still refreshes — that is what withRefresh is for.
-func TestAStaleIndexIsStillRefreshed(t *testing.T) {
-	err := StaleResourceError{Kind: kinds.Pod, Name: "api-7d8f", Ref: state.Ref{Index: 3}}
-	if !isStale(err) {
-		t.Error("isStale said an index failure is not refreshable")
-	}
-}
-
 // staleServices seeds a one-pod listing as the current state entry, with the
 // supplied kubectl answering the refresh and query deciding whether there is
 // anything to replay.
@@ -391,6 +383,54 @@ func TestEnsureExists(t *testing.T) {
 	live := &recordingKubectl{probeCode: 0}
 	if err := ensureExists(live, kinds.Pod, "nginx", "prod", state.Ref{Index: 1}); err != nil {
 		t.Errorf("ensureExists on a live resource = %v, want nil", err)
+	}
+}
+
+// The threading from a caller's Ref onto the StaleResourceError it produces has
+// no coverage from any test built the way the ones above are: every one of them
+// constructs the ref argument as state.Ref{Index: N} by hand, so a call site
+// that passed state.Ref{} instead — dropping the mark — would still build an
+// error whose Error() and isStale() behave exactly like an index's, and every
+// existing assertion would keep passing. This drives a mark through the same
+// function and checks what came out the other side, which is the only way to
+// tell the two apart.
+func TestEnsureExistsCarriesAMarkOntoTheStaleError(t *testing.T) {
+	gone := &recordingKubectl{probeCode: 1}
+	err := ensureExists(gone, kinds.Pod, "api-7d8f", "diagnostics", state.Ref{Mark: "api"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Fatalf("Ref.Mark = %q, want %q — the mark did not survive ensureExists", stale.Ref.Mark, "api")
+	}
+	// A mark carries no query to replay, so this is the behavioural
+	// consequence of the mark reaching the error: isStale must decline it
+	// rather than route it to a relist of an unrelated listing.
+	if isStale(err) {
+		t.Error("isStale said a mark failure is refreshable")
+	}
+}
+
+// The end-to-end version of the same gap: a command holding a mark-bearing Ref
+// has to hand it to ensureExists/forwardExit itself, not just the helper in
+// isolation. DescribeCommand.Execute used to take a bare int and could only
+// ever rebuild state.Ref{Index: index} for this error — there was no way for a
+// mark to reach it at all, index or not. This is the test that would have
+// caught that: it fails against Execute(index int, ...) the moment the
+// signature is reverted, because there is no int to spend the mark on.
+func TestDescribeCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("api-7d8f")}.
+		Execute(state.Ref{Mark: "api"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost on the way to the error", stale.Ref.Mark, "api")
 	}
 }
 

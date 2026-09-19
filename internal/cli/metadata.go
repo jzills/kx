@@ -13,14 +13,13 @@ import (
 
 func sortStrings(values []string) { sort.Strings(values) }
 
-// fetchMetadataField reads one metadata map (labels or annotations) off an
-// indexed resource.
-// One index, through the same fetch the batch uses — the reply shapes and the
-// sorting are parsed in exactly one place.
+// fetchMetadataField reads one metadata map (labels or annotations) off a
+// referenced resource.
+// One reference, through the same fetch the batch uses — the reply shapes and
+// the sorting are parsed in exactly one place.
 func fetchMetadataField(
-	kubectl kubectl.Service, resolver IndexResolver, index int, field string,
+	kubectl kubectl.Service, resolver IndexResolver, ref state.Ref, field string,
 ) (keys []string, values map[string]string, err error) {
-	ref := state.Ref{Index: index}
 	name, namespace, kind, err := resolver.Resolve(ref)
 	if err != nil {
 		return nil, nil, err
@@ -234,8 +233,8 @@ type MetadataReadCommand struct {
 	Field string
 }
 
-func (c MetadataReadCommand) Execute(index int) ([]string, map[string]string, error) {
-	return fetchMetadataField(c.Kubectl, c.State, index, c.Field)
+func (c MetadataReadCommand) Execute(ref state.Ref) ([]string, map[string]string, error) {
+	return fetchMetadataField(c.Kubectl, c.State, ref, c.Field)
 }
 
 var metadataVerbText = map[string]string{"label": "Labeled", "annotate": "Annotated"}
@@ -268,7 +267,7 @@ func (c MetadataWriteCommand) Execute(
 	if !overwrite {
 		// kubectl would refuse the write anyway, but its error names only the
 		// first conflict; listing them all saves a round trip.
-		_, current, err := fetchMetadataField(c.Kubectl, c.State, ref.Index, c.Field)
+		_, current, err := fetchMetadataField(c.Kubectl, c.State, ref, c.Field)
 		if err != nil {
 			return "", err
 		}

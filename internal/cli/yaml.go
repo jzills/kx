@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,8 +26,8 @@ type YamlCommand struct {
 	State   IndexResolver
 }
 
-func (c YamlCommand) Execute(index int, show []string, extraArgs []string) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c YamlCommand) Execute(ref state.Ref, show []string, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}

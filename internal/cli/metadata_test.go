@@ -14,7 +14,7 @@ func TestMetadataReadReturnsSortedKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: labelsJSON}
 	keys, values, err := MetadataReadCommand{
 		Kubectl: kubectl, State: pod("nginx"), Field: "labels",
-	}.Execute(1)
+	}.Execute(state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestMetadataReadHandlesMissingField(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{}}`}
 	keys, values, err := MetadataReadCommand{
 		Kubectl: kubectl, State: pod("nginx"), Field: "annotations",
-	}.Execute(1)
+	}.Execute(state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

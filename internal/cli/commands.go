@@ -270,7 +270,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
 			for _, target := range resolved {
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
-				if err := command.Execute(target.Ref.Index, extra); err != nil {
+				if err := command.Execute(target.Ref, extra); err != nil {
 					return err
 				}
 			}
@@ -343,7 +343,7 @@ func newLogsCommand(services Services) *cobra.Command {
 					render.Blank()
 				}
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
-				if err := command.Execute(target.Ref.Index, extra); err != nil {
+				if err := command.Execute(target.Ref, extra); err != nil {
 					return err
 				}
 			}
@@ -600,7 +600,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			// Confirmed and reported one at a time, so declining one resource
 			// doesn't silently take the rest with it.
 			for _, target := range resolved {
-				message, err := command.Execute(target.Ref.Index, yes, extra)
+				message, err := command.Execute(target.Ref, yes, extra)
 				if err != nil {
 					return err
 				}
@@ -880,7 +880,7 @@ func newYamlCommand(services Services) *cobra.Command {
 				// together with nothing saying which is which.
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
 				stop := render.Status("fetching manifest")
-				output, err := command.Execute(target.Ref.Index, fields, extra)
+				output, err := command.Execute(target.Ref, fields, extra)
 				stop()
 				if err != nil {
 					return err

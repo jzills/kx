@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/jzills/kx/internal/state"
 )
 
 const manifest = `
@@ -30,7 +32,7 @@ status:
 
 func TestYamlReturnsRawManifestByDefault(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
-	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.Execute(1, nil, nil)
+	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.Execute(state.Ref{Index: 1}, nil, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -46,7 +48,7 @@ func TestYamlReturnsRawManifestByDefault(t *testing.T) {
 func TestYamlShowPrefersShallowestKey(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
 	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.
-		Execute(1, []string{"metadata"}, nil)
+		Execute(state.Ref{Index: 1}, []string{"metadata"}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -62,7 +64,7 @@ func TestYamlShowPrefersShallowestKey(t *testing.T) {
 func TestYamlShowFindsNestedOnlyKey(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
 	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.
-		Execute(1, []string{"containerStatuses"}, nil)
+		Execute(state.Ref{Index: 1}, []string{"containerStatuses"}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -74,7 +76,7 @@ func TestYamlShowFindsNestedOnlyKey(t *testing.T) {
 func TestYamlShowMultipleKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
 	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.
-		Execute(1, []string{"metadata", "spec"}, nil)
+		Execute(state.Ref{Index: 1}, []string{"metadata", "spec"}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestYamlShowMultipleKeys(t *testing.T) {
 func TestYamlShowUnknownKeyYieldsEmpty(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
 	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.
-		Execute(1, []string{"nonexistent"}, nil)
+		Execute(state.Ref{Index: 1}, []string{"nonexistent"}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestYamlShowResolvesTiesTheSameWayEveryRun(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		kubectl := &recordingKubectl{output: ambiguousManifest}
 		out, err := YamlCommand{Kubectl: kubectl, State: pod("web")}.
-			Execute(1, []string{"shared"}, nil)
+			Execute(state.Ref{Index: 1}, []string{"shared"}, nil)
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
@@ -133,7 +135,7 @@ func TestYamlShowResolvesTiesTheSameWayEveryRun(t *testing.T) {
 func TestYamlShowUsesTwoSpaceIndent(t *testing.T) {
 	kubectl := &recordingKubectl{output: manifest}
 	out, err := YamlCommand{Kubectl: kubectl, State: workload("web", "Deployment")}.
-		Execute(1, []string{"metadata"}, nil)
+		Execute(state.Ref{Index: 1}, []string{"metadata"}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
