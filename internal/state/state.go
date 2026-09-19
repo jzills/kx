@@ -443,8 +443,8 @@ func (s *Service) loadHistory() (History, error) {
 		history.Named[kind] = state
 	}
 	for name, entry := range raw.Marks {
-		var mark Mark
-		if err := json.Unmarshal(entry, &mark); err != nil {
+		mark, err := decodeMark(entry)
+		if err != nil {
 			// Drop the mark rather than condemn the file, for the same reason
 			// a bad slot is dropped rather than treated as unreadable: there
 			// is no relist that fixes a corrupt mark, and the rest of the
@@ -490,6 +490,28 @@ func decodeEntry(entry map[string]json.RawMessage) (State, error) {
 		return State{}, err
 	}
 	return state, nil
+}
+
+// decodeMark turns one raw mark object into a Mark.
+//
+// A missing "name" key is rejected the same way decodeEntry rejects a missing
+// "resources" key: Go's zero value would otherwise accept it as a mark naming
+// the empty string in the empty namespace, reachable from a hand-edited or
+// partially-written state.json. Callers decide what an undecodable mark
+// costs; see loadHistory, which drops it rather than condemning the file.
+func decodeMark(data []byte) (Mark, error) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return Mark{}, err
+	}
+	if _, ok := probe["name"]; !ok {
+		return Mark{}, errors.New("'name'")
+	}
+	var mark Mark
+	if err := json.Unmarshal(data, &mark); err != nil {
+		return Mark{}, err
+	}
+	return mark, nil
 }
 
 // saveHistory writes the stack via a sibling temp file and an atomic rename, so
@@ -965,7 +987,10 @@ func (s *Service) DropEmpty() (History, int, error) {
 func (s *Service) DropAll() error {
 	marks, err := s.Marks()
 	if err != nil {
-		return err
+		// drop --all is reached precisely when state has gone wrong (corrupt file,
+		// partial write, etc.). It must never be the command that fails on broken state.
+		// Lose the marks along with the rest — a resettable file beats a preserved mark.
+		return s.saveHistory(History{})
 	}
 	if len(marks) == 0 {
 		return s.saveHistory(History{})

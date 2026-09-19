@@ -2304,4 +2304,59 @@ func TestDropAllLeavesMarks(t *testing.T) {
 	if len(marks) != 1 {
 		t.Errorf("Marks = %+v, want marks to survive drop --all", marks)
 	}
+
+	// The other half of the rule: DropAll must still have cleared the stack.
+	// Checked here, alongside the marks surviving, so an implementation that
+	// mutated the loaded history in place instead of building a fresh literal
+	// — silently leaving the stack intact — cannot pass both at once.
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 0 {
+		t.Errorf("len(States) = %d, want the stack cleared", len(history.States))
+	}
+	if history.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0", history.Cursor)
+	}
+}
+
+// A marks entry missing its name would decode to the zero Mark — a mark
+// naming the empty string in the empty namespace — the same failure
+// decodeEntry exists to prevent for a stack entry with no "resources". It
+// must be dropped, the way a broken slot drops, rather than stored.
+func TestMarkWithoutNameDropsRatherThanBeingStored(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
+		`"cursor":0,"marks":{"api":{"context":"staging"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if mark, ok := history.Marks["api"]; ok {
+		t.Errorf("Marks[api] = %+v, want the nameless entry dropped", mark)
+	}
+}
+
+// DropAll is the command reached for exactly when state has gone wrong, so a
+// corrupt file must not make it fail — it must still reset, the way it did
+// before marks existed. Losing marks along with the rest of a corrupt file is
+// the correct trade: a resettable file beats a preserved mark.
+func TestDropAllResetsACorruptFile(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := os.WriteFile(service.Path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll on a corrupt file: %v", err)
+	}
+
+	if _, err := service.Load(); !errors.Is(err, ErrNoState) {
+		t.Errorf("Load after DropAll on a corrupt file = %v, want ErrNoState", err)
+	}
 }
