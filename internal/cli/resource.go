@@ -33,7 +33,7 @@ func (c DescribeCommand) Execute(index int, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way.
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, state.Ref{Index: index})
 	}
 	return nil
 }
@@ -55,7 +55,7 @@ func (c EditCommand) Execute(ref state.Ref, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -223,7 +223,7 @@ func (c RolloutCommand) Execute(action string, ref state.Ref, extraArgs []string
 			return "", err
 		}
 		if code != 0 {
-			return "", forwardExit(c.Kubectl, kind, name, namespace, code)
+			return "", forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 		}
 		return "", nil
 	}
@@ -257,7 +257,7 @@ func (c PortForwardCommand) Execute(ref state.Ref, port string, extraArgs []stri
 		return err
 	}
 	if code != 0 {
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -314,7 +314,10 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	if pod == nil {
 		return SilentError{Code: code}
 	}
-	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code)
+	// cp resolves its pod out of an "<index>:<path>" argument, so there is no
+	// Ref in hand here the way the other commands have one — the zero Ref
+	// keeps today's refreshable behaviour, which is right for an index path.
+	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, state.Ref{})
 }
 
 // resolve rewrites an "<index>:<path>" argument into kubectl cp's own
@@ -373,7 +376,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			return forwardExit(c.Kubectl, kind, name, namespace, code)
+			return forwardExit(c.Kubectl, kind, name, namespace, code, state.Ref{Index: index})
 		}
 		return nil
 
@@ -497,7 +500,7 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed
@@ -523,7 +526,7 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 		return err
 	}
 
-	if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+	if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 		return err
 	}
 	return fmt.Errorf(
@@ -623,7 +626,7 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way — the same shape describe and exec use.
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }

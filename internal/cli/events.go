@@ -14,6 +14,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -48,7 +49,7 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 		// whose events are all older than --since has plainly not been deleted,
 		// and probing for it would spend a kubectl subprocess to learn what its
 		// events already said.
-		if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+		if err := ensureExists(c.Kubectl, kind, name, namespace, state.Ref{Index: index}); err != nil {
 			return nil, err
 		}
 		return nil, nil

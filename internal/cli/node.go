@@ -36,7 +36,8 @@ func (c NodeCommand) Execute(index int) (string, error) {
 		// A vanished node reads as stale so the caller can relist, rather than
 		// as whatever kubectl said about a name that is no longer there.
 		if IsNotFound(err) {
-			return "", StaleResourceError{Kind: kinds.Node, Name: name}
+			// No Namespace: a Node is cluster-scoped, and there is none to name.
+			return "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: state.Ref{Index: index}}
 		}
 		return "", err
 	}
@@ -84,7 +85,8 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	// and report for itself, so a preflight can add information but never take
 	// the command away.
 	if _, err := c.Kubectl.Run([]string{"get", "node", name}); IsNotFound(err) {
-		return StaleResourceError{Kind: kinds.Node, Name: name}
+		// No Namespace: a Node is cluster-scoped, and there is none to name.
+		return StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(

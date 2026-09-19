@@ -66,6 +66,47 @@ func TestIsStaleIgnoresUnrelatedErrors(t *testing.T) {
 	}
 }
 
+// A mark carries no query, so there is nothing to replay: replaying the
+// stack's query would answer @api with whatever listing happens to be
+// current, which is the bug #229 fixed for slots. The failure reports and
+// says how to re-mark.
+func TestAStaleMarkIsNotRefreshed(t *testing.T) {
+	err := StaleResourceError{
+		Kind: kinds.Pod, Name: "api-7d8f", Namespace: "diagnostics", Ref: state.Ref{Mark: "api"},
+	}
+	if isStale(err) {
+		t.Error("isStale said a mark failure is refreshable; it has no query to replay")
+	}
+	for _, want := range []string{"@api", "api-7d8f", "in diagnostics", "kx mark api <index>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if got, want := err.Error(), "@api is Pod/api-7d8f in diagnostics, which no longer exists. Re-mark it with 'kx mark api <index>'."; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+// A Node is cluster-scoped and carries no namespace — the message must not
+// read "in " with nothing after it.
+func TestAStaleMarkWithNoNamespaceOmitsIn(t *testing.T) {
+	err := StaleResourceError{Kind: kinds.Node, Name: "node-a", Ref: state.Ref{Mark: "worker"}}
+	if got, want := err.Error(), "@worker is Node/node-a, which no longer exists. Re-mark it with 'kx mark worker <index>'."; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if strings.Contains(err.Error(), " in ") {
+		t.Errorf("err = %q contains a dangling 'in' clause for a namespace-less Node", err)
+	}
+}
+
+// An index failure still refreshes — that is what withRefresh is for.
+func TestAStaleIndexIsStillRefreshed(t *testing.T) {
+	err := StaleResourceError{Kind: kinds.Pod, Name: "api-7d8f", Ref: state.Ref{Index: 3}}
+	if !isStale(err) {
+		t.Error("isStale said an index failure is not refreshable")
+	}
+}
+
 // staleServices seeds a one-pod listing as the current state entry, with the
 // supplied kubectl answering the refresh and query deciding whether there is
 // anything to replay.
@@ -340,7 +381,7 @@ func TestNamespaceSlotMismatchDoesNotReplayTheStackQuery(t *testing.T) {
 // state; a probe that succeeds leaves the failure alone.
 func TestEnsureExists(t *testing.T) {
 	gone := &recordingKubectl{probeCode: 1}
-	if err := ensureExists(gone, kinds.Pod, "nginx", "prod"); err == nil {
+	if err := ensureExists(gone, kinds.Pod, "nginx", "prod", state.Ref{Index: 1}); err == nil {
 		t.Error("ensureExists on a missing resource returned nil")
 	}
 	if want := "get Pod nginx -n prod"; joinArgs(gone.probes[0]) != want {
@@ -348,7 +389,7 @@ func TestEnsureExists(t *testing.T) {
 	}
 
 	live := &recordingKubectl{probeCode: 0}
-	if err := ensureExists(live, kinds.Pod, "nginx", "prod"); err != nil {
+	if err := ensureExists(live, kinds.Pod, "nginx", "prod", state.Ref{Index: 1}); err != nil {
 		t.Errorf("ensureExists on a live resource = %v, want nil", err)
 	}
 }

@@ -99,7 +99,9 @@ func fetchMetadataFields(
 				// stale index, and what withRefresh exists to recover from.
 				// Rendering it as a resource with no labels would read as a
 				// fact about the resource instead.
-				return nil, StaleResourceError{Kind: kinds.Kind(g.kind), Name: g.names[i]}
+				return nil, StaleResourceError{
+					Kind: kinds.Kind(g.kind), Name: g.names[i], Namespace: g.namespace, Ref: ref,
+				}
 			}
 			results[ref] = newMetadataResult(values)
 		}

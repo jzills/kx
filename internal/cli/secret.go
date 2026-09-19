@@ -200,7 +200,9 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 			// A NotFound here means the saved index outlived the Secret; the
 			// explicit type triggers the refresh path.
 			if IsNotFound(err) {
-				return StaleResourceError{Kind: expected, Name: target.Name}
+				return StaleResourceError{
+					Kind: expected, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+				}
 			}
 			return err
 		}
