@@ -2131,3 +2131,59 @@ func TestResolveExpectingAnIndexRefChecksTheKind(t *testing.T) {
 		t.Errorf("ResolveExpecting on a matching kind: %v", err)
 	}
 }
+
+// Marks are additive: a version-2 file written before marks existed decodes
+// with none, which is the correct reading of it. A schema bump would reset
+// every user's history to add a feature none of them is using yet.
+func TestHistoryWithoutMarksDecodesWithNone(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.Marks) != 0 {
+		t.Errorf("Marks = %v, want none", history.Marks)
+	}
+	if currentSchemaVersion != 2 {
+		t.Errorf("currentSchemaVersion = %d, want it unchanged at 2", currentSchemaVersion)
+	}
+}
+
+// A mark round-trips through the file with everything it needs to resolve:
+// what it names, where, and which cluster it was taken in.
+func TestMarksRoundTripThroughTheFile(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	mark, ok := history.Marks["api"]
+	if !ok {
+		t.Fatalf("Marks = %v, want an entry for api", history.Marks)
+	}
+	if mark.Name != "api-7d8f" || mark.Kind != kinds.Pod ||
+		mark.Namespace != "prod" || mark.Context != "staging" {
+		t.Errorf("mark = %+v, want api-7d8f/Pod/prod/staging", mark)
+	}
+}
+
+// A Ref spells itself the way the user wrote it, which is what the mark
+// errors quote back.
+func TestRefStringSpellsMarksWithTheSigil(t *testing.T) {
+	if got := (Ref{Mark: "api"}).String(); got != "@api" {
+		t.Errorf("Ref{Mark: api}.String() = %q, want @api", got)
+	}
+	if got := (Ref{Index: 3}).String(); got != "3" {
+		t.Errorf("Ref{Index: 3}.String() = %q, want 3", got)
+	}
+}

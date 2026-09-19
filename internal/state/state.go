@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -123,15 +124,36 @@ type Query struct {
 }
 
 // Ref is what a command's resource argument resolves through: a position in
-// the current listing, or — from PR 2 — a mark naming one resource directly.
+// the current listing, or a mark naming one resource directly.
 //
 // It exists so the commands stop passing a bare int around: an index and a
 // mark answer the same question ("which resource?") and differ only in how
 // they are looked up, and threading two types through twenty commands is what
 // made marks look expensive.
 type Ref struct {
-	// Index is a 1-based position in the current listing.
+	// Index is a 1-based position in the current listing. Zero when Mark is set.
 	Index int
+	// Mark is a mark name without the sigil. Empty when Index is set.
+	Mark string
+}
+
+// String spells a Ref the way the user wrote it, for error messages.
+func (r Ref) String() string {
+	if r.Mark != "" {
+		return "@" + r.Mark
+	}
+	return strconv.Itoa(r.Index)
+}
+
+// Mark is a resource pinned by a name the user chose, so it survives the
+// re-lists that move index numbers.
+//
+// Context is recorded because names repeat across clusters: a mark taken in
+// staging must not resolve in prod. Unlike the context slot, which is exempt
+// because switching is what it does, a mark has no reason to be portable.
+type Mark struct {
+	Resource
+	Context string `json:"context,omitempty"`
 }
 
 // State is one history entry: an indexed listing, the namespace it came from,
@@ -188,6 +210,10 @@ type History struct {
 	// and a slot cannot be displaced by MaxHistory. Absent in files written
 	// before slots existed, which read as an empty map.
 	Named map[kinds.Kind]State `json:"named,omitempty"`
+	// Marks are pinned resources, keyed by the name the user gave. Outside
+	// States because they are not history: they are not subject to
+	// max_history, and kx state drop --all deliberately leaves them.
+	Marks map[string]Mark `json:"marks,omitempty"`
 }
 
 // ErrNoState is returned when no state file exists yet.
@@ -364,6 +390,10 @@ func (s *Service) loadHistory() (History, error) {
 		// Decoded per entry like the stack, so a slot cannot smuggle in the
 		// empty listing the loop below exists to reject.
 		Named map[kinds.Kind]map[string]json.RawMessage `json:"named"`
+		// Absent in files written before marks existed, which read as nil —
+		// marks are additive, so a version-2 file predating them decodes with
+		// none rather than forcing a schema bump.
+		Marks map[string]json.RawMessage `json:"marks"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return History{}, unreadable(err)
@@ -411,6 +441,20 @@ func (s *Service) loadHistory() (History, error) {
 			history.Named = make(map[kinds.Kind]State, len(raw.Named))
 		}
 		history.Named[kind] = state
+	}
+	for name, entry := range raw.Marks {
+		var mark Mark
+		if err := json.Unmarshal(entry, &mark); err != nil {
+			// Drop the mark rather than condemn the file, for the same reason
+			// a bad slot is dropped rather than treated as unreadable: there
+			// is no relist that fixes a corrupt mark, and the rest of the
+			// file is unrelated to it.
+			continue
+		}
+		if history.Marks == nil {
+			history.Marks = make(map[string]Mark, len(raw.Marks))
+		}
+		history.Marks[name] = mark
 	}
 	if len(history.States) == 0 {
 		// No stack entries: either a fresh reset file, or slots-only (`kx ns`
@@ -623,6 +667,20 @@ func (s *Service) LoadHistory() (History, error) {
 		history.States[i] = backfilled(history.States[i])
 	}
 	return history, nil
+}
+
+// SaveMark stores a mark under name, replacing any mark already there — a
+// mark is a pointer, and moving it is the ordinary operation.
+func (s *Service) SaveMark(name string, mark Mark) error {
+	history, err := s.loadHistory()
+	if err != nil && !errors.Is(err, ErrNoState) {
+		return err
+	}
+	if history.Marks == nil {
+		history.Marks = map[string]Mark{}
+	}
+	history.Marks[name] = mark
+	return s.saveHistory(history)
 }
 
 // backfilled defaults an entry's namespace, for the entry being read.
