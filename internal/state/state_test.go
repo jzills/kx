@@ -2101,9 +2101,19 @@ func TestResolveAnIndexRefMatchesFields(t *testing.T) {
 	}
 }
 
-// The zero Ref names nothing. Resolving it as index 0 would report "Index 0 is
-// out of range", which describes an argument the user never wrote.
-func TestResolveRefusesTheZeroRef(t *testing.T) {
+// A literal 0 is a typed index, not an absent one: parseIndex (internal/cli)
+// has no zero guard, so `kx describe 0` reaches here as Ref{Index: 0}, same as
+// any other out-of-range index, and must be reported the same way — naming
+// the listing so the user can pick a real one. An earlier version of this test
+// asserted the opposite (a dedicated "No resource reference given." message,
+// via a since-removed ref.Index == 0 guard in Resolve), which shipped as an
+// undetected regression: `kx describe 0` on develop reports out-of-range, and
+// this branch silently changed that message for an index the user did type.
+// There is no code path that hands Resolve a genuinely absent Ref — the
+// no-argument case is refused by the CLI layer before Resolve is ever called,
+// and kx cp's own zero Ref never reaches it either — so Ref{} is only ever the
+// same thing as a typed 0.
+func TestResolveOnZeroFallsThroughToTheOutOfRangeMessage(t *testing.T) {
 	service := newTestService(t, 10)
 	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
 
@@ -2111,8 +2121,10 @@ func TestResolveRefusesTheZeroRef(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Resolve(Ref{}) = %q, want an error", name)
 	}
-	if strings.Contains(err.Error(), "out of range") {
-		t.Errorf("err = %q, want it to report an empty reference rather than index 0", err)
+	for _, want := range []string{"Index 0", "out of range", "1 Pod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
 	}
 }
 

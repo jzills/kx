@@ -22,6 +22,13 @@ type fakeResolver struct {
 	// open-ended range ("5..") against a fixed listing size.
 	count    int
 	countErr error
+	// seen records every Ref handed to Resolve, in order. Nil unless a test
+	// asks for it, which is most of them — Fields ignores its argument and
+	// Resolve just forwards ref.Index to it, so nothing here notices what
+	// shape a Ref arrived in unless something is watching. A pointer, because
+	// fakeResolver is passed around by value everywhere it's used, and a plain
+	// slice field would only ever grow the copy Resolve was called on.
+	seen *[]state.Ref
 }
 
 func (f fakeResolver) Fields(int) (string, string, kinds.Kind, error) {
@@ -32,6 +39,9 @@ func (f fakeResolver) Fields(int) (string, string, kinds.Kind, error) {
 }
 
 func (f fakeResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	if f.seen != nil {
+		*f.seen = append(*f.seen, ref)
+	}
 	return f.Fields(ref.Index)
 }
 

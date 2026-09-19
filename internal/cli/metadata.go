@@ -225,18 +225,6 @@ func newMetadataResult(values map[string]string) metadataResult {
 	return metadataResult{keys: keys, values: values}
 }
 
-// MetadataReadCommand shows the labels or annotations on an indexed resource.
-type MetadataReadCommand struct {
-	Kubectl kubectl.Service
-	State   IndexResolver
-	// Field is the metadata key to read: "labels" or "annotations".
-	Field string
-}
-
-func (c MetadataReadCommand) Execute(ref state.Ref) ([]string, map[string]string, error) {
-	return fetchMetadataField(c.Kubectl, c.State, ref, c.Field)
-}
-
 var metadataVerbText = map[string]string{"label": "Labeled", "annotate": "Annotated"}
 
 // MetadataWriteCommand sets or removes labels or annotations on an indexed

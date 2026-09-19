@@ -1131,9 +1131,6 @@ func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err
 	if ref.Mark != "" {
 		return s.resolveMark(ref)
 	}
-	if ref.Index == 0 {
-		return "", "", "", errEmptyRef
-	}
 	return s.Fields(ref.Index)
 }
 
@@ -1154,16 +1151,8 @@ func (s *Service) ResolveExpecting(
 		}
 		return name, namespace, nil
 	}
-	if ref.Index == 0 {
-		return "", "", errEmptyRef
-	}
 	return s.FieldsExpecting(ref.Index, expected)
 }
-
-// errEmptyRef reports a Ref that names nothing. Resolving it as index 0 would
-// answer "Index 0 is out of range", which describes an argument the user never
-// wrote.
-var errEmptyRef = errors.New("No resource reference given.")
 
 // Count returns how many resources are in the current listing — the same
 // entry Fields resolves indexes against. Used to resolve the open end of a

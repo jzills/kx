@@ -8,42 +8,6 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-const labelsJSON = `{"metadata":{"labels":{"tier":"frontend","app":"web"}}}`
-
-func TestMetadataReadReturnsSortedKeys(t *testing.T) {
-	kubectl := &recordingKubectl{output: labelsJSON}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "labels",
-	}.Execute(state.Ref{Index: 1})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	// Sorted, because kubectl returns a JSON object and Go map iteration would
-	// reorder the rows on every run.
-	if len(keys) != 2 || keys[0] != "app" || keys[1] != "tier" {
-		t.Errorf("keys = %v, want [app tier]", keys)
-	}
-	if values["app"] != "web" {
-		t.Errorf("values = %v", values)
-	}
-	if want := "get Pod nginx -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
-		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
-	}
-}
-
-func TestMetadataReadHandlesMissingField(t *testing.T) {
-	kubectl := &recordingKubectl{output: `{"metadata":{}}`}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "annotations",
-	}.Execute(state.Ref{Index: 1})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(keys) != 0 || len(values) != 0 {
-		t.Errorf("keys = %v, values = %v; want empty", keys, values)
-	}
-}
-
 func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
 	message, err := MetadataWriteCommand{

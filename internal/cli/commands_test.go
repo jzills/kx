@@ -365,6 +365,42 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	}
 }
 
+// A literal 0 is an out-of-range index like any other, not an absent
+// reference. state.Ref{} — the zero value — used to be treated specially by
+// Resolve (an "empty ref" guard reported "No resource reference given."), but
+// parseIndex has no zero guard of its own: a user typing `kx describe 0`
+// produces exactly that same zero Ref, and telling that apart from a
+// programmer-constructed empty one is not possible from the Ref alone. The
+// guard's message was accurate for one and wrong for the other, and there was
+// no way to know which had happened — so develop's actual behavior (an
+// out-of-range message naming the listing) is the only one that is right for
+// what a user who types "0" gets, and this pins it end to end.
+func TestDescribeOnLiteralZeroReportsOutOfRange(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDescribeCommand(services)
+	cmd.SetArgs([]string{"0"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx describe 0 succeeded, want an out-of-range error")
+	}
+	for _, want := range []string{"Index 0", "out of range", "2 Pods"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 for an unresolvable index", len(kube.interactive))
+	}
+}
+
 // Open ranges resolve against the real listing end-to-end, the same way an
 // explicit range does.
 func TestDeleteAcceptsOpenRanges(t *testing.T) {
