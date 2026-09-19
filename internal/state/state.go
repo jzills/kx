@@ -122,6 +122,18 @@ type Query struct {
 	Match    *string  `json:"match"`
 }
 
+// Ref is what a command's resource argument resolves through: a position in
+// the current listing, or — from PR 2 — a mark naming one resource directly.
+//
+// It exists so the commands stop passing a bare int around: an index and a
+// mark answer the same question ("which resource?") and differ only in how
+// they are looked up, and threading two types through twenty commands is what
+// made marks look expensive.
+type Ref struct {
+	// Index is a 1-based position in the current listing.
+	Index int
+}
+
 // State is one history entry: an indexed listing, the namespace it came from,
 // and the kubeconfig context it was taken against.
 //
@@ -903,6 +915,33 @@ func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err 
 	}
 	return name, namespaceAt(current, idx), kind, nil
 }
+
+// Resolve turns a Ref into the resource it names.
+//
+// Fields is the index branch: this is the seam a mark will resolve through
+// without every caller learning a second lookup.
+func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err error) {
+	if ref.Index == 0 {
+		return "", "", "", errEmptyRef
+	}
+	return s.Fields(ref.Index)
+}
+
+// ResolveExpecting is Resolve for a command that has already named the kind it
+// wants.
+func (s *Service) ResolveExpecting(
+	ref Ref, expected kinds.Kind,
+) (name, namespace string, err error) {
+	if ref.Index == 0 {
+		return "", "", errEmptyRef
+	}
+	return s.FieldsExpecting(ref.Index, expected)
+}
+
+// errEmptyRef reports a Ref that names nothing. Resolving it as index 0 would
+// answer "Index 0 is out of range", which describes an argument the user never
+// wrote.
+var errEmptyRef = errors.New("No resource reference given.")
 
 // Count returns how many resources are in the current listing — the same
 // entry Fields resolves indexes against. Used to resolve the open end of a

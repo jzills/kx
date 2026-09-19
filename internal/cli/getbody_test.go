@@ -516,6 +516,74 @@ const clusterScopedNodesTable = "NAME      STATUS   ROLES           AGE   VERSIO
 	"node-a    Ready    control-plane   1d    v1.34.3\n" +
 	"node-b    Ready    <none>          1d    v1.34.3"
 
+// A relist naming a bad index fetches nothing. The relist resolved as it
+// grouped, so kx get pods 1 99 issued the kubectl call for index 1 and then
+// failed — a listing of some of what was asked for, saved as state.
+func TestRelistValidatesEveryIndexBeforeFetching(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	before := len(kube.calls)
+
+	if err := runGet(services, "pods", []string{"1", "99"}, getOptions{}); err == nil {
+		t.Fatal("relist succeeded despite an out-of-range index")
+	}
+	if after := len(kube.calls); after != before {
+		t.Errorf("made %d kubectl calls for a refused relist, want 0", after-before)
+	}
+}
+
+// The relist's out-of-range error must keep naming the exact command that
+// fixes it — "run 'kx get pods' to relist Pods" — not just a generic "index
+// out of range". Nothing pinned this before, and it silently regressed once
+// when the relist was first routed through resolveRefs's plain Resolve
+// instead of a kind-aware resolution; resolveRefsExpecting is what restores
+// it.
+func TestRelistOutOfRangeIndexNamesTheRelistCommand(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	err := runGet(services, "pods", []string{"1", "99"}, getOptions{})
+	if err == nil {
+		t.Fatal("relist succeeded despite an out-of-range index")
+	}
+	if !strings.Contains(err.Error(), "Run 'kx get pods' to relist") {
+		t.Errorf("err = %q, want it to name the relist command", err)
+	}
+}
+
+// An index left over from a listing of a different kind is refused rather
+// than silently fetched as whatever it actually names — resolveRefsExpecting
+// performs this check itself (via ResolveExpecting/FieldsExpecting), so no
+// explicit kind check needs to run afterward in runGet.
+func TestRelistRefusesAnIndexOfTheWrongKind(t *testing.T) {
+	kube := &fakeKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := runGet(services, "pods", []string{"1"}, getOptions{})
+	if err == nil {
+		t.Fatal("relist accepted an index that resolved to the wrong kind")
+	}
+	for _, want := range []string{"Deployment/web", "not Pod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if len(kube.calls) != 0 {
+		t.Errorf("reached kubectl with %v; a kind mismatch must be refused first", kube.calls)
+	}
+}
+
 // An empty listing replaces the one before it, so the way back is offered at
 // the moment it becomes necessary rather than left to be discovered in
 // --help. The note names the listing it displaced, because "kx state back"
