@@ -593,7 +593,7 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 // An index named twice is one resource. Overlapping ranges are how this
 // actually happens — `kx labels 1..3 2..4` printed 2 and 3 twice — and for
 // kx delete a repeat meant a second delete of something already gone.
-func TestParseIndexesDropsRepeats(t *testing.T) {
+func TestParseRefsDropsRepeats(t *testing.T) {
 	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 10}
 
 	for _, tc := range []struct {
@@ -605,21 +605,38 @@ func TestParseIndexesDropsRepeats(t *testing.T) {
 		{[]string{"3", "1", "3"}, []int{3, 1}},
 		{[]string{"2..4", "3"}, []int{2, 3, 4}},
 	} {
-		got, err := parseIndexes(resolver, "indexes", tc.args)
+		got, err := parseRefs(resolver, "indexes", tc.args)
 		if err != nil {
-			t.Fatalf("parseIndexes(%v): %v", tc.args, err)
+			t.Fatalf("parseRefs(%v): %v", tc.args, err)
 		}
-		if len(got) != len(tc.want) {
-			t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+		gotIndexes := refIndexes(got)
+		if len(gotIndexes) != len(tc.want) {
+			t.Errorf("parseRefs(%v) = %v, want %v", tc.args, gotIndexes, tc.want)
 			continue
 		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Errorf("parseIndexes(%v) = %v, want %v — first occurrence wins, in order",
-					tc.args, got, tc.want)
+		for i := range gotIndexes {
+			if gotIndexes[i] != tc.want[i] {
+				t.Errorf("parseRefs(%v) = %v, want %v — first occurrence wins, in order",
+					tc.args, gotIndexes, tc.want)
 				break
 			}
 		}
+	}
+}
+
+// A mark named twice is one reference, the same as a repeated index.
+func TestParseRefsDropsRepeatedMarks(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod}
+
+	got, err := parseRefs(resolver, "indexes", []string{"@api", "@api", "@web"})
+	if err != nil {
+		t.Fatalf("parseRefs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("parseRefs = %+v, want two references — @api named twice is one", got)
+	}
+	if got[0].Mark != "api" || got[1].Mark != "web" {
+		t.Errorf("parseRefs = %+v, want [api web]", got)
 	}
 }
 

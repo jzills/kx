@@ -8,6 +8,162 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
+// A '@'-prefixed argument becomes a mark reference; anything else parses as
+// an index exactly as before.
+func TestParseRefsReadsTheSigil(t *testing.T) {
+	resolver := refOf([3]string{"api", "prod", "Pod"}, [3]string{"web", "prod", "Pod"})
+
+	refs, err := parseRefs(resolver, "indexes", []string{"@api", "2"})
+	if err != nil {
+		t.Fatalf("parseRefs: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("parseRefs = %v, want two references", refs)
+	}
+	if refs[0].Mark != "api" || refs[0].Index != 0 {
+		t.Errorf("refs[0] = %+v, want the mark api", refs[0])
+	}
+	if refs[1].Index != 2 || refs[1].Mark != "" {
+		t.Errorf("refs[1] = %+v, want index 2", refs[1])
+	}
+}
+
+// A mark names one resource; a range is positional by definition. Refused at
+// either end and in both spellings.
+func TestParseRefsRefusesARangeContainingAMark(t *testing.T) {
+	resolver := refOf([3]string{"api", "prod", "Pod"})
+
+	for _, arg := range []string{"@a..@b", "@api..5", "5..@api"} {
+		_, err := parseRefs(resolver, "indexes", []string{arg})
+		if err == nil {
+			t.Errorf("parseRefs(%q) succeeded, want a refusal", arg)
+			continue
+		}
+		if !strings.Contains(err.Error(), "range") {
+			t.Errorf("parseRefs(%q) error = %q, want it to explain the range", arg, err)
+		}
+	}
+}
+
+// A purely numeric mark name would make @3 ambiguous against index 3.
+func TestValidMarkNameRefusesNumbersAndJunk(t *testing.T) {
+	for _, name := range []string{"3", "42", "", "a b", "api/web", "@api"} {
+		if err := validMarkName(name); err == nil {
+			t.Errorf("validMarkName(%q) = nil, want a refusal", name)
+		}
+	}
+	for _, name := range []string{"api", "web-1", "db_primary", "api.v2", "a3"} {
+		if err := validMarkName(name); err != nil {
+			t.Errorf("validMarkName(%q) = %v, want it accepted", name, err)
+		}
+	}
+}
+
+// A Ref must never carry both an Index and a Mark — Ref's own doc says the
+// two fields are mutually exclusive, and Resolve silently prefers the mark
+// when both are set, so a Ref built with both would resolve to a different
+// resource than its Index suggests. parseRef and parseRefs are the only two
+// places a Ref is built from argv, so this checks both directly rather than
+// trusting that neither branch above ever sets the other field: a future
+// edit that, say, defaulted Index to the mark's string length would pass
+// every other test here and still violate this.
+func TestParseRefAndParseRefsNeverSetBothIndexAndMark(t *testing.T) {
+	resolver := refOf([3]string{"api", "prod", "Pod"}, [3]string{"web", "prod", "Pod"})
+
+	check := func(t *testing.T, ref state.Ref) {
+		t.Helper()
+		if ref.Index != 0 && ref.Mark != "" {
+			t.Errorf("ref = %+v, carries both an Index and a Mark", ref)
+		}
+	}
+
+	markRef, err := parseRef("index", "@api")
+	if err != nil {
+		t.Fatalf("parseRef(@api): %v", err)
+	}
+	check(t, markRef)
+	if markRef.Mark != "api" {
+		t.Errorf("parseRef(@api) = %+v, want the mark api", markRef)
+	}
+
+	indexRef, err := parseRef("index", "2")
+	if err != nil {
+		t.Fatalf("parseRef(2): %v", err)
+	}
+	check(t, indexRef)
+	if indexRef.Index != 2 {
+		t.Errorf("parseRef(2) = %+v, want index 2", indexRef)
+	}
+
+	refs, err := parseRefs(resolver, "indexes", []string{"@api", "2"})
+	if err != nil {
+		t.Fatalf("parseRefs: %v", err)
+	}
+	for _, ref := range refs {
+		check(t, ref)
+	}
+}
+
+// The threading a command relies on end to end: "@api" on argv reaches a
+// DisableFlagParsing command whose leading-argument split
+// (splitLeadingIndexes) has to recognize the sigil, whose resolveRefs has to
+// parse it into a mark Ref rather than rebuilding one from an int, and whose
+// Execute has to pass that Ref to Resolve unchanged. kx logs is exercised
+// through the real cobra command and a real state.Service (not a hand-built
+// Ref or a resolver that ignores its argument) so a regression in any one
+// link — the leading-run split, the parser, or the dedupe/rebuild in
+// resolveIndexes — fails this rather than being masked by the others.
+func TestLogsResolvesAMarkGivenOnTheCommandLine(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	cmd := newLogsCommand(services)
+	cmd.SetArgs([]string{"@api"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx logs @api: %v", err)
+	}
+
+	if len(kube.interactive) != 1 {
+		t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+	}
+	got := joinArgs(kube.interactive[0])
+	if !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+		t.Errorf("kubectl args = %q, want the marked resource api-7d8f in prod", got)
+	}
+}
+
+// An unknown mark is refused with resolveMark's own message — never with the
+// generic "not a valid int" a parse failure would produce. That distinction
+// is the whole reason Task 8's brief's own live-CLI check (`kx logs @nope`)
+// was replaced with this unit test: a live run cannot tell "the parser choked
+// on '@nope'" apart from "the mark 'nope' doesn't exist", but the message
+// text can, and only the second is correct.
+func TestLogsReportsAnUnknownMarkNotAParseFailure(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+
+	cmd := newLogsCommand(services)
+	cmd.SetArgs([]string{"@nope"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx logs @nope succeeded, want the unknown-mark error")
+	}
+	if strings.Contains(err.Error(), "not a valid int") {
+		t.Errorf("err = %q, want the unknown-mark message, not a parse failure", err)
+	}
+	if !strings.Contains(err.Error(), "No mark named 'nope'") {
+		t.Errorf("err = %q, want it to name the missing mark", err)
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was invoked %d times, want 0 — refused before any call", len(kube.interactive))
+	}
+}
+
 // resolveRefs is the one place a command's resource arguments are parsed and
 // resolved, so ranges, dedupe and validation cannot differ between commands.
 func TestResolveRefsParsesIndexesAndRanges(t *testing.T) {

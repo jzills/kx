@@ -6,6 +6,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // getOptions carries the flags `get` and `secret` share. They delegate to the
@@ -68,10 +69,10 @@ func runGet(services Services, resource string, args []string, options getOption
 	previous, _ := services.State.Load()
 
 	indexArgs, extra := splitLeadingIndexes(args)
-	var indexes []int
+	var refs []state.Ref
 	if len(indexArgs) > 0 {
 		var err error
-		indexes, err = parseIndexes(services.State, "indexes", indexArgs)
+		refs, err = parseRefs(services.State, "indexes", indexArgs)
 		if err != nil {
 			return err
 		}
@@ -82,10 +83,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	// way to relist anything — including the hint a kind mismatch prints.
 	switch strings.ToLower(resource) {
 	case "context", "contexts":
-		if len(indexes) == 0 {
+		if len(refs) == 0 {
 			return listSwitchTargets(services, true)
 		}
-		return switchTo(services, "context", indexes[0], true)
+		// A mark names a Kubernetes resource pinned by kx state, not a
+		// kubeconfig context — there is nothing for it to resolve against
+		// here, so it is refused rather than silently spent as index 0.
+		if refs[0].Mark != "" {
+			return fmt.Errorf(
+				"'%s' is a mark; contexts are switched by index, not by a marked resource.",
+				refs[0])
+		}
+		return switchTo(services, "context", refs[0].Index, true)
 	}
 
 	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
@@ -118,7 +127,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
-	if len(indexes) > 0 {
+	if len(refs) > 0 {
 		expected := kinds.Normalize(resource)
 		// resolveRefsExpecting resolves every index before any of them is
 		// acted on, so an out-of-range index late in the batch is caught

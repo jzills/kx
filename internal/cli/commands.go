@@ -153,55 +153,6 @@ func clampIndex(index, count int) int {
 	return index
 }
 
-// parseIndexes turns argv into the indexes a command acts on, expanding ranges
-// and dropping repeats.
-//
-// An index named twice is one resource, and the repeat is nearly always
-// accidental: overlapping ranges ("1..3 2..4") are how it actually happens,
-// and they printed 2 and 3 twice — or, for kx delete, asked kubectl to delete
-// something already gone. First occurrence wins, so the order the user wrote
-// survives.
-//
-// Dropped silently: the output shows each resource once, which says it, and a
-// count of what was ignored would only restate what is already visible.
-//
-// This is a dedupe by argument, before anything resolves — it only catches an
-// index spelled twice. resolveIndexes (refs.go) dedupes again afterward, by
-// what each index resolved to, which is the dedupe that actually matters:
-// two different indexes can name the same resource. The dedupe here remains
-// only so a repeated index is not resolved twice for no reason.
-func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("Missing argument '%s'.", name)
-	}
-	indexes := make([]int, 0, len(args))
-	seen := make(map[int]bool, len(args))
-	keep := func(candidates ...int) {
-		for _, index := range candidates {
-			if seen[index] {
-				continue
-			}
-			seen[index] = true
-			indexes = append(indexes, index)
-		}
-	}
-	for _, arg := range args {
-		if expanded, ok, err := expandRange(resolver, name, arg); ok {
-			if err != nil {
-				return nil, err
-			}
-			keep(expanded...)
-			continue
-		}
-		index, err := parseIndex(name, arg)
-		if err != nil {
-			return nil, err
-		}
-		keep(index)
-	}
-	return indexes, nil
-}
-
 func itemCount(count int) string {
 	if count == 1 {
 		return "1 item"
@@ -279,14 +230,23 @@ func newDescribeCommand(services Services) *cobra.Command {
 	}
 }
 
-// splitLeadingIndexes takes the run of numeric-or-range arguments at the
-// front, leaving the rest for kubectl. A malformed range (e.g. "9..abc") still
-// counts as part of the leading run — it isn't fully validated here, only
-// shaped like a range, so it reaches parseIndexes for a proper error instead
-// of the generic "not a valid int" that applies when nothing leads at all.
+// splitLeadingIndexes takes the run of numeric-, range- or mark-shaped
+// arguments at the front, leaving the rest for kubectl. A malformed range
+// (e.g. "9..abc") still counts as part of the leading run — it isn't fully
+// validated here, only shaped like a range, so it reaches parseRefs for a
+// proper error instead of the generic "not a valid int" that applies when
+// nothing leads at all.
+//
+// A '@'-prefixed argument is kept in the run unvalidated for the same reason:
+// "kx logs @api" would otherwise stop at "@api" on the first argument (it is
+// not an int and has no ".."), hand it to kubectl as a positional, and answer
+// with "@api is not a valid int" — the parse failure Task 8's brief explicitly
+// says a mark must never produce. Whether the name after '@' is any good is
+// parseRefs's question, same as an out-of-range index or a malformed range.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
 	for i, arg := range args {
-		if _, err := strconv.Atoi(arg); err != nil && !strings.Contains(arg, "..") {
+		if _, err := strconv.Atoi(arg); err != nil &&
+			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") {
 			return args[:i], args[i:]
 		}
 	}

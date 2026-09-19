@@ -158,6 +158,50 @@ func TestGetIndexRangeRelist(t *testing.T) {
 	}
 }
 
+// A mark resolves the same way an index does, through the same leading-run
+// split and resolveRefsExpecting call — "kx get pods @api" relists the
+// resource pinned by the mark rather than treating "@api" as a name to fetch
+// literally.
+func TestGetResolvesAMarkOnTheCommandLine(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "nginx-abc-xyz", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	if err := runGet(services, "pods", []string{"@api"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	want := []string{"get", "pods", "nginx-abc-xyz", "-n", "prod"}
+	if joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+}
+
+// Contexts live in kubeconfig, not in kx state, so a mark — which names a
+// Kubernetes resource pinned from a listing — has nothing to resolve against
+// here. Refused rather than silently spent as index 0 (a mark Ref's Index is
+// always its zero value), which would have switched to whatever context
+// happens to sit first.
+func TestGetContextsRefusesAMark(t *testing.T) {
+	kube := &fakeKubectl{}
+	services := switchServices(t, kube)
+
+	err := runGet(services, "contexts", []string{"@api"}, getOptions{})
+	if err == nil {
+		t.Fatal("runGet(contexts, @api) succeeded, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "mark") {
+		t.Errorf("err = %q, want it to name the mark as the problem", err)
+	}
+	if len(kube.calls) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.calls))
+	}
+}
+
 // A kubectl flag value can legitimately contain ".." — JSONPath's recursive
 // descent, e.g. -o jsonpath={..metadata.name} — and must reach kubectl
 // untouched rather than being mistaken for a range token. Range/int
