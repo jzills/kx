@@ -960,6 +960,18 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 			if err != nil {
 				return err
 			}
+			// A slot (FieldsNamed) is not a resource reference, so a mark has
+			// nothing to have pinned here — refused rather than silently
+			// spending its zero-value Index as index 0. switchTo below takes
+			// a bare int for exactly that reason: it must never be handed a
+			// Ref that might still be carrying a mark.
+			if ref.Mark != "" {
+				subject := "namespaces"
+				if isContext {
+					subject = "contexts"
+				}
+				return markRefusedForSlot(ref, subject)
+			}
 			// Shared with `kx get contexts <index>`, which routes here too, so
 			// the stale-namespace relist lives in one place.
 			return switchTo(services, use, ref.Index, isContext)

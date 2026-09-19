@@ -78,6 +78,23 @@ func parseRef(name, arg string) (state.Ref, error) {
 	return state.Ref{Index: index}, nil
 }
 
+// markRefusedForSlot reports that a mark was given where only an index can be
+// spent — a namespace or context slot (FieldsNamed) is not a resource
+// reference, and marks were deliberately left untouched by that: `kx ns 2`
+// has nothing for a mark to have pinned, since a mark names a Kubernetes
+// resource resolved from a listing, and a slot is neither. subject names what
+// is being switched ("namespaces", "contexts"), in the command's own
+// vocabulary.
+//
+// Shared by newSwitchCommand (kx ns / kx context) and kx get contexts's own
+// pre-parse rather than each writing its own wording, so a reader meeting
+// this refusal twice sees the same sentence and never has to work out
+// whether two phrasings mean the same thing.
+func markRefusedForSlot(ref state.Ref, subject string) error {
+	return fmt.Errorf(
+		"'%s' is a mark; %s are switched by index, not by a marked resource.", ref, subject)
+}
+
 // parseRefs turns argv into the references a command acts on: a leading '@'
 // makes a mark reference, and everything else parses as an index or range,
 // expanding to one state.Ref{Index: n} per index and dropping repeats.

@@ -539,6 +539,44 @@ const namespaceTable = "NAME      STATUS   AGE\n" +
 	"default   Active   91d\n" +
 	"prod      Active   91d\n"
 
+// kx ns and kx context read a slot (FieldsNamed), which the marks work
+// deliberately left untouched — a slot is not a resource reference, and
+// there is nothing for `kx mark` to have pinned there. newSwitchCommand used
+// to extract ref.Index in isolation after parseRef, so a mark's zero-value
+// Index silently went through as index 0 rather than being refused: `kx ns
+// @foo` resolved index 0 against whatever namespace listing happened to be
+// current and reported a confusing out-of-range error that named no mark at
+// all. Both spellings are checked, and the assertion is on the message
+// itself — naming the mark and the reason — not merely that an error came
+// back, since a bad error would have passed a looser check too.
+func TestSwitchRefusesAMark(t *testing.T) {
+	cases := []struct {
+		use       string
+		isContext bool
+		wantNoun  string
+	}{
+		{"namespace", false, "namespaces are switched by index"},
+		{"context", true, "contexts are switched by index"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.use, func(t *testing.T) {
+			services := switchServices(t, &recordingKubectl{})
+			cmd := newSwitchCommand(services, tc.use, tc.use, "short", tc.isContext)
+			cmd.SetArgs([]string{"@foo"})
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("kx %s @foo succeeded, want a refusal", tc.use)
+			}
+			if !strings.Contains(err.Error(), "@foo") {
+				t.Errorf("err = %q, want it to name the mark", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantNoun) {
+				t.Errorf("err = %q, want %q", err, tc.wantNoun)
+			}
+		})
+	}
+}
+
 // The whole of #156, through the real call path: list namespaces, list
 // something else on top, then switch. The 2 counts against namespaces.
 func TestNamespaceListThenSwitchIgnoresAnInterveningListing(t *testing.T) {

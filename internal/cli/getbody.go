@@ -88,11 +88,11 @@ func runGet(services Services, resource string, args []string, options getOption
 		}
 		// A mark names a Kubernetes resource pinned by kx state, not a
 		// kubeconfig context — there is nothing for it to resolve against
-		// here, so it is refused rather than silently spent as index 0.
+		// here, so it is refused rather than silently spent as index 0. See
+		// markRefusedForSlot (refs.go): newSwitchCommand hits the same case
+		// for `kx ns`/`kx context` and shares this wording.
 		if refs[0].Mark != "" {
-			return fmt.Errorf(
-				"'%s' is a mark; contexts are switched by index, not by a marked resource.",
-				refs[0])
+			return markRefusedForSlot(refs[0], "contexts")
 		}
 		return switchTo(services, "context", refs[0].Index, true)
 	}
