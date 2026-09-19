@@ -6,6 +6,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -176,7 +177,12 @@ func newDrainCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return DrainCommand{

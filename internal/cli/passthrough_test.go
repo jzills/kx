@@ -259,40 +259,38 @@ func TestRefuseScopeFlagPassesOtherFlags(t *testing.T) {
 	}
 }
 
-// The refusal has to come before any output. describe and logs print a banner
-// per index and then run kubectl, so guarding inside the per-index work put a
-// banner above the error for a command that never ran.
-func TestRefuseScopeFlagForIndexesRefusesBeforeResolvingWork(t *testing.T) {
-	resolver := refOf(
-		[3]string{"desktop-control-plane", "", "Node"},
-		[3]string{"web-abc", "prod", "Pod"},
-	)
-
-	if err := refuseScopeFlagForIndexes(resolver, []int{1, 2}, []string{"-n", "other"}); err == nil {
-		t.Error("a namespaced index among cluster-scoped ones did not refuse -n")
+// The namespaces are already on the Resolved values, so the guard must not
+// ask the resolver for them again. PR 1 bridged with indexesOf() and paid a
+// state load per index on a path that had the answer in hand.
+func TestRefuseScopeFlagResolvedRefusesAScopeFlagBesideANamespacedReference(t *testing.T) {
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "api", Namespace: "prod", Kind: kinds.Pod},
+		{Ref: state.Ref{Index: 2}, Name: "web", Namespace: "prod", Kind: kinds.Pod},
 	}
-	if err := refuseScopeFlagForIndexes(resolver, []int{1}, []string{"-n", "other"}); err != nil {
-		t.Errorf("refuseScopeFlagForIndexes = %v, want -n allowed for a cluster-scoped index", err)
+
+	if err := refuseScopeFlagResolved(resolved, []string{"-n", "other"}); err == nil {
+		t.Error("a scope flag beside a namespaced reference was allowed")
 	}
 }
 
-// No scope flag means no resolution: the guard must not spend a lookup per
-// index on the ordinary path, which is every invocation.
-func TestRefuseScopeFlagForIndexesResolvesNothingWithoutAScopeFlag(t *testing.T) {
-	counter := &countingResolver{}
-	if err := refuseScopeFlagForIndexes(counter, []int{1, 2, 3}, []string{"--force"}); err != nil {
-		t.Fatalf("refuseScopeFlagForIndexes: %v", err)
+// A cluster-scoped reference carries no namespace for -n to contradict; -A is
+// refused either way. Same rule refuseScopeFlag already applies.
+func TestRefuseScopeFlagResolvedKeepsTheClusterScopedException(t *testing.T) {
+	node := []Resolved{{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node}}
+
+	if err := refuseScopeFlagResolved(node, []string{"-n", "kube-system"}); err != nil {
+		t.Errorf("refuseScopeFlagResolved = %v, want -n allowed for a cluster-scoped reference", err)
 	}
-	if counter.calls != 0 {
-		t.Errorf("resolved %d indexes with no scope flag present, want 0", counter.calls)
+	if err := refuseScopeFlagResolved(node, []string{"-A"}); err == nil {
+		t.Error("-A beside a reference was allowed")
 	}
 }
 
-// -A widens a listing, and there is no listing beside an index to widen — so
-// it is refused even when no index resolves to a namespace at all.
-func TestRefuseScopeFlagForIndexesRefusesAllNamespacesWithNoIndexes(t *testing.T) {
-	if err := refuseScopeFlagForIndexes(refOf(), nil, []string{"-A"}); err == nil {
-		t.Error("refuseScopeFlagForIndexes(-A) with no indexes = nil, want a refusal")
+// No references and a scope flag still refuses -A: there is no listing beside
+// a reference for it to widen.
+func TestRefuseScopeFlagResolvedWithNoReferencesStillRefusesAllNamespaces(t *testing.T) {
+	if err := refuseScopeFlagResolved(nil, []string{"-A"}); err == nil {
+		t.Error("-A with no references was allowed")
 	}
 }
 

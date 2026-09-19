@@ -161,27 +161,21 @@ func refuseScopeFlag(args []string, namespace string) error {
 	return scopeFlagBesideIndexError(flag, "")
 }
 
-// refuseScopeFlagForIndexes applies refuseScopeFlag across every index a
-// command resolved, so the refusal lands before any output rather than after
-// the first banner of a command that will not run.
+// refuseScopeFlagResolved rejects a namespace-scope flag that would contradict
+// a reference the caller has already resolved.
 //
-// Returns immediately when there is no scope flag to refuse — which is every
-// ordinary invocation — so the guard costs no index resolution on the path
-// that does not need it. With no indexes at all it still asks once, since -A
-// is refused whatever an index would have resolved to.
-func refuseScopeFlagForIndexes(resolver IndexResolver, indexes []int, args []string) error {
+// Takes the resolved values rather than a resolver and a list of indexes: the
+// namespace it needs is on each Resolved, and asking for it again cost a state
+// load per index on a path that had the answer in hand.
+func refuseScopeFlagResolved(resolved []Resolved, args []string) error {
 	if scopeFlagIn(args) == "" {
 		return nil
 	}
-	if len(indexes) == 0 {
+	if len(resolved) == 0 {
 		return refuseScopeFlag(args, "")
 	}
-	for _, index := range indexes {
-		_, namespace, _, err := resolver.Fields(index)
-		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlag(args, namespace); err != nil {
+	for _, target := range resolved {
+		if err := refuseScopeFlag(args, target.Namespace); err != nil {
 			return err
 		}
 	}

@@ -264,7 +264,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
@@ -323,7 +323,7 @@ func newLogsCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			if err := checkFollow(extra, len(resolved)); err != nil {
@@ -429,7 +429,12 @@ func newEditCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return EditCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -461,7 +466,12 @@ func newExecCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return ExecCommand{
@@ -516,7 +526,12 @@ func newDebugCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return DebugCommand{
@@ -573,7 +588,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			command := DeleteCommand{
@@ -641,7 +656,12 @@ func newScaleCommand(services Services) *cobra.Command {
 					"'--replicas' cannot be combined with a replica count — kx builds " +
 						"the flag from the count given here. Drop one of the two.")
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, extra); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -689,7 +709,12 @@ func newRolloutCommand(services Services) *cobra.Command {
 				return err
 			}
 			extra := rest[2:]
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, extra); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -734,7 +759,12 @@ func newPortForwardCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[2:]); err != nil {
+			_, namespace, kind, err := services.State.Fields(index)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: state.Ref{Index: index}, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[2:]); err != nil {
 				return err
 			}
 			return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -822,7 +852,7 @@ func newYamlCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			// --show narrows the YAML it parsed, so another output format is a
