@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -237,28 +238,42 @@ func TestNamespaceDecodeWithNoSecretsDoesNotPrompt(t *testing.T) {
 	}
 }
 
+// oneResolved and twoResolved stand in for what runGet's resolveRefsExpecting
+// call would have produced, for tests that exercise decodeSecrets directly
+// rather than through the whole runGet path. decodeSecrets trusts these —
+// the kind check now happens once, in the caller, before decodeSecrets is
+// reached at all (see TestDecodeRejectsAnIndexThatIsNotASecret).
+var oneResolved = []Resolved{
+	{Ref: state.Ref{Index: 1}, Name: "db-creds", Namespace: "prod", Kind: kinds.Secret},
+}
+
+var twoResolved = []Resolved{
+	{Ref: state.Ref{Index: 1}, Name: "db-creds", Namespace: "prod", Kind: kinds.Secret},
+	{Ref: state.Ref{Index: 2}, Name: "other-secret", Namespace: "prod", Kind: kinds.Secret},
+}
+
 func TestDecodeGuards(t *testing.T) {
 	tests := []struct {
-		name    string
-		kind    kinds.Kind
-		res     string
-		indexes []int
-		options getOptions
-		want    string
+		name     string
+		kind     kinds.Kind
+		res      string
+		resolved []Resolved
+		options  getOptions
+		want     string
 	}{
 		{
 			name: "--key without --decode", kind: kinds.Secret, res: "secret",
-			indexes: []int{1}, options: getOptions{HasKey: true, Key: "tls.crt"},
+			resolved: oneResolved, options: getOptions{HasKey: true, Key: "tls.crt"},
 			want: "--key requires --decode",
 		},
 		{
 			name: "--decode on a non-Secret kind", kind: kinds.Pod, res: "pods",
-			indexes: []int{1}, options: decodeOptions(),
+			resolved: oneResolved, options: decodeOptions(),
 			want: "'--decode' cannot be combined with Pods",
 		},
 		{
 			name: "--key with several indexes", kind: kinds.Secret, res: "secret",
-			indexes: []int{1, 2}, options: getOptions{Decode: true, HasKey: true, Key: "a"},
+			resolved: twoResolved, options: getOptions{Decode: true, HasKey: true, Key: "a"},
 			want: "--key takes a single index",
 		},
 	}
@@ -266,7 +281,7 @@ func TestDecodeGuards(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			quietRender(t)
 			services := secretServices(t, &fakeKubectl{output: oneSecretJSON}, tc.kind)
-			err := decodeSecrets(services, tc.res, tc.indexes, nil, tc.options)
+			err := decodeSecrets(services, tc.res, tc.resolved, nil, tc.options)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want one containing %q", err, tc.want)
 			}
@@ -276,12 +291,14 @@ func TestDecodeGuards(t *testing.T) {
 
 // `kubectl config set-context` accepts any string, and so does a decode: without
 // the kind check a stale index pointing at a Pod would be fetched as a Secret.
+// The check now happens in runGet, before decodeSecrets is ever reached, so
+// this goes through runGet rather than calling decodeSecrets directly.
 func TestDecodeRejectsAnIndexThatIsNotASecret(t *testing.T) {
 	quietRender(t)
 	kube := &fakeKubectl{output: oneSecretJSON}
 	services := secretServices(t, kube, kinds.Pod)
 
-	err := decodeSecrets(services, "secret", []int{1}, nil, decodeOptions())
+	err := runGet(services, "secret", []string{"1"}, decodeOptions())
 	if err == nil || !strings.Contains(err.Error(), "not Secret") {
 		t.Fatalf("err = %v, want a kind mismatch", err)
 	}
@@ -297,7 +314,7 @@ func TestDecodeMissingKeyNamesTheKey(t *testing.T) {
 
 	options := decodeOptions()
 	options.HasKey, options.Key = true, "nope"
-	err := decodeSecrets(services, "secret", []int{1}, nil, options)
+	err := decodeSecrets(services, "secret", oneResolved, nil, options)
 	if err == nil || !strings.Contains(err.Error(), "No key 'nope'") {
 		t.Fatalf("err = %v, want it to name the missing key", err)
 	}
@@ -310,7 +327,7 @@ func TestDecodeNotFoundBecomesStale(t *testing.T) {
 	kube := &fakeKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): secrets "db-creds" not found`}}
 	services := secretServices(t, kube, kinds.Secret)
 
-	err := decodeSecrets(services, "secret", []int{1}, nil, decodeOptions())
+	err := decodeSecrets(services, "secret", oneResolved, nil, decodeOptions())
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %T (%v), want StaleResourceError", err, err)
@@ -329,5 +346,33 @@ func TestSecretRegistersNamespaceFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("--%s is not registered, so it will not appear in --help", name)
 		}
+	}
+}
+
+// A bad index anywhere in the batch must decode nothing. Every other
+// index-taking command resolves the whole batch before acting; this one
+// printed a secret's plaintext and then failed, which is the worst version of
+// that bug because the output is credentials.
+func TestDecodeRefusesTheBatchBeforePrintingAnySecret(t *testing.T) {
+	kube := &recordingKubectl{output: `{"data":{"password":"aHVudGVyMg=="}}`}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"db-creds"}, kinds.Secret),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	err := runGet(services, "secrets", []string{"1", "99"}, getOptions{Decode: true, Yes: true})
+	if err == nil {
+		t.Fatal("kx get secrets --decode 1 99 succeeded despite an out-of-range index")
+	}
+	if strings.Contains(out.String(), "hunter2") {
+		t.Errorf("output printed a decoded secret before failing:\n%s", out.String())
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("made %d kubectl calls for a refused batch, want 0", len(kube.runs))
 	}
 }

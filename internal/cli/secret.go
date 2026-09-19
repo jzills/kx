@@ -165,7 +165,15 @@ func renderSecret(secret secretData, namespace string) {
 //
 // Split out of the listing path because decoding reads resources rather than
 // listing them, so it never re-saves state.
-func decodeSecrets(services Services, resource string, indexes []int, extra []string, options getOptions) error {
+//
+// resolved has already been resolved — and, for a non-empty batch, kind
+// checked against kinds.Secret — by the caller's resolveRefsExpecting call
+// before decodeSecrets is ever reached, so every entry here is safe to fetch.
+// That is what keeps `kx get secrets --decode 1 99` from decoding and
+// printing index 1's plaintext before failing on the out-of-range 99: the
+// whole batch is validated before any of it is acted on, rather than
+// resolving and fetching one index at a time.
+func decodeSecrets(services Services, resource string, resolved []Resolved, extra []string, options getOptions) error {
 	if !options.Decode {
 		return fmt.Errorf("--key requires --decode")
 	}
@@ -175,29 +183,24 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 			"'--decode' cannot be combined with %s — only Secrets carry data to decode.",
 			kinds.PluralDisplay(string(expected)))
 	}
-	if options.HasKey && len(indexes) != 1 {
+	if options.HasKey && len(resolved) != 1 {
 		return fmt.Errorf("--key takes a single index")
 	}
 
 	command := SecretCommand{Kubectl: services.Kubectl, State: services.State}
-	if len(indexes) == 0 {
+	if len(resolved) == 0 {
 		return decodeNamespace(services, command, extra, options.Yes)
 	}
 
-	for position, index := range indexes {
-		name, namespace, err := services.State.FieldsExpecting(index, expected)
-		if err != nil {
-			return err
-		}
-
+	for position, target := range resolved {
 		stop := render.Status("fetching secret")
-		secret, err := command.Execute(index)
+		secret, err := command.Execute(target.Ref.Index)
 		stop()
 		if err != nil {
 			// A NotFound here means the saved index outlived the Secret; the
 			// explicit type triggers the refresh path.
 			if IsNotFound(err) {
-				return StaleResourceError{Kind: expected, Name: name}
+				return StaleResourceError{Kind: expected, Name: target.Name}
 			}
 			return err
 		}
@@ -205,7 +208,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 		if options.HasKey {
 			value, ok := secret.Values[options.Key]
 			if !ok {
-				return fmt.Errorf("No key '%s' in %s/%s.", options.Key, expected, name)
+				return fmt.Errorf("No key '%s' in %s/%s.", options.Key, expected, target.Name)
 			}
 			// Raw and unwrapped so the value stays substitutable in shell.
 			return writeValue(value)
@@ -213,7 +216,7 @@ func decodeSecrets(services Services, resource string, indexes []int, extra []st
 		if position > 0 {
 			render.Raw("")
 		}
-		renderSecret(secret, namespace)
+		renderSecret(secret, target.Namespace)
 	}
 	return nil
 }

@@ -98,7 +98,24 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	if options.Decode || options.HasKey {
-		return decodeSecrets(services, resource, indexes, extra, options)
+		// Resolved only when the command already names a Secret-shaped
+		// resource and carries indexes: otherwise decodeSecrets's own guards
+		// (--decode required, kind mismatch) are what should fire, and firing
+		// resolveRefsExpecting first would replace those messages with a
+		// resolution error about an index that was never going to be
+		// fetched. When it does apply, resolving the whole batch here —
+		// before decodeSecrets fetches or renders anything — is what stops a
+		// bad index late in the batch from letting an earlier one's secret
+		// reach the terminal first.
+		var resolved []Resolved
+		if options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
+			var err error
+			resolved, err = resolveRefsExpecting(services.State, "indexes", indexArgs, kinds.Secret)
+			if err != nil {
+				return err
+			}
+		}
+		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
 	if len(indexes) > 0 {
