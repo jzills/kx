@@ -164,6 +164,12 @@ func clampIndex(index, count int) int {
 //
 // Dropped silently: the output shows each resource once, which says it, and a
 // count of what was ignored would only restate what is already visible.
+//
+// This is a dedupe by argument, before anything resolves — it only catches an
+// index spelled twice. resolveIndexes (refs.go) dedupes again afterward, by
+// what each index resolved to, which is the dedupe that actually matters:
+// two different indexes can name the same resource. The dedupe here remains
+// only so a repeated index is not resolved twice for no reason.
 func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
@@ -194,22 +200,6 @@ func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, er
 		keep(index)
 	}
 	return indexes, nil
-}
-
-// validateIndexes resolves every index against the current state before a
-// batch command acts on any of them. Without this, a command that loops
-// index-by-index (delete, describe, logs, yaml, label/annotation reads) only
-// discovers a bad index — e.g. a range that overruns the current listing —
-// after it has already acted on the indexes ahead of it. For delete that
-// partial action can't be undone, so the whole batch must validate clean
-// before any of it runs.
-func validateIndexes(resolver IndexResolver, indexes []int) error {
-	for _, index := range indexes {
-		if _, _, _, err := resolver.Fields(index); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func itemCount(count int) string {
@@ -270,24 +260,17 @@ func newDescribeCommand(services Services) *cobra.Command {
 				return fmt.Errorf(
 					"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
 			}
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
-				return err
-			}
-			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
+			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
 				return err
 			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
-			for _, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
-				render.Banner(string(kind), name, namespace, "")
-				if err := command.Execute(index, extra); err != nil {
+			for _, target := range resolved {
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				if err := command.Execute(target.Ref.Index, extra); err != nil {
 					return err
 				}
 			}
@@ -336,17 +319,14 @@ func newLogsCommand(services Services) *cobra.Command {
 				}
 				return fmt.Errorf("Missing argument 'indexes'.")
 			}
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
-				return err
-			}
-			if err := checkFollow(extra, len(indexes)); err != nil {
+			if err := checkFollow(extra, len(resolved)); err != nil {
 				return err
 			}
 			// Before the first subprocess, so a malformed window is reported
@@ -358,16 +338,12 @@ func newLogsCommand(services Services) *cobra.Command {
 			command := LogsCommand{
 				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
 			}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
+			for position, target := range resolved {
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, "")
-				if err := command.Execute(index, extra); err != nil {
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				if err := command.Execute(target.Ref.Index, extra); err != nil {
 					return err
 				}
 			}
@@ -593,14 +569,11 @@ func newDeleteCommand(services Services) *cobra.Command {
 				}
 				return requiredArgsError(cmd)
 			}
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
-				return err
-			}
-			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
+			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
 				return err
 			}
 			command := DeleteCommand{
@@ -611,8 +584,8 @@ func newDeleteCommand(services Services) *cobra.Command {
 			}
 			// Confirmed and reported one at a time, so declining one resource
 			// doesn't silently take the rest with it.
-			for _, index := range indexes {
-				message, err := command.Execute(index, yes, extra)
+			for _, target := range resolved {
+				message, err := command.Execute(target.Ref.Index, yes, extra)
 				if err != nil {
 					return err
 				}
@@ -845,14 +818,11 @@ func newYamlCommand(services Services) *cobra.Command {
 				return requiredArgsError(cmd)
 			}
 			extra := rest
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
-				return err
-			}
-			if err := refuseScopeFlagForIndexes(services.State, indexes, extra); err != nil {
+			if err := refuseScopeFlagForIndexes(services.State, indexesOf(resolved), extra); err != nil {
 				return err
 			}
 			// --show narrows the YAML it parsed, so another output format is a
@@ -872,19 +842,15 @@ func newYamlCommand(services Services) *cobra.Command {
 				}
 			}
 			command := YamlCommand{Kubectl: services.Kubectl, State: services.State}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
+			for position, target := range resolved {
 				if position > 0 {
 					render.Raw("")
 				}
 				// Banner per manifest: without it, several manifests run
 				// together with nothing saying which is which.
-				render.Banner(string(kind), name, namespace, "")
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
 				stop := render.Status("fetching manifest")
-				output, err := command.Execute(index, fields, extra)
+				output, err := command.Execute(target.Ref.Index, fields, extra)
 				stop()
 				if err != nil {
 					return err
@@ -911,32 +877,25 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		Args:    minArgs(1),
 		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
-				return err
-			}
-			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			// One fetch for the whole batch, and so one spinner: a call per
 			// index took 1.12s for a 14-pod listing where one batched call
 			// took 0.079s.
 			stop := render.Status("fetching " + field)
-			results, err := fetchMetadataFields(services.Kubectl, services.State, indexes, field)
+			results, err := fetchMetadataFields(services.Kubectl, resolved, field)
 			stop()
 			if err != nil {
 				return err
 			}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
-				result := results[index]
+			for position, target := range resolved {
+				result := results[target.Ref]
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, itemCount(len(result.keys)))
+				render.Banner(string(target.Kind), target.Name, target.Namespace, itemCount(len(result.keys)))
 				if asSelector {
 					pairs := make([]string, 0, len(result.keys))
 					for _, key := range result.keys {

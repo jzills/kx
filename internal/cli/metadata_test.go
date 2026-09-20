@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jzills/kx/internal/state"
 )
 
 const labelsJSON = `{"metadata":{"labels":{"tier":"frontend","app":"web"}}}`
@@ -179,7 +181,11 @@ func TestMetadataReadBatchesOneCallPerGroup(t *testing.T) {
 		[3]string{"db", "prod", "Pod"},
 	)
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1, 2, 3}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
@@ -190,7 +196,7 @@ func TestMetadataReadBatchesOneCallPerGroup(t *testing.T) {
 		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
 	}
 	for index, want := range map[int]string{1: "api", 2: "web", 3: "db"} {
-		if got := results[index].values["app"]; got != want {
+		if got := results[state.Ref{Index: index}].values["app"]; got != want {
 			t.Errorf("index %d resolved to app=%q, want %q", index, got, want)
 		}
 	}
@@ -209,15 +215,19 @@ func TestMetadataReadMatchesRepliesByName(t *testing.T) {
 		[3]string{"web", "prod", "Pod"},
 	)
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1, 2}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
-	if results[1].values["app"] != "api" {
-		t.Errorf("index 1 = %v, want api's labels despite web coming back first", results[1].values)
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want api's labels despite web coming back first", results[state.Ref{Index: 1}].values)
 	}
-	if results[2].values["app"] != "web" {
-		t.Errorf("index 2 = %v, want web's labels", results[2].values)
+	if results[state.Ref{Index: 2}].values["app"] != "web" {
+		t.Errorf("index 2 = %v, want web's labels", results[state.Ref{Index: 2}].values)
 	}
 }
 
@@ -236,7 +246,11 @@ func TestMetadataReadGroupsByKindAndNamespace(t *testing.T) {
 		[3]string{"job", "prod", "Job"},
 	)
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1, 2, 3}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
@@ -252,8 +266,8 @@ func TestMetadataReadGroupsByKindAndNamespace(t *testing.T) {
 			t.Errorf("call %d = %q, want %q", i+1, got, want)
 		}
 	}
-	if results[3].values["app"] != "job" {
-		t.Errorf("index 3 = %v, want the Job's labels", results[3].values)
+	if results[state.Ref{Index: 3}].values["app"] != "job" {
+		t.Errorf("index 3 = %v, want the Job's labels", results[state.Ref{Index: 3}].values)
 	}
 }
 
@@ -263,12 +277,16 @@ func TestMetadataReadAcceptsABareObjectForOneName(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"name":"api","labels":{"app":"api"}}}`}
 	resolver := refOf([3]string{"api", "prod", "Pod"})
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
-	if results[1].values["app"] != "api" {
-		t.Errorf("index 1 = %v, want api's labels", results[1].values)
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want api's labels", results[state.Ref{Index: 1}].values)
 	}
 }
 
@@ -283,7 +301,11 @@ func TestMetadataReadReportsAResourceMissingFromTheReply(t *testing.T) {
 		[3]string{"gone", "prod", "Pod"},
 	)
 
-	if _, err := fetchMetadataFields(kubectl, resolver, []int{1, 2}, "labels"); err == nil {
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	if _, err := fetchMetadataFields(kubectl, resolved, "labels"); err == nil {
 		t.Fatal("fetchMetadataFields succeeded with a resource absent from the reply")
 	}
 }
@@ -296,12 +318,16 @@ func TestMetadataReadAcceptsASingleReplyWithNoName(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"app":"api"}}}`}
 	resolver := refOf([3]string{"api", "prod", "Pod"})
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
-	if results[1].values["app"] != "api" {
-		t.Errorf("index 1 = %v, want the sole reply's labels", results[1].values)
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want the sole reply's labels", results[state.Ref{Index: 1}].values)
 	}
 }
 
@@ -318,7 +344,11 @@ func TestMetadataReadStillReportsAMissingNameInABatch(t *testing.T) {
 		[3]string{"gone", "prod", "Pod"},
 	)
 
-	_, err := fetchMetadataFields(kubectl, resolver, []int{1, 2, 3}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
 	if err == nil {
 		t.Fatal("fetchMetadataFields succeeded with a name absent from a batched reply")
 	}
@@ -342,14 +372,18 @@ func TestMetadataReadFetchesTheCollectionForSeveralNames(t *testing.T) {
 		[3]string{"web", "prod", "Pod"},
 	)
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1, 2}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
 	if want := "get Pod -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
 		t.Errorf("args = %q, want %q — no names, so kubectl makes one request", joinArgs(kubectl.runs[0]), want)
 	}
-	if results[1].values["app"] != "api" || results[2].values["app"] != "web" {
+	if results[state.Ref{Index: 1}].values["app"] != "api" || results[state.Ref{Index: 2}].values["app"] != "web" {
 		t.Errorf("results = %v, want the two resources asked for", results)
 	}
 	if len(results) != 2 {
@@ -364,7 +398,11 @@ func TestMetadataReadKeepsANamedFetchForOneName(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"name":"api","labels":{"app":"api"}}}`}
 	resolver := refOf([3]string{"api", "prod", "Pod"})
 
-	if _, err := fetchMetadataFields(kubectl, resolver, []int{1}, "labels"); err != nil {
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	if _, err := fetchMetadataFields(kubectl, resolved, "labels"); err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
 	if want := "get Pod api -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
@@ -394,14 +432,18 @@ func TestMetadataReadFallsBackToNamedFetchesWhenListingFails(t *testing.T) {
 		[3]string{"web", "prod", "Pod"},
 	)
 
-	results, err := fetchMetadataFields(kubectl, resolver, []int{1, 2}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
 	if err != nil {
 		t.Fatalf("fetchMetadataFields: %v", err)
 	}
 	if len(kubectl.runs) != 3 {
 		t.Fatalf("made %d calls, want the failed listing plus one per name", len(kubectl.runs))
 	}
-	if results[1].values["app"] != "api" || results[2].values["app"] != "web" {
+	if results[state.Ref{Index: 1}].values["app"] != "api" || results[state.Ref{Index: 2}].values["app"] != "web" {
 		t.Errorf("results = %v, want both resources via the fallback", results)
 	}
 }
@@ -420,7 +462,11 @@ func TestMetadataReadReportsTheNamedFetchErrorWhenBothFail(t *testing.T) {
 		[3]string{"web", "prod", "Pod"},
 	)
 
-	_, err := fetchMetadataFields(kubectl, resolver, []int{1, 2}, "labels")
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
 	if err == nil {
 		t.Fatal("fetchMetadataFields succeeded with both paths failing")
 	}

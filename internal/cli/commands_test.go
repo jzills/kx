@@ -293,7 +293,7 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 }
 
 // indexResolverFunc lets a test fail on a specific index rather than
-// uniformly, so validateIndexes can be proven to check every index in the
+// uniformly, so resolveRefs can be proven to check every index in the
 // batch rather than stopping after the first one resolves.
 type indexResolverFunc func(int) (string, string, kinds.Kind, error)
 
@@ -301,28 +301,37 @@ func (f indexResolverFunc) Fields(idx int) (string, string, kinds.Kind, error) {
 	return f(idx)
 }
 
+func (f indexResolverFunc) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return f(ref.Index)
+}
+
+func (f indexResolverFunc) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := f(ref.Index)
+	return name, namespace, err
+}
+
 func (f indexResolverFunc) Count() (int, error) {
 	return 0, nil
 }
 
-func TestValidateIndexesCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
+func TestResolveRefsCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
 	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
 		if idx == 3 {
 			return "", "", "", fmt.Errorf("index %d is out of range", idx)
 		}
 		return "pod", "prod", kinds.Pod, nil
 	})
-	if err := validateIndexes(resolver, []int{1, 2, 3, 4}); err == nil {
-		t.Fatal("validateIndexes accepted a batch containing an out-of-range index")
+	if _, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3", "4"}); err == nil {
+		t.Fatal("resolveRefs accepted a batch containing an out-of-range index")
 	}
 }
 
-func TestValidateIndexesAcceptsAWhollyValidBatch(t *testing.T) {
+func TestResolveRefsAcceptsAWhollyValidBatch(t *testing.T) {
 	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
 		return "pod", "prod", kinds.Pod, nil
 	})
-	if err := validateIndexes(resolver, []int{1, 2, 3}); err != nil {
-		t.Fatalf("validateIndexes rejected a wholly valid batch: %v", err)
+	if _, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"}); err != nil {
+		t.Fatalf("resolveRefs rejected a wholly valid batch: %v", err)
 	}
 }
 

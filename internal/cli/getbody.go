@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 )
@@ -27,21 +26,24 @@ type namespaceGroup struct {
 	Names     []string
 }
 
-// groupByNamespace collects resolved entries by namespace, preserving the order
-// each namespace was first seen so the stitched table lists rows in roughly the
-// order the indexes did. Always returns at least one group for a non-empty
-// input, so callers can read groups[0] without a length check.
-func groupByNamespace(entries []index.Entry) []namespaceGroup {
+// groupByNamespace collects resolved references by namespace, preserving the
+// order each namespace was first seen so the stitched table lists rows in
+// roughly the order the indexes did. Always returns at least one group for a
+// non-empty input, so callers can read groups[0] without a length check.
+//
+// Reads the namespace off each Resolved rather than resolving it again — the
+// resolution already happened once, in resolveRefs.
+func groupByNamespace(resolved []Resolved) []namespaceGroup {
 	var groups []namespaceGroup
 	at := map[string]int{}
-	for _, entry := range entries {
-		position, seen := at[entry.Namespace]
+	for _, target := range resolved {
+		position, seen := at[target.Namespace]
 		if !seen {
-			at[entry.Namespace] = len(groups)
-			groups = append(groups, namespaceGroup{Namespace: entry.Namespace})
+			at[target.Namespace] = len(groups)
+			groups = append(groups, namespaceGroup{Namespace: target.Namespace})
 			position = len(groups) - 1
 		}
-		groups[position].Names = append(groups[position].Names, entry.Name)
+		groups[position].Names = append(groups[position].Names, target.Name)
 	}
 	return groups
 }
@@ -101,17 +103,18 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	if len(indexes) > 0 {
 		expected := kinds.Normalize(resource)
-		resolved := make([]index.Entry, 0, len(indexes))
-		for _, idx := range indexes {
-			// FieldsExpecting rather than Fields: the resource type was named on
-			// the command line, so an out-of-range index or an empty history can
-			// be reported against that kind instead of against whatever listing
-			// happens to be current.
-			name, ns, err := services.State.FieldsExpecting(idx, expected)
-			if err != nil {
-				return err
-			}
-			resolved = append(resolved, index.Entry{Name: name, Namespace: ns})
+		// resolveRefsExpecting resolves every index before any of them is
+		// acted on, so an out-of-range index late in the batch is caught
+		// before the first kubectl call rather than after some of them have
+		// already run. Expecting rather than resolveRefs's plain Resolve: the
+		// resource type was named on the command line, so a failure — out of
+		// range, no state, or an index left over from a listing of a
+		// different kind — is reported against that kind, the way
+		// FieldsExpecting always has, instead of generically or silently
+		// fetched as whatever the index actually names.
+		resolved, err := resolveRefsExpecting(services.State, "indexes", indexArgs, expected)
+		if err != nil {
+			return err
 		}
 		groups := groupByNamespace(resolved)
 
@@ -123,11 +126,11 @@ func runGet(services Services, resource string, args []string, options getOption
 		// first group's namespace, so a selection spanning namespaces came
 		// back as "pods ... not found", which reads as a resource that is
 		// gone rather than a request kubectl will not serve.
-		if len(indexes) > 1 && isWatch(extra) {
+		if len(resolved) > 1 && isWatch(extra) {
 			return fmt.Errorf(
 				"--watch takes a single resource; %d indexes were given. "+
 					"Watch one of them, or drop --watch to fetch them all.",
-				len(indexes))
+				len(resolved))
 		}
 
 		// Indexes from an -A listing can land in different namespaces, and

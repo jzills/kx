@@ -2080,3 +2080,54 @@ func TestSaveKeepsDifferentQuerylessEntriesApart(t *testing.T) {
 		t.Errorf("len(States) = %d, want 3", len(history.States))
 	}
 }
+
+// A Ref carrying an index resolves exactly as Fields did — Resolve is the
+// shape that will also carry a mark, not a change of behaviour.
+func TestResolveAnIndexRefMatchesFields(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+
+	name, namespace, kind, err := service.Resolve(Ref{Index: 2})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	wantName, wantNamespace, wantKind, err := service.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if name != wantName || namespace != wantNamespace || kind != wantKind {
+		t.Errorf("Resolve = (%q, %q, %q), want (%q, %q, %q)",
+			name, namespace, kind, wantName, wantNamespace, wantKind)
+	}
+}
+
+// The zero Ref names nothing. Resolving it as index 0 would report "Index 0 is
+// out of range", which describes an argument the user never wrote.
+func TestResolveRefusesTheZeroRef(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	name, _, _, err := service.Resolve(Ref{})
+	if err == nil {
+		t.Fatalf("Resolve(Ref{}) = %q, want an error", name)
+	}
+	if strings.Contains(err.Error(), "out of range") {
+		t.Errorf("err = %q, want it to report an empty reference rather than index 0", err)
+	}
+}
+
+// The kind-checking path takes a Ref too, so the destructive commands convert
+// without losing their kind guard.
+func TestResolveExpectingAnIndexRefChecksTheKind(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	})
+
+	if _, _, err := service.ResolveExpecting(Ref{Index: 1}, kinds.Deployment); err == nil {
+		t.Fatal("ResolveExpecting accepted a Pod where a Deployment was expected")
+	}
+	if _, _, err := service.ResolveExpecting(Ref{Index: 1}, kinds.Pod); err != nil {
+		t.Errorf("ResolveExpecting on a matching kind: %v", err)
+	}
+}
