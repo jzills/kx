@@ -2390,6 +2390,28 @@ func TestSaveKeepsMarks(t *testing.T) {
 // naming the empty string in the empty namespace — the same failure
 // decodeEntry exists to prevent for a stack entry with no "resources". It
 // must be dropped, the way a broken slot drops, rather than stored.
+// A mark whose kind is missing is as unusable as one with no name, and fails
+// worse: the name still resolves, so kubectl is asked for a resource type of
+// "" and answers "the server doesn't have a resource type", which kx reports
+// as a stale resource — telling the user a running pod no longer exists and
+// advising them to re-mark it. Dropped on load like any other unreadable mark.
+func TestMarkWithoutKindDropsRatherThanBeingStored(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
+		`"cursor":0,"marks":{"api":{"name":"api-7d8f","namespace":"prod","context":"staging"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if mark, ok := history.Marks["api"]; ok {
+		t.Errorf("Marks[api] = %+v, want the kindless entry dropped", mark)
+	}
+}
+
 func TestMarkWithoutNameDropsRatherThanBeingStored(t *testing.T) {
 	service := newTestService(t, 10)
 	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +

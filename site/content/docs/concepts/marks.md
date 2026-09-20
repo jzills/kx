@@ -82,3 +82,28 @@ kx unmark --all        # this is what removes marks
 That asymmetry is deliberate. `kx state drop --all` clears things that
 accumulate on their own, one `kx get` at a time; a mark is something you
 named on purpose, and clearing it takes a command that says so.
+
+## A mark kx cannot read is dropped
+
+Marks live in `~/.kx/state.json` alongside the listings, and kx reads that file
+on every command. An entry it cannot make sense of — one missing the resource
+name, or the kind it has to ask kubectl for — is dropped as the file loads,
+and the rest of the file is used as normal. `kx mark` simply stops listing it,
+and spending that name reports it as unknown:
+
+```
+✗ No mark named 'web' — run 'kx mark web <index>' to create one, or 'kx mark' to list them.
+```
+
+That is deliberate, and it is the same rule a malformed listing follows. The
+alternative is worse than it sounds: a mark with no kind still has a name, so
+kx would ask kubectl for a resource with no type, kubectl would answer that it
+has no such type, and kx would report a resource that is running perfectly well
+as one that no longer exists — blaming the cluster for a problem in a local
+file.
+
+Nothing kx writes can produce such an entry; every mark is made from a listing
+that already carries both fields, and the state file is written by an atomic
+rename, so an interrupted write leaves the previous file rather than half of a
+new one. It is worth saying only because `KX_STATE` invites pointing kx at a
+file something else maintains.
