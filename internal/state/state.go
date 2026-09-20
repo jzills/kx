@@ -506,18 +506,26 @@ func unknownMarkError(name string) error {
 
 // decodeMark turns one raw mark object into a Mark.
 //
-// A missing "name" key is rejected the same way decodeEntry rejects a missing
-// "resources" key: Go's zero value would otherwise accept it as a mark naming
-// the empty string in the empty namespace, reachable from a hand-edited or
-// partially-written state.json. Callers decide what an undecodable mark
-// costs; see loadHistory, which drops it rather than condemning the file.
+// A missing "name" or "kind" is rejected the same way decodeEntry rejects a
+// missing "resources": Go's zero value would otherwise accept the entry, and
+// both fields are load-bearing. A nameless mark points at the empty string in
+// the empty namespace. A kindless one is worse than useless — the name still
+// resolves, so kubectl is asked for a resource type of "" and answers "the
+// server doesn't have a resource type", which kx reads as a vanished resource
+// and reports as "no longer exists" about something that is running.
+//
+// Reachable only from a hand-edited or partially-written state.json, since kx
+// writes both. Callers decide what an undecodable mark costs; see loadHistory,
+// which drops it rather than condemning the file.
 func decodeMark(data []byte) (Mark, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return Mark{}, err
 	}
-	if _, ok := probe["name"]; !ok {
-		return Mark{}, errors.New("'name'")
+	for _, key := range []string{"name", "kind"} {
+		if _, ok := probe[key]; !ok {
+			return Mark{}, fmt.Errorf("'%s'", key)
+		}
 	}
 	var mark Mark
 	if err := json.Unmarshal(data, &mark); err != nil {
