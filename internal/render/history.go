@@ -1,7 +1,6 @@
 package render
 
 import (
-	"sort"
 	"strconv"
 	"strings"
 
@@ -341,39 +340,6 @@ func (r *Renderer) listing(entry state.State, scope, context string) {
 			row = append(row, Plain(resource.Namespace))
 		}
 		rows = append(rows, append(row, Plain(resource.Name)))
-	}
-	r.Table(columns, rows)
-}
-
-// MarkList renders the marks currently set, in the shape ThemeList and
-// EngineList use for their own registries: a caption naming the count, then a
-// plain table. Sorted by name for stable output — Marks() returns a map,
-// whose iteration order is not — rather than by index, since a mark carries
-// none.
-func (r *Renderer) MarkList(marks map[string]state.Mark) {
-	if len(marks) == 0 {
-		r.Caption("No marks set — run 'kx mark <name> <index>' to create one.")
-		return
-	}
-	names := make([]string, 0, len(marks))
-	for name := range marks {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	r.Caption("Marks", "", itemLabel(len(names)))
-	columns := []Column{
-		{Header: "NAME"}, {Header: "KIND"}, {Header: "RESOURCE"}, {Header: "NAMESPACE"},
-	}
-	rows := make([][]Cell, 0, len(names))
-	for _, name := range names {
-		mark := marks[name]
-		rows = append(rows, []Cell{
-			Plain("@" + name),
-			Plain(string(mark.Kind)),
-			Plain(mark.Name),
-			Plain(mark.Namespace),
-		})
 	}
 	r.Table(columns, rows)
 }

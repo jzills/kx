@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
 	"github.com/muesli/termenv"
 )
@@ -586,5 +588,52 @@ func TestFormatElapsedIsAnAgeWithoutTheAgo(t *testing.T) {
 func TestFormatElapsedOfAnUndatedThingIsEmpty(t *testing.T) {
 	if got := FormatElapsedAt(time.Now(), time.Time{}); got != "" {
 		t.Errorf("FormatElapsedAt(zero) = %q, want empty", got)
+	}
+}
+
+// A mark has no index, so the listing is keyed by the name the user chose and
+// must show what that name currently points at — the kind, the resource and
+// the namespace it was pinned in.
+func TestMarkListShowsWhatEachNamePointsAt(t *testing.T) {
+	out := styledCapture(t, "github-dark", func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{
+				Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod",
+			}},
+			"db": {Resource: state.Resource{
+				Name: "db-0", Kind: kinds.StatefulSet, Namespace: "data",
+			}},
+		})
+	})
+	for _, want := range []string{"@api", "api-7d8f", "prod", "@db", "db-0", "data", "2 items"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("mark list is missing %q:\n%s", want, out)
+		}
+	}
+	// Sorted by name, not by map order, so two runs cannot disagree.
+	if strings.Index(out, "@api") > strings.Index(out, "@db") {
+		t.Errorf("marks are not sorted by name:\n%s", out)
+	}
+}
+
+// The empty state names the command that fills it, rather than pointing at
+// --help: the same rule the history and switch-target listings follow, and
+// what the unknown-mark error already says for this situation.
+func TestMarkListEmptyNamesTheCommandThatCreatesOne(t *testing.T) {
+	out := styledCapture(t, "github-dark", func(r *Renderer) {
+		r.MarkList(nil)
+	})
+	if !strings.Contains(out, "kx mark <name> <index>") {
+		t.Errorf("empty mark list does not name the command that creates one: %q", out)
+	}
+}
+
+func TestMarkListPlainWhenNotStyled(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, &buf, "github-dark", false).MarkList(map[string]state.Mark{
+		"api": {Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}},
+	})
+	if strings.Contains(buf.String(), esc) {
+		t.Errorf("mark list leaked color into unstyled output: %q", buf.String())
 	}
 }

@@ -810,8 +810,15 @@ func TestDropAllConfirmsBeforeClearing(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kx state drop --all: %v", err)
 	}
-	if prompted == "" {
-		t.Error("kx state drop --all did not prompt for confirmation")
+	// The wording is asserted, not merely its presence. --all no longer means
+	// "all" — marks survive it — so the prompt is the one place the user learns
+	// that before deciding, and a silent reword would take it away.
+	for _, want := range []string{
+		"namespace and context slots", "Marks are untouched", "kx unmark --all",
+	} {
+		if !strings.Contains(prompted, want) {
+			t.Errorf("prompt = %q\n  missing %q", prompted, want)
+		}
 	}
 
 	history, err := services.State.LoadHistory()
