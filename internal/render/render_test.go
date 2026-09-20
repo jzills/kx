@@ -616,6 +616,51 @@ func TestMarkListShowsWhatEachNamePointsAt(t *testing.T) {
 	}
 }
 
+// A mark from another context refuses to resolve, so which context it was
+// taken in is exactly the fact this listing must not hide. One context shared
+// by every mark is a property of the whole listing and captions it, the same
+// trade StateHistory makes for the history stack — see
+// TestStateHistoryCaptionsASharedContext.
+func TestMarkListCaptionsASharedContext(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{
+				Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod",
+			}, Context: "docker-desktop"},
+			"db": {Resource: state.Resource{
+				Name: "db-0", Kind: kinds.StatefulSet, Namespace: "data",
+			}, Context: "docker-desktop"},
+		})
+	})
+	if !strings.Contains(out, "docker-desktop") {
+		t.Errorf("output = %q, want it to name the shared context", out)
+	}
+	if strings.Contains(out, "CONTEXT") {
+		t.Errorf("output = %q, want no CONTEXT column when every mark shares one", out)
+	}
+}
+
+// Marks taken in different clusters are the case the column exists for: a
+// mark from one cluster and one from another are indistinguishable without
+// it, and one of the two will refuse to resolve.
+func TestMarkListAddsAContextColumnWhenMarksDiffer(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{
+				Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod",
+			}, Context: "staging"},
+			"db": {Resource: state.Resource{
+				Name: "db-0", Kind: kinds.StatefulSet, Namespace: "data",
+			}, Context: "production"},
+		})
+	})
+	for _, want := range []string{"CONTEXT", "staging", "production"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
 // The empty state names the command that fills it, rather than pointing at
 // --help: the same rule the history and switch-target listings follow, and
 // what the unknown-mark error already says for this situation.

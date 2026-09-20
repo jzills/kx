@@ -25,12 +25,16 @@ kx state 2           # jump to position 2
 kx state back        # step back one
 kx state forward     # step forward one
 kx state drop 2      # remove position 2
-kx state drop --all  # clear everything, slots included
+kx state drop --all  # clear the stack and the slots — marks are untouched
 kx state drop --empty  # drop the entries whose listing found nothing
 ```
 
 Jumping does not re-run anything: the entry already holds the listing, so the
 indexes it carries resolve immediately.
+
+`--all` only clears what accumulates on its own, one `kx get` at a time.
+[A mark](../marks/) is named on purpose, not accumulated, so it takes a
+command that says so: `kx unmark --all`.
 
 Re-running the listing you are already on refreshes that entry instead of
 pushing another copy of it. Re-running `kx get` is how you see what changed, so

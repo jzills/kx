@@ -42,7 +42,9 @@ var helpSections = []struct {
 // Every line here is a feature that existed only in the README: the numbering
 // itself, the kind shorthand, multiple indexes, ranges, and why an -A listing
 // has none. A per-command --help can't teach any of it, because none of it
-// belongs to one command.
+// belongs to one command. Marks earn a line for the same reason: naming an
+// index and spending it as @name is a way of reading *any* command's index
+// argument, not something 'kx mark --help' alone can convey.
 var examples = []render.HelpItem{
 	{Name: "kx get pods", Doc: "Number a listing's rows 1, 2, 3..."},
 	{Name: "kx pods", Doc: "Known kinds and CRDs can drop the 'get'"},
@@ -50,6 +52,7 @@ var examples = []render.HelpItem{
 	{Name: "kx delete 3 5", Doc: "Several indexes at once"},
 	{Name: "kx delete 3..7", Doc: "A range; '..5' and '5..' leave an end open"},
 	{Name: "kx get pods -A", Doc: "Every namespace; indexes carry their namespace"},
+	{Name: "kx mark api 3", Doc: "Name an index — @api then spends it, past any re-listing"},
 }
 
 // The docs URL used to close this screen too. It is one line under `kx
@@ -166,7 +169,7 @@ func flagSpelling(flag *pflag.Flag) string {
 // TestEveryArgumentIsDocumented fails on a name that reaches here undescribed,
 // so a new command can't quietly fall back to "required".
 var argDocs = map[string]string{
-	"index":     "Row number from the current listing; run kx state to see it",
+	"index":     "Row number from the current listing, or @name for a mark; kx state or kx mark shows them",
 	"resource":  "Resource type: pods, deploy, svc, a CRD, or any kubectl kind",
 	"position":  "History position, as numbered by kx state --all",
 	"name":      "Name, or the row number from the listing shown above",

@@ -22,7 +22,7 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing; run kx state to see it |
+| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 
@@ -46,4 +46,5 @@ kx logs 1 -f --tail=100
 kx logs 1 --since 7d
 kx logs 1..3
 kx logs 3..
+kx logs @api -f
 ```

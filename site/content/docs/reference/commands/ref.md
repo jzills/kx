@@ -22,7 +22,7 @@ kx ref [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing; run kx state to see it |
+| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 

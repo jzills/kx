@@ -23,11 +23,12 @@ type fakeResolver struct {
 	count    int
 	countErr error
 	// seen records every Ref handed to Resolve, in order. Nil unless a test
-	// asks for it, which is most of them — Fields ignores its argument and
-	// Resolve just forwards ref.Index to it, so nothing here notices what
-	// shape a Ref arrived in unless something is watching. A pointer, because
-	// fakeResolver is passed around by value everywhere it's used, and a plain
-	// slice field would only ever grow the copy Resolve was called on.
+	// asks for it, which today is only TestExecuteMethodsPassTheirRefUnchangedToResolve
+	// — Fields ignores its argument and Resolve just forwards ref.Index to it,
+	// so nothing here notices what shape a Ref arrived in unless something is
+	// watching. A pointer, because fakeResolver is passed around by value
+	// everywhere it's used, and a plain slice field would only ever grow the
+	// copy Resolve was called on.
 	seen *[]state.Ref
 }
 

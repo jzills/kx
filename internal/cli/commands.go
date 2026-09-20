@@ -194,7 +194,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 		SuggestFor:         []string{"detail", "details"},
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
 		Long:               "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -240,9 +240,10 @@ func newDescribeCommand(services Services) *cobra.Command {
 // A '@'-prefixed argument is kept in the run unvalidated for the same reason:
 // "kx logs @api" would otherwise stop at "@api" on the first argument (it is
 // not an int and has no ".."), hand it to kubectl as a positional, and answer
-// with "@api is not a valid int" — the parse failure Task 8's brief explicitly
-// says a mark must never produce. Whether the name after '@' is any good is
-// parseRefs's question, same as an out-of-range index or a malformed range.
+// with "@api is not a valid int" — a parse failure that names the wrong
+// problem, since "@api" is a perfectly well-formed mark reference. Whether
+// the name after '@' is any good is parseRefs's question, same as an
+// out-of-range index or a malformed range.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
 	for i, arg := range args {
 		if _, err := strconv.Atoi(arg); err != nil &&
@@ -260,7 +261,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -410,7 +411,7 @@ func newExecCommand(services Services) *cobra.Command {
 		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
 		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
 			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
-		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
+		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

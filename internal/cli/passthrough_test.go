@@ -260,8 +260,9 @@ func TestRefuseScopeFlagPassesOtherFlags(t *testing.T) {
 }
 
 // The namespaces are already on the Resolved values, so the guard must not
-// ask the resolver for them again. PR 1 bridged with indexesOf() and paid a
-// state load per index on a path that had the answer in hand.
+// ask the resolver for them again. An earlier version of this guard took
+// only the indexes and re-resolved each one, paying a state load per index
+// on a path that had the answer in hand.
 func TestRefuseScopeFlagResolvedRefusesAScopeFlagBesideANamespacedReference(t *testing.T) {
 	resolved := []Resolved{
 		{Ref: state.Ref{Index: 1}, Name: "api", Namespace: "prod", Kind: kinds.Pod},
