@@ -218,14 +218,32 @@ func TestUnmarkAllAbortsWithoutConfirmation(t *testing.T) {
 // kx mark and kx unmark set no SuggestFor unlike most siblings, so a typed
 // plural fell through to `kx get marks`/`kx get unmarks` and a kubectl error
 // instead of being offered the right command.
-func TestMarkAndUnmarkSuggestThePluralTypo(t *testing.T) {
-	root := NewRoot(Services{}, "test")
-
-	if got := root.SuggestionsFor("marks"); len(got) != 1 || got[0] != "mark" {
-		t.Errorf("SuggestionsFor(marks) = %v, want [mark]", got)
-	}
-	if got := root.SuggestionsFor("unmarks"); len(got) != 1 || got[0] != "unmark" {
-		t.Errorf("SuggestionsFor(unmarks) = %v, want [unmark]", got)
+// Driven through Execute rather than SuggestionsFor, because cobra defaults
+// SuggestionsMinimumDistance to 2 inside Execute and leaves it 0 on the struct
+// — so calling SuggestionsFor directly reports what no user ever sees, and an
+// explicit SuggestFor entry would make such a test pass while masking that the
+// distance match already covers a plural.
+func TestMarkAndUnmarkSuggestThePluralTypoExactlyOnce(t *testing.T) {
+	for typo, want := range map[string]string{"marks": "mark", "unmarks": "unmark"} {
+		root := NewRoot(Services{}, "test")
+		root.SetArgs([]string{typo})
+		err := root.Execute()
+		if err == nil {
+			t.Fatalf("kx %s succeeded, want an unknown-command error", typo)
+		}
+		// Counted by suggestion line, not by substring: the typo itself contains
+		// the command's name. Listing SuggestFor alongside cobra's own distance
+		// match printed the same name twice under one "Did you mean this?".
+		suggested := 0
+		for _, line := range strings.Split(err.Error(), "\n") {
+			if strings.TrimSpace(line) == want {
+				suggested++
+			}
+		}
+		if suggested != 1 {
+			t.Errorf("kx %s suggested %q on %d lines, want exactly 1:\n%s",
+				typo, want, suggested, err)
+		}
 	}
 }
 
