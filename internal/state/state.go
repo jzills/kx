@@ -514,9 +514,12 @@ func unknownMarkError(name string) error {
 // server doesn't have a resource type", which kx reads as a vanished resource
 // and reports as "no longer exists" about something that is running.
 //
-// Reachable only from a hand-edited or partially-written state.json, since kx
-// writes both. Callers decide what an undecodable mark costs; see loadHistory,
-// which drops it rather than condemning the file.
+// Not reachable from kx itself: every mark is created from a resolved listing
+// entry, which always carries both, and saveHistory's atomic rename means an
+// interrupted write leaves the previous file intact rather than a truncated
+// one. This guards a state.json edited by hand or written by something else.
+// Callers decide what an undecodable mark costs; see loadHistory, which drops
+// it rather than condemning the file.
 func decodeMark(data []byte) (Mark, error) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
