@@ -5,6 +5,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -20,8 +21,9 @@ import (
 // list would invite `kx mark 2` to mean something it doesn't.
 func newMarkCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mark [name] [index]",
-		Short: "Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.",
+		Use:        "mark [name] [index]",
+		SuggestFor: []string{"marks"},
+		Short:      "Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.",
 		Long: "Pins whatever `<index>` currently resolves to under `<name>`, so 'kx logs @name' keeps " +
 			"working after a later listing moves every index around it.\n\n" +
 			"With no arguments, lists the marks that are set. That listing carries no index " +
@@ -82,8 +84,9 @@ func listMarks(services Services) error {
 func newUnmarkCommand(services Services) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "unmark [name]",
-		Short: "Remove a mark by name; --all removes every mark.",
+		Use:        "unmark [name]",
+		SuggestFor: []string{"unmarks"},
+		Short:      "Remove a mark by name; --all removes every mark.",
 		Long: "Removes a mark by name, or every mark at once with --all — the marks 'kx state " +
 			"drop --all' deliberately leaves behind.",
 		Example: "  kx unmark api\n  kx unmark --all",
@@ -110,7 +113,11 @@ func newUnmarkCommand(services Services) *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("kx unmark requires a name, or --all to remove every mark")
 			}
-			name := args[0]
+			// The mark listing prints names with their sigil ("@api"), and
+			// copying what is on screen is the obvious way to spend one — so a
+			// leading '@' is accepted rather than reported as an unknown mark
+			// named "@api".
+			name := strings.TrimPrefix(args[0], "@")
 			if err := services.State.DropMark(name); err != nil {
 				return err
 			}

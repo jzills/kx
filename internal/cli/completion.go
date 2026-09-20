@@ -43,6 +43,7 @@ var argCompleters = map[string]completer{
 	"action":          completeRolloutAction,
 	"theme.name":      completeTheme,
 	"engine.name":     completeEngine,
+	"unmark.name":     completeMarkNames,
 	"replicas":        nil, // A number kx cannot guess.
 	"port":            nil, // Likewise, and it is a mapping, not a port.
 	"key=value":       nil,
@@ -428,6 +429,38 @@ func completeRolloutAction(Services, string) []string {
 	candidates := make([]string, 0, len(rolloutActions))
 	for _, action := range rolloutActions {
 		candidates = append(candidates, action.Name+"\t"+action.Doc)
+	}
+	return candidates
+}
+
+// completeMarkNames offers the marks currently set, for kx unmark's own name
+// argument — plain, without the '@' sigil the listing prints them with, the
+// same as theme.name and engine.name complete their own arguments' spelling
+// rather than a display form of it. Registered as "unmark.name" rather than
+// the bare "name" so it does not also apply to kx mark's own [name] argument,
+// which names a mark to create rather than one to choose from a list.
+func completeMarkNames(services Services, _ string) []string {
+	if services.State == nil {
+		return nil
+	}
+	marks, err := services.State.Marks()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(marks))
+	for name := range marks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	candidates := make([]string, 0, len(names))
+	for _, name := range names {
+		mark := marks[name]
+		label := mark.Name
+		if mark.Kind != "" {
+			label += " (" + string(mark.Kind) + ")"
+		}
+		candidates = append(candidates, name+"\t"+label)
 	}
 	return candidates
 }

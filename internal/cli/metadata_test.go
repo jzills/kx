@@ -274,6 +274,46 @@ func TestMetadataReadReportsAResourceMissingFromTheReply(t *testing.T) {
 	}
 }
 
+// The Ref that names a stale resource must be the caller's own, mark
+// included — fetchMetadataFields resolves through resolver.Resolve(ref) once
+// (to learn the name to fetch) and then again inside the loop that builds
+// StaleResourceError (metadata.go's g.refs[i]), and a version that rebuilt
+// state.Ref{Index: ref.Index} for either use would report "index 0 is stale"
+// for a mark that went missing from the reply, rather than naming the mark.
+// Three references in the batch, matching
+// TestMetadataReadStillReportsAMissingNameInABatch, because a batch of one
+// takes the single-reply fallback (see
+// TestMetadataReadAcceptsASingleReplyWithNoName) and never reaches the
+// missing-name check at all.
+func TestMetadataReadCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"missing-pod", "prod", "Pod"},
+	)
+	resolver.marks = map[string]int{"ghost": 3}
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "@ghost"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
+	if err == nil {
+		t.Fatal("fetchMetadataFields succeeded with a name absent from the reply")
+	}
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "ghost" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "ghost")
+	}
+}
+
 // A single-name reply is taken as the resource asked for whether or not it
 // carries a metadata.name. The name match exists to tell several replies
 // apart; with one there is nothing to tell apart, and insisting on the field

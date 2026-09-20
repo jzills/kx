@@ -95,6 +95,20 @@ func markRefusedForSlot(ref state.Ref, subject string) error {
 		"'%s' is a mark; %s are switched by index, not by a marked resource.", ref, subject)
 }
 
+// markRefusedForCp reports that kx cp was given a mark on its pod side.
+//
+// cp parses that side out of an "<index>:<path>" argument with strconv.Atoi
+// directly, rather than through parseRef like every other command — there is
+// no Ref here for a mark to ride along on, and adding one is out of scope for
+// this fix. But falling through silently is not: a mark simply fails to parse
+// as an int, so without this check the whole argument passed to kubectl
+// unchanged, which then failed with a message about a path instead of a mark.
+func markRefusedForCp(mark string) error {
+	return fmt.Errorf(
+		"'@%s' is a mark; kx cp resolves an indexed pod by number, not by a marked resource. Give the index instead.",
+		mark)
+}
+
 // parseRefs turns argv into the references a command acts on: a leading '@'
 // makes a mark reference, and everything else parses as an index or range,
 // expanding to one state.Ref{Index: n} per index and dropping repeats.

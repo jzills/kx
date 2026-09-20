@@ -741,7 +741,8 @@ func (s *Service) DropMark(name string) error {
 	}
 	if _, ok := history.Marks[name]; !ok {
 		return fmt.Errorf(
-			"No mark named '%s' — run 'kx mark' to see the marks you have.", name)
+			"No mark named '%s' — run 'kx mark %s <index>' to create one, or 'kx mark' to list them.",
+			name, name)
 	}
 	delete(history.Marks, name)
 	return s.saveHistory(history)

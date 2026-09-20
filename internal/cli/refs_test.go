@@ -213,6 +213,32 @@ func TestResolveRefsDedupesByResolvedIdentity(t *testing.T) {
 	}
 }
 
+// The spec's own motivating example: `kx labels 3 @api` should dedupe to one
+// resource, not print it twice, when index 3 and mark @api name the same
+// thing. Both existing dedupe tests use two indexes, and indexedResolver used
+// to discard ref.Mark entirely, so this exact case could not be written
+// against it before now.
+func TestResolveRefsDedupesAnIndexAndAMarkNamingTheSameResource(t *testing.T) {
+	resolver := refOf(
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"db", "prod", "Pod"},
+		[3]string{"api", "prod", "Pod"},
+	)
+	resolver.marks = map[string]int{"api": 3}
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"3", "@api"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("resolved %d references, want 1 — index 3 and @api are one resource",
+			len(resolved))
+	}
+	if resolved[0].Name != "api" {
+		t.Errorf("resolved = %+v, want api", resolved)
+	}
+}
+
 // Every reference is resolved before the caller acts on any of them, so a bad
 // one cannot leave a command half-done. This is what kx delete already
 // guaranteed and kx cordon did not.

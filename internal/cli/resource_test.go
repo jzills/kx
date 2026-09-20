@@ -331,6 +331,45 @@ func TestCopyRejectsAnIndexedNonPod(t *testing.T) {
 	}
 }
 
+// kx cp parses its pod side with strconv.Atoi, which has no sigil branch —
+// marks on cp are deliberately out of scope, but before this, "@api:/f"
+// simply failed to parse as an int and fell through unchanged, so kubectl
+// was handed the literal string "@api:/f" and failed with a confusing
+// message about a path. This must be refused clearly instead, the way kx ns
+// @foo is refused.
+func TestCopyRefusesAMarkOnTheSourceSide(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("@api:/var/log/app.log", "./app.log", nil)
+	if err == nil {
+		t.Fatal("copied from a mark, want an error")
+	}
+	for _, want := range []string{"@api", "mark"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err.Error(), want)
+		}
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Error("kubectl was called with an unresolved mark")
+	}
+}
+
+// Either side of the copy can name a mark; both must be refused the same way.
+func TestCopyRefusesAMarkOnTheDestinationSide(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
+		Execute("./patch.conf", "@api:/etc/app/patch.conf", nil)
+	if err == nil {
+		t.Fatal("copied to a mark, want an error")
+	}
+	if !strings.Contains(err.Error(), "@api") {
+		t.Errorf("err = %q, want it to name the mark", err.Error())
+	}
+	if len(kubectl.interactive) != 0 {
+		t.Error("kubectl was called with an unresolved mark")
+	}
+}
+
 // A vanished indexed pod is stale state, exactly like exec/port-forward.
 func TestCopyFailureOnVanishedPodStaysStale(t *testing.T) {
 	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}

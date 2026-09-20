@@ -226,6 +226,29 @@ func TestNamespaceCompletionReadsItsOwnSlot(t *testing.T) {
 	}
 }
 
+// kx unmark <TAB> had no completer at all — argCompleters carried no entry
+// for its "name" argument, unlike kx theme <TAB> and kx engine <TAB>, which
+// complete theirs from the same map. It offers plain mark names, matching
+// what the argument itself accepts.
+func TestUnmarkCompletesMarkNames(t *testing.T) {
+	services := completionServices(t)
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	root := NewRoot(services, "test")
+	candidates, _ := complete(t, root, "unmark", "")
+
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %v, want the one mark", candidates)
+	}
+	if candidates[0] != "api\tapi-7d8f (Pod)" {
+		t.Errorf("candidates[0] = %q, want the plain mark name, not '@api'", candidates[0])
+	}
+}
+
 // The pass-through commands disable cobra's flag parsing, so cobra never
 // completes their flag values; kx parses them here the way it does at run time.
 func TestFlagValuesCompleteOnPassthroughCommands(t *testing.T) {

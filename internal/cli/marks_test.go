@@ -87,6 +87,29 @@ func TestMarkRefusesANumericName(t *testing.T) {
 	}
 }
 
+// The mark listing prints names with their sigil ("@api"), and copying what
+// is on screen is the obvious way to spend one — kx unmark must accept it
+// rather than reporting an unknown mark literally named "@api".
+func TestUnmarkAcceptsTheSigilItsOwnListingPrints(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	cmd := newUnmarkCommand(services)
+	cmd.SetArgs([]string{"@api"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx unmark @api: %v", err)
+	}
+
+	marks, _ := services.State.Marks()
+	if len(marks) != 0 {
+		t.Errorf("marks = %+v, want none", marks)
+	}
+}
+
 func TestUnmarkRemovesOne(t *testing.T) {
 	services := switchServices(t, &recordingKubectl{})
 	if err := services.State.SaveMark("api", state.Mark{
@@ -189,6 +212,60 @@ func TestUnmarkAllAbortsWithoutConfirmation(t *testing.T) {
 	}
 	if len(marks) != 1 {
 		t.Errorf("marks = %+v, want the mark still present", marks)
+	}
+}
+
+// kx mark and kx unmark set no SuggestFor unlike most siblings, so a typed
+// plural fell through to `kx get marks`/`kx get unmarks` and a kubectl error
+// instead of being offered the right command.
+func TestMarkAndUnmarkSuggestThePluralTypo(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+
+	if got := root.SuggestionsFor("marks"); len(got) != 1 || got[0] != "mark" {
+		t.Errorf("SuggestionsFor(marks) = %v, want [mark]", got)
+	}
+	if got := root.SuggestionsFor("unmarks"); len(got) != 1 || got[0] != "unmark" {
+		t.Errorf("SuggestionsFor(unmarks) = %v, want [unmark]", got)
+	}
+}
+
+// kx mark resolves an index exactly the way kx describe does, so a context
+// mismatch on it must recover the same way — registered with withoutRefresh,
+// `kx get pods` in staging followed by `kx context 2` then `kx mark api 3`
+// used to dead-end on a bare ContextMismatchError where `kx describe 3` in
+// the identical state relisted and offered fresh indexes to pick from.
+//
+// Run through NewRoot rather than by wrapping newMarkCommand directly, so
+// this actually exercises root.go's registration — the thing item 2 changes —
+// rather than only the withRefresh/isStale mechanism in isolation, which
+// would stay green even if root.go still registered kx mark with
+// withoutRefresh.
+func TestMarkRecoversFromAContextMismatchLikeDescribe(t *testing.T) {
+	out := captureRender(t)
+	services := mismatchServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Resource: "pods", Args: []string{}})
+
+	root := NewRoot(services, "test")
+	root.SetArgs([]string{"mark", "api", "1"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("kx mark api 1 succeeded across a context mismatch")
+	}
+
+	var silent SilentError
+	if !errors.As(err, &silent) {
+		t.Fatalf("err = %v, want SilentError — the refresh already reported it", err)
+	}
+	if !strings.Contains(out.String(), "nginx-abc-xyz") {
+		t.Errorf("output = %q, want the refreshed listing to mark from", out.String())
+	}
+
+	marks, merr := services.State.Marks()
+	if merr != nil {
+		t.Fatalf("Marks: %v", merr)
+	}
+	if len(marks) != 0 {
+		t.Errorf("marks = %+v, want none — the mismatch must refuse before storing anything", marks)
 	}
 }
 

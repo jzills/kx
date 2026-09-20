@@ -317,9 +317,9 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	// cp resolves its pod out of an "<index>:<path>" argument via strconv.Atoi,
 	// so there is no Ref in hand here the way the other commands have one — the
 	// zero Ref keeps today's refreshable behaviour, which is right for an index
-	// path. cp does not support marks: this parsing has no sigil branch, so
-	// `kx cp @api:/f .` would hand kubectl the literal string "@api:/f" rather
-	// than resolving a mark.
+	// path. cp does not support marks: resolve (above) refuses one with a clear
+	// message rather than reaching here at all, so this path is only ever an
+	// index's.
 	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, state.Ref{})
 }
 
@@ -331,6 +331,14 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 	before, path, found := strings.Cut(arg, ":")
 	if !found {
 		return arg, nil, nil
+	}
+	// Marks on cp are deliberately out of scope — there is no Ref here for one
+	// to ride along on, unlike every other command — but silently mishandling
+	// one is not: without this, strconv.Atoi below simply failed to parse
+	// "@api" and the whole argument fell through unchanged, handing kubectl
+	// the literal string "@api:/f" and a confusing message about a path.
+	if mark, ok := strings.CutPrefix(before, "@"); ok {
+		return "", nil, markRefusedForCp(mark)
 	}
 	index, err := strconv.Atoi(before)
 	if err != nil {

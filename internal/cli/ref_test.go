@@ -19,6 +19,12 @@ type indexedResolver struct {
 		name, namespace string
 		kind            kinds.Kind
 	}
+	// marks maps a mark name to the 1-based index it points at, so a test can
+	// build a mark that names the same resource as one of entries — the
+	// coverage the spec's own motivating example (`kx labels 3 @api`) calls
+	// for, and that this resolver could not offer while Resolve discarded
+	// ref.Mark outright.
+	marks map[string]int
 }
 
 func (r indexedResolver) Fields(index int) (string, string, kinds.Kind, error) {
@@ -30,6 +36,13 @@ func (r indexedResolver) Fields(index int) (string, string, kinds.Kind, error) {
 }
 
 func (r indexedResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	if ref.Mark != "" {
+		index, ok := r.marks[ref.Mark]
+		if !ok {
+			return "", "", "", fmt.Errorf("No mark named '%s'.", ref.Mark)
+		}
+		return r.Fields(index)
+	}
 	return r.Fields(ref.Index)
 }
 

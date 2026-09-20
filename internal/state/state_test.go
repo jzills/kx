@@ -2270,6 +2270,31 @@ func TestDropMarkReportsAnUnknownName(t *testing.T) {
 	}
 }
 
+// DropMark and resolveMark (via Resolve) refuse an unknown name for the same
+// reason — a typo should not look like something else — and used to say so
+// in two different sentences: DropMark's opener matched resolveMark's, but
+// the tail diverged ("see the marks you have" vs. "to create one, or 'kx
+// mark' to list them"). One sentence, in one place, for a rule enforced in
+// several: this pins that the two error messages are now identical, modulo
+// the name.
+func TestDropMarkAndResolveMarkShareOneWording(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	dropErr := service.DropMark("nope")
+	if dropErr == nil {
+		t.Fatal("DropMark on an unknown name succeeded")
+	}
+	_, _, _, resolveErr := service.Resolve(Ref{Mark: "nope"})
+	if resolveErr == nil {
+		t.Fatal("Resolve on an unknown mark succeeded")
+	}
+	if dropErr.Error() != resolveErr.Error() {
+		t.Errorf("DropMark and Resolve disagree about an unknown mark:\n  DropMark: %q\n  Resolve:  %q",
+			dropErr, resolveErr)
+	}
+}
+
 // kx state drop --all leaves marks alone; this is the call that removes them.
 func TestDropAllMarksLeavesTheHistoryStack(t *testing.T) {
 	service := newTestService(t, 10)

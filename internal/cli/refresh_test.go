@@ -564,3 +564,42 @@ func TestAVanishedResourceIsStillStaleState(t *testing.T) {
 		t.Error("a vanished pod was not treated as stale")
 	}
 }
+
+// The central guarantee behind marks and context: a mark taken in one cluster
+// must never resolve in another, and — unlike an ordinary index whose listing
+// can simply be replayed — there is no query behind a mark for withRefresh to
+// rebuild. If resolveMark's mismatch were ever reported as a
+// state.ContextMismatchError with an empty Relist, isStale would read it as
+// recoverable (see the ContextMismatchError branch above) and withRefresh
+// would replay the history stack's query, silently handing `kx logs @api`
+// a fresh listing of something else entirely.
+//
+// This drives a real state.Service end to end — save a listing, mark a
+// resource in it, switch the context — rather than constructing an error by
+// hand, because a hand-built error pins nothing about what resolveMark
+// actually returns. state.go's own comment above resolveMark notes this
+// mistake has already been made three times.
+func TestIsStaleDeclinesAMarkContextMismatch(t *testing.T) {
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	store.Context = func() string { return "staging" }
+	if err := store.Save(state.State{
+		Resources: state.NewResources([]string{"api-old"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	if err := store.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "diagnostics"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	store.Context = func() string { return "production" }
+
+	_, _, _, err := store.Resolve(state.Ref{Mark: "api"})
+	if err == nil {
+		t.Fatal("Resolve(@api) succeeded across a context mismatch")
+	}
+	if isStale(err) {
+		t.Errorf("isStale(%v) = true, want false — a mark carries no query for withRefresh to replay", err)
+	}
+}

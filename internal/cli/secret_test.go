@@ -308,6 +308,34 @@ func TestDecodeRejectsAnIndexThatIsNotASecret(t *testing.T) {
 	}
 }
 
+// The same NotFound-becomes-stale path, but resolved with a mark instead of
+// an index — decodeSecrets builds the StaleResourceError from target.Ref
+// directly, and a version that rebuilt state.Ref{Index: target.Ref.Index}
+// there instead would report a bare "index 0" stale failure rather than
+// naming the mark to re-mark.
+func TestDecodeNotFoundOnAMarkCarriesTheMarkOntoTheStaleError(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): secrets "db-creds" not found`}}
+	services := secretServices(t, kube, kinds.Secret)
+	if err := services.State.SaveMark("creds", state.Mark{
+		Resource: state.Resource{Name: "db-creds", Kind: kinds.Secret, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	markResolved := []Resolved{
+		{Ref: state.Ref{Mark: "creds"}, Name: "db-creds", Namespace: "prod", Kind: kinds.Secret},
+	}
+	err := decodeSecrets(services, "secret", markResolved, nil, decodeOptions())
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %T (%v), want StaleResourceError", err, err)
+	}
+	if stale.Ref.Mark != "creds" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "creds")
+	}
+}
+
 func TestDecodeMissingKeyNamesTheKey(t *testing.T) {
 	quietRender(t)
 	services := secretServices(t, &fakeKubectl{output: oneSecretJSON}, kinds.Secret)
