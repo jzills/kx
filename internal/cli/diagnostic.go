@@ -388,7 +388,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return err
 			}
 			if asJSON {
-				document, err := diagnosticJSON(report, ref.Index)
+				document, err := diagnosticJSON(report, ref)
 				if err != nil {
 					return err
 				}

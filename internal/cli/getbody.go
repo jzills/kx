@@ -119,7 +119,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		var resolved []Resolved
 		if options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
 			var err error
-			resolved, err = resolveRefsExpecting(services.State, "indexes", indexArgs, kinds.Secret)
+			resolved, err = resolveParsedExpecting(services.State, refs, kinds.Secret)
 			if err != nil {
 				return err
 			}
@@ -138,7 +138,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		// different kind — is reported against that kind, the way
 		// FieldsExpecting always has, instead of generically or silently
 		// fetched as whatever the index actually names.
-		resolved, err := resolveRefsExpecting(services.State, "indexes", indexArgs, expected)
+		resolved, err := resolveParsedExpecting(services.State, refs, expected)
 		if err != nil {
 			return err
 		}

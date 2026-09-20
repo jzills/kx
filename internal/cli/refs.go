@@ -208,7 +208,19 @@ func resolveRefs(resolver IndexResolver, name string, args []string) ([]Resolved
 func resolveRefsExpecting(
 	resolver IndexResolver, name string, args []string, expected kinds.Kind,
 ) ([]Resolved, error) {
-	return resolveIndexes(resolver, name, args, func(ref state.Ref) (string, string, kinds.Kind, error) {
+	refs, err := parseRefs(resolver, name, args)
+	if err != nil {
+		return nil, err
+	}
+	return resolveParsedExpecting(resolver, refs, expected)
+}
+
+// resolveParsedExpecting is resolveRefsExpecting for a caller holding parsed
+// refs already; see resolveParsed for why kx get is that caller.
+func resolveParsedExpecting(
+	resolver IndexResolver, refs []state.Ref, expected kinds.Kind,
+) ([]Resolved, error) {
+	return resolveParsed(refs, func(ref state.Ref) (string, string, kinds.Kind, error) {
 		resourceName, namespace, err := resolver.ResolveExpecting(ref, expected)
 		return resourceName, namespace, expected, err
 	})
@@ -232,6 +244,21 @@ func resolveIndexes(
 	if err != nil {
 		return nil, err
 	}
+	return resolveParsed(refs, resolve)
+}
+
+// resolveParsed is resolveIndexes for a caller that has already parsed, so the
+// argv is not walked twice.
+//
+// kx get parses early — the contexts spelling has to know whether it was given
+// a mark before any of this runs, and a malformed range should be reported
+// before a scope flag is judged — and then resolves the same arguments further
+// down. Re-parsing there repeated the work and, for an open range like "3..",
+// repeated the state load that resolves its open end.
+func resolveParsed(
+	refs []state.Ref,
+	resolve func(ref state.Ref) (name, namespace string, kind kinds.Kind, err error),
+) ([]Resolved, error) {
 	resolved := make([]Resolved, 0, len(refs))
 	seen := make(map[Resolved]bool, len(refs))
 	for _, ref := range refs {
