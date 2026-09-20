@@ -219,7 +219,7 @@ one resource, so it keeps working across every listing that comes after it.
 
 ```bash
 kx mark api 3          # pin what index 3 is right now
-kx logs @api -f        # spend it anywhere an index works
+kx logs @api -f        # spend it where a command takes an index
 kx exec @api -- sh
 kx mark                # list marks
 kx unmark api
@@ -230,6 +230,9 @@ A mark survives re-listing, which is what an index cannot do. It is pinned to
 the cluster it was taken in, and will not resolve in another — the same name
 means a different resource there, or none at all. `kx state drop --all`
 leaves marks alone; `kx unmark --all` is what removes them.
+
+`kx ns` and `kx context` take an index but not a mark, because a slot is not
+a resource; `kx cp` parses its own `index:path` and takes one too.
 
 ## Use kx in CI
 
