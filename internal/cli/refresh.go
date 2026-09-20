@@ -219,3 +219,46 @@ func handleStale(services Services, err error) {
 		render.Raw("Run 'kx get <resource>' to refresh the list.")
 	}
 }
+
+// runEach runs act for every resolved reference, continuing past a failure
+// that concerns only one of them.
+//
+// A read asked about several resources should answer for the ones it can.
+// kubectl refusing one pod's logs is ordinary in a namespace worth debugging,
+// and it used to end the batch: `kx logs 1..2` printed the first deployment's
+// error and never reached index 2, which read like the range being exclusive
+// rather than like one resource being unreadable. Position decided what you
+// saw — `kx logs 2..1` answered for both.
+//
+// Two kinds of failure still stop everything. An error withRefresh can recover
+// from has to reach it, or a stale index would report where it used to relist.
+// And an error that is kx's own, rather than kubectl's verdict on one
+// resource, says nothing about whether the next resource would fare better.
+//
+// The first failure's exit code is what the command exits with, so a script
+// still notices. kubectl's own message is printed where the failure happened,
+// under that resource's banner, unless kubectl already wrote it to the
+// terminal itself — which is what SilentError means.
+func runEach(resolved []Resolved, act func(target Resolved) error) error {
+	var first error
+	for _, target := range resolved {
+		err := act(target)
+		if err == nil {
+			continue
+		}
+		var silent SilentError
+		var refused kubectl.Error
+		switch {
+		case errors.As(err, &silent):
+			// kubectl streamed its own message already.
+		case errors.As(err, &refused):
+			render.Error(refused.Error())
+		default:
+			return err
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
+}

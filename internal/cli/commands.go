@@ -219,13 +219,10 @@ func newDescribeCommand(services Services) *cobra.Command {
 				return err
 			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
-			for _, target := range resolved {
+			return runEach(resolved, func(target Resolved) error {
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
-				if err := command.Execute(target.Ref, extra); err != nil {
-					return err
-				}
-			}
-			return nil
+				return command.Execute(target.Ref, extra)
+			})
 		},
 	}
 }
@@ -299,16 +296,15 @@ func newLogsCommand(services Services) *cobra.Command {
 			command := LogsCommand{
 				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
 			}
-			for position, target := range resolved {
-				if position > 0 {
+			first := true
+			return runEach(resolved, func(target Resolved) error {
+				if !first {
 					render.Blank()
 				}
+				first = false
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
-				if err := command.Execute(target.Ref, extra); err != nil {
-					return err
-				}
-			}
-			return nil
+				return command.Execute(target.Ref, extra)
+			})
 		},
 	}
 	// Registered so it appears in the command's help; parsing is by hand, like
@@ -833,10 +829,12 @@ func newYamlCommand(services Services) *cobra.Command {
 				}
 			}
 			command := YamlCommand{Kubectl: services.Kubectl, State: services.State}
-			for position, target := range resolved {
-				if position > 0 {
+			first := true
+			return runEach(resolved, func(target Resolved) error {
+				if !first {
 					render.Raw("")
 				}
+				first = false
 				// Banner per manifest: without it, several manifests run
 				// together with nothing saying which is which.
 				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
@@ -849,8 +847,8 @@ func newYamlCommand(services Services) *cobra.Command {
 				// Printed with its trailing newline intact, so consecutive
 				// manifests are separated the way kubectl's own output is.
 				render.Raw(strings.TrimRight(output, "\n") + "\n")
-			}
-			return nil
+				return nil
+			})
 		},
 	}
 	// Parsed by hand, registered only so it appears in --help instead of

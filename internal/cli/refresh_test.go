@@ -604,3 +604,76 @@ func TestIsStaleDeclinesAMarkContextMismatch(t *testing.T) {
 		t.Errorf("isStale(%v) = true, want false — a mark carries no query for withRefresh to replay", err)
 	}
 }
+
+// The bug this exists to prevent: kubectl refusing one resource ended the
+// batch, so `kx logs 1..2` printed one error and never reached index 2.
+func TestRunEachContinuesPastOneResourcesFailure(t *testing.T) {
+	targets := []Resolved{
+		{Name: "a", Kind: kinds.Pod}, {Name: "b", Kind: kinds.Pod}, {Name: "c", Kind: kinds.Pod},
+	}
+	var seen []string
+	err := runEach(targets, func(target Resolved) error {
+		seen = append(seen, target.Name)
+		if target.Name == "a" {
+			return SilentError{Code: 1}
+		}
+		return nil
+	})
+	if len(seen) != 3 {
+		t.Errorf("visited %v, want every target reached", seen)
+	}
+	var silent SilentError
+	if !errors.As(err, &silent) || silent.Code != 1 {
+		t.Errorf("err = %v, want the failure's exit code carried out of the batch", err)
+	}
+}
+
+// The first failure's code is the one reported, so a script sees the same
+// exit it would have seen when the batch stopped at that resource.
+func TestRunEachReportsTheFirstFailuresCode(t *testing.T) {
+	targets := []Resolved{{Name: "a"}, {Name: "b"}}
+	err := runEach(targets, func(target Resolved) error {
+		if target.Name == "a" {
+			return SilentError{Code: 3}
+		}
+		return SilentError{Code: 7}
+	})
+	var silent SilentError
+	if !errors.As(err, &silent) || silent.Code != 3 {
+		t.Errorf("err = %v, want the first failure's code (3)", err)
+	}
+}
+
+// A stale resource must still abort, or withRefresh never gets the error and
+// a vanished index reports where it used to relist.
+func TestRunEachStopsForAnErrorWithRefreshCanRecoverFrom(t *testing.T) {
+	targets := []Resolved{{Name: "a"}, {Name: "b"}}
+	var seen []string
+	err := runEach(targets, func(target Resolved) error {
+		seen = append(seen, target.Name)
+		return StaleResourceError{Kind: kinds.Pod, Name: "a"}
+	})
+	if len(seen) != 1 {
+		t.Errorf("visited %v, want the batch to stop so withRefresh can recover", seen)
+	}
+	if !isStale(err) {
+		t.Errorf("err = %v, want the stale error to reach withRefresh unchanged", err)
+	}
+}
+
+// kx's own errors say nothing about whether the next resource would work, so
+// they stop the batch rather than being collected.
+func TestRunEachStopsForAnErrorThatIsNotKubectlsVerdict(t *testing.T) {
+	targets := []Resolved{{Name: "a"}, {Name: "b"}}
+	var seen []string
+	err := runEach(targets, func(target Resolved) error {
+		seen = append(seen, target.Name)
+		return errors.New("kx could not render the table")
+	})
+	if len(seen) != 1 {
+		t.Errorf("visited %v, want the batch to stop", seen)
+	}
+	if err == nil || !strings.Contains(err.Error(), "could not render") {
+		t.Errorf("err = %v, want kx's own error surfaced unchanged", err)
+	}
+}
