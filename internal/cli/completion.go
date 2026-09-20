@@ -293,13 +293,52 @@ func argAt(cmd *cobra.Command, position int) (Arg, bool) {
 
 // completeIndex offers the rows of the current listing, described by what they
 // point at — the whole reason indexes are worth completing, since "3" on its
-// own tells a reader nothing.
+// own tells a reader nothing — followed by every mark.
+//
+// The two are gathered independently rather than one gating the other: a mark
+// resolves with no listing at all, which is exactly the situation `kx state
+// drop --all` leaves behind and the one a mark exists to survive. Returning
+// early when loadCurrent fails would offer nothing in precisely the case a
+// mark is most useful, so a missing listing here means "no numbered rows",
+// not "no candidates".
 func completeIndex(services Services, _ string) []string {
-	entry, err := loadCurrent(services)
+	var candidates []string
+	if entry, err := loadCurrent(services); err == nil {
+		candidates = indexCandidates(entry)
+	}
+	return append(candidates, markCandidates(services)...)
+}
+
+// markCandidates offers every mark, spelled with its sigil and described by
+// the resource it points at, the same shape indexCandidates uses for a row.
+//
+// Marks from another context are offered too, deliberately: the resolution
+// error names the mismatch better than silence would, and the user may be
+// about to switch back to the context the mark was taken in.
+func markCandidates(services Services) []string {
+	if services.State == nil {
+		return nil
+	}
+	marks, err := services.State.Marks()
 	if err != nil {
 		return nil
 	}
-	return indexCandidates(entry)
+	names := make([]string, 0, len(marks))
+	for name := range marks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	candidates := make([]string, 0, len(names))
+	for _, name := range names {
+		mark := marks[name]
+		label := mark.Name
+		if mark.Kind != "" {
+			label += " (" + string(mark.Kind) + ")"
+		}
+		candidates = append(candidates, "@"+name+"\t"+label)
+	}
+	return candidates
 }
 
 func indexCandidates(entry state.State) []string {

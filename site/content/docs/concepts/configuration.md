@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: ~/.kx/config.toml, the KX_* overrides, and when output is styled.
-weight: 3
+weight: 4
 ---
 
 `kx` reads `~/.kx/config.toml`. Every key has an environment variable that

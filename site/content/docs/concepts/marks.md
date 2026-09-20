@@ -1,0 +1,79 @@
+---
+title: Marks
+description: Naming a resource so it survives the re-listing that moves every index.
+weight: 3
+---
+
+An index is a position in a listing, not an identity. The moment you run
+`kx get` again, every number is reassigned — row 3 is whatever sorts third
+this time, not the pod you meant. That is fine for a command you type and
+spend in the same breath, but it falls apart the moment something else
+relists in between: a script that watches logs across a redeploy, or a pod
+you want to come back to after checking something else.
+
+A mark is the fix: a name you choose, pinned to one resource, that keeps
+resolving no matter how many listings happen after it.
+
+```bash
+kx mark api 3
+```
+
+pins whatever index 3 currently resolves to under the name `api`. From then
+on, `@api` spends it exactly the way an index does — anywhere `<index>` is
+accepted, in any command:
+
+```bash
+kx logs @api -f
+kx exec @api -- sh
+kx describe @api
+```
+
+## Listing and removing marks
+
+Bare `kx mark` lists what's set:
+
+```bash
+kx mark
+```
+
+That listing carries no index column and saves no state — a mark is spent by
+the name it was given, never by position, so numbering the list would invite
+`kx mark 2` to mean something it doesn't.
+
+```bash
+kx unmark api          # remove one mark
+kx unmark --all        # remove every mark
+```
+
+Marking under a name that's already taken replaces it in place; a mark is a
+pointer, and moving it is the ordinary operation, not an error.
+
+## A mark is pinned to its cluster
+
+Every mark records the kubeconfig context it was made in, for the same reason
+[a listing does](../state/): a name means nothing without the cluster it was
+read from, and `web` in staging is not `web` in production. Spending a mark
+from another context is refused, naming both:
+
+```
+✗ @web was marked in context 'staging'; you are in 'production'.
+```
+
+There's no relist that fixes this the way a stale index gets one: switching
+context is what you'd do next, not a mistake to recover from, so `kx` just
+says which context the mark is waiting for.
+
+## What outlives a re-list
+
+An index depends on the listing that produced it; drop that listing and the
+index is gone. A mark depends on nothing but its own entry, so it survives
+history that indexes don't:
+
+```bash
+kx state drop --all    # clears every listing and slot — marks are untouched
+kx unmark --all        # this is what removes marks
+```
+
+That asymmetry is deliberate. `kx state drop --all` clears things that
+accumulate on their own, one `kx get` at a time; a mark is something you
+named on purpose, and clearing it takes a command that says so.

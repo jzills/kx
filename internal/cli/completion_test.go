@@ -71,6 +71,64 @@ func TestIndexCompletionNamesTheResources(t *testing.T) {
 	}
 }
 
+// kx logs <TAB> offers marks beside the numbered rows: a mark is spendable
+// anywhere an index is, so it belongs in the same completion.
+func TestCompleteIndexOffersMarks(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api-7d8f"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := services.State.SaveMark("web", state.Mark{
+		Resource: state.Resource{Name: "web-abc", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	candidates := completeIndex(services, "")
+	var sawIndex, sawMark bool
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "1\t") {
+			sawIndex = true
+		}
+		if strings.HasPrefix(candidate, "@web\t") {
+			sawMark = true
+		}
+	}
+	if !sawIndex {
+		t.Errorf("candidates = %v, want the numbered row", candidates)
+	}
+	if !sawMark {
+		t.Errorf("candidates = %v, want @web offered", candidates)
+	}
+}
+
+// A mark resolves with no listing at all — that is the whole point of one,
+// since it survives `kx state drop --all`. completeIndex used to return as
+// soon as loadCurrent failed, before it ever consulted marks, so a mark was
+// the one thing completion could not offer in the situation it matters most:
+// right after the listing that made it is gone.
+func TestCompleteIndexOffersMarksWithoutAListing(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("web", state.Mark{
+		Resource: state.Resource{Name: "web-abc", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	candidates := completeIndex(services, "")
+	var sawMark bool
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "@web\t") {
+			sawMark = true
+		}
+	}
+	if !sawMark {
+		t.Errorf("candidates = %v, want @web offered with no current listing", candidates)
+	}
+}
+
 // Repeatable arguments keep completing: `kx delete 1 <TAB>` is still choosing
 // an index.
 func TestIndexCompletionContinuesForRepeatableArgs(t *testing.T) {
