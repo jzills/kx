@@ -19,8 +19,13 @@ kx mark api 3
 ```
 
 pins whatever index 3 currently resolves to under the name `api`. From then
-on, `@api` spends it exactly the way an index does — anywhere `<index>` is
-accepted, in any command:
+on, `@api` spends it exactly the way an index does, anywhere `<index>` is
+accepted — with three exceptions: `kx ns` and `kx context` switch a
+namespace/context slot, not a Kubernetes resource, so there is nothing for a
+mark to have pinned there; and `kx cp` parses its own `<index>:<path>`
+argument rather than taking a bare index, so a mark has nowhere to go. All
+three refuse a mark explicitly, naming the reason, rather than silently
+falling back to some other behavior.
 
 ```bash
 kx logs @api -f

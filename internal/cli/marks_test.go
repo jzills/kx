@@ -110,6 +110,37 @@ func TestUnmarkAcceptsTheSigilItsOwnListingPrints(t *testing.T) {
 	}
 }
 
+// A name that survives the sigil strip but could never have been stored is
+// reported for what it is. DropMark's "No mark named" error interpolates the
+// name into a 'kx mark %s <index>' suggestion, so a bare "@" recommended a
+// command with a hole where the name goes, and a doubled "@@web" recommended
+// one validMarkName itself rejects.
+func TestUnmarkRefusesANameThatCouldNeverHaveBeenStored(t *testing.T) {
+	for _, arg := range []string{"@", "@@web"} {
+		services := switchServices(t, &recordingKubectl{})
+		// A real mark has to exist, or DropMark reports ErrNoState before it
+		// ever reaches the "No mark named" branch this guards — and the test
+		// would pass whether or not the name was validated.
+		if err := services.State.SaveMark("web", state.Mark{
+			Resource: state.Resource{Name: "web-abc", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		cmd := newUnmarkCommand(services)
+		cmd.SetArgs([]string{arg})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("kx unmark %s succeeded, want a refusal", arg)
+		}
+		if strings.Contains(err.Error(), "kx mark  <index>") {
+			t.Errorf("kx unmark %s suggests a command with no name in it: %q", arg, err)
+		}
+		if strings.Contains(err.Error(), "kx mark @") {
+			t.Errorf("kx unmark %s suggests a name kx would refuse to create: %q", arg, err)
+		}
+	}
+}
+
 func TestUnmarkRemovesOne(t *testing.T) {
 	services := switchServices(t, &recordingKubectl{})
 	if err := services.State.SaveMark("api", state.Mark{

@@ -271,7 +271,7 @@ kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
-kx state drop 2       # remove position 2 (--all clears everything, slots included)
+kx state drop 2       # remove position 2 (--all clears everything, slots included, marks untouched)
 kx state drop --empty # drop the entries whose listing found nothing
 ```
 

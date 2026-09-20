@@ -75,7 +75,7 @@ func files() []render.HelpItem {
 	}
 	if path, err := state.File(); err == nil {
 		items = append(items, render.HelpItem{
-			Name: homeRelative(path), Doc: "Saved listings, navigated with kx state",
+			Name: homeRelative(path), Doc: "Saved listings and marks; see kx state and kx mark",
 		})
 	}
 	return items

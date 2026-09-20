@@ -138,11 +138,11 @@ func TestLogsResolvesAMarkGivenOnTheCommandLine(t *testing.T) {
 }
 
 // An unknown mark is refused with resolveMark's own message — never with the
-// generic "not a valid int" a parse failure would produce. That distinction
-// is the whole reason Task 8's brief's own live-CLI check (`kx logs @nope`)
-// was replaced with this unit test: a live run cannot tell "the parser choked
-// on '@nope'" apart from "the mark 'nope' doesn't exist", but the message
-// text can, and only the second is correct.
+// generic "not a valid int" a parse failure would produce. A live run of
+// `kx logs @nope` cannot tell "the parser choked on '@nope'" apart from "the
+// mark 'nope' doesn't exist", since both fail the command the same way; the
+// message text can, and only the second is correct, so this checks the text
+// itself rather than just the exit code.
 func TestLogsReportsAnUnknownMarkNotAParseFailure(t *testing.T) {
 	kube := &recordingKubectl{}
 	services := switchServices(t, kube)

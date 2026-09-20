@@ -240,6 +240,21 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 // TestDecodeRefusesTheBatchBeforePrintingAnySecret already exercises it) end
 // to end, with a real state.Service holding a saved mark, and checks what
 // actually reached kubectl.
+//
+// edit, exec, debug, scale, rollout, port-forward, label, drain, tree and
+// scan take a third shape neither of the above covers: a lone
+// `ref, err := parseRef(...)` resolved once in RunE itself — to build the
+// Resolved value refuseScopeFlagResolved checks, or, for tree and scan, to
+// caption the banner — and handed to Execute, which resolves the same ref a
+// second time on its own. That is two independent call sites per command, and
+// nothing above exercises either: a RunE that quietly rebuilt
+// state.Ref{Index: ref.Index} at the pre-resolve, the hand-off, or both would
+// still pass every test in this file. Because both sites share the one `ref`
+// variable, driving the command once exercises them together. label has no
+// separate pre-resolve — MetadataWriteCommand.Execute is the only place its
+// ref is resolved — so it is included here for its single Execute hand-off.
+// tree and scan print no kubectl args on the path exercised here, so their
+// subtests check the rendered output instead.
 func TestRunEHandOffsThreadAMarkToKubectl(t *testing.T) {
 	t.Run("describe", func(t *testing.T) {
 		kube := &recordingKubectl{}
@@ -377,6 +392,234 @@ func TestRunEHandOffsThreadAMarkToKubectl(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "api-7d8f") {
 			t.Errorf("output = %q, want the marked resource named", out.String())
+		}
+	})
+
+	t.Run("edit", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newEditCommand(services)
+		cmd.SetArgs([]string{"@api"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx edit @api: %v", err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+		}
+		if got := joinArgs(kube.interactive[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("exec", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newExecCommand(services)
+		cmd.SetArgs([]string{"@api", "--", "true"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx exec @api -- true: %v", err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+		}
+		if got := joinArgs(kube.interactive[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("debug", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newDebugCommand(services)
+		cmd.SetArgs([]string{"@api"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx debug @api: %v", err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+		}
+		if got := joinArgs(kube.interactive[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("scale", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Deployment, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newScaleCommand(services)
+		cmd.SetArgs([]string{"@api", "3"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx scale @api 3: %v", err)
+		}
+		if len(kube.runs) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.runs))
+		}
+		if got := joinArgs(kube.runs[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("rollout", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Deployment, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newRolloutCommand(services)
+		cmd.SetArgs([]string{"restart", "@api"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx rollout restart @api: %v", err)
+		}
+		if len(kube.runs) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.runs))
+		}
+		if got := joinArgs(kube.runs[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("port-forward", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newPortForwardCommand(services)
+		cmd.SetArgs([]string{"@api", "8080:80"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx port-forward @api 8080:80: %v", err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+		}
+		if got := joinArgs(kube.interactive[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("label", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newMetadataWriteCommand(services, "label", "labels",
+			"Set or remove labels on an indexed resource.",
+			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key.")
+		cmd.SetArgs([]string{"@api", "env=prod", "--overwrite"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx label @api env=prod: %v", err)
+		}
+		if len(kube.runs) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.runs))
+		}
+		if got := joinArgs(kube.runs[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
+		}
+	})
+
+	t.Run("drain", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("worker", state.Mark{
+			Resource: state.Resource{Name: "node-a", Kind: kinds.Node},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+
+		cmd := newDrainCommand(services)
+		cmd.SetArgs([]string{"@worker", "-y"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx drain @worker -y: %v", err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.interactive))
+		}
+		if got := joinArgs(kube.interactive[0]); got != "drain node-a" {
+			t.Errorf("kubectl args = %q, want %q", got, "drain node-a")
+		}
+	})
+
+	t.Run("tree", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		services := switchServices(t, kube)
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-tree", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		client := fake.NewSimpleClientset(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "api-tree", Namespace: "prod"},
+		})
+		services.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+		out := captureRender(t)
+
+		cmd := newTreeCommand(services)
+		cmd.SetArgs([]string{"@api"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx tree @api: %v", err)
+		}
+		if !strings.Contains(out.String(), "api-tree") {
+			t.Errorf("output = %q, want the marked resource named", out.String())
+		}
+	})
+
+	t.Run("scan", func(t *testing.T) {
+		kube := &recordingKubectl{
+			output: `{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}`,
+		}
+		services := switchServices(t, kube)
+		services.Scanner = &fakeScanner{}
+		if err := services.State.SaveMark("api", state.Mark{
+			Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		captureRender(t)
+
+		cmd := newScanCommand(services)
+		cmd.SetArgs([]string{"@api", "--engine", "grype"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx scan @api: %v", err)
+		}
+		if len(kube.runs) != 1 {
+			t.Fatalf("kubectl invoked %d times, want 1", len(kube.runs))
+		}
+		if got := joinArgs(kube.runs[0]); !strings.Contains(got, "api-7d8f") || !strings.Contains(got, "-n prod") {
+			t.Errorf("kubectl args = %q, want the marked resource in prod", got)
 		}
 	})
 }

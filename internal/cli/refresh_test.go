@@ -437,18 +437,19 @@ func TestDescribeCarriesAMarkOntoAStaleResourceError(t *testing.T) {
 
 // The Describe test above pins one ref use per command — the call into
 // Resolve that makes the command work at all, and that a human reviewer would
-// notice breaking immediately. Three more commands use ref a second time,
+// notice breaking immediately. Several commands use ref a second time,
 // independently, to build the same StaleResourceError on their not-found
-// path: NodeCommand.Execute, EventsCommand.Execute and LogsCommand.Execute's
-// Pod branch. Nothing above exercises that second use, and it is exactly
-// where a dropped mark does damage — isStale declines a stale mark and
-// reports it, where a stale index is refreshable, so a command that resolved
-// correctly but then rebuilt state.Ref{Index: ref.Index} for the error would
-// have `kx cordon @worker` on a vanished node relist an unrelated listing
-// instead of reporting that the mark needs to be retaken. DrainCommand.Execute
-// has the identical second use and is included here too, even though it
-// wasn't one of the eight int-to-Ref conversions — it already took a Ref, and
-// the same gap applies to it in the same file.
+// path — NodeCommand.Execute, EventsCommand.Execute, LogsCommand.Execute's
+// Pod branch, and DrainCommand.Execute are the four tested below. Nothing
+// above exercises that second use, and it is exactly where a dropped mark
+// does damage — isStale declines a stale mark and reports it, where a stale
+// index is refreshable, so a command that resolved correctly but then
+// rebuilt state.Ref{Index: ref.Index} for the error would have
+// `kx cordon @worker` on a vanished node relist an unrelated listing instead
+// of reporting that the mark needs to be retaken. MetadataReadCommand and
+// SecretCommand have the identical second use and are not duplicated here —
+// their own tests live beside the code they cover, in metadata_test.go and
+// secret_test.go, so this file's four are not the whole list.
 func TestNodeCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
 	kube := &recordingKubectl{
 		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},

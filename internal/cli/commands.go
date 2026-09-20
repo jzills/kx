@@ -953,6 +953,14 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 		Args:       cobra.MaximumNArgs(1),
 		Example:    "  kx " + use + "\n  kx " + use + " 2",
 		SuggestFor: switchSuggestions(isContext),
+		Annotations: map[string]string{
+			// A slot switch takes a bare row number, never a mark — see the
+			// Mark refusal below. The shared argDocs entry for "index"
+			// promises "@name for a mark" for every other command, so this
+			// overrides it rather than let --help promise something kx ns
+			// and kx context both refuse.
+			"arg.index": "Row number from the current listing; kx state shows them",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listSwitchTargets(services, isContext)

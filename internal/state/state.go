@@ -492,6 +492,18 @@ func decodeEntry(entry map[string]json.RawMessage) (State, error) {
 	return state, nil
 }
 
+// unknownMarkError reports a name that no mark answers to.
+//
+// One sentence in one place: both the drop path and the resolve path meet the
+// same situation, and a reader running into it twice should not have to work
+// out whether two wordings mean the same thing. Held apart as literals once,
+// the two had already drifted.
+func unknownMarkError(name string) error {
+	return fmt.Errorf(
+		"No mark named '%s' — run 'kx mark %s <index>' to create one, or 'kx mark' to list them.",
+		name, name)
+}
+
 // decodeMark turns one raw mark object into a Mark.
 //
 // A missing "name" key is rejected the same way decodeEntry rejects a missing
@@ -740,9 +752,7 @@ func (s *Service) DropMark(name string) error {
 		return err
 	}
 	if _, ok := history.Marks[name]; !ok {
-		return fmt.Errorf(
-			"No mark named '%s' — run 'kx mark %s <index>' to create one, or 'kx mark' to list them.",
-			name, name)
+		return unknownMarkError(name)
 	}
 	delete(history.Marks, name)
 	return s.saveHistory(history)
@@ -1097,9 +1107,7 @@ func (s *Service) resolveMark(ref Ref) (name, namespace string, kind kinds.Kind,
 	}
 	mark, ok := marks[ref.Mark]
 	if !ok {
-		return "", "", "", fmt.Errorf(
-			"No mark named '%s' — run 'kx mark %s <index>' to create one, or 'kx mark' to list them.",
-			ref.Mark, ref.Mark)
+		return "", "", "", unknownMarkError(ref.Mark)
 	}
 	if current := s.context(); mark.Context != "" && current != "" && mark.Context != current {
 		return "", "", "", fmt.Errorf(

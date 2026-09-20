@@ -116,6 +116,18 @@ func newUnmarkCommand(services Services) *cobra.Command {
 			// leading '@' is accepted rather than reported as an unknown mark
 			// named "@api".
 			name := strings.TrimPrefix(args[0], "@")
+			// Validated the same way kx mark validates a name before ever
+			// creating one: DropMark's "No mark named" error interpolates
+			// whatever it is handed straight into its "run 'kx mark %s
+			// <index>'" suggestion, so an empty name (a bare "@") or one that
+			// still carries a sigil (a doubled "@@web") turned that
+			// suggestion into a command that cannot work — 'kx mark  <index>'
+			// with a name-shaped hole, or 'kx mark @web <index>', which
+			// validMarkName itself rejects. Catching it here reports the bad
+			// name plainly instead of recommending either.
+			if err := validMarkName(name); err != nil {
+				return err
+			}
 			if err := services.State.DropMark(name); err != nil {
 				return err
 			}
