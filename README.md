@@ -211,6 +211,29 @@ Nothing here touches the cluster: `kx ref` reports what the index *means*, so it
 answers instantly and works with nothing reachable. The command you spend it on
 is what discovers whether the resource is still there.
 
+## Marks
+
+An index is a position, and positions move — the next `kx get` renumbers
+everything out from under it. A mark is a name you choose instead, pinned to
+one resource, so it keeps working across every listing that comes after it.
+
+```bash
+kx mark api 3          # pin what index 3 is right now
+kx logs @api -f        # spend it where a command takes an index
+kx exec @api -- sh
+kx mark                # list marks
+kx unmark api
+kx unmark --all
+```
+
+A mark survives re-listing, which is what an index cannot do. It is pinned to
+the cluster it was taken in, and will not resolve in another — the same name
+means a different resource there, or none at all. `kx state drop --all`
+leaves marks alone; `kx unmark --all` is what removes them.
+
+`kx ns` and `kx context` take an index but not a mark, because a slot is not
+a resource; `kx cp` parses its own `index:path` and takes one too.
+
 ## Use kx in CI
 
 `--fail-on <severity>` turns a sweep into a build gate, and `--json` prints the
@@ -251,7 +274,7 @@ kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
-kx state drop 2       # remove position 2 (--all clears everything, slots included)
+kx state drop 2       # remove position 2 (--all clears everything, slots included, marks untouched)
 kx state drop --empty # drop the entries whose listing found nothing
 ```
 
@@ -314,6 +337,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx label <index> [<key=value>...]` | Set or remove labels on an indexed resource. |
 | `kx labels <index>...` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| `kx mark [<name>] [<index>]` | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx ref <index>...` | Print what an index refers to, for commands kx doesn't wrap. |
@@ -324,6 +348,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
+| `kx unmark [<name>]` | Remove a mark by name; --all removes every mark. |
 | `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |

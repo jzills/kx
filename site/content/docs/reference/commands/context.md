@@ -24,7 +24,7 @@ kx context [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing; run kx state to see it |
+| `[index]` | Row number from the current listing; kx state shows them |
 
 ## Global options
 

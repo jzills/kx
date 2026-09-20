@@ -13,6 +13,7 @@ import (
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -62,8 +63,8 @@ type ScanCommand struct {
 }
 
 // Execute resolves the unique images of one indexed workload.
-func (c ScanCommand) Execute(index int, engine string) ([]string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c ScanCommand) Execute(ref state.Ref, engine string) ([]string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -577,15 +578,15 @@ func newScanCommand(services Services) *cobra.Command {
 					subject.Namespace = scope.Namespace
 				}
 			} else {
-				index, err := parseIndex("index", indexArgs[0])
+				ref, err := parseRef("index", indexArgs[0])
 				if err != nil {
 					return err
 				}
-				name, resourceNamespace, kind, err := services.State.Fields(index)
+				name, resourceNamespace, kind, err := services.State.Resolve(ref)
 				if err != nil {
 					return err
 				}
-				images, err = command.Execute(index, engine)
+				images, err = command.Execute(ref, engine)
 				if err != nil {
 					return err
 				}

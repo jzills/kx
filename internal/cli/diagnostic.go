@@ -28,8 +28,8 @@ type DiagnosticCommand struct {
 	Diagnostics Gatherer
 }
 
-func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.Report, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DiagnosticCommand) Execute(ctx context.Context, ref state.Ref) (diagnostics.Report, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
@@ -375,20 +375,20 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return sweepGate(result, failOn, threshold)
 			}
 
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
 			stop := render.Status("gathering diagnostics")
 			report, err := DiagnosticCommand{
 				State: services.State, Diagnostics: service,
-			}.Execute(ctx, index)
+			}.Execute(ctx, ref)
 			stop()
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				document, err := diagnosticJSON(report, index)
+				document, err := diagnosticJSON(report, ref.Index)
 				if err != nil {
 					return err
 				}

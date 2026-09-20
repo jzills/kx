@@ -43,7 +43,7 @@ func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {
 		State:   workload("web", kinds.Deployment),
 		Save:    states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, true); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 1 {
@@ -74,7 +74,7 @@ func TestTreeSavesWithoutQuery(t *testing.T) {
 	command := TreeCommand{
 		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, true); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if states.saved[0].Query != nil {
@@ -89,7 +89,7 @@ func TestUnindexedTreeSavesNothing(t *testing.T) {
 	command := TreeCommand{
 		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, false); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, false); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 0 {
@@ -107,7 +107,7 @@ func TestTreeOnNamespaceIndexGraphsThatNamespace(t *testing.T) {
 		State: fakeResolver{name: "prod", namespace: "default", kind: kinds.Namespace},
 		Save:  states.Save,
 	}
-	node, err := command.Execute(context.Background(), 1, false)
+	node, err := command.Execute(context.Background(), state.Ref{Index: 1}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

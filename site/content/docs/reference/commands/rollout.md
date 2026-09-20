@@ -3,7 +3,7 @@
 title: "kx rollout"
 linkTitle: "rollout"
 description: "Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet."
-weight: 21
+weight: 22
 ---
 
 Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams live and blocks until the rollout settles; the other actions run and return immediately.
@@ -23,7 +23,7 @@ kx rollout [OPTIONS] <action> <index>
 | Argument | Description |
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
-| `<index>` | Row number from the current listing; run kx state to see it |
+| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Global options
 

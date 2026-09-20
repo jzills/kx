@@ -8,47 +8,11 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-const labelsJSON = `{"metadata":{"labels":{"tier":"frontend","app":"web"}}}`
-
-func TestMetadataReadReturnsSortedKeys(t *testing.T) {
-	kubectl := &recordingKubectl{output: labelsJSON}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "labels",
-	}.Execute(1)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	// Sorted, because kubectl returns a JSON object and Go map iteration would
-	// reorder the rows on every run.
-	if len(keys) != 2 || keys[0] != "app" || keys[1] != "tier" {
-		t.Errorf("keys = %v, want [app tier]", keys)
-	}
-	if values["app"] != "web" {
-		t.Errorf("values = %v", values)
-	}
-	if want := "get Pod nginx -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
-		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
-	}
-}
-
-func TestMetadataReadHandlesMissingField(t *testing.T) {
-	kubectl := &recordingKubectl{output: `{"metadata":{}}`}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "annotations",
-	}.Execute(1)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(keys) != 0 || len(values) != 0 {
-		t.Errorf("keys = %v, values = %v; want empty", keys, values)
-	}
-}
-
 func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +34,7 @@ func TestAnnotateUsesItsOwnVerb(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"annotations":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "annotate", Field: "annotations",
-	}.Execute(1, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -85,7 +49,7 @@ func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev","app":"web"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
 	if err == nil {
 		t.Fatal("overwrote existing labels without --overwrite")
 	}
@@ -100,7 +64,7 @@ func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -116,7 +80,7 @@ func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, nil, nil, nil, false)
+	}.Execute(state.Ref{Index: 1}, nil, nil, nil, false)
 	if err == nil {
 		t.Fatal("accepted a write with nothing to set or remove")
 	}
@@ -307,6 +271,46 @@ func TestMetadataReadReportsAResourceMissingFromTheReply(t *testing.T) {
 	}
 	if _, err := fetchMetadataFields(kubectl, resolved, "labels"); err == nil {
 		t.Fatal("fetchMetadataFields succeeded with a resource absent from the reply")
+	}
+}
+
+// The Ref that names a stale resource must be the caller's own, mark
+// included — fetchMetadataFields resolves through resolver.Resolve(ref) once
+// (to learn the name to fetch) and then again inside the loop that builds
+// StaleResourceError (metadata.go's g.refs[i]), and a version that rebuilt
+// state.Ref{Index: ref.Index} for either use would report "index 0 is stale"
+// for a mark that went missing from the reply, rather than naming the mark.
+// Three references in the batch, matching
+// TestMetadataReadStillReportsAMissingNameInABatch, because a batch of one
+// takes the single-reply fallback (see
+// TestMetadataReadAcceptsASingleReplyWithNoName) and never reaches the
+// missing-name check at all.
+func TestMetadataReadCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"missing-pod", "prod", "Pod"},
+	)
+	resolver.marks = map[string]int{"ghost": 3}
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "@ghost"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
+	if err == nil {
+		t.Fatal("fetchMetadataFields succeeded with a name absent from the reply")
+	}
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "ghost" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "ghost")
 	}
 }
 

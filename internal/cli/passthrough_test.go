@@ -259,40 +259,39 @@ func TestRefuseScopeFlagPassesOtherFlags(t *testing.T) {
 	}
 }
 
-// The refusal has to come before any output. describe and logs print a banner
-// per index and then run kubectl, so guarding inside the per-index work put a
-// banner above the error for a command that never ran.
-func TestRefuseScopeFlagForIndexesRefusesBeforeResolvingWork(t *testing.T) {
-	resolver := refOf(
-		[3]string{"desktop-control-plane", "", "Node"},
-		[3]string{"web-abc", "prod", "Pod"},
-	)
-
-	if err := refuseScopeFlagForIndexes(resolver, []int{1, 2}, []string{"-n", "other"}); err == nil {
-		t.Error("a namespaced index among cluster-scoped ones did not refuse -n")
+// The namespaces are already on the Resolved values, so the guard must not
+// ask the resolver for them again. An earlier version of this guard took
+// only the indexes and re-resolved each one, paying a state load per index
+// on a path that had the answer in hand.
+func TestRefuseScopeFlagResolvedRefusesAScopeFlagBesideANamespacedReference(t *testing.T) {
+	resolved := []Resolved{
+		{Ref: state.Ref{Index: 1}, Name: "api", Namespace: "prod", Kind: kinds.Pod},
+		{Ref: state.Ref{Index: 2}, Name: "web", Namespace: "prod", Kind: kinds.Pod},
 	}
-	if err := refuseScopeFlagForIndexes(resolver, []int{1}, []string{"-n", "other"}); err != nil {
-		t.Errorf("refuseScopeFlagForIndexes = %v, want -n allowed for a cluster-scoped index", err)
+
+	if err := refuseScopeFlagResolved(resolved, []string{"-n", "other"}); err == nil {
+		t.Error("a scope flag beside a namespaced reference was allowed")
 	}
 }
 
-// No scope flag means no resolution: the guard must not spend a lookup per
-// index on the ordinary path, which is every invocation.
-func TestRefuseScopeFlagForIndexesResolvesNothingWithoutAScopeFlag(t *testing.T) {
-	counter := &countingResolver{}
-	if err := refuseScopeFlagForIndexes(counter, []int{1, 2, 3}, []string{"--force"}); err != nil {
-		t.Fatalf("refuseScopeFlagForIndexes: %v", err)
+// A cluster-scoped reference carries no namespace for -n to contradict; -A is
+// refused either way. Same rule refuseScopeFlag already applies.
+func TestRefuseScopeFlagResolvedKeepsTheClusterScopedException(t *testing.T) {
+	node := []Resolved{{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node}}
+
+	if err := refuseScopeFlagResolved(node, []string{"-n", "kube-system"}); err != nil {
+		t.Errorf("refuseScopeFlagResolved = %v, want -n allowed for a cluster-scoped reference", err)
 	}
-	if counter.calls != 0 {
-		t.Errorf("resolved %d indexes with no scope flag present, want 0", counter.calls)
+	if err := refuseScopeFlagResolved(node, []string{"-A"}); err == nil {
+		t.Error("-A beside a reference was allowed")
 	}
 }
 
-// -A widens a listing, and there is no listing beside an index to widen — so
-// it is refused even when no index resolves to a namespace at all.
-func TestRefuseScopeFlagForIndexesRefusesAllNamespacesWithNoIndexes(t *testing.T) {
-	if err := refuseScopeFlagForIndexes(refOf(), nil, []string{"-A"}); err == nil {
-		t.Error("refuseScopeFlagForIndexes(-A) with no indexes = nil, want a refusal")
+// No references and a scope flag still refuses -A: there is no listing beside
+// a reference for it to widen.
+func TestRefuseScopeFlagResolvedWithNoReferencesStillRefusesAllNamespaces(t *testing.T) {
+	if err := refuseScopeFlagResolved(nil, []string{"-A"}); err == nil {
+		t.Error("-A with no references was allowed")
 	}
 }
 
@@ -563,7 +562,7 @@ func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
 		message, err := DeleteCommand{
 			Kubectl: kube, State: pod("nginx"), Confirm: func(string) error { return nil },
 			Status: noStatus,
-		}.Execute(1, true, []string{value})
+		}.Execute(state.Ref{Index: 1}, true, []string{value})
 		if err != nil {
 			t.Fatalf("Execute(%s): %v", value, err)
 		}
@@ -582,7 +581,7 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 		message, err := DeleteCommand{
 			Kubectl: &recordingKubectl{}, State: pod("nginx"),
 			Confirm: func(string) error { return nil }, Status: noStatus,
-		}.Execute(1, true, args)
+		}.Execute(state.Ref{Index: 1}, true, args)
 		if err != nil {
 			t.Fatalf("Execute(%v): %v", args, err)
 		}
@@ -595,7 +594,7 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 // An index named twice is one resource. Overlapping ranges are how this
 // actually happens — `kx labels 1..3 2..4` printed 2 and 3 twice — and for
 // kx delete a repeat meant a second delete of something already gone.
-func TestParseIndexesDropsRepeats(t *testing.T) {
+func TestParseRefsDropsRepeats(t *testing.T) {
 	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 10}
 
 	for _, tc := range []struct {
@@ -607,21 +606,38 @@ func TestParseIndexesDropsRepeats(t *testing.T) {
 		{[]string{"3", "1", "3"}, []int{3, 1}},
 		{[]string{"2..4", "3"}, []int{2, 3, 4}},
 	} {
-		got, err := parseIndexes(resolver, "indexes", tc.args)
+		got, err := parseRefs(resolver, "indexes", tc.args)
 		if err != nil {
-			t.Fatalf("parseIndexes(%v): %v", tc.args, err)
+			t.Fatalf("parseRefs(%v): %v", tc.args, err)
 		}
-		if len(got) != len(tc.want) {
-			t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+		gotIndexes := refIndexes(got)
+		if len(gotIndexes) != len(tc.want) {
+			t.Errorf("parseRefs(%v) = %v, want %v", tc.args, gotIndexes, tc.want)
 			continue
 		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Errorf("parseIndexes(%v) = %v, want %v — first occurrence wins, in order",
-					tc.args, got, tc.want)
+		for i := range gotIndexes {
+			if gotIndexes[i] != tc.want[i] {
+				t.Errorf("parseRefs(%v) = %v, want %v — first occurrence wins, in order",
+					tc.args, gotIndexes, tc.want)
 				break
 			}
 		}
+	}
+}
+
+// A mark named twice is one reference, the same as a repeated index.
+func TestParseRefsDropsRepeatedMarks(t *testing.T) {
+	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod}
+
+	got, err := parseRefs(resolver, "indexes", []string{"@api", "@api", "@web"})
+	if err != nil {
+		t.Fatalf("parseRefs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("parseRefs = %+v, want two references — @api named twice is one", got)
+	}
+	if got[0].Mark != "api" || got[1].Mark != "web" {
+		t.Errorf("parseRefs = %+v, want [api web]", got)
 	}
 }
 

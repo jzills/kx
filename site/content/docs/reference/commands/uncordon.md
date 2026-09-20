@@ -3,7 +3,7 @@
 title: "kx uncordon"
 linkTitle: "uncordon"
 description: "Mark one or more indexed Nodes schedulable again."
-weight: 27
+weight: 28
 ---
 
 Reverses kx cordon, letting the scheduler place pods on the node again.
@@ -18,7 +18,7 @@ kx uncordon [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing; run kx state to see it |
+| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Global options
 

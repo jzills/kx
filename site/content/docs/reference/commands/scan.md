@@ -3,7 +3,7 @@
 title: "kx scan"
 linkTitle: "scan"
 description: "Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine)."
-weight: 23
+weight: 24
 ---
 
 Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.
@@ -25,7 +25,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing; run kx state to see it |
+| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 

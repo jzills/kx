@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -63,6 +64,39 @@ func TestIsStaleRecognizesStaleResourceError(t *testing.T) {
 func TestIsStaleIgnoresUnrelatedErrors(t *testing.T) {
 	if isStale(errors.New("connection refused")) {
 		t.Error("isStale on an unrelated error = true, want false")
+	}
+}
+
+// A mark carries no query, so there is nothing to replay: replaying the
+// stack's query would answer @api with whatever listing happens to be
+// current, which is the bug #229 fixed for slots. The failure reports and
+// says how to re-mark.
+func TestAStaleMarkIsNotRefreshed(t *testing.T) {
+	err := StaleResourceError{
+		Kind: kinds.Pod, Name: "api-7d8f", Namespace: "diagnostics", Ref: state.Ref{Mark: "api"},
+	}
+	if isStale(err) {
+		t.Error("isStale said a mark failure is refreshable; it has no query to replay")
+	}
+	for _, want := range []string{"@api", "api-7d8f", "in diagnostics", "kx mark api <index>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if got, want := err.Error(), "@api is Pod/api-7d8f in diagnostics, which no longer exists. Re-mark it with 'kx mark api <index>'."; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+// A Node is cluster-scoped and carries no namespace — the message must not
+// read "in " with nothing after it.
+func TestAStaleMarkWithNoNamespaceOmitsIn(t *testing.T) {
+	err := StaleResourceError{Kind: kinds.Node, Name: "node-a", Ref: state.Ref{Mark: "worker"}}
+	if got, want := err.Error(), "@worker is Node/node-a, which no longer exists. Re-mark it with 'kx mark worker <index>'."; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if strings.Contains(err.Error(), " in ") {
+		t.Errorf("err = %q contains a dangling 'in' clause for a namespace-less Node", err)
 	}
 }
 
@@ -340,7 +374,7 @@ func TestNamespaceSlotMismatchDoesNotReplayTheStackQuery(t *testing.T) {
 // state; a probe that succeeds leaves the failure alone.
 func TestEnsureExists(t *testing.T) {
 	gone := &recordingKubectl{probeCode: 1}
-	if err := ensureExists(gone, kinds.Pod, "nginx", "prod"); err == nil {
+	if err := ensureExists(gone, kinds.Pod, "nginx", "prod", state.Ref{Index: 1}); err == nil {
 		t.Error("ensureExists on a missing resource returned nil")
 	}
 	if want := "get Pod nginx -n prod"; joinArgs(gone.probes[0]) != want {
@@ -348,8 +382,131 @@ func TestEnsureExists(t *testing.T) {
 	}
 
 	live := &recordingKubectl{probeCode: 0}
-	if err := ensureExists(live, kinds.Pod, "nginx", "prod"); err != nil {
+	if err := ensureExists(live, kinds.Pod, "nginx", "prod", state.Ref{Index: 1}); err != nil {
 		t.Errorf("ensureExists on a live resource = %v, want nil", err)
+	}
+}
+
+// The threading from a caller's Ref onto the StaleResourceError it produces has
+// no coverage from any test built the way the ones above are: every one of them
+// constructs the ref argument as state.Ref{Index: N} by hand, so a call site
+// that passed state.Ref{} instead — dropping the mark — would still build an
+// error whose Error() and isStale() behave exactly like an index's, and every
+// existing assertion would keep passing. This drives a mark through the same
+// function and checks what came out the other side, which is the only way to
+// tell the two apart.
+func TestEnsureExistsCarriesAMarkOntoTheStaleError(t *testing.T) {
+	gone := &recordingKubectl{probeCode: 1}
+	err := ensureExists(gone, kinds.Pod, "api-7d8f", "diagnostics", state.Ref{Mark: "api"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Fatalf("Ref.Mark = %q, want %q — the mark did not survive ensureExists", stale.Ref.Mark, "api")
+	}
+	// A mark carries no query to replay, so this is the behavioural
+	// consequence of the mark reaching the error: isStale must decline it
+	// rather than route it to a relist of an unrelated listing.
+	if isStale(err) {
+		t.Error("isStale said a mark failure is refreshable")
+	}
+}
+
+// The end-to-end version of the same gap: a command holding a mark-bearing Ref
+// has to hand it to ensureExists/forwardExit itself, not just the helper in
+// isolation. DescribeCommand.Execute used to take a bare int and could only
+// ever rebuild state.Ref{Index: index} for this error — there was no way for a
+// mark to reach it at all, index or not. This is the test that would have
+// caught that: it fails against Execute(index int, ...) the moment the
+// signature is reverted, because there is no int to spend the mark on.
+func TestDescribeCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := DescribeCommand{Kubectl: kubectl, State: pod("api-7d8f")}.
+		Execute(state.Ref{Mark: "api"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost on the way to the error", stale.Ref.Mark, "api")
+	}
+}
+
+// The Describe test above pins one ref use per command — the call into
+// Resolve that makes the command work at all, and that a human reviewer would
+// notice breaking immediately. Several commands use ref a second time,
+// independently, to build the same StaleResourceError on their not-found
+// path — NodeCommand.Execute, EventsCommand.Execute, LogsCommand.Execute's
+// Pod branch, and DrainCommand.Execute are the four tested below. Nothing
+// above exercises that second use, and it is exactly where a dropped mark
+// does damage — isStale declines a stale mark and reports it, where a stale
+// index is refreshable, so a command that resolved correctly but then
+// rebuilt state.Ref{Index: ref.Index} for the error would have
+// `kx cordon @worker` on a vanished node relist an unrelated listing instead
+// of reporting that the mark needs to be retaken. MetadataReadCommand and
+// SecretCommand have the identical second use and are not duplicated here —
+// their own tests live beside the code they cover, in metadata_test.go and
+// secret_test.go, so this file's four are not the whole list.
+func TestNodeCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{
+		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},
+	}
+	_, err := NodeCommand{Kubectl: kube, State: node("node-a"), Verb: "cordon"}.
+		Execute(state.Ref{Mark: "worker"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "worker" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "worker")
+	}
+}
+
+func TestDrainCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{
+		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},
+	}
+	err := DrainCommand{Kubectl: kube, State: node("node-a")}.
+		Execute(state.Ref{Mark: "worker"}, true, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "worker" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "worker")
+	}
+}
+
+func TestEventsCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{probeCode: 1}
+	command := EventsCommand{Kubectl: kube, State: pod("api-7d8f"), Events: noEventsService{}}
+	_, err := command.Execute(context.Background(), state.Ref{Mark: "api"})
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "api")
+	}
+}
+
+func TestLogsCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kube := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := LogsCommand{Kubectl: kube, State: pod("api-7d8f"), Status: noStatus}.
+		Execute(state.Ref{Mark: "api"}, nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "api")
 	}
 }
 
@@ -406,5 +563,44 @@ func TestAWrappedMissingScannerIsNotStaleState(t *testing.T) {
 func TestAVanishedResourceIsStillStaleState(t *testing.T) {
 	if !isStale(kubectl.Error{Stderr: `Error from server (NotFound): pods "nginx" not found`}) {
 		t.Error("a vanished pod was not treated as stale")
+	}
+}
+
+// The central guarantee behind marks and context: a mark taken in one cluster
+// must never resolve in another, and — unlike an ordinary index whose listing
+// can simply be replayed — there is no query behind a mark for withRefresh to
+// rebuild. If resolveMark's mismatch were ever reported as a
+// state.ContextMismatchError with an empty Relist, isStale would read it as
+// recoverable (see the ContextMismatchError branch above) and withRefresh
+// would replay the history stack's query, silently handing `kx logs @api`
+// a fresh listing of something else entirely.
+//
+// This drives a real state.Service end to end — save a listing, mark a
+// resource in it, switch the context — rather than constructing an error by
+// hand, because a hand-built error pins nothing about what resolveMark
+// actually returns. state.go's own comment above resolveMark notes this
+// mistake has already been made three times.
+func TestIsStaleDeclinesAMarkContextMismatch(t *testing.T) {
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	store.Context = func() string { return "staging" }
+	if err := store.Save(state.State{
+		Resources: state.NewResources([]string{"api-old"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	if err := store.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "diagnostics"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	store.Context = func() string { return "production" }
+
+	_, _, _, err := store.Resolve(state.Ref{Mark: "api"})
+	if err == nil {
+		t.Fatal("Resolve(@api) succeeded across a context mismatch")
+	}
+	if isStale(err) {
+		t.Errorf("isStale(%v) = true, want false — a mark carries no query for withRefresh to replay", err)
 	}
 }

@@ -71,6 +71,64 @@ func TestIndexCompletionNamesTheResources(t *testing.T) {
 	}
 }
 
+// kx logs <TAB> offers marks beside the numbered rows: a mark is spendable
+// anywhere an index is, so it belongs in the same completion.
+func TestCompleteIndexOffersMarks(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api-7d8f"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := services.State.SaveMark("web", state.Mark{
+		Resource: state.Resource{Name: "web-abc", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	candidates := completeIndex(services, "")
+	var sawIndex, sawMark bool
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "1\t") {
+			sawIndex = true
+		}
+		if strings.HasPrefix(candidate, "@web\t") {
+			sawMark = true
+		}
+	}
+	if !sawIndex {
+		t.Errorf("candidates = %v, want the numbered row", candidates)
+	}
+	if !sawMark {
+		t.Errorf("candidates = %v, want @web offered", candidates)
+	}
+}
+
+// A mark resolves with no listing at all — that is the whole point of one,
+// since it survives `kx state drop --all`. completeIndex used to return as
+// soon as loadCurrent failed, before it ever consulted marks, so a mark was
+// the one thing completion could not offer in the situation it matters most:
+// right after the listing that made it is gone.
+func TestCompleteIndexOffersMarksWithoutAListing(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("web", state.Mark{
+		Resource: state.Resource{Name: "web-abc", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	candidates := completeIndex(services, "")
+	var sawMark bool
+	for _, candidate := range candidates {
+		if strings.HasPrefix(candidate, "@web\t") {
+			sawMark = true
+		}
+	}
+	if !sawMark {
+		t.Errorf("candidates = %v, want @web offered with no current listing", candidates)
+	}
+}
+
 // Repeatable arguments keep completing: `kx delete 1 <TAB>` is still choosing
 // an index.
 func TestIndexCompletionContinuesForRepeatableArgs(t *testing.T) {
@@ -165,6 +223,29 @@ func TestNamespaceCompletionReadsItsOwnSlot(t *testing.T) {
 	}
 	if candidates[1] != "2\tprod" {
 		t.Errorf("candidates[1] = %q, want 2\tprod", candidates[1])
+	}
+}
+
+// kx unmark <TAB> had no completer at all — argCompleters carried no entry
+// for its "name" argument, unlike kx theme <TAB> and kx engine <TAB>, which
+// complete theirs from the same map. It offers plain mark names, matching
+// what the argument itself accepts.
+func TestUnmarkCompletesMarkNames(t *testing.T) {
+	services := completionServices(t)
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	root := NewRoot(services, "test")
+	candidates, _ := complete(t, root, "unmark", "")
+
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %v, want the one mark", candidates)
+	}
+	if candidates[0] != "api\tapi-7d8f (Pod)" {
+		t.Errorf("candidates[0] = %q, want the plain mark name, not '@api'", candidates[0])
 	}
 }
 

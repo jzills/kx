@@ -27,8 +27,8 @@ type TreeCommand struct {
 
 // Execute graphs the resource an index names. A Namespace row graphs that
 // namespace itself — its own name, not the namespace the `kx get ns` ran in.
-func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tree.Node, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c TreeCommand) Execute(ctx context.Context, ref state.Ref, indexed bool) (*tree.Node, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -302,11 +302,11 @@ func newTreeCommand(services Services) *cobra.Command {
 				return deliverPage(ctx, page, htmlOpts)
 			}
 
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
-			name, namespace, kind, err := services.State.Fields(index)
+			name, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
@@ -323,7 +323,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				}
 			}
 			stop := render.Status("resolving ownership graph")
-			node, err := command.Execute(ctx, index, indexed)
+			node, err := command.Execute(ctx, ref, indexed)
 			stop()
 			if err != nil {
 				return err

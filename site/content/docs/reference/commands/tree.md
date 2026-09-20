@@ -3,7 +3,7 @@
 title: "kx tree"
 linkTitle: "tree"
 description: "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace."
-weight: 26
+weight: 27
 ---
 
 Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.
@@ -18,7 +18,7 @@ kx tree [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing; run kx state to see it |
+| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 

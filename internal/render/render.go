@@ -232,6 +232,7 @@ func KeyValueTable(header string, keys []string, values map[string]string) {
 
 func ThemeList(active string)                        { current.ThemeList(active) }
 func EngineList(active string)                       { current.EngineList(active) }
+func MarkList(marks map[string]state.Mark)           { current.MarkList(marks) }
 func StateHistory(history state.History)             { current.StateHistory(history) }
 func State(entry state.State)                        { current.State(entry) }
 func SwitchTargets(history state.History, live Live) { current.SwitchTargets(history, live) }

@@ -21,9 +21,9 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// The leading run of numbers are indexes; everything after is kubectl's. A
-// range token counts as a single leading argument here — it's expanded later,
-// in parseIndexes.
+// The leading run of numbers, ranges and marks are references; everything
+// after is kubectl's. A range token counts as a single leading argument
+// here — it's expanded later, in parseRefs.
 func TestSplitLeadingIndexes(t *testing.T) {
 	cases := []struct {
 		args        []string
@@ -38,10 +38,16 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		{[]string{"9..17", "-o", "wide"}, 1, "-o wide"},
 		{[]string{"9..17", "3", "--tail=5"}, 2, "--tail=5"},
 		// A malformed range still belongs to the leading run — it should reach
-		// parseIndexes for a proper "not a valid range" error, rather than
+		// parseRefs for a proper "not a valid range" error, rather than
 		// falling through to the generic "not a valid int" message that
 		// applies when the leading run is empty.
 		{[]string{"5..", "-o", "wide"}, 1, "-o wide"},
+		// A mark belongs to the leading run unvalidated, the same as a
+		// malformed range: "kx logs @nope" must reach parseRefs for the
+		// unknown-mark error, not fall through to kubectl as a positional
+		// and produce "@nope is not a valid int".
+		{[]string{"@api", "-o", "wide"}, 1, "-o wide"},
+		{[]string{"@api", "2", "--tail=5"}, 2, "--tail=5"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -80,9 +86,22 @@ func TestParseIndexNamesTheArgument(t *testing.T) {
 	}
 }
 
+// refIndexes extracts the Index of every ref, for tests migrated from
+// parseIndexes ([]int) to parseRefs ([]state.Ref) that only ever exercise the
+// plain-index path — a Mark in the result here would zero-value to 0 and hide
+// a real bug, so callers that care about marks assert on the Refs directly
+// instead of going through this.
+func refIndexes(refs []state.Ref) []int {
+	indexes := make([]int, len(refs))
+	for i, ref := range refs {
+		indexes[i] = ref.Index
+	}
+	return indexes
+}
+
 // A range token expands into every index it spans, inclusive of both ends,
 // walking in whichever direction the two ends imply.
-func TestParseIndexesExpandsRanges(t *testing.T) {
+func TestParseRefsExpandsRanges(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -95,12 +114,12 @@ func TestParseIndexesExpandsRanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseIndexes(fakeResolver{}, "indexes", tc.args)
+			got, err := parseRefs(fakeResolver{}, "indexes", tc.args)
 			if err != nil {
-				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+				t.Fatalf("parseRefs(%v) error = %v", tc.args, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			if !reflect.DeepEqual(refIndexes(got), tc.want) {
+				t.Errorf("parseRefs(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}
@@ -108,7 +127,7 @@ func TestParseIndexesExpandsRanges(t *testing.T) {
 
 // A malformed range is reported the same way a bad single index is: named,
 // quoted, and rejected before reaching the cluster.
-func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
+func TestParseRefsRejectsMalformedRanges(t *testing.T) {
 	cases := []struct {
 		arg  string
 		want string
@@ -118,9 +137,9 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.arg, func(t *testing.T) {
-			_, err := parseIndexes(fakeResolver{}, "indexes", []string{tc.arg})
+			_, err := parseRefs(fakeResolver{}, "indexes", []string{tc.arg})
 			if err == nil {
-				t.Fatalf("parseIndexes(%q) accepted a malformed range", tc.arg)
+				t.Fatalf("parseRefs(%q) accepted a malformed range", tc.arg)
 			}
 			if err.Error() != tc.want {
 				t.Errorf("error = %q, want %q", err, tc.want)
@@ -131,7 +150,7 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 
 // "..5" defaults the start to 1; "5.." defaults the end to the size of the
 // current listing, reported by the resolver's Count().
-func TestParseIndexesExpandsOpenRanges(t *testing.T) {
+func TestParseRefsExpandsOpenRanges(t *testing.T) {
 	cases := []struct {
 		name  string
 		args  []string
@@ -145,12 +164,12 @@ func TestParseIndexesExpandsOpenRanges(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolver := fakeResolver{count: tc.count}
-			got, err := parseIndexes(resolver, "indexes", tc.args)
+			got, err := parseRefs(resolver, "indexes", tc.args)
 			if err != nil {
-				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+				t.Fatalf("parseRefs(%v) error = %v", tc.args, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			if !reflect.DeepEqual(refIndexes(got), tc.want) {
+				t.Errorf("parseRefs(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}
@@ -159,10 +178,10 @@ func TestParseIndexesExpandsOpenRanges(t *testing.T) {
 // A bare ".." is not "everything" — it's rejected the same way a malformed
 // range is, so a destructive command like delete never expands an
 // unqualified ".." into the whole listing by accident.
-func TestParseIndexesRejectsBareDoubleDot(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{}, "indexes", []string{".."})
+func TestParseRefsRejectsBareDoubleDot(t *testing.T) {
+	_, err := parseRefs(fakeResolver{}, "indexes", []string{".."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted a bare '..'")
+		t.Fatal("parseRefs accepted a bare '..'")
 	}
 	want := "Invalid value for 'indexes': '..' is not a valid range."
 	if err.Error() != want {
@@ -173,10 +192,10 @@ func TestParseIndexesRejectsBareDoubleDot(t *testing.T) {
 // An open-end range whose start is already past the current listing is a
 // hard error — not a silent reverse-walk (unlike an explicit "20..9") and
 // not a silent no-op.
-func TestParseIndexesRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{count: 3}, "indexes", []string{"5.."})
+func TestParseRefsRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	_, err := parseRefs(fakeResolver{count: 3}, "indexes", []string{"5.."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted '5..' starting past a 3-item listing")
+		t.Fatal("parseRefs accepted '5..' starting past a 3-item listing")
 	}
 	want := "Invalid value for 'indexes': '5..' starts past the current listing (3 items)."
 	if err.Error() != want {
@@ -186,19 +205,19 @@ func TestParseIndexesRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
 
 // An open-end range propagates the resolver's error (e.g. no state saved
 // yet) directly, rather than reporting it as a malformed range.
-func TestParseIndexesPropagatesCountErrorForOpenEndRange(t *testing.T) {
+func TestParseRefsPropagatesCountErrorForOpenEndRange(t *testing.T) {
 	wantErr := errors.New("no state found")
-	_, err := parseIndexes(fakeResolver{countErr: wantErr}, "indexes", []string{"5.."})
+	_, err := parseRefs(fakeResolver{countErr: wantErr}, "indexes", []string{"5.."})
 	if err != wantErr {
-		t.Errorf("parseIndexes(%q) error = %v, want %v", "5..", err, wantErr)
+		t.Errorf("parseRefs(%q) error = %v, want %v", "5..", err, wantErr)
 	}
 }
 
 // An open-end range still respects maxRangeSpan once its end is resolved.
-func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{count: 999999}, "indexes", []string{"1.."})
+func TestParseRefsRejectsOversizedOpenEndRange(t *testing.T) {
+	_, err := parseRefs(fakeResolver{count: 999999}, "indexes", []string{"1.."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted an oversized open-end range")
+		t.Fatal("parseRefs accepted an oversized open-end range")
 	}
 	want := "Invalid value for 'indexes': '1..' spans more than 10000 indexes."
 	if err.Error() != want {
@@ -208,10 +227,10 @@ func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
 
 // A pathological range shouldn't build a giant slice before any index is even
 // resolved against the current listing.
-func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{}, "indexes", []string{"1..999999"})
+func TestParseRefsRejectsOversizedRanges(t *testing.T) {
+	_, err := parseRefs(fakeResolver{}, "indexes", []string{"1..999999"})
 	if err == nil {
-		t.Fatal("parseIndexes accepted an oversized range")
+		t.Fatal("parseRefs accepted an oversized range")
 	}
 }
 
@@ -221,20 +240,20 @@ func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
 // timeout rather than a bare call: on the overflow this regresses, the
 // unbounded loop would otherwise hang the test (and eventually the CI
 // runner) instead of failing it cleanly.
-func TestParseIndexesRejectsOverflowingRanges(t *testing.T) {
+func TestParseRefsRejectsOverflowingRanges(t *testing.T) {
 	arg := fmt.Sprintf("%d..%d", math.MaxInt64, math.MinInt64)
 	done := make(chan error, 1)
 	go func() {
-		_, err := parseIndexes(fakeResolver{}, "indexes", []string{arg})
+		_, err := parseRefs(fakeResolver{}, "indexes", []string{arg})
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("parseIndexes accepted a range whose span overflows int")
+			t.Fatal("parseRefs accepted a range whose span overflows int")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("parseIndexes did not return — span overflow likely bypassed the maxRangeSpan guard")
+		t.Fatal("parseRefs did not return — span overflow likely bypassed the maxRangeSpan guard")
 	}
 }
 
@@ -365,6 +384,42 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	}
 }
 
+// A literal 0 is an out-of-range index like any other, not an absent
+// reference. state.Ref{} — the zero value — used to be treated specially by
+// Resolve (an "empty ref" guard reported "No resource reference given."), but
+// parseIndex has no zero guard of its own: a user typing `kx describe 0`
+// produces exactly that same zero Ref, and telling that apart from a
+// programmer-constructed empty one is not possible from the Ref alone. The
+// guard's message was accurate for one and wrong for the other, and there was
+// no way to know which had happened — so develop's actual behavior (an
+// out-of-range message naming the listing) is the only one that is right for
+// what a user who types "0" gets, and this pins it end to end.
+func TestDescribeOnLiteralZeroReportsOutOfRange(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDescribeCommand(services)
+	cmd.SetArgs([]string{"0"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx describe 0 succeeded, want an out-of-range error")
+	}
+	for _, want := range []string{"Index 0", "out of range", "2 Pods"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 for an unresolvable index", len(kube.interactive))
+	}
+}
+
 // Open ranges resolve against the real listing end-to-end, the same way an
 // explicit range does.
 func TestDeleteAcceptsOpenRanges(t *testing.T) {
@@ -483,6 +538,44 @@ func switchServices(t *testing.T, kube kubectl.Service) Services {
 const namespaceTable = "NAME      STATUS   AGE\n" +
 	"default   Active   91d\n" +
 	"prod      Active   91d\n"
+
+// kx ns and kx context read a slot (FieldsNamed), which the marks work
+// deliberately left untouched — a slot is not a resource reference, and
+// there is nothing for `kx mark` to have pinned there. newSwitchCommand used
+// to extract ref.Index in isolation after parseRef, so a mark's zero-value
+// Index silently went through as index 0 rather than being refused: `kx ns
+// @foo` resolved index 0 against whatever namespace listing happened to be
+// current and reported a confusing out-of-range error that named no mark at
+// all. Both spellings are checked, and the assertion is on the message
+// itself — naming the mark and the reason — not merely that an error came
+// back, since a bad error would have passed a looser check too.
+func TestSwitchRefusesAMark(t *testing.T) {
+	cases := []struct {
+		use       string
+		isContext bool
+		wantNoun  string
+	}{
+		{"namespace", false, "namespaces are switched by index"},
+		{"context", true, "contexts are switched by index"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.use, func(t *testing.T) {
+			services := switchServices(t, &recordingKubectl{})
+			cmd := newSwitchCommand(services, tc.use, tc.use, "short", tc.isContext)
+			cmd.SetArgs([]string{"@foo"})
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("kx %s @foo succeeded, want a refusal", tc.use)
+			}
+			if !strings.Contains(err.Error(), "@foo") {
+				t.Errorf("err = %q, want it to name the mark", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantNoun) {
+				t.Errorf("err = %q, want %q", err, tc.wantNoun)
+			}
+		})
+	}
+}
 
 // The whole of #156, through the real call path: list namespaces, list
 // something else on top, then switch. The 2 counts against namespaces.
@@ -717,8 +810,15 @@ func TestDropAllConfirmsBeforeClearing(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kx state drop --all: %v", err)
 	}
-	if prompted == "" {
-		t.Error("kx state drop --all did not prompt for confirmation")
+	// The wording is asserted, not merely its presence. --all no longer means
+	// "all" — marks survive it — so the prompt is the one place the user learns
+	// that before deciding, and a silent reword would take it away.
+	for _, want := range []string{
+		"namespace and context slots", "Marks are untouched", "kx unmark --all",
+	} {
+		if !strings.Contains(prompted, want) {
+			t.Errorf("prompt = %q\n  missing %q", prompted, want)
+		}
 	}
 
 	history, err := services.State.LoadHistory()

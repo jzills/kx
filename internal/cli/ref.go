@@ -46,7 +46,7 @@ const (
 func (c RefCommand) Execute(resolved []Resolved, field string) ([]string, error) {
 	lines := make([]string, 0, len(resolved))
 	for _, target := range resolved {
-		index, name, namespace, kind := target.Ref.Index, target.Name, target.Namespace, target.Kind
+		name, namespace, kind := target.Name, target.Namespace, target.Kind
 		// Lowercased canonical kind, not kubectl's shorthand: `rs` and
 		// `deploy` are kubectl's own spellings, and this exists to compose
 		// with tools that are not kubectl. Lowercase because `pod/x` is the
@@ -62,9 +62,12 @@ func (c RefCommand) Execute(resolved []Resolved, field string) ([]string, error)
 			// flag with no value, and kubectl fails somewhere further from
 			// the cause than here.
 			if namespace == "" {
+				// target.Ref's own String() renders "@api" for a mark and the
+				// bare number for an index — a hardcoded "Index %d" would print
+				// "Index 0" once a mark could reach here.
 				return nil, fmt.Errorf(
-					"Index %d is %s/%s, which lives outside any namespace — there is no namespace to print.",
-					index, kind, name)
+					"%s is %s/%s, which lives outside any namespace — there is no namespace to print.",
+					target.Ref, kind, name)
 			}
 			lines = append(lines, namespace)
 		default:

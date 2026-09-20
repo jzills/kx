@@ -3,7 +3,7 @@
 title: "kx port-forward"
 linkTitle: "port-forward"
 description: "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service)."
-weight: 19
+weight: 20
 ---
 
 Forwards a local port to an indexed resource. Given a workload rather than a Pod, kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.
@@ -20,7 +20,7 @@ kx port-forward [OPTIONS] <index> <port> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing; run kx state to see it |
+| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 | `<port>` | Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port |
 
 ## Global options

@@ -13,14 +13,13 @@ import (
 
 func sortStrings(values []string) { sort.Strings(values) }
 
-// fetchMetadataField reads one metadata map (labels or annotations) off an
-// indexed resource.
-// One index, through the same fetch the batch uses — the reply shapes and the
-// sorting are parsed in exactly one place.
+// fetchMetadataField reads one metadata map (labels or annotations) off a
+// referenced resource.
+// One reference, through the same fetch the batch uses — the reply shapes and
+// the sorting are parsed in exactly one place.
 func fetchMetadataField(
-	kubectl kubectl.Service, resolver IndexResolver, index int, field string,
+	kubectl kubectl.Service, resolver IndexResolver, ref state.Ref, field string,
 ) (keys []string, values map[string]string, err error) {
-	ref := state.Ref{Index: index}
 	name, namespace, kind, err := resolver.Resolve(ref)
 	if err != nil {
 		return nil, nil, err
@@ -99,7 +98,9 @@ func fetchMetadataFields(
 				// stale index, and what withRefresh exists to recover from.
 				// Rendering it as a resource with no labels would read as a
 				// fact about the resource instead.
-				return nil, StaleResourceError{Kind: kinds.Kind(g.kind), Name: g.names[i]}
+				return nil, StaleResourceError{
+					Kind: kinds.Kind(g.kind), Name: g.names[i], Namespace: g.namespace, Ref: ref,
+				}
 			}
 			results[ref] = newMetadataResult(values)
 		}
@@ -224,18 +225,6 @@ func newMetadataResult(values map[string]string) metadataResult {
 	return metadataResult{keys: keys, values: values}
 }
 
-// MetadataReadCommand shows the labels or annotations on an indexed resource.
-type MetadataReadCommand struct {
-	Kubectl kubectl.Service
-	State   IndexResolver
-	// Field is the metadata key to read: "labels" or "annotations".
-	Field string
-}
-
-func (c MetadataReadCommand) Execute(index int) ([]string, map[string]string, error) {
-	return fetchMetadataField(c.Kubectl, c.State, index, c.Field)
-}
-
 var metadataVerbText = map[string]string{"label": "Labeled", "annotate": "Annotated"}
 
 // MetadataWriteCommand sets or removes labels or annotations on an indexed
@@ -250,7 +239,7 @@ type MetadataWriteCommand struct {
 }
 
 func (c MetadataWriteCommand) Execute(
-	index int, setKeys []string, sets map[string]string, removes []string, overwrite bool,
+	ref state.Ref, setKeys []string, sets map[string]string, removes []string, overwrite bool,
 ) (string, error) {
 	if len(sets) == 0 && len(removes) == 0 {
 		return "", fmt.Errorf(
@@ -258,7 +247,7 @@ func (c MetadataWriteCommand) Execute(
 			c.Verb)
 	}
 
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +255,7 @@ func (c MetadataWriteCommand) Execute(
 	if !overwrite {
 		// kubectl would refuse the write anyway, but its error names only the
 		// first conflict; listing them all saves a round trip.
-		_, current, err := fetchMetadataField(c.Kubectl, c.State, index, c.Field)
+		_, current, err := fetchMetadataField(c.Kubectl, c.State, ref, c.Field)
 		if err != nil {
 			return "", err
 		}

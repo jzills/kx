@@ -3,12 +3,14 @@ package render
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
 )
 
@@ -481,4 +483,80 @@ func (r *Renderer) swatch(name string) string {
 		parts = append(parts, styles[part.Style].Render(part.Sample))
 	}
 	return strings.Join(parts, "  ")
+}
+
+// markContextsSpan reports whether the given marks were taken in more than
+// one kubeconfig context — spansContexts asks the same question of the
+// history stack, but a mark has no state.State to read a context off.
+func markContextsSpan(marks []state.Mark) bool {
+	for _, mark := range marks {
+		if mark.Context != marks[0].Context {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedMarkContext returns the one context every mark was taken in, or ""
+// when they disagree — that gets a column instead, the same trade
+// sharedContext makes for the history stack — or when none recorded one.
+func sharedMarkContext(marks []state.Mark) string {
+	if len(marks) == 0 || markContextsSpan(marks) {
+		return ""
+	}
+	return marks[0].Context
+}
+
+// MarkList renders the marks currently set, in the shape ThemeList and
+// EngineList use for their own registries: a caption naming the count, then a
+// plain table. Sorted by name for stable output — Marks() returns a map,
+// whose iteration order is not — rather than by index, since a mark carries
+// none.
+//
+// A mark refuses to resolve outside the context it was taken in, so which
+// context that is decides whether the mark on screen actually works — and
+// `kx mark` is the only place that fact is visible at all. Follows
+// StateHistory's convention for the identical problem (see history.go):
+// one context shared by every mark captions the table; only a set that
+// disagrees earns a CONTEXT column, since a column of identical values would
+// say nothing a shared caption hadn't already.
+func (r *Renderer) MarkList(marks map[string]state.Mark) {
+	if len(marks) == 0 {
+		r.Caption("No marks set — run 'kx mark <name> <index>' to create one.")
+		return
+	}
+	names := make([]string, 0, len(marks))
+	for name := range marks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	ordered := make([]state.Mark, len(names))
+	for i, name := range names {
+		ordered[i] = marks[name]
+	}
+	perRow := markContextsSpan(ordered)
+
+	r.Caption("Marks", sharedMarkContext(ordered), itemLabel(len(names)))
+	columns := []Column{
+		{Header: "NAME"}, {Header: "KIND"}, {Header: "RESOURCE"}, {Header: "NAMESPACE"},
+	}
+	if perRow {
+		columns = append(columns, Column{Header: "CONTEXT"})
+	}
+	rows := make([][]Cell, 0, len(names))
+	for i, name := range names {
+		mark := ordered[i]
+		row := []Cell{
+			Plain("@" + name),
+			Plain(string(mark.Kind)),
+			Plain(mark.Name),
+			Plain(mark.Namespace),
+		}
+		if perRow {
+			row = append(row, Plain(mark.Context))
+		}
+		rows = append(rows, row)
+	}
+	r.Table(columns, rows)
 }

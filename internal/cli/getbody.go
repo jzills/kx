@@ -6,6 +6,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // getOptions carries the flags `get` and `secret` share. They delegate to the
@@ -68,10 +69,10 @@ func runGet(services Services, resource string, args []string, options getOption
 	previous, _ := services.State.Load()
 
 	indexArgs, extra := splitLeadingIndexes(args)
-	var indexes []int
+	var refs []state.Ref
 	if len(indexArgs) > 0 {
 		var err error
-		indexes, err = parseIndexes(services.State, "indexes", indexArgs)
+		refs, err = parseRefs(services.State, "indexes", indexArgs)
 		if err != nil {
 			return err
 		}
@@ -82,10 +83,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	// way to relist anything — including the hint a kind mismatch prints.
 	switch strings.ToLower(resource) {
 	case "context", "contexts":
-		if len(indexes) == 0 {
+		if len(refs) == 0 {
 			return listSwitchTargets(services, true)
 		}
-		return switchTo(services, "context", indexes[0], true)
+		// A mark names a Kubernetes resource pinned by kx state, not a
+		// kubeconfig context — there is nothing for it to resolve against
+		// here, so it is refused rather than silently spent as index 0. See
+		// markRefusedForSlot (refs.go): newSwitchCommand hits the same case
+		// for `kx ns`/`kx context` and shares this wording.
+		if refs[0].Mark != "" {
+			return markRefusedForSlot(refs[0], "contexts")
+		}
+		return switchTo(services, "context", refs[0].Index, true)
 	}
 
 	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
@@ -98,10 +107,27 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	if options.Decode || options.HasKey {
-		return decodeSecrets(services, resource, indexes, extra, options)
+		// Resolved only when the command already names a Secret-shaped
+		// resource and carries indexes: otherwise decodeSecrets's own guards
+		// (--decode required, kind mismatch) are what should fire, and firing
+		// resolveRefsExpecting first would replace those messages with a
+		// resolution error about an index that was never going to be
+		// fetched. When it does apply, resolving the whole batch here —
+		// before decodeSecrets fetches or renders anything — is what stops a
+		// bad index late in the batch from letting an earlier one's secret
+		// reach the terminal first.
+		var resolved []Resolved
+		if options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
+			var err error
+			resolved, err = resolveRefsExpecting(services.State, "indexes", indexArgs, kinds.Secret)
+			if err != nil {
+				return err
+			}
+		}
+		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
-	if len(indexes) > 0 {
+	if len(refs) > 0 {
 		expected := kinds.Normalize(resource)
 		// resolveRefsExpecting resolves every index before any of them is
 		// acted on, so an out-of-range index late in the batch is caught

@@ -6,6 +6,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -22,8 +23,8 @@ type NodeCommand struct {
 }
 
 // Execute runs the verb against one indexed node, returning the line to report.
-func (c NodeCommand) Execute(index int) (string, error) {
-	name, _, kind, err := c.State.Fields(index)
+func (c NodeCommand) Execute(ref state.Ref) (string, error) {
+	name, _, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -31,11 +32,13 @@ func (c NodeCommand) Execute(index int) (string, error) {
 		return "", unsupportedKindError(c.Verb, kind, kinds.Set{kinds.Node})
 	}
 	// No -n: a Node is cluster-scoped, and kubectl cordon takes no namespace.
+	// Namespace is left unset on the error below for the same reason — see the
+	// Namespace field's own doc on StaleResourceError.
 	if _, err := c.Kubectl.Run([]string{c.Verb, name}); err != nil {
 		// A vanished node reads as stale so the caller can relist, rather than
 		// as whatever kubectl said about a name that is no longer there.
 		if IsNotFound(err) {
-			return "", StaleResourceError{Kind: kinds.Node, Name: name}
+			return "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 		}
 		return "", err
 	}
@@ -64,8 +67,8 @@ type DrainCommand struct {
 }
 
 // Execute drains one indexed node, streaming kubectl's own progress.
-func (c DrainCommand) Execute(index int, yes bool, extraArgs []string) error {
-	name, _, kind, err := c.State.Fields(index)
+func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error {
+	name, _, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -83,7 +86,7 @@ func (c DrainCommand) Execute(index int, yes bool, extraArgs []string) error {
 	// and report for itself, so a preflight can add information but never take
 	// the command away.
 	if _, err := c.Kubectl.Run([]string{"get", "node", name}); IsNotFound(err) {
-		return StaleResourceError{Kind: kinds.Node, Name: name}
+		return StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
@@ -135,7 +138,7 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 			// Reported one at a time, so a failure partway through leaves the
 			// successes visible rather than swallowing them.
 			for _, target := range resolved {
-				message, err := command.Execute(target.Ref.Index)
+				message, err := command.Execute(target.Ref)
 				if err != nil {
 					return err
 				}
@@ -172,18 +175,23 @@ func newDrainCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("drain requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			if err := refuseScopeFlagForIndexes(services.State, []int{index}, rest[1:]); err != nil {
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return DrainCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
 				Confirm: services.confirm(),
-			}.Execute(index, yes, rest[1:])
+			}.Execute(ref, yes, rest[1:])
 		},
 	}
 	// Registered so they appear in --help; parsing is by hand.

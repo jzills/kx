@@ -3,7 +3,7 @@
 title: "kx yaml"
 linkTitle: "yaml"
 description: "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."
-weight: 28
+weight: 30
 ---
 
 Prints the raw YAML manifest for one or more indexed resources. --show fetches the same full manifest and narrows it client-side to the named top-level fields, so it works with anything kubectl's own YAML output has.
@@ -24,7 +24,7 @@ kx yaml [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing; run kx state to see it |
+| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 
