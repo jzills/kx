@@ -1060,7 +1060,7 @@ func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
 				Summary: "Only 0/1 replicas ready"},
 		},
 	}
-	document, err := diagnosticJSON(report, 1)
+	document, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -1122,7 +1122,7 @@ func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
 				Summary: "Failed ×46154 on Pod/web-1"},
 		},
 	}
-	document, err := diagnosticJSON(report, 1)
+	document, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}

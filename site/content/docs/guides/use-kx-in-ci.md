@@ -71,6 +71,12 @@ carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run carries
 }
 ```
 
+A resource that was named by index carries that `index`, so a consumer finding
+something worth acting on can name it — `kx diag 4` — without listing again. A
+resource named by a mark carries `mark` instead, because a mark has no position
+in a listing; the two never appear together, and a document built from neither
+carries neither.
+
 `kx tree --json` names every node with `kind` and `name` rather than the
 `rs/web-7d8f` label the terminal draws, carries the same `index` the tree
 printed, and always returns a `roots` list — one entry for an indexed resource

@@ -10,6 +10,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/tree"
 	"github.com/jzills/kx/internal/web"
 )
@@ -25,10 +26,46 @@ func decodeJSON(t *testing.T, document string) map[string]any {
 
 // The JSON is a public surface, so it carries a version the way kx's other
 // on-disk shape does.
+// A mark has no position in a listing, so Index is 0 and omitempty drops it —
+// which left the document saying nothing about which reference produced it.
+// The name is carried instead, so a consumer can still name what was
+// diagnosed.
+func TestDiagnosticJSONNamesTheMarkItWasSpentWith(t *testing.T) {
+	out, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
+	}, state.Ref{Mark: "api"})
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	if !strings.Contains(out, `"mark": "api"`) {
+		t.Errorf("document does not name the mark it was spent with:\n%s", out)
+	}
+	if strings.Contains(out, `"index"`) {
+		t.Errorf("document reports an index for a mark, which has none:\n%s", out)
+	}
+}
+
+// An index still reports its position and carries no mark, so the two
+// references stay distinguishable in the document.
+func TestDiagnosticJSONKeepsTheIndexForAnIndex(t *testing.T) {
+	out, err := diagnosticJSON(diagnostics.Report{
+		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
+	}, state.Ref{Index: 4})
+	if err != nil {
+		t.Fatalf("diagnosticJSON: %v", err)
+	}
+	if !strings.Contains(out, `"index": 4`) {
+		t.Errorf("document lost the index:\n%s", out)
+	}
+	if strings.Contains(out, `"mark"`) {
+		t.Errorf("document reports a mark for an index:\n%s", out)
+	}
+}
+
 func TestDiagnosticJSONCarriesASchemaVersion(t *testing.T) {
 	out, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
-	}, 1)
+	}, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -49,7 +86,7 @@ func TestDiagnosticJSONCarriesASchemaVersion(t *testing.T) {
 func TestDiagnosticJSONCarriesTheIndexItWasResolvedFrom(t *testing.T) {
 	out, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
-	}, 4)
+	}, state.Ref{Index: 4})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -115,7 +152,7 @@ func TestDiagnosticJSONCarriesTheFindingsInOrder(t *testing.T) {
 			},
 		}},
 	})
-	out, err := diagnosticJSON(report, 1)
+	out, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -403,7 +440,7 @@ func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
 		}
 		diagnosed, err := diagnosticJSON(diagnostics.Report{
 			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
-		}, 1)
+		}, state.Ref{Index: 1})
 		if err != nil {
 			t.Fatalf("diagnosticJSON: %v", err)
 		}
@@ -451,7 +488,7 @@ func TestDiagnosticJSONUsesTheSingularSeverityToken(t *testing.T) {
 		Verdict:  diagnostics.Warning,
 		Findings: []diagnostics.Finding{{Severity: diagnostics.Warning, Summary: "hot"}},
 	}
-	out, err := diagnosticJSON(report, 1)
+	out, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -650,7 +687,7 @@ func TestTreeAndTopShareTheSubjectVocabulary(t *testing.T) {
 func TestDiagnosticJSONHasOneShapeIndexedOrSwept(t *testing.T) {
 	indexed, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.Critical,
-	}, 1)
+	}, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -688,7 +725,7 @@ func TestDiagnosticJSONSaysWhatWindowItRanUnder(t *testing.T) {
 	indexed, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod",
 		Verdict: diagnostics.Critical, Window: 24 * time.Hour,
-	}, 1)
+	}, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -713,7 +750,7 @@ func TestDiagnosticJSONSaysWhatWindowItRanUnder(t *testing.T) {
 func TestUnboundedDiagnosticJSONCarriesNoWindow(t *testing.T) {
 	out, err := diagnosticJSON(diagnostics.Report{
 		Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: diagnostics.OK,
-	}, 1)
+	}, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -736,7 +773,7 @@ func TestDiagnosticJSONCountsAnIndexedRunAsASweepOfOne(t *testing.T) {
 	} {
 		out, err := diagnosticJSON(diagnostics.Report{
 			Kind: kinds.Pod, Name: "web", Namespace: "prod", Verdict: testCase.verdict,
-		}, 1)
+		}, state.Ref{Index: 1})
 		if err != nil {
 			t.Fatalf("diagnosticJSON: %v", err)
 		}
