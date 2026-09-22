@@ -5,6 +5,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/render"
@@ -79,18 +80,28 @@ func listMarks(services Services) error {
 	return nil
 }
 
-// newUnmarkCommand removes one mark by name, or every mark with --all.
+// newUnmarkCommand removes marks by name, or every mark with --all.
+//
+// Names, never positions. Every other listing in kx numbers its rows because
+// they have no durable handle; a mark's whole purpose is that it has one, and
+// it is already the leftmost column. Numbering them would also put a row
+// number beside a Pod on a resource-shaped listing, which invites being spent
+// at the next command — where it would resolve against the current listing
+// instead, silently and against something else.
 func newUnmarkCommand(services Services) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "unmark [name]",
-		Short: "Remove a mark by name; --all removes every mark.",
-		Long: "Removes a mark by name, or every mark at once with --all — the marks 'kx state " +
-			"drop --all' deliberately leaves behind.",
-		Example: "  kx unmark api\n  kx unmark --all",
-		Args:    cobra.MaximumNArgs(1),
+		Use:   "unmark [name...]",
+		Short: "Remove marks by name; --all removes every mark.",
+		Long: "Removes one or more marks by name, or every mark at once with --all — the marks " +
+			"'kx state drop --all' deliberately leaves behind.\n\nNames rather than row numbers: " +
+			"the mark listing carries no index column, because a mark is spent by the name it " +
+			"was given. A name that is not a mark refuses the whole call, so a typo partway " +
+			"through leaves every mark in place.",
+		Example: "  kx unmark api\n  kx unmark api web db\n  kx unmark --all",
+		Args:    cobra.ArbitraryArgs,
 		Annotations: map[string]string{
-			"arg.name": "Mark name to remove",
+			"arg.name": "Mark names to remove",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
@@ -108,33 +119,97 @@ func newUnmarkCommand(services Services) *cobra.Command {
 				render.Success("Removed all marks.")
 				return nil
 			}
-			if len(args) != 1 {
+			if len(args) == 0 {
 				return fmt.Errorf("kx unmark requires a name, or --all to remove every mark")
 			}
-			// The mark listing prints names with their sigil ("@api"), and
-			// copying what is on screen is the obvious way to spend one — so a
-			// leading '@' is accepted rather than reported as an unknown mark
-			// named "@api".
-			name := strings.TrimPrefix(args[0], "@")
-			// Validated the same way kx mark validates a name before ever
-			// creating one: DropMark's "No mark named" error interpolates
-			// whatever it is handed straight into its "run 'kx mark %s
-			// <index>'" suggestion, so an empty name (a bare "@") or one that
-			// still carries a sigil (a doubled "@@web") turned that
-			// suggestion into a command that cannot work — 'kx mark  <index>'
-			// with a name-shaped hole, or 'kx mark @web <index>', which
-			// validMarkName itself rejects. Catching it here reports the bad
-			// name plainly instead of recommending either.
-			if err := validMarkName(name); err != nil {
+			names, err := markNames(args)
+			if err != nil {
 				return err
 			}
-			if err := services.State.DropMark(name); err != nil {
+			if err := services.State.DropMarks(names); err != nil {
 				return err
 			}
-			render.Success(fmt.Sprintf("Removed mark @%s", name))
+			render.Success(removedMarks(names))
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Remove every mark")
 	return cmd
+}
+
+// markNames turns the arguments into the mark names to remove, deduped in the
+// order they were written.
+//
+// The mark listing prints names with their sigil ("@api"), and copying what is
+// on screen is the obvious way to spend one — so a leading '@' is accepted
+// rather than reported as an unknown mark named "@api". It is accepted on any
+// argument, not only the first: a list copied off the screen carries it on
+// every one, and a list typed from memory on none.
+//
+// Each name is validated the same way kx mark validates one before ever
+// creating it: DropMarks' "No mark named" error interpolates whatever it is
+// handed straight into its "run 'kx mark %s <index>'" suggestion, so an empty
+// name (a bare "@") or one that still carries a sigil (a doubled "@@web")
+// turned that suggestion into a command that cannot work — 'kx mark  <index>'
+// with a name-shaped hole, or 'kx mark @web <index>', which validMarkName
+// itself rejects. Catching it here reports the bad name plainly instead of
+// recommending either.
+//
+// A name written twice is one mark, the way a repeated index is one resource
+// (see parseRefs): the repeat is dropped rather than refused, because the
+// second removal would report the mark as unknown — an error about the user's
+// own success.
+func markNames(args []string) ([]string, error) {
+	names := make([]string, 0, len(args))
+	seen := make(map[string]bool, len(args))
+	for _, arg := range args {
+		if err := notAPosition(arg); err != nil {
+			return nil, err
+		}
+		name := strings.TrimPrefix(arg, "@")
+		if err := validMarkName(name); err != nil {
+			return nil, err
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// notAPosition refuses the row numbers the rest of kx is spent with, since
+// this is the one listing that has none.
+//
+// Caught here rather than left to the name validators, which answer the
+// question they were written for and not this one: a bare number came back as
+// "'1' is a number, which a mark name cannot be", which is about creating a
+// mark, and a range came back as "No mark named '1..3'" — "1..3" is dots and
+// digits, both legal in a name — which reads as a typo rather than as a
+// spelling kx does not have.
+func notAPosition(arg string) error {
+	spelling := strings.TrimPrefix(arg, "@")
+	_, numeric := strconv.Atoi(spelling)
+	if numeric != nil && !strings.Contains(spelling, "..") {
+		return nil
+	}
+	return fmt.Errorf(
+		"kx unmark takes mark names, not row numbers — the mark listing has no index "+
+			"column, because a mark is spent by the name it was given. Run 'kx mark' to "+
+			"see the names, then 'kx unmark <name>'. Got '%s'.", arg)
+}
+
+// removedMarks reports what was removed, naming every mark with the sigil the
+// listing prints rather than counting them — the names are what the user
+// typed, and a count of them says nothing the line above it hasn't.
+func removedMarks(names []string) string {
+	spelled := make([]string, len(names))
+	for i, name := range names {
+		spelled[i] = "@" + name
+	}
+	if len(spelled) == 1 {
+		return "Removed mark " + spelled[0]
+	}
+	return "Removed marks " + strings.Join(spelled, ", ")
 }

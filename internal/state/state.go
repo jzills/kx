@@ -777,14 +777,31 @@ func (s *Service) Marks() (map[string]Mark, error) {
 // DropMark removes one mark, reporting a name that was never marked rather
 // than succeeding silently — a typo should not look like a removal.
 func (s *Service) DropMark(name string) error {
+	return s.DropMarks([]string{name})
+}
+
+// DropMarks removes several marks in one write, refusing the whole call if any
+// of the names is not a mark.
+//
+// All or nothing, for the reason every batch in kx resolves before it acts: a
+// typo partway through a list would otherwise take the marks named before it,
+// leaving the user to work out which half landed — and a mark cannot be
+// recovered from the listing that no longer mentions it. One write rather than
+// one per name follows from the same guarantee; it also stops the file being
+// re-read and rewritten once per mark.
+func (s *Service) DropMarks(names []string) error {
 	history, err := s.loadHistory()
 	if err != nil {
 		return err
 	}
-	if _, ok := history.Marks[name]; !ok {
-		return unknownMarkError(name)
+	for _, name := range names {
+		if _, ok := history.Marks[name]; !ok {
+			return unknownMarkError(name)
+		}
 	}
-	delete(history.Marks, name)
+	for _, name := range names {
+		delete(history.Marks, name)
+	}
 	return s.saveHistory(history)
 }
 

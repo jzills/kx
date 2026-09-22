@@ -348,7 +348,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
-| `kx unmark [<name>]` | Remove a mark by name; --all removes every mark. |
+| `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |
 | `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
