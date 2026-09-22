@@ -2548,3 +2548,50 @@ func TestResolveExpectingRefusesAMarkOfTheWrongKind(t *testing.T) {
 		}
 	}
 }
+
+// `kx top` and `kx get pods` are different views of the same kind: top omits
+// pods no metrics have arrived for and orders by usage, so the numbers on
+// screen belong to different resources. The entry top saves carries a `get
+// pods` query, because that is what a stale entry has to replay as, which made
+// the two indistinguishable here — top replaced the get listing instead of
+// pushing beside it, and `kx state back` could no longer reach it. The command
+// that produced the listing is part of which view it is.
+func TestSaveKeepsTopAndGetApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{}}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{}, Command: "top"}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2 — a top listing is not the get listing it followed",
+			len(history.States))
+	}
+	if names := history.States[0].Resources.Names(); len(names) != 2 {
+		t.Errorf("the entry behind holds %v, want the get listing's own resources", names)
+	}
+}
+
+// Two runs of kx top are still one view, so the refresh idiom does not fill
+// the stack with copies of it either.
+func TestSaveReplacesARepeatedTopListing(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query {
+		return &Query{Resource: "pods", Args: []string{}, Command: "top"}
+	}
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — the same top listing twice is one view",
+			len(history.States))
+	}
+}

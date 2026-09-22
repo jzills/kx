@@ -110,8 +110,14 @@ func (c TopCommand) Execute(
 		Namespace:     entryNamespace,
 		AllNamespaces: allNamespaces,
 		// Recorded as a `get pods` query so a stale entry refreshes into a
-		// listing, which is what the indexes were assigned against.
-		Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},
+		// listing, which is what the indexes were assigned against. Command
+		// keeps it from *being* that listing: top omits pods no metrics have
+		// arrived for and orders by usage, so the two hold different
+		// resources in a different order, and an entry that replaced the get
+		// listing put those numbers where the get listing's had been.
+		Query: &state.Query{
+			Resource: "pods", Args: extraArgs, Match: match, Command: "top",
+		},
 	}); err != nil {
 		return index.Table{}, "", err
 	}
@@ -167,8 +173,11 @@ func (c TopCommand) ExecuteNodes(
 		Namespace: namespace,
 		// Recorded as a `get nodes` query, matching kx get nodes' own
 		// convention, so a stale entry refreshes into the same listing
-		// shape the indexes were assigned against.
-		Query: &state.Query{Resource: "nodes", Args: extraArgs, Match: match},
+		// shape the indexes were assigned against — and carrying the command
+		// that produced it, for the same reason Execute's entry does.
+		Query: &state.Query{
+			Resource: "nodes", Args: extraArgs, Match: match, Command: "top",
+		},
 	}); err != nil {
 		return index.Table{}, "", err
 	}

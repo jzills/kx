@@ -121,6 +121,19 @@ type Query struct {
 	Resource string   `json:"resource"`
 	Args     []string `json:"args"`
 	Match    *string  `json:"match"`
+	// Command is the kx command the listing came from, empty for `kx get`.
+	//
+	// It exists to tell two entries apart, not to be replayed: `kx top`
+	// records a `get pods` query precisely so a stale entry refreshes into a
+	// listing, and that made its entry indistinguishable from the `kx get
+	// pods` before it — so it replaced that listing rather than pushing
+	// beside it, and `kx state back` could not reach it. The two hold
+	// different resources in a different order, which is what an index
+	// resolves against.
+	//
+	// Absent from files written before it existed, which read as `kx get` —
+	// the command that wrote all but a handful of them.
+	Command string `json:"command,omitempty"`
 }
 
 // Ref is what a command's resource argument resolves through: a position in
@@ -664,6 +677,12 @@ func sameListing(current, next State) bool {
 // and `kx get pods -m api` are different views of the same kind.
 func sameQuery(current, next Query) bool {
 	if current.Resource != next.Resource || len(current.Args) != len(next.Args) {
+		return false
+	}
+	// The command counts as part of the invocation: `kx top` records the `get
+	// pods` query it replays as, and without this it read as the `kx get pods`
+	// it followed and replaced it.
+	if current.Command != next.Command {
 		return false
 	}
 	for i := range current.Args {
