@@ -45,11 +45,11 @@ Release notes have three tiers, and you write only the first:
 | tier | comes from |
 |---|---|
 | `## Highlights` | `release-notes/vX.Y.Z.md` — you |
-| `## Features` / `## Fixes` / `## Dependencies` | derived from what merged |
+| `## Breaking changes` / `## Features` / `## Fixes` / `## Dependencies` | derived from what merged |
 | `## What's Changed` | GitHub, unchanged |
 
-All four are siblings at the same heading level, which is the one GitHub's
-own generated block already uses.
+They are siblings at the same heading level, which is the one GitHub's own
+generated block already uses.
 
 The bullets are derived rather than written so they cannot advertise something
 that never shipped. The paragraph is written rather than derived because no
@@ -59,6 +59,13 @@ Say what changed for someone using kx, and whether upgrading asks anything of
 them. [`release-notes/v0.5.2.md`](release-notes/v0.5.2.md) is the worked
 example — it names the one thing that needed a reinstall.
 
+A release that breaks something says so twice. The `## Breaking changes`
+section is derived, from the conventional-commit `!` on a pull request title —
+`fix(state)!: drop the top-level back, forward and drop aliases` — so marking
+the title is what puts it there, and marking it after the merge is too late.
+The bullet names the change; the paragraph is where you say what to do about
+it. Bump the minor for one, per "Pick the number" above.
+
 Preview it before pushing:
 
 ```bash
@@ -67,7 +74,10 @@ go run ./tools/gen-release-notes --version 0.5.3
 
 Only `feat`, `fix`, `perf` and dependency bumps become bullets. Everything
 else — docs, style, test, refactor, plain chores — appears in the commit list
-below. That is deliberate: the block exists to be scanned.
+below. That is deliberate: the block exists to be scanned. A `!` overrides
+that: any type carrying it leads the block instead, since a chore that raises
+the minimum Go version costs its readers something a feature often does not.
+Each change is listed once, in the first section that claims it.
 
 **The summary is required.** The workflow checks for it before it installs Go,
 and fails the run if it is missing or empty. That check is first because

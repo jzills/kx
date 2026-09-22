@@ -175,3 +175,80 @@ func TestAssembleWithNoSections(t *testing.T) {
 		t.Errorf("a release with no categories still has a summary:\n%s", notes)
 	}
 }
+
+// The conventional-commit "!" is the one machine-readable thing a PR title
+// says about breakage. It was matched so the prefix still split and then
+// thrown away, so `feat!: …` rendered as an ordinary Features bullet —
+// indistinguishable from a change that asks nothing of anyone.
+func TestChangesReadsTheBreakingMarker(t *testing.T) {
+	log := record(
+		"Merge pull request #380 from jzills/fix/save-empty-listing",
+		"fix(state)!: drop the top-level back, forward and drop aliases",
+	) + record(
+		"Merge pull request #381 from jzills/feat/marks",
+		"feat!: name a resource with kx mark",
+	) + record(
+		"Merge pull request #382 from jzills/fix/quiet",
+		"fix(render): quieten the spinner",
+	)
+
+	changes := Changes(log)
+	if len(changes) != 3 {
+		t.Fatalf("parsed %d changes, want 3: %+v", len(changes), changes)
+	}
+	if !changes[0].Breaking || changes[0].Type != "fix" || changes[0].Scope != "state" {
+		t.Errorf("got %+v, want a breaking fix scoped state", changes[0])
+	}
+	if !changes[1].Breaking || changes[1].Type != "feat" {
+		t.Errorf("got %+v, want a breaking feat — the marker rides a bare type too", changes[1])
+	}
+	if changes[2].Breaking {
+		t.Errorf("got %+v, want an unmarked change left unbreaking", changes[2])
+	}
+	if strings.Contains(changes[0].Summary, "!") {
+		t.Errorf("Summary = %q kept the marker, which belongs to the prefix", changes[0].Summary)
+	}
+}
+
+// Breaking changes lead. A reader deciding whether to upgrade needs them
+// before the features, and a release that has none says nothing about them.
+func TestSectionsLeadsWithBreakingChanges(t *testing.T) {
+	sections := Sections([]Change{
+		{Number: 361, Type: "feat", Summary: "--fail-on completes per command"},
+		{Number: 380, Type: "fix", Breaking: true, Summary: "drop the top-level aliases"},
+		{Number: 362, Type: "chore", Scope: "deps", Summary: "bump golang.org/x/term"},
+	})
+
+	var titles []string
+	for _, section := range sections {
+		titles = append(titles, section.Title)
+	}
+	if strings.Join(titles, ",") != "Breaking changes,Features,Dependencies" {
+		t.Errorf("sections = %v, want Breaking changes first", titles)
+	}
+}
+
+// Listed once. A breaking fix under both Breaking changes and Fixes reads as
+// two changes, and the second telling omits the thing that mattered about it.
+func TestSectionsListsABreakingChangeOnlyOnce(t *testing.T) {
+	sections := Sections([]Change{
+		{Number: 380, Type: "fix", Breaking: true, Summary: "drop the top-level aliases"},
+	})
+	if len(sections) != 1 || sections[0].Title != "Breaking changes" {
+		t.Fatalf("sections = %+v, want Breaking changes alone", sections)
+	}
+	if len(sections[0].Changes) != 1 {
+		t.Errorf("section holds %+v, want the one change", sections[0].Changes)
+	}
+}
+
+// A type that earns no heading of its own earns none by being breaking
+// either — the marker promotes it rather than the type letting it through.
+func TestSectionsCategorisesABreakingChoreAsBreaking(t *testing.T) {
+	sections := Sections([]Change{
+		{Number: 1, Type: "chore", Breaking: true, Summary: "require Go 1.26"},
+	})
+	if len(sections) != 1 || sections[0].Title != "Breaking changes" {
+		t.Errorf("sections = %+v, want Breaking changes alone", sections)
+	}
+}

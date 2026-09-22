@@ -26,6 +26,11 @@ type Change struct {
 	Type    string
 	Scope   string
 	Summary string // the title with its prefix and any trailing (#N) removed
+	// Breaking is the conventional-commit "!" on the prefix, the one
+	// machine-readable thing a title says about what upgrading costs. Read
+	// from the title alone: this tier is built from pull request titles, so
+	// the "BREAKING CHANGE:" footer form has no body here to be found in.
+	Breaking bool
 }
 
 // summaryHeading names the tier a person wrote. "Highlights" rather than
@@ -44,10 +49,18 @@ type Section struct {
 // Everything else — docs, style, test, refactor, plain chores — falls through
 // to the generated list below. The block exists to be scanned, and one that
 // reprints every pull request is the list it sits above.
+//
+// Breaking changes lead, and they are matched on the marker rather than on a
+// type: a reader deciding whether to upgrade needs them before the features,
+// and breakage can arrive as any type — a chore that raises the minimum Go
+// version costs its readers something a feat often does not. The marker
+// promotes a change into this section rather than the type letting it through,
+// so a type that earns no heading of its own still surfaces when it is marked.
 var categories = []struct {
 	title string
 	match func(Change) bool
 }{
+	{"Breaking changes", func(c Change) bool { return c.Breaking }},
 	{"Features", func(c Change) bool { return c.Type == "feat" }},
 	{"Fixes", func(c Change) bool { return c.Type == "fix" || c.Type == "perf" }},
 	{"Dependencies", func(c Change) bool {
@@ -65,8 +78,11 @@ var (
 	squashSubject = regexp.MustCompile(`\s\(#(\d+)\)$`)
 	// A conventional-commit prefix: type, optional scope, optional breaking
 	// "!", then ": ". The scope is kept on the type so "chore(deps)" can be
-	// categorised apart from a plain "chore".
-	conventional = regexp.MustCompile(`^([a-z]+)(?:\(([^)]*)\))?!?:\s+(.*)$`)
+	// categorised apart from a plain "chore", and the "!" is captured rather
+	// than merely tolerated — matched and discarded, it let `feat!: …` render
+	// as an ordinary Features bullet, indistinguishable from a change that
+	// asks nothing of anyone.
+	conventional = regexp.MustCompile(`^([a-z]+)(?:\(([^)]*)\))?(!)?:\s+(.*)$`)
 	// A release branch's own merge-back, and the version bump inside it. Both
 	// are the release machinery recording itself; neither is a change anyone
 	// reading the notes came looking for.
@@ -108,10 +124,11 @@ func Changes(log string) []Change {
 		}
 		seen[number] = true
 		changes = append(changes, Change{
-			Number:  number,
-			Type:    parts[1],
-			Scope:   parts[2],
-			Summary: strings.TrimSpace(parts[3]),
+			Number:   number,
+			Type:     parts[1],
+			Scope:    parts[2],
+			Breaking: parts[3] == "!",
+			Summary:  strings.TrimSpace(parts[4]),
 		})
 	}
 	return changes
@@ -129,14 +146,21 @@ func firstLine(body string) string {
 // Sections buckets changes into the categories that earn a heading, dropping
 // any category nothing landed in — a release with no fixes should not
 // advertise a Fixes section.
+//
+// The first matching category wins, so a change appears once. A breaking fix
+// listed under both Breaking changes and Fixes reads as two changes, and the
+// second telling leaves out the thing that mattered about it.
 func Sections(changes []Change) []Section {
 	var sections []Section
+	claimed := make(map[int]bool, len(changes))
 	for _, category := range categories {
 		var matched []Change
 		for _, change := range changes {
-			if category.match(change) {
-				matched = append(matched, change)
+			if claimed[change.Number] || !category.match(change) {
+				continue
 			}
+			claimed[change.Number] = true
+			matched = append(matched, change)
 		}
 		if len(matched) > 0 {
 			sections = append(sections, Section{Title: category.title, Changes: matched})
