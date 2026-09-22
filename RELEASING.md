@@ -66,6 +66,16 @@ the title is what puts it there, and marking it after the merge is too late.
 The bullet names the change; the paragraph is where you say what to do about
 it. Bump the minor for one, per "Pick the number" above.
 
+**One line per paragraph — do not hard-wrap it.** GitHub renders a release
+body with line breaks on, so every newline inside a paragraph becomes a
+literal `<br>` and the text breaks at whatever column it was typed to,
+however wide the reader's window is. The generator copies the paragraph
+verbatim and will not reflow it: reflowing would be a tool editing prose it
+did not author, and it would join lines a summary broke on purpose. v0.6.0
+shipped wrapped at 76 columns and had to be edited after the fact — the
+worked example had never been rendered, because the three tiers post-date
+v0.5.2's own release.
+
 Preview it before pushing:
 
 ```bash
