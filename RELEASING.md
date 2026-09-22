@@ -1,11 +1,13 @@
 # Releasing kx
 
-A release is one gesture: push a branch named `release/vX.Y.Z`. Everything
-after that — tests, six binaries, eight wheels, PyPI, the tag, the GitHub
-release, the krew-index submission, and the pull requests back to `main` and
-`develop` — is [`.github/workflows/release.yml`](.github/workflows/release.yml).
+A release is two gestures: push a branch named `release/vX.Y.Z`, then approve
+the run once the build comes back green. Everything else — tests, six
+binaries, eight wheels, PyPI, the tag, the GitHub release, the krew-index
+submission, and the pull requests back to `main` and `develop` — is
+[`.github/workflows/release.yml`](.github/workflows/release.yml).
 
-There is nothing to run locally and nothing to publish by hand.
+There is nothing to run locally and nothing to publish by hand. Nothing is
+published — nothing is even committed — until you approve.
 
 ## Before you push
 
@@ -90,26 +92,59 @@ the minimum Go version costs its readers something a feature often does not.
 Each change is listed once, in the first section that claims it.
 
 **The summary is required.** The workflow checks for it before it installs Go,
-and fails the run if it is missing or empty. That check is first because
-nothing after it comes back cleanly.
+and fails the run if it is missing or empty. That check is first because it is
+the one thing the build cannot tell you about itself, and a five-minute build
+is a wasteful way to find out the paragraph is missing.
 
 ## What the pipeline does
 
-Five jobs. The order is load-bearing.
+Six jobs. The order is load-bearing.
 
 | job | does |
 |---|---|
-| **Build and Publish** | gate, tests, stamps `pyproject.toml`, cross-compiles, verifies the archives, builds and installs a wheel, publishes to PyPI |
+| **Build** | checks the summary, runs the tests, cross-compiles, verifies the archives, builds and installs a wheel, uploads the archives and the wheels |
+| **Publish to PyPI** | *waits for your approval*, then stamps `pyproject.toml`, pushes the bump commit, uploads the wheels |
 | **Create Release Tag** | tags `vX.Y.Z` and pushes it |
 | **Publish GitHub Release** | checksums, assembles the notes, creates the release, validates the krew manifest, dispatches krew-index |
 | **Open PR to Main** | opens and auto-merges the release PR |
 | **Merge Release Back to Develop** | opens the merge-back PR |
+
+**Build** writes nothing outside the runner. Everything that does not come
+back cleanly — the bump commit, PyPI, the tag, the release, the krew
+submission, both pull requests — is downstream of the approval, so a run
+abandoned at the gate leaves the release branch exactly as you pushed it.
 
 Binaries are built before wheels because the wheels package them. The krew
 manifest is validated *after* publishing because the validator installs from
 real URLs with real checksums, so it cannot run earlier — what it buys is
 finding out within a minute rather than from a stuck pull request on someone
 else's repository.
+
+## Approving the release
+
+**Build** takes about five minutes. When it finishes, the run page shows
+*Review deployments* — tick `release`, then **Approve and deploy**. Nothing
+downstream starts until you do.
+
+The point of the pause is to look at what the build proved before it becomes
+permanent. In the **Build** job's log:
+
+- *Check the bundled version matches the release* — the binary reports the
+  number you are releasing.
+- *Verify the archives are krew-installable* and *Verify the Windows
+  archives* — six archives, each with its binary and its `LICENSE`.
+- *Install a wheel and run the installed binary* — the last line is the
+  installed `kx --version`.
+
+Then decide. **Approve** and the rest of the pipeline runs unattended.
+**Reject**, or simply cancel the run, and nothing was published, nothing was
+tagged, and no commit was pushed: delete the branch and the run stops
+mattering. A run left pending expires after 30 days.
+
+The `release` environment holds the required-reviewer rule and is restricted
+to `release/*` branches. `prevent_self_review` is deliberately **off** — with
+it on, the only reviewer could never approve their own run and every release
+would deadlock.
 
 ## After it finishes
 
@@ -137,7 +172,8 @@ Each of these is a scar.
 - **`RELEASE_PAT`, not `GITHUB_TOKEN`.** The `restrict-release` ruleset
   protects `release/**` and bypasses a specific user, not the Actions bot —
   integration bypass actors need an org-owned repository. The version-bump
-  commit is pushed with a fine-grained PAT issued under that user.
+  commit, pushed from the publish job, uses a fine-grained PAT issued under
+  that user.
 
 - **`[skip ci]` on the bump commit.** GitHub suppresses on-push retriggering
   only for the built-in token. A PAT push to `release/**` would start a second
@@ -159,15 +195,21 @@ Each of these is a scar.
   those five images with every release from v0.0.6 to v0.5.2. A step now checks
   that the staging directory holds nothing but archives and `SHA256SUMS`.
 
+- **The archive download names its artifact.** The run carries the wheels as
+  well as the archives, and `download-artifact` with `merge-multiple: true`
+  and no `name:` takes every artifact in the run — which would stage eight
+  wheels next to the release assets and trip the check above.
+
 - **The tag is pushed with `GITHUB_TOKEN`,** which never triggers downstream
   workflows — so the krew update is an explicit `workflow_dispatch` rather
   than `on: push: tags`.
 
 ## When something fails
 
-**Before the PyPI publish** — the gate, the tests, a build or archive check.
-Nothing was published and no tag exists. Fix it, commit to the release branch,
-and push: that re-runs the workflow from the top.
+**Before the PyPI publish** — the summary check, the tests, a build or
+archive check, or an approval you decided not to give. Nothing was published,
+no tag exists, and the release branch carries no bump commit. Fix it, commit
+to the release branch, and push: that re-runs the workflow from the top.
 
 **After the PyPI publish.** A version cannot be re-uploaded to PyPI. Do not
 retry the same number — cut the next patch instead. The `--skip-existing` flag
@@ -182,7 +224,8 @@ release and PyPI are fine; only the krew-index submission is affected. Fix
 gh workflow run krew.yml --ref v0.5.3
 ```
 
-**A release branch that should not have been pushed.** If the run has not
-tagged yet, delete the branch (`git push origin --delete release/v0.5.3`) and
-the run stops mattering. Once the tag exists, the release exists — go forward,
-not back.
+**A release branch that should not have been pushed.** If the run is still
+waiting for approval, reject it and delete the branch — the remote never
+changed. If it was approved but has not tagged yet, delete the branch
+(`git push origin --delete release/v0.5.3`) and the run stops mattering. Once
+the tag exists, the release exists — go forward, not back.
