@@ -2595,3 +2595,58 @@ func TestSaveReplacesARepeatedTopListing(t *testing.T) {
 			len(history.States))
 	}
 }
+
+// Several marks go in one write. Dropping them one call at a time re-read and
+// rewrote the file per name, and a failure partway through left the ones
+// already dropped gone with no record of what the user asked for.
+func TestDropMarksRemovesEveryNamedMark(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "db", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-0", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	if err := service.DropMarks([]string{"api", "web"}); err != nil {
+		t.Fatalf("DropMarks: %v", err)
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Fatalf("marks = %+v, want db alone", marks)
+	}
+	if _, ok := marks["db"]; !ok {
+		t.Errorf("marks = %+v, want the unnamed mark left behind", marks)
+	}
+}
+
+// All or nothing. A name that is not a mark refuses the whole call, so a typo
+// in the middle of a batch does not take the marks before it with it.
+func TestDropMarksRemovesNothingWhenOneNameIsUnknown(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-0", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	err := service.DropMarks([]string{"api", "nope"})
+	if err == nil {
+		t.Fatal("DropMarks accepted a name that is not a mark")
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("err = %q, want it to name the mark it could not find", err)
+	}
+
+	marks, _ := service.Marks()
+	if len(marks) != 2 {
+		t.Errorf("marks = %+v, want both left — the batch removed nothing", marks)
+	}
+}

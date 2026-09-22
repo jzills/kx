@@ -47,8 +47,16 @@ the name it was given, never by position, so numbering the list would invite
 
 ```bash
 kx unmark api          # remove one mark
+kx unmark api web db   # remove several
 kx unmark --all        # remove every mark
 ```
+
+Names, and as many as you like. A name that isn't a mark refuses the whole
+call, so a typo partway through a list leaves every mark in place — there is
+no half-removed state to work out afterwards, and a mark can't be recovered
+from a listing that no longer mentions it. The `@` the listing prints is
+accepted on any of them, since copying what's on screen is the obvious way to
+type one.
 
 Marking under a name that's already taken replaces it in place; a mark is a
 pointer, and moving it is the ordinary operation, not an error.

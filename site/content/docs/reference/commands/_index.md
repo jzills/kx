@@ -40,7 +40,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--out str] [--port int] [kubectl flags...]`](top/) | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](tree/) | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | [`kx uncordon <index>...`](uncordon/) | Mark one or more indexed Nodes schedulable again. |
-| [`kx unmark [<name>] [--all]`](unmark/) | Remove a mark by name; --all removes every mark. |
+| [`kx unmark [<name>...] [--all]`](unmark/) | Remove marks by name; --all removes every mark. |
 | [`kx yaml <index>... [--show str] [kubectl flags...]`](yaml/) | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 
 ## History
