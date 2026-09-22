@@ -222,9 +222,6 @@ func newTopCommand(services Services) *cobra.Command {
 			scopedAllNamespaces := false
 			var output index.Table
 			var namespace string
-			// Read before Execute saves over it, so an empty listing can name
-			// what it displaced. See runGet.
-			previous, _ := services.State.Load()
 			if nodes {
 				resourceLabel = "nodes"
 				output, namespace, err = command.ExecuteNodes(match, rest)
@@ -266,7 +263,7 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 			render.IndexedTable(output, resourceLabel, namespace)
 			if output.Empty() {
-				render.PreviousListingNote(previous)
+				render.PreviousListingNote(previousListing(services))
 			}
 			if !htmlOpts.Enabled {
 				return nil

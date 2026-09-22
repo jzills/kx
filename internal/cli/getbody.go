@@ -62,12 +62,6 @@ func runGet(services Services, resource string, args []string, options getOption
 	// ".." (JSONPath's recursive descent, e.g. -o jsonpath={..metadata.name}),
 	// and a scan-anywhere loop that expanded it as a range broke that
 	// passthrough outright instead of erroring or ignoring it.
-	// Read before anything saves over it: a listing that finds nothing still
-	// becomes the current one, and the note offering the way back has to name
-	// what it displaced. Errors are ignored deliberately — no state yet is the
-	// ordinary first-run case, and it means there is nothing to offer.
-	previous, _ := services.State.Load()
-
 	indexArgs, extra := splitLeadingIndexes(args)
 	var refs []state.Ref
 	if len(indexArgs) > 0 {
@@ -173,7 +167,7 @@ func runGet(services Services, resource string, args []string, options getOption
 			}
 			render.IndexedTable(output, resource, render.AllNamespaces)
 			if output.Empty() {
-				render.PreviousListingNote(previous)
+				render.PreviousListingNote(previousListing(services))
 			}
 			return nil
 		}
@@ -219,9 +213,31 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 	render.IndexedTable(output, resource, namespace)
 	if output.Empty() {
-		render.PreviousListingNote(previous)
+		render.PreviousListingNote(previousListing(services))
 	}
 	return nil
+}
+
+// previousListing is the entry `kx state back` would return to, for the note an
+// empty listing offers.
+//
+// Read after the listing that found nothing has been saved, not before. The
+// entry that was current a moment ago is not always the one behind the new
+// one: a listing repeating the query the cursor is already on replaces that
+// entry rather than pushing beside it, so `kx get pods` (2 rows) followed by a
+// drained `kx get pods` offered "returns to Pods · 2 items" — the entry it had
+// just overwritten — and back landed on whatever was before that.
+//
+// Errors are ignored deliberately: no state yet is the ordinary first-run
+// case, and it means there is nothing to offer. So is a cursor at the bottom
+// of the stack, where there is nothing behind the current entry; the zero
+// State renders no note.
+func previousListing(services Services) state.State {
+	history, err := services.State.LoadHistory()
+	if err != nil || history.Cursor < 1 || history.Cursor >= len(history.States) {
+		return state.State{}
+	}
+	return history.States[history.Cursor-1]
 }
 
 // switchTo activates an indexed namespace or context.
