@@ -14,6 +14,10 @@ const podsOutput = "NAME             READY   STATUS    RESTARTS   AGE\n" +
 	"nginx-abc-xyz    1/1     Running   0          5d\n" +
 	"redis-def-uvw    1/1     Running   0          3d"
 
+const servicesOutput = "NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+	"api    ClusterIP   10.0.0.11    <none>        80/TCP    5d\n" +
+	"web    ClusterIP   10.0.0.12    <none>        80/TCP    3d"
+
 // fakeKubectl records the arguments it was called with instead of spawning a
 // process.
 type fakeKubectl struct {
@@ -564,5 +568,62 @@ func TestUnknownKindKeepsTheCurrentNamespace(t *testing.T) {
 	}
 	if got := states.saved[0].Namespace; got != "diagnostics" {
 		t.Errorf("saved namespace = %q, want diagnostics", got)
+	}
+}
+
+// `-o json`, `-o yaml` and `-o name` are output kx cannot number, and a
+// listing it cannot number must not become the current one: the numbers on
+// screen still belong to the listing before it. Saving the unparsed text as a
+// resourceless entry wiped them — `kx get pods` followed by `kx get pods -o
+// json` left `kx ref 1` answering "the current listing is empty" about a
+// listing the user never replaced.
+//
+// An empty *table* is a different thing and is still saved, by
+// TestGetEmptyOutputSavesTheEmptyListing below: it found nothing, which is a
+// fact about the cluster rather than a shape kx cannot read.
+func TestGetNonTabularOutputLeavesTheCurrentListingAlone(t *testing.T) {
+	for _, shape := range []struct {
+		flags  []string
+		output string
+	}{
+		{[]string{"-o", "json"}, "{\n  \"apiVersion\": \"v1\",\n  \"items\": []\n}"},
+		{[]string{"-o", "name"}, "pod/nginx-abc-xyz\npod/redis-def-uvw"},
+	} {
+		states := &fakeState{}
+		kubectl := &fakeKubectl{output: shape.output}
+
+		table, _, err := newGet(kubectl, states).Execute("pods", "", shape.flags)
+		if err != nil {
+			t.Fatalf("Execute %v: %v", shape.flags, err)
+		}
+		if table.Indexable() {
+			t.Errorf("%v: numbered output kx cannot index:\n%s", shape.flags, table.Text())
+		}
+		if len(states.saved) != 0 {
+			t.Errorf("%v: saved %d entries, want none — the listing before it still resolves",
+				shape.flags, len(states.saved))
+		}
+	}
+}
+
+// A slot holds one kind's listing, and a listing that found nothing names no
+// kind — SaveNamed refuses it, which reached the user as "state: a slot needs
+// a single-kind listing" where `kx ns` should have said none were found. The
+// slot keeps what it had, which is what kx contexts has always done with an
+// empty listing.
+func TestSlotListingThatFoundNothingKeepsTheSlot(t *testing.T) {
+	states := &fakeState{}
+	get := GetCommand{
+		Kubectl: &fakeKubectl{output: ""},
+		State:   slotOnly{writer: states},
+		Index:   index.Service{},
+	}
+
+	if _, _, err := get.Execute("namespaces", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.named) != 0 {
+		t.Errorf("wrote %d slot entries for a listing that found nothing, want none",
+			len(states.named))
 	}
 }

@@ -111,7 +111,9 @@ kx pods --field-selector status.phase=Running
 
 {{% kx-note %}}
 `-o json` and friends pass through too, but there is no table to number in
-that output, so nothing is indexed. The command prints what kubectl printed.
+that output, so nothing is indexed. The command prints what kubectl printed,
+and the listing you already had stays current — the numbers on screen before
+it still resolve.
 {{% /kx-note %}}
 
 ## Resources with no namespace
