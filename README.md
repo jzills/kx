@@ -78,12 +78,18 @@ Indexes come several at a time, as ranges, or narrowed.
 
 ```bash
 kx delete 3 5                   # several at once
-kx delete 3..7                  # an inclusive range, walking either direction
+kx delete 3..7                  # an inclusive range, walking either direction, trimmed to the listing
 kx delete ..5                   # open at the start
 kx delete 5..                   # open to the end of the listing
 kx get pods -m api              # --match/-m filters rows by name substring
 kx get pods -n prod -l app=api  # anything else passes through to kubectl
 ```
+
+kubectl's own flags pass through everywhere they mean something — `kx delete 3
+--force --grace-period=0`, `kx rollout undo 3 --to-revision=2`, `kx scale 3 0
+--timeout=1m`, `kx logs 3 -f --tail=100`. A namespace flag is the exception: an
+index already carries the namespace it was listed from, so `-n` beside one is
+refused rather than silently retargeting the command.
 
 `-A` listings are indexed too: each row records its own namespace, so
 `kx describe 7` reaches a resource in a namespace you aren't in, and two pods
@@ -183,6 +189,51 @@ you want in CI — `kx diag --out report.html` is the whole command.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/browser-reports/)
 
+## Spend an index anywhere
+
+`kx` wraps two dozen of kubectl's verbs. `kx ref` covers the rest, and every
+tool that isn't kubectl: it prints what an index refers to, as an argument
+fragment that drops straight into another command.
+
+```bash
+kx ref 3                                     # pod/web-abc-xyz -n prod
+kubectl exec $(kx ref 3) -- sh               # a verb kx doesn't wrap
+kubectl get $(kx ref 1..3)                   # one line each, so ranges work too
+stern $(kx ref 3 --name) -n $(kx ref 3 --namespace)
+kx ref 1..9 --name | xargs -n1 some-tool
+```
+
+`--name`, `--namespace` and `--kind` print that field alone, for tools that take
+the pieces separately. A cluster-scoped resource gets no `-n`, because there is
+no namespace for it to be in.
+
+Nothing here touches the cluster: `kx ref` reports what the index *means*, so it
+answers instantly and works with nothing reachable. The command you spend it on
+is what discovers whether the resource is still there.
+
+## Marks
+
+An index is a position, and positions move — the next `kx get` renumbers
+everything out from under it. A mark is a name you choose instead, pinned to
+one resource, so it keeps working across every listing that comes after it.
+
+```bash
+kx mark api 3          # pin what index 3 is right now
+kx logs @api -f        # spend it where a command takes an index
+kx exec @api -- sh
+kx mark                # list marks
+kx unmark api
+kx unmark --all
+```
+
+A mark survives re-listing, which is what an index cannot do. It is pinned to
+the cluster it was taken in, and will not resolve in another — the same name
+means a different resource there, or none at all. `kx state drop --all`
+leaves marks alone; `kx unmark --all` is what removes them.
+
+`kx ns` and `kx context` take an index but not a mark, because a slot is not
+a resource; `kx cp` parses its own `index:path` and takes one too.
+
 ## Use kx in CI
 
 `--fail-on <severity>` turns a sweep into a build gate, and `--json` prints the
@@ -223,8 +274,14 @@ kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
-kx state drop 2       # remove position 2 (--all clears everything, slots included)
+kx state drop 2       # remove position 2 (--all clears everything, slots included, marks untouched)
+kx state drop --empty # drop the entries whose listing found nothing
 ```
+
+A listing that found nothing is saved like any other, so the indexes it
+replaced stop resolving rather than quietly pointing at the listing before it.
+`kx` offers the way back when it happens, and `kx state drop --empty` sweeps
+those entries up.
 
 Each entry remembers the context it was listed in, so a staging index is never
 resolved against production — `kx` refuses and relists instead. `KX_STATE`
@@ -280,8 +337,10 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx label <index> [<key=value>...]` | Set or remove labels on an indexed resource. |
 | `kx labels <index>...` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| `kx mark [<name>] [<index>]` | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| `kx ref <index>...` | Print what an index refers to, for commands kx doesn't wrap. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
@@ -289,6 +348,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
+| `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |
 | `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
@@ -316,3 +376,6 @@ commands it documents. Tests are not in the hook — run them yourself.
 The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)
 tapes — see [`demo/README.md`](demo/README.md) for seeding the demo namespace
 and re-recording.
+
+Releases are cut by pushing a `release/vX.Y.Z` branch — see
+[`RELEASING.md`](RELEASING.md).

@@ -14,6 +14,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -29,8 +30,8 @@ type EventsCommand struct {
 	Since time.Time
 }
 
-func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c EventsCommand) Execute(ctx context.Context, ref state.Ref) ([]events.Row, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +49,7 @@ func (c EventsCommand) Execute(ctx context.Context, index int) ([]events.Row, er
 		// whose events are all older than --since has plainly not been deleted,
 		// and probing for it would spend a kubectl subprocess to learn what its
 		// events already said.
-		if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+		if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 			return nil, err
 		}
 		return nil, nil
@@ -71,11 +72,8 @@ func newEventsCommand(services Services) *cobra.Command {
 			"  kx events 1..3\n  kx events 3..",
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
-				return err
-			}
-			if err := validateIndexes(services.State, indexes); err != nil {
 				return err
 			}
 			// Parsed before the API server is read, so a typo fails on the
@@ -95,13 +93,9 @@ func newEventsCommand(services Services) *cobra.Command {
 				Events:  events.APIService{Client: client},
 				Since:   events.Cutoff(window),
 			}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
+			for position, target := range resolved {
 				stop := render.Status("fetching events")
-				rows, err := command.Execute(cmd.Context(), index)
+				rows, err := command.Execute(cmd.Context(), target.Ref)
 				stop()
 				if err != nil {
 					return err
@@ -113,7 +107,7 @@ func newEventsCommand(services Services) *cobra.Command {
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, extra,
+				render.Banner(string(target.Kind), target.Name, target.Namespace, extra,
 					render.WindowLabel(window))
 				render.EventsTable(rows, window)
 			}
@@ -268,6 +262,9 @@ func newTopCommand(services Services) *cobra.Command {
 				return nil
 			}
 			render.IndexedTable(output, resourceLabel, namespace)
+			if output.Empty() {
+				render.PreviousListingNote(previousListing(services))
+			}
 			if !htmlOpts.Enabled {
 				return nil
 			}

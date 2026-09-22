@@ -3,12 +3,14 @@
 title: "kx state"
 linkTitle: "state"
 description: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets."
-weight: 28
+weight: 31
 ---
 
 Shows the listing that indexes currently resolve against.
 
 kx keeps a stack of recent `kx get` results — `max_history` of them, 10 by default — with a cursor marking the current one. `--all` lists the stack, a position jumps to an entry, and `back`/`forward` step through it.
+
+Re-running the listing you are already on refreshes that entry rather than pushing another copy, so the stack holds distinct views and `back` reaches the one before.
 
 Namespaces and contexts sit in slots of their own, outside that stack: `kx ns 2` counts against the namespaces you last listed however much you have listed since, and switching namespace never pushes work off the stack. `--targets` expands both slots, so you can pick a number without listing again.
 
@@ -25,7 +27,7 @@ kx state [OPTIONS] [position]
 | Command | Description |
 |---|---|
 | `kx state back` | Navigate to the previous kx get result. |
-| `kx state drop` | Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots. |
+| `kx state drop` | Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything but marks. |
 | `kx state forward` | Navigate to the next kx get result. |
 
 ## Arguments

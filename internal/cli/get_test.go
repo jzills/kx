@@ -14,6 +14,10 @@ const podsOutput = "NAME             READY   STATUS    RESTARTS   AGE\n" +
 	"nginx-abc-xyz    1/1     Running   0          5d\n" +
 	"redis-def-uvw    1/1     Running   0          3d"
 
+const servicesOutput = "NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+	"api    ClusterIP   10.0.0.11    <none>        80/TCP    5d\n" +
+	"web    ClusterIP   10.0.0.12    <none>        80/TCP    3d"
+
 // fakeKubectl records the arguments it was called with instead of spawning a
 // process.
 type fakeKubectl struct {
@@ -404,14 +408,33 @@ func TestGetWithoutMatchLeavesQueryMatchNil(t *testing.T) {
 	}
 }
 
-// Empty listings must not push a state entry, or `kx back` fills with nothing.
-func TestGetEmptyOutputSavesNothing(t *testing.T) {
+// An empty listing pushes a state entry like any other, because not pushing
+// one leaves the *previous* listing addressable: `kx get pods -n a` (14 rows)
+// then `kx get pods -n b` (none) then `kx delete 1` deleted a pod in a, two
+// commands and one namespace away from anything on screen. The entry carries
+// its query so the failure it produces can name what found nothing.
+//
+// This replaces a test that pinned the opposite, on the grounds that empty
+// entries fill the history with nothing. They do cost a slot; `kx state drop
+// --empty` is the answer to that, and it is the cheaper problem of the two.
+func TestGetEmptyOutputSavesTheEmptyListing(t *testing.T) {
 	states := &fakeState{}
-	if _, _, err := newGet(&fakeKubectl{output: ""}, states).Execute("pods", "", nil); err != nil {
+	kubectl := &fakeKubectl{output: "", namespace: "kube-public"}
+	if _, _, err := newGet(kubectl, states).Execute("pods", "", nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(states.saved) != 0 {
-		t.Errorf("saved %d entries for empty output, want 0", len(states.saved))
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty listing, want 1", len(states.saved))
+	}
+	entry := states.saved[0]
+	if entry.Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", entry.Resources.Len())
+	}
+	if entry.Namespace != "kube-public" {
+		t.Errorf("entry.Namespace = %q, want kube-public", entry.Namespace)
+	}
+	if entry.Query == nil || entry.Query.Resource != "pods" {
+		t.Errorf("entry.Query = %+v, want the pods query that found nothing", entry.Query)
 	}
 }
 
@@ -441,9 +464,10 @@ func TestGetUnknownResourceKindPassesThrough(t *testing.T) {
 // full listing path rather than substituting one.
 func indexService() Indexer { return index.Service{} }
 
-// An empty listing saves no state, so a caller reading the namespace back out
-// of saved state captioned it with the previous entry's. Switching to an empty
-// namespace and running `kx get pods` reported the namespace you had left.
+// A caller reading the namespace back out of saved state captioned an empty
+// listing with the previous entry's: switching to an empty namespace and
+// running `kx get pods` reported the namespace you had left. Execute returns
+// it directly for that reason, which is independent of what gets saved.
 func TestGetReturnsTheNamespaceEvenWhenNothingMatched(t *testing.T) {
 	kubectl := &fakeKubectl{output: "", namespace: "empty-ns"}
 	states := &fakeState{}
@@ -454,9 +478,6 @@ func TestGetReturnsTheNamespaceEvenWhenNothingMatched(t *testing.T) {
 	}
 	if namespace != "empty-ns" {
 		t.Errorf("namespace = %q, want empty-ns", namespace)
-	}
-	if len(states.saved) != 0 {
-		t.Errorf("an empty listing saved state: %+v", states.saved)
 	}
 }
 
@@ -547,5 +568,62 @@ func TestUnknownKindKeepsTheCurrentNamespace(t *testing.T) {
 	}
 	if got := states.saved[0].Namespace; got != "diagnostics" {
 		t.Errorf("saved namespace = %q, want diagnostics", got)
+	}
+}
+
+// `-o json`, `-o yaml` and `-o name` are output kx cannot number, and a
+// listing it cannot number must not become the current one: the numbers on
+// screen still belong to the listing before it. Saving the unparsed text as a
+// resourceless entry wiped them — `kx get pods` followed by `kx get pods -o
+// json` left `kx ref 1` answering "the current listing is empty" about a
+// listing the user never replaced.
+//
+// An empty *table* is a different thing and is still saved, by
+// TestGetEmptyOutputSavesTheEmptyListing below: it found nothing, which is a
+// fact about the cluster rather than a shape kx cannot read.
+func TestGetNonTabularOutputLeavesTheCurrentListingAlone(t *testing.T) {
+	for _, shape := range []struct {
+		flags  []string
+		output string
+	}{
+		{[]string{"-o", "json"}, "{\n  \"apiVersion\": \"v1\",\n  \"items\": []\n}"},
+		{[]string{"-o", "name"}, "pod/nginx-abc-xyz\npod/redis-def-uvw"},
+	} {
+		states := &fakeState{}
+		kubectl := &fakeKubectl{output: shape.output}
+
+		table, _, err := newGet(kubectl, states).Execute("pods", "", shape.flags)
+		if err != nil {
+			t.Fatalf("Execute %v: %v", shape.flags, err)
+		}
+		if table.Indexable() {
+			t.Errorf("%v: numbered output kx cannot index:\n%s", shape.flags, table.Text())
+		}
+		if len(states.saved) != 0 {
+			t.Errorf("%v: saved %d entries, want none — the listing before it still resolves",
+				shape.flags, len(states.saved))
+		}
+	}
+}
+
+// A slot holds one kind's listing, and a listing that found nothing names no
+// kind — SaveNamed refuses it, which reached the user as "state: a slot needs
+// a single-kind listing" where `kx ns` should have said none were found. The
+// slot keeps what it had, which is what kx contexts has always done with an
+// empty listing.
+func TestSlotListingThatFoundNothingKeepsTheSlot(t *testing.T) {
+	states := &fakeState{}
+	get := GetCommand{
+		Kubectl: &fakeKubectl{output: ""},
+		State:   slotOnly{writer: states},
+		Index:   index.Service{},
+	}
+
+	if _, _, err := get.Execute("namespaces", "", nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(states.named) != 0 {
+		t.Errorf("wrote %d slot entries for a listing that found nothing, want none",
+			len(states.named))
 	}
 }

@@ -221,7 +221,7 @@ func TestEventsCommandWithoutAWindowKeepsEverything(t *testing.T) {
 		State:   pod("nginx"),
 		Events:  events.APIService{Client: client},
 	}
-	rows, err := command.Execute(context.Background(), 1)
+	rows, err := command.Execute(context.Background(), state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

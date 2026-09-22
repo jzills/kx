@@ -122,6 +122,16 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.AddCommand(withoutRefresh(newEngineCommand(services)))
 	root.AddCommand(withoutRefresh(newThemeCommand(services)))
 	root.AddCommand(withoutRefresh(newTopCommand(services)))
+	// withoutRefresh: the wrapper re-runs a saved query when kubectl reports a
+	// resource gone, and kx ref never asks kubectl anything. It reports what
+	// the index means, which is knowable with no cluster reachable at all.
+	root.AddCommand(withoutRefresh(newRefCommand(services)))
+	// kx mark resolves an index exactly the way kx describe does, and a stale
+	// or context-mismatched index deserves the same recovery: a fresh listing
+	// to mark from, rather than a dead end. kx unmark takes no index and never
+	// resolves one, so it stays without the wrapper.
+	root.AddCommand(withRefresh(services, newMarkCommand(services)))
+	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
 
 	stateCmd := newStateCommand(services)
 	stateCmd.AddCommand(
@@ -129,23 +139,9 @@ func NewRoot(services Services, version string) *cobra.Command {
 			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
 		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
 			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
-		newDropCommand(services, "kx state drop"),
+		newDropCommand(services),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
-
-	// kx back/forward/drop predate kx state gaining subcommands. They stay
-	// registered and fully working — just hidden from --help and the README
-	// table — so existing scripts and muscle memory don't break.
-	for _, cmd := range []*cobra.Command{
-		newNavigateCommand(services, "back", "Navigate to the previous kx get result.",
-			"Moves the cursor to the previous kx get result, clamped at the start of the stack.", -1),
-		newNavigateCommand(services, "forward", "Navigate to the next kx get result.",
-			"Moves the cursor to the next kx get result, clamped at the end of the stack.", +1),
-		newDropCommand(services, "kx drop"),
-	} {
-		cmd.Hidden = true
-		root.AddCommand(withoutRefresh(cmd))
-	}
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),

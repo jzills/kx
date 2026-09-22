@@ -1,51 +1,18 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jzills/kx/internal/state"
 )
-
-const labelsJSON = `{"metadata":{"labels":{"tier":"frontend","app":"web"}}}`
-
-func TestMetadataReadReturnsSortedKeys(t *testing.T) {
-	kubectl := &recordingKubectl{output: labelsJSON}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "labels",
-	}.Execute(1)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	// Sorted, because kubectl returns a JSON object and Go map iteration would
-	// reorder the rows on every run.
-	if len(keys) != 2 || keys[0] != "app" || keys[1] != "tier" {
-		t.Errorf("keys = %v, want [app tier]", keys)
-	}
-	if values["app"] != "web" {
-		t.Errorf("values = %v", values)
-	}
-	if want := "get Pod nginx -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
-		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
-	}
-}
-
-func TestMetadataReadHandlesMissingField(t *testing.T) {
-	kubectl := &recordingKubectl{output: `{"metadata":{}}`}
-	keys, values, err := MetadataReadCommand{
-		Kubectl: kubectl, State: pod("nginx"), Field: "annotations",
-	}.Execute(1)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(keys) != 0 || len(values) != 0 {
-		t.Errorf("keys = %v, values = %v; want empty", keys, values)
-	}
-}
 
 func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -67,7 +34,7 @@ func TestAnnotateUsesItsOwnVerb(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"annotations":{}}}`}
 	message, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "annotate", Field: "annotations",
-	}.Execute(1, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"note"}, map[string]string{"note": "hi"}, nil, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -82,7 +49,7 @@ func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev","app":"web"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
+	}.Execute(state.Ref{Index: 1}, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false)
 	if err == nil {
 		t.Fatal("overwrote existing labels without --overwrite")
 	}
@@ -97,7 +64,7 @@ func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev"}}}`}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, true)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -113,7 +80,7 @@ func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	_, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
-	}.Execute(1, nil, nil, nil, false)
+	}.Execute(state.Ref{Index: 1}, nil, nil, nil, false)
 	if err == nil {
 		t.Fatal("accepted a write with nothing to set or remove")
 	}
@@ -157,5 +124,357 @@ func TestParsePairsRejectsMalformed(t *testing.T) {
 		if _, _, err := parsePairs([]string{arg}); err == nil {
 			t.Errorf("parsePairs(%q) succeeded, want an error", arg)
 		}
+	}
+}
+
+// One kubectl call per (kind, namespace), not one per index. Fourteen serial
+// calls measured 1.26s on this cluster against ~110ms for the grouped read.
+//
+// Naming the resources in that one call is not enough, and measuring is what
+// showed it: kubectl makes an API request per name it is given, so the named
+// form only saved the process spawns. See the collection test below.
+func TestMetadataReadBatchesOneCallPerGroup(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}},
+		{"metadata":{"name":"db","labels":{"app":"db"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"db", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if len(kubectl.runs) != 1 {
+		t.Fatalf("made %d kubectl calls for three pods in one namespace, want 1", len(kubectl.runs))
+	}
+	if want := "get Pod -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
+		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+	for index, want := range map[int]string{1: "api", 2: "web", 3: "db"} {
+		if got := results[state.Ref{Index: index}].values["app"]; got != want {
+			t.Errorf("index %d resolved to app=%q, want %q", index, got, want)
+		}
+	}
+}
+
+// Matched by name rather than by reply order. kubectl happens to return items
+// in the order asked for, but nothing in its contract says so, and a mismatch
+// would silently attribute one resource's labels to another.
+func TestMetadataReadMatchesRepliesByName(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"web","labels":{"app":"web"}}},
+		{"metadata":{"name":"api","labels":{"app":"api"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want api's labels despite web coming back first", results[state.Ref{Index: 1}].values)
+	}
+	if results[state.Ref{Index: 2}].values["app"] != "web" {
+		t.Errorf("index 2 = %v, want web's labels", results[state.Ref{Index: 2}].values)
+	}
+}
+
+// A listing can span namespaces (kx get -A) and kinds (a tree walk), and
+// kubectl can fetch neither in one call. One call per group, and the groups
+// keep the order the indexes were given in.
+func TestMetadataReadGroupsByKindAndNamespace(t *testing.T) {
+	kubectl := &recordingKubectl{outputs: []string{
+		`{"metadata":{"name":"api","labels":{"app":"api"}}}`,
+		`{"metadata":{"name":"web","labels":{"app":"web"}}}`,
+		`{"metadata":{"name":"job","labels":{"app":"job"}}}`,
+	}}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "staging", "Pod"},
+		[3]string{"job", "prod", "Job"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if len(kubectl.runs) != 3 {
+		t.Fatalf("made %d calls for three distinct kind/namespace pairs, want 3", len(kubectl.runs))
+	}
+	for i, want := range []string{
+		"get Pod api -n prod -o json",
+		"get Pod web -n staging -o json",
+		"get Job job -n prod -o json",
+	} {
+		if got := joinArgs(kubectl.runs[i]); got != want {
+			t.Errorf("call %d = %q, want %q", i+1, got, want)
+		}
+	}
+	if results[state.Ref{Index: 3}].values["app"] != "job" {
+		t.Errorf("index 3 = %v, want the Job's labels", results[state.Ref{Index: 3}].values)
+	}
+}
+
+// A single name comes back as the bare object, not a List — kubectl only wraps
+// a reply in one when it was asked for several. Both shapes have to read.
+func TestMetadataReadAcceptsABareObjectForOneName(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"metadata":{"name":"api","labels":{"app":"api"}}}`}
+	resolver := refOf([3]string{"api", "prod", "Pod"})
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want api's labels", results[state.Ref{Index: 1}].values)
+	}
+}
+
+// A resource missing from the reply is a stale index, which is what withRefresh
+// exists for — reported rather than rendered as a resource with no labels.
+func TestMetadataReadReportsAResourceMissingFromTheReply(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"gone", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	if _, err := fetchMetadataFields(kubectl, resolved, "labels"); err == nil {
+		t.Fatal("fetchMetadataFields succeeded with a resource absent from the reply")
+	}
+}
+
+// The Ref that names a stale resource must be the caller's own, mark
+// included — fetchMetadataFields resolves through resolver.Resolve(ref) once
+// (to learn the name to fetch) and then again inside the loop that builds
+// StaleResourceError (metadata.go's g.refs[i]), and a version that rebuilt
+// state.Ref{Index: ref.Index} for either use would report "index 0 is stale"
+// for a mark that went missing from the reply, rather than naming the mark.
+// Three references in the batch, matching
+// TestMetadataReadStillReportsAMissingNameInABatch, because a batch of one
+// takes the single-reply fallback (see
+// TestMetadataReadAcceptsASingleReplyWithNoName) and never reaches the
+// missing-name check at all.
+func TestMetadataReadCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"missing-pod", "prod", "Pod"},
+	)
+	resolver.marks = map[string]int{"ghost": 3}
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "@ghost"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
+	if err == nil {
+		t.Fatal("fetchMetadataFields succeeded with a name absent from the reply")
+	}
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %v, want a StaleResourceError", err)
+	}
+	if stale.Ref.Mark != "ghost" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "ghost")
+	}
+}
+
+// A single-name reply is taken as the resource asked for whether or not it
+// carries a metadata.name. The name match exists to tell several replies
+// apart; with one there is nothing to tell apart, and insisting on the field
+// would make kx depend on something it does not need.
+func TestMetadataReadAcceptsASingleReplyWithNoName(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"app":"api"}}}`}
+	resolver := refOf([3]string{"api", "prod", "Pod"})
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if results[state.Ref{Index: 1}].values["app"] != "api" {
+		t.Errorf("index 1 = %v, want the sole reply's labels", results[state.Ref{Index: 1}].values)
+	}
+}
+
+// The stale check still bites where it means something: a batched reply that
+// omits one of the names it was asked about.
+func TestMetadataReadStillReportsAMissingNameInABatch(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+		[3]string{"gone", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
+	if err == nil {
+		t.Fatal("fetchMetadataFields succeeded with a name absent from a batched reply")
+	}
+	if !strings.Contains(err.Error(), "gone") {
+		t.Errorf("err = %q, want it to name the resource that was missing", err)
+	}
+}
+
+// One API request, not one per name. kubectl issues a request per named
+// resource when handed several — measured on this cluster, 14 names took
+// 892ms where the same fetch without names took 97ms — so a group of more
+// than one is read as a collection and filtered here.
+func TestMetadataReadFetchesTheCollectionForSeveralNames(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"kind":"List","items":[
+		{"metadata":{"name":"api","labels":{"app":"api"}}},
+		{"metadata":{"name":"web","labels":{"app":"web"}}},
+		{"metadata":{"name":"unasked","labels":{"app":"unasked"}}}
+	]}`}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if want := "get Pod -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
+		t.Errorf("args = %q, want %q — no names, so kubectl makes one request", joinArgs(kubectl.runs[0]), want)
+	}
+	if results[state.Ref{Index: 1}].values["app"] != "api" || results[state.Ref{Index: 2}].values["app"] != "web" {
+		t.Errorf("results = %v, want the two resources asked for", results)
+	}
+	if len(results) != 2 {
+		t.Errorf("results = %v, want only the indexes asked about", results)
+	}
+}
+
+// One name stays a named fetch: listing a whole namespace to find one
+// resource is the slower half of the trade, and it needs list permission
+// where a named get needs only get.
+func TestMetadataReadKeepsANamedFetchForOneName(t *testing.T) {
+	kubectl := &recordingKubectl{output: `{"metadata":{"name":"api","labels":{"app":"api"}}}`}
+	resolver := refOf([3]string{"api", "prod", "Pod"})
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	if _, err := fetchMetadataFields(kubectl, resolved, "labels"); err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if want := "get Pod api -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
+		t.Errorf("args = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+}
+
+// A collection fetch needs list permission on the namespace; a named get needs
+// only get, and RBAC that grants the second without the first is ordinary. So
+// a failed collection fetch falls back to naming each resource rather than
+// reporting a failure the old code would not have had.
+func TestMetadataReadFallsBackToNamedFetchesWhenListingFails(t *testing.T) {
+	kubectl := &recordingKubectl{
+		outputs: []string{
+			"",
+			`{"metadata":{"name":"api","labels":{"app":"api"}}}`,
+			`{"metadata":{"name":"web","labels":{"app":"web"}}}`,
+		},
+		errs: []error{
+			errors.New(`Error from server (Forbidden): pods is forbidden: cannot list resource "pods"`),
+			nil,
+			nil,
+		},
+	}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	results, err := fetchMetadataFields(kubectl, resolved, "labels")
+	if err != nil {
+		t.Fatalf("fetchMetadataFields: %v", err)
+	}
+	if len(kubectl.runs) != 3 {
+		t.Fatalf("made %d calls, want the failed listing plus one per name", len(kubectl.runs))
+	}
+	if results[state.Ref{Index: 1}].values["app"] != "api" || results[state.Ref{Index: 2}].values["app"] != "web" {
+		t.Errorf("results = %v, want both resources via the fallback", results)
+	}
+}
+
+// When the fallback fails too, its error is the one reported: it names the
+// resource, where the listing's names only the collection.
+func TestMetadataReadReportsTheNamedFetchErrorWhenBothFail(t *testing.T) {
+	kubectl := &recordingKubectl{
+		errs: []error{
+			errors.New("cannot list resource"),
+			errors.New(`Error from server (NotFound): pods "api" not found`),
+		},
+	}
+	resolver := refOf(
+		[3]string{"api", "prod", "Pod"},
+		[3]string{"web", "prod", "Pod"},
+	)
+
+	resolved, err := resolveRefs(resolver, "indexes", []string{"1", "2"})
+	if err != nil {
+		t.Fatalf("resolveRefs: %v", err)
+	}
+	_, err = fetchMetadataFields(kubectl, resolved, "labels")
+	if err == nil {
+		t.Fatal("fetchMetadataFields succeeded with both paths failing")
+	}
+	if !strings.Contains(err.Error(), "NotFound") {
+		t.Errorf("err = %q, want the named fetch's error, which names the resource", err)
 	}
 }

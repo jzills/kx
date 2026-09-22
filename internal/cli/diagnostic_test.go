@@ -1060,7 +1060,7 @@ func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
 				Summary: "Only 0/1 replicas ready"},
 		},
 	}
-	document, err := diagnosticJSON(report, 1)
+	document, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -1122,7 +1122,7 @@ func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
 				Summary: "Failed ×46154 on Pod/web-1"},
 		},
 	}
-	document, err := diagnosticJSON(report, 1)
+	document, err := diagnosticJSON(report, state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("diagnosticJSON: %v", err)
 	}
@@ -1167,5 +1167,25 @@ func TestPageBuildersCarryTheWindow(t *testing.T) {
 	result.Window = 0
 	if got := sweepPage(result, web.Meta{}).Window; got != "" {
 		t.Errorf("an unbounded sweepPage carried Window = %q, want empty", got)
+	}
+}
+
+// A sweep that checked nothing is still the listing indexes count against;
+// saving no entry left the previous listing addressable. See
+// TestGetEmptyOutputSavesTheEmptyListing for what that costs.
+func TestTriageEmptySweepSavesTheEmptyEntry(t *testing.T) {
+	var saved []state.State
+	if _, err := triageOf(&fakeGatherer{}, &saved).
+		Execute(context.Background(), "prod", false, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("saved %d entries for an empty sweep, want 1", len(saved))
+	}
+	if saved[0].Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", saved[0].Resources.Len())
+	}
+	if saved[0].Namespace != "prod" {
+		t.Errorf("entry.Namespace = %q, want prod", saved[0].Namespace)
 	}
 }

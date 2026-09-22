@@ -102,6 +102,31 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 		return nil, true, fmt.Errorf(
 			"Invalid value for '%s': '%s' spans more than %d indexes.", name, arg, maxRangeSpan)
 	}
+	// Clamped to the listing, so a closed range that overshoots acts on the
+	// rows that exist rather than failing outright — which is what the
+	// open-ended form has always done, since it reads its end from Count().
+	// `13..` ending at the last row while `13..20` died on index 15 was the
+	// same gesture answered two ways.
+	//
+	// After the span check above, not before: an absurd range ("1..999999")
+	// keeps its own refusal rather than being quietly narrowed to the
+	// listing. Clamping is for a range that overshoots, not for one that was
+	// never plausible.
+	if count, countErr := resolver.Count(); countErr != nil {
+		return nil, true, countErr
+	} else if count > 0 {
+		// An empty listing is left unclamped on purpose: resolution reports
+		// it as the empty listing it is (see state.emptyListing), which says
+		// more than "starts past the current listing (0 items)".
+		if start > count && end > count {
+			return nil, true, fmt.Errorf(
+				"Invalid value for '%s': '%s' starts past the current listing (%s).",
+				name, arg, itemCount(count))
+		}
+		start = clampIndex(start, count)
+		end = clampIndex(end, count)
+	}
+
 	step := 1
 	if start > end {
 		step = -1
@@ -116,42 +141,16 @@ func expandRange(resolver IndexResolver, name, arg string) (indexes []int, ok bo
 	return indexes, true, nil
 }
 
-func parseIndexes(resolver IndexResolver, name string, args []string) ([]int, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("Missing argument '%s'.", name)
+// clampIndex pulls an index inside the current listing, which is the only
+// range of positions that can resolve to anything.
+func clampIndex(index, count int) int {
+	if index < 1 {
+		return 1
 	}
-	indexes := make([]int, 0, len(args))
-	for _, arg := range args {
-		if expanded, ok, err := expandRange(resolver, name, arg); ok {
-			if err != nil {
-				return nil, err
-			}
-			indexes = append(indexes, expanded...)
-			continue
-		}
-		index, err := parseIndex(name, arg)
-		if err != nil {
-			return nil, err
-		}
-		indexes = append(indexes, index)
+	if index > count {
+		return count
 	}
-	return indexes, nil
-}
-
-// validateIndexes resolves every index against the current state before a
-// batch command acts on any of them. Without this, a command that loops
-// index-by-index (delete, describe, logs, yaml, label/annotation reads) only
-// discovers a bad index — e.g. a range that overruns the current listing —
-// after it has already acted on the indexes ahead of it. For delete that
-// partial action can't be undone, so the whole batch must validate clean
-// before any of it runs.
-func validateIndexes(resolver IndexResolver, indexes []int) error {
-	for _, index := range indexes {
-		if _, _, _, err := resolver.Fields(index); err != nil {
-			return err
-		}
-	}
-	return nil
+	return index
 }
 
 func itemCount(count int) string {
@@ -195,7 +194,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 		SuggestFor:         []string{"detail", "details"},
 		Short:              "Show full kubectl describe output for one or more indexed resources.",
 		Long:               "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
-		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..",
+		Example:            "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -212,37 +211,40 @@ func newDescribeCommand(services Services) *cobra.Command {
 				return fmt.Errorf(
 					"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
 			}
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
-			for _, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
-				render.Banner(string(kind), name, namespace, "")
-				if err := command.Execute(index, extra); err != nil {
-					return err
-				}
-			}
-			return nil
+			return runEach(resolved, func(target Resolved) error {
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				return command.Execute(target.Ref, extra)
+			})
 		},
 	}
 }
 
-// splitLeadingIndexes takes the run of numeric-or-range arguments at the
-// front, leaving the rest for kubectl. A malformed range (e.g. "9..abc") still
-// counts as part of the leading run — it isn't fully validated here, only
-// shaped like a range, so it reaches parseIndexes for a proper error instead
-// of the generic "not a valid int" that applies when nothing leads at all.
+// splitLeadingIndexes takes the run of numeric-, range- or mark-shaped
+// arguments at the front, leaving the rest for kubectl. A malformed range
+// (e.g. "9..abc") still counts as part of the leading run — it isn't fully
+// validated here, only shaped like a range, so it reaches parseRefs for a
+// proper error instead of the generic "not a valid int" that applies when
+// nothing leads at all.
+//
+// A '@'-prefixed argument is kept in the run unvalidated for the same reason:
+// "kx logs @api" would otherwise stop at "@api" on the first argument (it is
+// not an int and has no ".."), hand it to kubectl as a positional, and answer
+// with "@api is not a valid int" — a parse failure that names the wrong
+// problem, since "@api" is a perfectly well-formed mark reference. Whether
+// the name after '@' is any good is parseRefs's question, same as an
+// out-of-range index or a malformed range.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
 	for i, arg := range args {
-		if _, err := strconv.Atoi(arg); err != nil && !strings.Contains(arg, "..") {
+		if _, err := strconv.Atoi(arg); err != nil &&
+			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") {
 			return args[:i], args[i:]
 		}
 	}
@@ -256,7 +258,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
-		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..",
+		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -275,14 +277,14 @@ func newLogsCommand(services Services) *cobra.Command {
 				}
 				return fmt.Errorf("Missing argument 'indexes'.")
 			}
-			indexes, err := parseIndexes(services.State, "indexes", indexArgs)
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
-			if err := checkFollow(extra, len(indexes)); err != nil {
+			if err := checkFollow(extra, len(resolved)); err != nil {
 				return err
 			}
 			// Before the first subprocess, so a malformed window is reported
@@ -294,20 +296,15 @@ func newLogsCommand(services Services) *cobra.Command {
 			command := LogsCommand{
 				Kubectl: services.Kubectl, State: services.State, Status: render.Status,
 			}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
-				if position > 0 {
+			first := true
+			return runEach(resolved, func(target Resolved) error {
+				if !first {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, "")
-				if err := command.Execute(index, extra); err != nil {
-					return err
-				}
-			}
-			return nil
+				first = false
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				return command.Execute(target.Ref, extra)
+			})
 		},
 	}
 	// Registered so it appears in the command's help; parsing is by hand, like
@@ -385,12 +382,20 @@ func newEditCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("edit requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
+				return err
+			}
 			return EditCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, rest[1:])
+				Execute(ref, rest[1:])
 		},
 	}
 }
@@ -402,7 +407,7 @@ func newExecCommand(services Services) *cobra.Command {
 		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
 		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
 			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
-		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar",
+		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:               minArgs(1),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -414,13 +419,21 @@ func newExecCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("exec requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
+				return err
+			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return ExecCommand{
 				Kubectl: services.Kubectl, State: services.State, Shells: services.Config.Shells,
-			}.Execute(index, command, rest[1:])
+			}.Execute(ref, command, rest[1:])
 		},
 	}
 }
@@ -466,14 +479,22 @@ func newDebugCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("debug requires an index")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
+				return err
+			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
 				return err
 			}
 			return DebugCommand{
 				Kubectl: services.Kubectl, State: services.State,
 				Image: services.Config.DebugImage,
-			}.Execute(index, command, rest[1:])
+			}.Execute(ref, command, rest[1:])
 		},
 	}
 	// Read by hand out of the passthrough args — kx acts on both, rather than
@@ -487,21 +508,44 @@ func newDebugCommand(services Services) *cobra.Command {
 }
 
 func newDeleteCommand(services Services) *cobra.Command {
-	var yes bool
 	cmd := &cobra.Command{
-		Use:        "delete <index>...",
+		Use:        "delete <index>... [kubectl flags]",
 		SuggestFor: []string{"rm", "remove", "destroy"},
 		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
 		Long: "Deletes one or more indexed resources, confirming each one individually " +
-			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.",
-		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..",
-		Args:    minArgs(1),
+			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.\n\n" +
+			"kubectl's own flags pass through: --force --grace-period=0 for a pod that " +
+			"will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still " +
+			"prompts — kx does not read kubectl's flag semantics, and reading " +
+			"--dry-run=none as a dry run would skip the prompt on a real delete.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..\n" +
+			"  kx delete 3 --force --grace-period=0",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			yes, rest := extractBool(rest, "--yes", "-y")
+			indexArgs, extra := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return requiredArgsError(cmd)
+			}
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			command := DeleteCommand{
@@ -512,8 +556,8 @@ func newDeleteCommand(services Services) *cobra.Command {
 			}
 			// Confirmed and reported one at a time, so declining one resource
 			// doesn't silently take the rest with it.
-			for _, index := range indexes {
-				message, err := command.Execute(index, yes)
+			for _, target := range resolved {
+				message, err := command.Execute(target.Ref, yes, extra)
 				if err != nil {
 					return err
 				}
@@ -522,30 +566,63 @@ func newDeleteCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt")
+	// Parsed by hand, registered only so it appears in --help instead of
+	// vanishing.
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 	return cmd
 }
 
 func newScaleCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use:   "scale <index> <replicas>",
+		Use:   "scale <index> <replicas> [kubectl flags]",
 		Short: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
 		Long: "Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. " +
-			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.",
-		Example: "  kx scale 1 3",
-		Args:    exactArgs(2),
+			"For a Deployment or StatefulSet, kx rollout status on the same index can then confirm the new replicas came up.\n\n" +
+			"kubectl's own flags pass through — --current-replicas to make the scale " +
+			"conditional, --timeout, --dry-run. --replicas is the exception: kx builds it " +
+			"from the replica count given here, so a second one is refused rather than " +
+			"left for kubectl to choose between.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx scale 1 3\n  kx scale 1 3 --current-replicas=2\n  kx scale 1 0 --timeout=1m",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return requiredArgsError(cmd)
+			}
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
-			replicas, err := strconv.Atoi(args[1])
+			replicas, err := strconv.Atoi(rest[1])
 			if err != nil {
 				return fmt.Errorf(
-					"Invalid value for 'replicas': '%s' is not a valid int.", args[1])
+					"Invalid value for 'replicas': '%s' is not a valid int.", rest[1])
+			}
+			extra := rest[2:]
+			if hasFlag(extra, "--replicas", "") {
+				return fmt.Errorf(
+					"'--replicas' cannot be combined with a replica count — kx builds " +
+						"the flag from the count given here. Drop one of the two.")
+			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+				return err
 			}
 			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, replicas)
+				Execute(ref, replicas, extra)
 			if err != nil {
 				return err
 			}
@@ -561,19 +638,44 @@ func newRolloutCommand(services Services) *cobra.Command {
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
 		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
-			"live and blocks until the rollout settles; the other actions run and return immediately.",
-		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1",
+			"live and blocks until the rollout settles; the other actions run and return immediately.\n\n" +
+			"kubectl's own flags pass through, which is how undo reaches a particular " +
+			"revision: --to-revision, --revision for history, --timeout for status.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1\n" +
+			"  kx rollout undo 1 --to-revision=2\n  kx rollout status 1 --timeout=2m",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
 		// left `kx rollout status <TAB>` offering filenames instead of the
 		// index it wants. installCompletions covers both positions.
-		Args: exactArgs(2),
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[1])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			if len(rest) < 2 {
+				return requiredArgsError(cmd)
+			}
+			ref, err := parseRef("index", rest[1])
 			if err != nil {
 				return err
 			}
+			extra := rest[2:]
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+				return err
+			}
 			output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(args[0], index)
+				Execute(rest[0], ref, extra)
 			if err != nil {
 				return err
 			}
@@ -610,12 +712,20 @@ func newPortForwardCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return fmt.Errorf("port-forward requires an index and a port")
 			}
-			index, err := parseIndex("index", rest[0])
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
 			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, rest[2:]); err != nil {
+				return err
+			}
 			return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
-				Execute(index, rest[1], rest[2:])
+				Execute(ref, rest[1], rest[2:])
 		},
 	}
 }
@@ -658,23 +768,57 @@ func newCopyCommand(services Services) *cobra.Command {
 }
 
 func newYamlCommand(services Services) *cobra.Command {
-	var show string
 	cmd := &cobra.Command{
-		Use:        "yaml <index>...",
+		Use:        "yaml <index>... [kubectl flags]",
 		SuggestFor: []string{"manifest", "spec"},
 		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
 		Long: "Prints the raw YAML manifest for one or more indexed resources. --show fetches the " +
 			"same full manifest and narrows it client-side to the named top-level fields, so it " +
-			"works with anything kubectl's own YAML output has.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml 3..",
-		Args:    minArgs(1),
+			"works with anything kubectl's own YAML output has.\n\n" +
+			"kubectl's own flags pass through. Naming an output format yourself replaces " +
+			"kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints " +
+			"JSON. --show cannot be combined with one: it parses the YAML it narrows.\n\n" +
+			"Unrecognized flags are passed through to kubectl.",
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
+			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			show, rest, err := extractString(rest, "--show", "")
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			indexArgs, rest := splitLeadingIndexes(rest)
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return requiredArgsError(cmd)
+			}
+			extra := rest
+			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+			if err != nil {
 				return err
+			}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+				return err
+			}
+			// --show narrows the YAML it parsed, so another output format is a
+			// contradiction rather than a refinement — and left to kubectl the
+			// two would silently produce whichever -o came last.
+			if show != "" && hasFlag(extra, "--output", "-o") {
+				return fmt.Errorf(
+					"'--show' cannot be combined with an output format — it narrows the " +
+						"YAML manifest it parsed. Drop one of the two.")
 			}
 			var fields []string
 			if show != "" {
@@ -685,19 +829,17 @@ func newYamlCommand(services Services) *cobra.Command {
 				}
 			}
 			command := YamlCommand{Kubectl: services.Kubectl, State: services.State}
-			for position, index := range indexes {
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
-				if position > 0 {
+			first := true
+			return runEach(resolved, func(target Resolved) error {
+				if !first {
 					render.Raw("")
 				}
+				first = false
 				// Banner per manifest: without it, several manifests run
 				// together with nothing saying which is which.
-				render.Banner(string(kind), name, namespace, "")
+				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
 				stop := render.Status("fetching manifest")
-				output, err := command.Execute(index, fields)
+				output, err := command.Execute(target.Ref, fields, extra)
 				stop()
 				if err != nil {
 					return err
@@ -705,11 +847,13 @@ func newYamlCommand(services Services) *cobra.Command {
 				// Printed with its trailing newline intact, so consecutive
 				// manifests are separated the way kubectl's own output is.
 				render.Raw(strings.TrimRight(output, "\n") + "\n")
-			}
-			return nil
+				return nil
+			})
 		},
 	}
-	cmd.Flags().StringVar(&show, "show", "", "Comma-separated fields to display (e.g. metadata,spec)")
+	// Parsed by hand, registered only so it appears in --help instead of
+	// vanishing.
+	cmd.Flags().String("show", "", "Comma-separated fields to display (e.g. metadata,spec)")
 	return cmd
 }
 
@@ -722,40 +866,34 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		Args:    minArgs(1),
 		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			indexes, err := parseIndexes(services.State, "indexes", args)
+			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
 				return err
 			}
-			if err := validateIndexes(services.State, indexes); err != nil {
+			// One fetch for the whole batch, and so one spinner: a call per
+			// index took 1.12s for a 14-pod listing where one batched call
+			// took 0.079s.
+			stop := render.Status("fetching " + field)
+			results, err := fetchMetadataFields(services.Kubectl, resolved, field)
+			stop()
+			if err != nil {
 				return err
 			}
-			command := MetadataReadCommand{
-				Kubectl: services.Kubectl, State: services.State, Field: field,
-			}
-			for position, index := range indexes {
-				stop := render.Status("fetching " + field)
-				keys, values, err := command.Execute(index)
-				stop()
-				if err != nil {
-					return err
-				}
-				name, namespace, kind, err := services.State.Fields(index)
-				if err != nil {
-					return err
-				}
+			for position, target := range resolved {
+				result := results[target.Ref]
 				if position > 0 {
 					render.Blank()
 				}
-				render.Banner(string(kind), name, namespace, itemCount(len(keys)))
+				render.Banner(string(target.Kind), target.Name, target.Namespace, itemCount(len(result.keys)))
 				if asSelector {
-					pairs := make([]string, 0, len(keys))
-					for _, key := range keys {
-						pairs = append(pairs, key+"="+values[key])
+					pairs := make([]string, 0, len(result.keys))
+					for _, key := range result.keys {
+						pairs = append(pairs, key+"="+result.values[key])
 					}
 					render.Raw(strings.Join(pairs, ","))
 					continue
 				}
-				render.KeyValueTable(header, keys, values)
+				render.KeyValueTable(header, result.keys, result.values)
 			}
 			return nil
 		},
@@ -779,7 +917,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 		Args:    minArgs(1),
 		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
@@ -789,7 +927,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 			}
 			message, err := MetadataWriteCommand{
 				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
-			}.Execute(index, keys, values, removes, overwrite)
+			}.Execute(ref, keys, values, removes, overwrite)
 			if err != nil {
 				return err
 			}
@@ -813,17 +951,37 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 		Args:       cobra.MaximumNArgs(1),
 		Example:    "  kx " + use + "\n  kx " + use + " 2",
 		SuggestFor: switchSuggestions(isContext),
+		Annotations: map[string]string{
+			// A slot switch takes a bare row number, never a mark — see the
+			// Mark refusal below. The shared argDocs entry for "index"
+			// promises "@name for a mark" for every other command, so this
+			// overrides it rather than let --help promise something kx ns
+			// and kx context both refuse.
+			"arg.index": "Row number from the current listing; kx state shows them",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listSwitchTargets(services, isContext)
 			}
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
+			// A slot (FieldsNamed) is not a resource reference, so a mark has
+			// nothing to have pinned here — refused rather than silently
+			// spending its zero-value Index as index 0. switchTo below takes
+			// a bare int for exactly that reason: it must never be handed a
+			// Ref that might still be carrying a mark.
+			if ref.Mark != "" {
+				subject := "namespaces"
+				if isContext {
+					subject = "contexts"
+				}
+				return markRefusedForSlot(ref, subject)
+			}
 			// Shared with `kx get contexts <index>`, which routes here too, so
 			// the stale-namespace relist lives in one place.
-			return switchTo(services, use, index, isContext)
+			return switchTo(services, use, ref.Index, isContext)
 		},
 	}
 }
@@ -898,7 +1056,10 @@ func listSwitchTargets(services Services, isContext bool) error {
 	// of the screen — and per #240 that answer lives in the kubeconfig, not in
 	// a slot that froze whenever the listing was taken. The contexts branch
 	// above takes its own caption the same way, and for the same reason.
-	render.IndexedTable(output, "namespaces", services.Kubectl.CurrentNamespace())
+	// SwitchListing rather than IndexedTable: this is the screen you pick a
+	// number off, so the row you are on is marked as well as named in the
+	// caption — the way kx theme and kx engine mark theirs.
+	render.SwitchListing(output, "namespaces", services.Kubectl.CurrentNamespace())
 	return nil
 }
 
@@ -912,6 +1073,9 @@ func newStateCommand(services Services) *cobra.Command {
 			"10 by default — with a cursor marking the current one. `--all` lists " +
 			"the stack, a position jumps to an entry, and `back`/`forward` step " +
 			"through it.\n\n" +
+			"Re-running the listing you are already on refreshes that entry rather " +
+			"than pushing another copy, so the stack holds distinct views and " +
+			"`back` reaches the one before.\n\n" +
 			"Namespaces and contexts sit in slots of their own, outside that " +
 			"stack: `kx ns 2` counts against the namespaces you last listed " +
 			"however much you have listed since, and switching namespace never " +
@@ -923,7 +1087,12 @@ func newStateCommand(services Services) *cobra.Command {
 			"disagree about what 2 means.",
 		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
 			"  kx state 2",
-		SuggestFor: []string{"history", "stack", "cursor"},
+		// back/forward/drop were top-level commands once. Removed, cobra
+		// suggested by edit distance alone and answered `kx drop` with "did
+		// you mean top?" — listing them here points the old spellings at the
+		// command that replaced them. No command is added: SuggestFor is
+		// consulted only after a lookup has already failed.
+		SuggestFor: []string{"history", "stack", "cursor", "back", "forward", "drop"},
 		Args:       cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Both read the whole file, and the slots live outside the stack, so
@@ -999,27 +1168,47 @@ func newNavigateCommand(services Services, use, short, long string, delta int) *
 	}
 }
 
-// prefix is the invocation the examples show — "kx state drop" for the
-// documented subcommand, "kx drop" for the hidden top-level alias kept for
-// existing scripts and muscle memory. Both share this constructor, so
-// without it the alias's own --help would show examples for a command it
-// isn't.
-func newDropCommand(services Services, prefix string) *cobra.Command {
-	var all bool
+func newDropCommand(services Services) *cobra.Command {
+	const prefix = "kx state drop"
+	var all, empty bool
 	cmd := &cobra.Command{
 		Use:   "drop <position>",
-		Short: "Remove a history entry by position (shown in kx state --all); --all clears everything, including namespace/context slots.",
-		Long: "Removes a history entry by position, or clears the whole stack — including the " +
-			"namespace and context slots — with --all.",
-		Example: fmt.Sprintf("  %s 2\n  %s --all", prefix, prefix),
+		Short: "Remove a history entry by position (shown in kx state --all); --empty drops the entries that found nothing, --all clears everything but marks.",
+		Long: "Removes a history entry by position, drops every entry that found nothing with " +
+			"--empty, or clears the whole stack — including the namespace and context slots — " +
+			"with --all.\n\n" +
+			"A listing that found nothing is still saved, so the indexes it replaced stop " +
+			"resolving; --empty is how those entries are swept back up. It needs no " +
+			"confirmation, unlike --all: an entry holding nothing is not work anyone can lose.\n\n" +
+			"--all leaves marks in place — they were named deliberately, not accumulated the way " +
+			"the stack is. 'kx unmark --all' is what removes them.",
+		Example: fmt.Sprintf("  %s 2\n  %s --empty\n  %s --all", prefix, prefix, prefix),
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && empty {
+				return fmt.Errorf("drop --all and --empty are different requests; pick one")
+			}
+			if empty {
+				if len(args) > 0 {
+					return fmt.Errorf("drop --empty takes no position argument")
+				}
+				history, dropped, err := services.State.DropEmpty()
+				if err != nil {
+					return err
+				}
+				if dropped == 0 {
+					render.Caption("No empty entries to drop.")
+					return nil
+				}
+				render.StateHistory(history)
+				return nil
+			}
 			if all {
 				if len(args) > 0 {
 					return fmt.Errorf("drop --all takes no position argument")
 				}
 				if err := services.confirm()(
-					"Clear all kx history, including namespace and context slots?",
+					"Clear all kx history, including namespace and context slots? Marks are untouched — run 'kx unmark --all' for those.",
 				); err != nil {
 					return err
 				}
@@ -1045,5 +1234,7 @@ func newDropCommand(services Services, prefix string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Clear all history and namespace/context slots")
+	cmd.Flags().BoolVarP(&empty, "empty", "e", false,
+		"Drop every history entry whose listing found nothing")
 	return cmd
 }

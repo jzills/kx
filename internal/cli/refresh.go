@@ -10,6 +10,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -23,9 +24,26 @@ import (
 type StaleResourceError struct {
 	Kind kinds.Kind
 	Name string
+	// Namespace is rendered as "in <namespace>" for a mark failure. Empty for
+	// a cluster-scoped kind (Node), which genuinely has none — the message
+	// must not read "in " with nothing after it.
+	Namespace string
+	// Ref is what named the resource. A mark failure is not refreshable: a
+	// mark carries no query, and replaying the history stack's would answer
+	// it with an unrelated listing.
+	Ref state.Ref
 }
 
 func (e StaleResourceError) Error() string {
+	if e.Ref.Mark != "" {
+		where := ""
+		if e.Namespace != "" {
+			where = " in " + e.Namespace
+		}
+		return fmt.Sprintf(
+			"%s is %s/%s%s, which no longer exists. Re-mark it with 'kx mark %s <index>'.",
+			e.Ref, e.Kind, e.Name, where, e.Ref.Mark)
+	}
 	return string(e.Kind) + "/" + e.Name + " no longer exists"
 }
 
@@ -59,15 +77,18 @@ func IsNotFound(err error) bool {
 
 // ensureExists converts a command failure into a StaleResourceError when the
 // resource is genuinely gone, so the caller can refresh rather than report a
-// confusing kubectl message.
-func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace string) error {
+// confusing kubectl message. ref is carried onto the error unchanged, so a
+// mark failure reports rather than replays — see isStale.
+func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace string, ref state.Ref) error {
 	if kubectl.Probe([]string{"get", string(kind), name, "-n", namespace}) != 0 {
-		return StaleResourceError{Kind: kind, Name: name}
+		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 	}
 	return nil
 }
 
 // forwardExit turns a non-zero kubectl exit into the error kx should return.
+// ref is passed straight through to ensureExists, so the caller's mark or
+// index rides along onto whichever error comes back.
 //
 // A vanished resource becomes StaleResourceError, so the caller refreshes.
 // Anything else forwards kubectl's own exit code: kubectl has already printed
@@ -76,9 +97,9 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 // on its own when the resource is still there — is why `kx describe 1
 // --bogus-flag` printed kubectl's error and then exited 0.
 func forwardExit(
-	kubectl kubectl.Service, kind kinds.Kind, name, namespace string, code int,
+	kubectl kubectl.Service, kind kinds.Kind, name, namespace string, code int, ref state.Ref,
 ) error {
-	if err := ensureExists(kubectl, kind, name, namespace); err != nil {
+	if err := ensureExists(kubectl, kind, name, namespace, ref); err != nil {
 		return err
 	}
 	return SilentError{Code: code}
@@ -96,7 +117,9 @@ func forwardExit(
 func isStale(err error) bool {
 	var stale StaleResourceError
 	if errors.As(err, &stale) {
-		return true
+		// A mark carries no query to replay — see StaleResourceError.Ref — so
+		// only an index failure is refreshable here.
+		return stale.Ref.Mark == ""
 	}
 	var mismatch state.ContextMismatchError
 	if errors.As(err, &mismatch) {
@@ -195,4 +218,47 @@ func handleStale(services Services, err error) {
 	if recoverState(services, refreshLead(err)) != refreshed {
 		render.Raw("Run 'kx get <resource>' to refresh the list.")
 	}
+}
+
+// runEach runs act for every resolved reference, continuing past a failure
+// that concerns only one of them.
+//
+// A read asked about several resources should answer for the ones it can.
+// kubectl refusing one pod's logs is ordinary in a namespace worth debugging,
+// and it used to end the batch: `kx logs 1..2` printed the first deployment's
+// error and never reached index 2, which read like the range being exclusive
+// rather than like one resource being unreadable. Position decided what you
+// saw — `kx logs 2..1` answered for both.
+//
+// Two kinds of failure still stop everything. An error withRefresh can recover
+// from has to reach it, or a stale index would report where it used to relist.
+// And an error that is kx's own, rather than kubectl's verdict on one
+// resource, says nothing about whether the next resource would fare better.
+//
+// The first failure's exit code is what the command exits with, so a script
+// still notices. kubectl's own message is printed where the failure happened,
+// under that resource's banner, unless kubectl already wrote it to the
+// terminal itself — which is what SilentError means.
+func runEach(resolved []Resolved, act func(target Resolved) error) error {
+	var first error
+	for _, target := range resolved {
+		err := act(target)
+		if err == nil {
+			continue
+		}
+		var silent SilentError
+		var refused kubectl.Error
+		switch {
+		case errors.As(err, &silent):
+			// kubectl streamed its own message already.
+		case errors.As(err, &refused):
+			render.Error(refused.Error())
+		default:
+			return err
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }

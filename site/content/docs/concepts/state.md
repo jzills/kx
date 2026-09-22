@@ -25,12 +25,72 @@ kx state 2           # jump to position 2
 kx state back        # step back one
 kx state forward     # step forward one
 kx state drop 2      # remove position 2
-kx state drop --all  # clear everything, slots included
+kx state drop --all  # clear the stack and the slots — marks are untouched
+kx state drop --empty  # drop the entries whose listing found nothing
 ```
 
 Jumping does not re-run anything: the entry already holds the listing, so the
-indexes it carries resolve immediately. The older `kx back`, `kx forward` and
-`kx drop` spellings still work.
+indexes it carries resolve immediately.
+
+`--all` only clears what accumulates on its own, one `kx get` at a time.
+[A mark](../marks/) is named on purpose, not accumulated, so it takes a
+command that says so: `kx unmark --all`.
+
+Re-running the listing you are already on refreshes that entry instead of
+pushing another copy of it. Re-running `kx get` is how you see what changed, so
+without that the stack filled with one listing — five runs of `kx get pods`
+around a single `kx get deploy` left nine entries, eight of them the same, and
+`kx state back` could not reach the Deployments listing. The same session now
+leaves three: pods, deployments, pods.
+
+## Reading an index back out
+
+`kx state` shows what every index means. `kx ref` prints one of them in a form
+another command can take:
+
+```bash
+kx ref 3                          # pod/web-abc-xyz -n prod
+kubectl exec $(kx ref 3) -- sh
+kubectl get $(kx ref 1..3)        # one line per index
+```
+
+That is what keeps the index model from being limited to the verbs kx wraps:
+anything that takes a resource — another kubectl subcommand, `stern`, `velero`,
+a script of your own — can be handed one. `--name`, `--namespace` and `--kind`
+print a single field for tools that want the pieces separately, and a
+cluster-scoped resource comes back without `-n`, since there is no namespace for
+it to be in.
+
+`kx ref` never contacts the cluster. It reports what the index means, not what
+still exists, so it answers instantly — and a stale index prints the name it was
+assigned, leaving the command you spend it on to discover the resource is gone.
+
+## A listing that found nothing is still a listing
+
+`kx get pods -n empty-namespace` saves its result like any other listing, even
+though the result is nothing. It has to: an empty listing that saved no entry
+would leave the *previous* one resolving indexes, so `kx get pods -n a`
+followed by `kx get pods -n b` and then `kx delete 1` deleted a pod in `a` —
+a namespace and two commands away from anything on screen.
+
+So the numbers retire when a listing finds nothing, and kx says so on the spot:
+
+```
+Pods · empty-namespace · none found
+'kx state back' returns to Pods · prod · 14 items
+```
+
+Spending an index against it explains itself the same way, at the moment it
+matters rather than one command earlier:
+
+```
+✗ The current listing is empty — Pods · empty-namespace found none.
+  Run 'kx state back' for the previous listing.
+```
+
+Those entries cost a history slot each. `kx state drop --empty` removes all of
+them at once, and needs no confirmation the way `--all` does — an entry holding
+nothing is not work anyone can lose.
 
 Every entry records the context it was listed in, because a resource name
 means nothing without the cluster it was read from. `kx state` names it beside

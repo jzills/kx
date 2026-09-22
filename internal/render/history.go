@@ -2,6 +2,7 @@ package render
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
@@ -10,21 +11,45 @@ import (
 
 // kindLabel names a listing by the kind it holds, or "Mixed" when an entry
 // spans several — a namespace-wide tree, for instance.
-func kindLabel(resources state.Resources) string {
+//
+// An empty listing has no resource to read a kind off, and "Mixed" is the
+// wrong answer for it: it reads as a listing of several kinds that lost its
+// rows. An entry saved by `kx get` still records what was asked for, and that
+// is what the listing is called. Entries saved without a query — a tree walk,
+// a triage sweep — have nothing to name and keep "Mixed".
+func kindLabel(entry state.State) string {
 	var seen kinds.Kind
-	for i, entry := range resources.Entries() {
+	for i, resource := range entry.Resources.Entries() {
 		if i == 0 {
-			seen = entry.Kind
+			seen = resource.Kind
 			continue
 		}
-		if entry.Kind != seen {
+		if resource.Kind != seen {
 			return "Mixed"
 		}
 	}
 	if seen == "" {
+		if entry.Resources.Len() == 0 && entry.Query != nil {
+			return kinds.PluralDisplay(entry.Query.Resource)
+		}
 		return "Mixed"
 	}
 	return kinds.PluralDisplay(string(seen))
+}
+
+// PreviousListingNote offers the way back to the listing an empty one just
+// displaced, naming it — "kx state back" alone does not say what you would be
+// going back to, and the listing that found nothing is on screen instead.
+//
+// A no-op when there is nothing to return to: an empty previous entry, or none
+// at all, would have the note point at a listing that does not exist.
+func (r *Renderer) PreviousListingNote(previous state.State) {
+	if previous.Resources.Len() == 0 {
+		return
+	}
+	r.Caption("'kx state back' returns to " + strings.Join(captionParts(
+		kindLabel(previous), scopeLabel(previous), countLabel(previous.Resources.Len()),
+	), " · "))
 }
 
 func entryLabel(count int) string {
@@ -148,7 +173,7 @@ func (r *Renderer) StateHistory(history state.History) {
 		row := []Cell{
 			Styled(strconv.Itoa(position+1), rowStyle),
 			Styled(marker, theme.Header),
-			Styled(kindLabel(entry.Resources), rowStyle),
+			Styled(kindLabel(entry), rowStyle),
 			Styled(scopeLabel(entry), rowStyle),
 		}
 		if perRow {
@@ -190,7 +215,7 @@ func (r *Renderer) switchTargetSummary(history state.History) {
 			continue
 		}
 		rows = append(rows, []Cell{
-			Styled(kindLabel(entry.Resources), theme.Muted),
+			Styled(kindLabel(entry), theme.Muted),
 			Styled(strconv.Itoa(entry.Resources.Len()), theme.Muted),
 		})
 	}
@@ -291,7 +316,12 @@ func (r *Renderer) State(entry state.State) {
 func (r *Renderer) listing(entry state.State, scope, context string) {
 	count := entry.Resources.Len()
 	// The context sits beside the scope, and Caption drops either when empty.
-	r.Caption(kindLabel(entry.Resources), scope, context, itemLabel(count))
+	r.Caption(kindLabel(entry), scope, context, countLabel(count))
+	// A header row over no rows is noise: the caption has already said the
+	// listing found nothing, which is what emptyListing does for kx get.
+	if count == 0 {
+		return
+	}
 
 	spanning := entry.AllNamespaces
 	columns := []Column{{Header: "X", Right: true}, {Header: "KIND"}}

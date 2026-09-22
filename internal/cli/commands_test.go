@@ -21,9 +21,9 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// The leading run of numbers are indexes; everything after is kubectl's. A
-// range token counts as a single leading argument here — it's expanded later,
-// in parseIndexes.
+// The leading run of numbers, ranges and marks are references; everything
+// after is kubectl's. A range token counts as a single leading argument
+// here — it's expanded later, in parseRefs.
 func TestSplitLeadingIndexes(t *testing.T) {
 	cases := []struct {
 		args        []string
@@ -38,10 +38,16 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		{[]string{"9..17", "-o", "wide"}, 1, "-o wide"},
 		{[]string{"9..17", "3", "--tail=5"}, 2, "--tail=5"},
 		// A malformed range still belongs to the leading run — it should reach
-		// parseIndexes for a proper "not a valid range" error, rather than
+		// parseRefs for a proper "not a valid range" error, rather than
 		// falling through to the generic "not a valid int" message that
 		// applies when the leading run is empty.
 		{[]string{"5..", "-o", "wide"}, 1, "-o wide"},
+		// A mark belongs to the leading run unvalidated, the same as a
+		// malformed range: "kx logs @nope" must reach parseRefs for the
+		// unknown-mark error, not fall through to kubectl as a positional
+		// and produce "@nope is not a valid int".
+		{[]string{"@api", "-o", "wide"}, 1, "-o wide"},
+		{[]string{"@api", "2", "--tail=5"}, 2, "--tail=5"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -80,9 +86,22 @@ func TestParseIndexNamesTheArgument(t *testing.T) {
 	}
 }
 
+// refIndexes extracts the Index of every ref, for tests migrated from
+// parseIndexes ([]int) to parseRefs ([]state.Ref) that only ever exercise the
+// plain-index path — a Mark in the result here would zero-value to 0 and hide
+// a real bug, so callers that care about marks assert on the Refs directly
+// instead of going through this.
+func refIndexes(refs []state.Ref) []int {
+	indexes := make([]int, len(refs))
+	for i, ref := range refs {
+		indexes[i] = ref.Index
+	}
+	return indexes
+}
+
 // A range token expands into every index it spans, inclusive of both ends,
 // walking in whichever direction the two ends imply.
-func TestParseIndexesExpandsRanges(t *testing.T) {
+func TestParseRefsExpandsRanges(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -95,12 +114,12 @@ func TestParseIndexesExpandsRanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseIndexes(fakeResolver{}, "indexes", tc.args)
+			got, err := parseRefs(fakeResolver{}, "indexes", tc.args)
 			if err != nil {
-				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+				t.Fatalf("parseRefs(%v) error = %v", tc.args, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			if !reflect.DeepEqual(refIndexes(got), tc.want) {
+				t.Errorf("parseRefs(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}
@@ -108,7 +127,7 @@ func TestParseIndexesExpandsRanges(t *testing.T) {
 
 // A malformed range is reported the same way a bad single index is: named,
 // quoted, and rejected before reaching the cluster.
-func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
+func TestParseRefsRejectsMalformedRanges(t *testing.T) {
 	cases := []struct {
 		arg  string
 		want string
@@ -118,9 +137,9 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.arg, func(t *testing.T) {
-			_, err := parseIndexes(fakeResolver{}, "indexes", []string{tc.arg})
+			_, err := parseRefs(fakeResolver{}, "indexes", []string{tc.arg})
 			if err == nil {
-				t.Fatalf("parseIndexes(%q) accepted a malformed range", tc.arg)
+				t.Fatalf("parseRefs(%q) accepted a malformed range", tc.arg)
 			}
 			if err.Error() != tc.want {
 				t.Errorf("error = %q, want %q", err, tc.want)
@@ -131,7 +150,7 @@ func TestParseIndexesRejectsMalformedRanges(t *testing.T) {
 
 // "..5" defaults the start to 1; "5.." defaults the end to the size of the
 // current listing, reported by the resolver's Count().
-func TestParseIndexesExpandsOpenRanges(t *testing.T) {
+func TestParseRefsExpandsOpenRanges(t *testing.T) {
 	cases := []struct {
 		name  string
 		args  []string
@@ -145,12 +164,12 @@ func TestParseIndexesExpandsOpenRanges(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolver := fakeResolver{count: tc.count}
-			got, err := parseIndexes(resolver, "indexes", tc.args)
+			got, err := parseRefs(resolver, "indexes", tc.args)
 			if err != nil {
-				t.Fatalf("parseIndexes(%v) error = %v", tc.args, err)
+				t.Fatalf("parseRefs(%v) error = %v", tc.args, err)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("parseIndexes(%v) = %v, want %v", tc.args, got, tc.want)
+			if !reflect.DeepEqual(refIndexes(got), tc.want) {
+				t.Errorf("parseRefs(%v) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}
@@ -159,10 +178,10 @@ func TestParseIndexesExpandsOpenRanges(t *testing.T) {
 // A bare ".." is not "everything" — it's rejected the same way a malformed
 // range is, so a destructive command like delete never expands an
 // unqualified ".." into the whole listing by accident.
-func TestParseIndexesRejectsBareDoubleDot(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{}, "indexes", []string{".."})
+func TestParseRefsRejectsBareDoubleDot(t *testing.T) {
+	_, err := parseRefs(fakeResolver{}, "indexes", []string{".."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted a bare '..'")
+		t.Fatal("parseRefs accepted a bare '..'")
 	}
 	want := "Invalid value for 'indexes': '..' is not a valid range."
 	if err.Error() != want {
@@ -173,10 +192,10 @@ func TestParseIndexesRejectsBareDoubleDot(t *testing.T) {
 // An open-end range whose start is already past the current listing is a
 // hard error — not a silent reverse-walk (unlike an explicit "20..9") and
 // not a silent no-op.
-func TestParseIndexesRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{count: 3}, "indexes", []string{"5.."})
+func TestParseRefsRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
+	_, err := parseRefs(fakeResolver{count: 3}, "indexes", []string{"5.."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted '5..' starting past a 3-item listing")
+		t.Fatal("parseRefs accepted '5..' starting past a 3-item listing")
 	}
 	want := "Invalid value for 'indexes': '5..' starts past the current listing (3 items)."
 	if err.Error() != want {
@@ -186,19 +205,19 @@ func TestParseIndexesRejectsOpenEndRangeStartingPastTheListing(t *testing.T) {
 
 // An open-end range propagates the resolver's error (e.g. no state saved
 // yet) directly, rather than reporting it as a malformed range.
-func TestParseIndexesPropagatesCountErrorForOpenEndRange(t *testing.T) {
+func TestParseRefsPropagatesCountErrorForOpenEndRange(t *testing.T) {
 	wantErr := errors.New("no state found")
-	_, err := parseIndexes(fakeResolver{countErr: wantErr}, "indexes", []string{"5.."})
+	_, err := parseRefs(fakeResolver{countErr: wantErr}, "indexes", []string{"5.."})
 	if err != wantErr {
-		t.Errorf("parseIndexes(%q) error = %v, want %v", "5..", err, wantErr)
+		t.Errorf("parseRefs(%q) error = %v, want %v", "5..", err, wantErr)
 	}
 }
 
 // An open-end range still respects maxRangeSpan once its end is resolved.
-func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{count: 999999}, "indexes", []string{"1.."})
+func TestParseRefsRejectsOversizedOpenEndRange(t *testing.T) {
+	_, err := parseRefs(fakeResolver{count: 999999}, "indexes", []string{"1.."})
 	if err == nil {
-		t.Fatal("parseIndexes accepted an oversized open-end range")
+		t.Fatal("parseRefs accepted an oversized open-end range")
 	}
 	want := "Invalid value for 'indexes': '1..' spans more than 10000 indexes."
 	if err.Error() != want {
@@ -208,10 +227,10 @@ func TestParseIndexesRejectsOversizedOpenEndRange(t *testing.T) {
 
 // A pathological range shouldn't build a giant slice before any index is even
 // resolved against the current listing.
-func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
-	_, err := parseIndexes(fakeResolver{}, "indexes", []string{"1..999999"})
+func TestParseRefsRejectsOversizedRanges(t *testing.T) {
+	_, err := parseRefs(fakeResolver{}, "indexes", []string{"1..999999"})
 	if err == nil {
-		t.Fatal("parseIndexes accepted an oversized range")
+		t.Fatal("parseRefs accepted an oversized range")
 	}
 }
 
@@ -221,20 +240,20 @@ func TestParseIndexesRejectsOversizedRanges(t *testing.T) {
 // timeout rather than a bare call: on the overflow this regresses, the
 // unbounded loop would otherwise hang the test (and eventually the CI
 // runner) instead of failing it cleanly.
-func TestParseIndexesRejectsOverflowingRanges(t *testing.T) {
+func TestParseRefsRejectsOverflowingRanges(t *testing.T) {
 	arg := fmt.Sprintf("%d..%d", math.MaxInt64, math.MinInt64)
 	done := make(chan error, 1)
 	go func() {
-		_, err := parseIndexes(fakeResolver{}, "indexes", []string{arg})
+		_, err := parseRefs(fakeResolver{}, "indexes", []string{arg})
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("parseIndexes accepted a range whose span overflows int")
+			t.Fatal("parseRefs accepted a range whose span overflows int")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("parseIndexes did not return — span overflow likely bypassed the maxRangeSpan guard")
+		t.Fatal("parseRefs did not return — span overflow likely bypassed the maxRangeSpan guard")
 	}
 }
 
@@ -293,7 +312,7 @@ func TestMultiIndexCommandsAcceptSeveral(t *testing.T) {
 }
 
 // indexResolverFunc lets a test fail on a specific index rather than
-// uniformly, so validateIndexes can be proven to check every index in the
+// uniformly, so resolveRefs can be proven to check every index in the
 // batch rather than stopping after the first one resolves.
 type indexResolverFunc func(int) (string, string, kinds.Kind, error)
 
@@ -301,35 +320,49 @@ func (f indexResolverFunc) Fields(idx int) (string, string, kinds.Kind, error) {
 	return f(idx)
 }
 
+func (f indexResolverFunc) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
+	return f(ref.Index)
+}
+
+func (f indexResolverFunc) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
+	name, namespace, _, err := f(ref.Index)
+	return name, namespace, err
+}
+
 func (f indexResolverFunc) Count() (int, error) {
 	return 0, nil
 }
 
-func TestValidateIndexesCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
+func TestResolveRefsCatchesABadIndexAnywhereInTheBatch(t *testing.T) {
 	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
 		if idx == 3 {
 			return "", "", "", fmt.Errorf("index %d is out of range", idx)
 		}
 		return "pod", "prod", kinds.Pod, nil
 	})
-	if err := validateIndexes(resolver, []int{1, 2, 3, 4}); err == nil {
-		t.Fatal("validateIndexes accepted a batch containing an out-of-range index")
+	if _, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3", "4"}); err == nil {
+		t.Fatal("resolveRefs accepted a batch containing an out-of-range index")
 	}
 }
 
-func TestValidateIndexesAcceptsAWhollyValidBatch(t *testing.T) {
+func TestResolveRefsAcceptsAWhollyValidBatch(t *testing.T) {
 	resolver := indexResolverFunc(func(idx int) (string, string, kinds.Kind, error) {
 		return "pod", "prod", kinds.Pod, nil
 	})
-	if err := validateIndexes(resolver, []int{1, 2, 3}); err != nil {
-		t.Fatalf("validateIndexes rejected a wholly valid batch: %v", err)
+	if _, err := resolveRefs(resolver, "indexes", []string{"1", "2", "3"}); err != nil {
+		t.Fatalf("resolveRefs rejected a wholly valid batch: %v", err)
 	}
 }
 
-// A range that runs past the current listing must not delete anything —
-// not even the indexes that were in range — because there is no way to undo
-// a delete once it has run. Validating every index before acting on any of
-// them is the only way to make a bad range fail cleanly instead of partially.
+// An out-of-range index in a batch must not delete anything — not even the
+// indexes that were in range — because there is no way to undo a delete once
+// it has run. Validating every index before acting on any of them is the only
+// way to make a bad batch fail cleanly instead of partially.
+//
+// Spelled with an explicit index rather than a range: a range is now clamped
+// to the listing (see TestDeleteClampsARangeRatherThanRefusingTheBatch), so
+// "2..5" no longer carries an out-of-range index to be caught. An index the
+// user typed out still does, and this is the guarantee that matters for it.
 func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	kube := &recordingKubectl{}
 	services := switchServices(t, kube)
@@ -341,13 +374,49 @@ func TestDeleteValidatesAllIndexesBeforeDeletingAny(t *testing.T) {
 	}
 
 	cmd := newDeleteCommand(services)
-	cmd.SetArgs([]string{"1", "2..5", "-y"})
+	cmd.SetArgs([]string{"1", "99", "-y"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("delete succeeded despite an out-of-range index in the batch")
 	}
 	if len(kube.runs) != 0 {
 		t.Errorf("kubectl was called %d times, want 0 — index 3 is out of range and "+
 			"should be caught before index 1 or 2 is deleted", len(kube.runs))
+	}
+}
+
+// A literal 0 is an out-of-range index like any other, not an absent
+// reference. state.Ref{} — the zero value — used to be treated specially by
+// Resolve (an "empty ref" guard reported "No resource reference given."), but
+// parseIndex has no zero guard of its own: a user typing `kx describe 0`
+// produces exactly that same zero Ref, and telling that apart from a
+// programmer-constructed empty one is not possible from the Ref alone. The
+// guard's message was accurate for one and wrong for the other, and there was
+// no way to know which had happened — so develop's actual behavior (an
+// out-of-range message naming the listing) is the only one that is right for
+// what a user who types "0" gets, and this pins it end to end.
+func TestDescribeOnLiteralZeroReportsOutOfRange(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDescribeCommand(services)
+	cmd.SetArgs([]string{"0"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("kx describe 0 succeeded, want an out-of-range error")
+	}
+	for _, want := range []string{"Index 0", "out of range", "2 Pods"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if len(kube.interactive) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 for an unresolvable index", len(kube.interactive))
 	}
 }
 
@@ -469,6 +538,44 @@ func switchServices(t *testing.T, kube kubectl.Service) Services {
 const namespaceTable = "NAME      STATUS   AGE\n" +
 	"default   Active   91d\n" +
 	"prod      Active   91d\n"
+
+// kx ns and kx context read a slot (FieldsNamed), which the marks work
+// deliberately left untouched — a slot is not a resource reference, and
+// there is nothing for `kx mark` to have pinned there. newSwitchCommand used
+// to extract ref.Index in isolation after parseRef, so a mark's zero-value
+// Index silently went through as index 0 rather than being refused: `kx ns
+// @foo` resolved index 0 against whatever namespace listing happened to be
+// current and reported a confusing out-of-range error that named no mark at
+// all. Both spellings are checked, and the assertion is on the message
+// itself — naming the mark and the reason — not merely that an error came
+// back, since a bad error would have passed a looser check too.
+func TestSwitchRefusesAMark(t *testing.T) {
+	cases := []struct {
+		use       string
+		isContext bool
+		wantNoun  string
+	}{
+		{"namespace", false, "namespaces are switched by index"},
+		{"context", true, "contexts are switched by index"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.use, func(t *testing.T) {
+			services := switchServices(t, &recordingKubectl{})
+			cmd := newSwitchCommand(services, tc.use, tc.use, "short", tc.isContext)
+			cmd.SetArgs([]string{"@foo"})
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatalf("kx %s @foo succeeded, want a refusal", tc.use)
+			}
+			if !strings.Contains(err.Error(), "@foo") {
+				t.Errorf("err = %q, want it to name the mark", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantNoun) {
+				t.Errorf("err = %q, want %q", err, tc.wantNoun)
+			}
+		})
+	}
+}
 
 // The whole of #156, through the real call path: list namespaces, list
 // something else on top, then switch. The 2 counts against namespaces.
@@ -698,13 +805,20 @@ func TestDropAllConfirmsBeforeClearing(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services, "kx state drop")
+	cmd := newDropCommand(services)
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("kx state drop --all: %v", err)
 	}
-	if prompted == "" {
-		t.Error("kx state drop --all did not prompt for confirmation")
+	// The wording is asserted, not merely its presence. --all no longer means
+	// "all" — marks survive it — so the prompt is the one place the user learns
+	// that before deciding, and a silent reword would take it away.
+	for _, want := range []string{
+		"namespace and context slots", "Marks are untouched", "kx unmark --all",
+	} {
+		if !strings.Contains(prompted, want) {
+			t.Errorf("prompt = %q\n  missing %q", prompted, want)
+		}
 	}
 
 	history, err := services.State.LoadHistory()
@@ -730,7 +844,7 @@ func TestDropAllAbortsWithoutConfirmation(t *testing.T) {
 	var out bytes.Buffer
 	render.SetOutput(&out, &out, "github-dark")
 
-	cmd := newDropCommand(services, "kx state drop")
+	cmd := newDropCommand(services)
 	cmd.SetArgs([]string{"--all"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("kx state drop --all succeeded despite an aborted confirmation")
@@ -976,4 +1090,142 @@ func TestLogsRegistersSinceFlag(t *testing.T) {
 	if newLogsCommand(Services{}).Flags().Lookup("since") == nil {
 		t.Error("--since is not registered, so it will not appear in --help")
 	}
+}
+
+// Saving a listing that found nothing is what stops an index resolving against
+// the listing before it, and the entry it saves costs a history slot. --empty
+// is how those are swept back up, without the confirmation --all needs: an
+// entry holding nothing is not work anyone can lose.
+func TestDropEmptySweepsTheEmptyEntries(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	for _, entry := range []state.State{
+		{Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "default"},
+		{Namespace: "empty", Query: &state.Query{Resource: "pods"}},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+	var prompted string
+	services.Confirm = func(m string) error { prompted = m; return nil }
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--empty"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --empty: %v", err)
+	}
+	if prompted != "" {
+		t.Errorf("kx state drop --empty prompted %q, want no confirmation", prompted)
+	}
+
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("len(States) = %d, want 1 — only the empty entry goes", len(history.States))
+	}
+	if names := history.States[0].Resources.Names(); len(names) != 1 || names[0] != "nginx" {
+		t.Errorf("kept %v, want the entry that holds something", names)
+	}
+}
+
+// Nothing to sweep is not an error, and not a silent reprint of an unchanged
+// stack either — reprinting reads as though something happened.
+func TestDropEmptyWithNothingToSweepSaysSo(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+
+	cmd := newDropCommand(services)
+	cmd.SetArgs([]string{"--empty"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx state drop --empty: %v", err)
+	}
+	if !strings.Contains(out.String(), "No empty") {
+		t.Errorf("output = %q, want it to say there was nothing to drop", out.String())
+	}
+}
+
+// --empty and a position are two different requests, and --all is a third.
+func TestDropEmptyRefusesToBeCombined(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{output: namespaceTable})
+	services.Confirm = func(string) error { return nil }
+
+	for _, args := range [][]string{{"--empty", "2"}, {"--empty", "--all"}} {
+		var out bytes.Buffer
+		render.SetOutput(&out, &out, "github-dark")
+		cmd := newDropCommand(services)
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("kx state drop %v succeeded, want a refusal", args)
+		}
+	}
+}
+
+// The deliberate consequence of clamping, on the command where it matters
+// most. `kx delete 1 2..5` on a two-row listing used to refuse the whole
+// batch; it now deletes the two rows that exist, because that is what the
+// range names once intersected with the listing.
+//
+// The all-or-nothing guarantee is unchanged for an index the user typed out —
+// see TestDeleteValidatesAllIndexesBeforeDeletingAny — and a range entirely
+// past the end is still refused rather than clamped to nothing.
+func TestDeleteClampsARangeRatherThanRefusingTheBatch(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kinds.Pod),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save pods: %v", err)
+	}
+
+	cmd := newDeleteCommand(services)
+	cmd.SetArgs([]string{"1", "2..5", "-y"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx delete 1 2..5: %v", err)
+	}
+	if len(kube.runs) != 2 {
+		t.Fatalf("kubectl calls = %d, want 2 — the rows that exist, each once", len(kube.runs))
+	}
+
+	cmd = newDeleteCommand(services)
+	cmd.SetArgs([]string{"5..9", "-y"})
+	if err := cmd.Execute(); err == nil {
+		t.Error("kx delete 5..9 succeeded on a two-row listing, want the past-the-listing refusal")
+	}
+}
+
+// kx ns is the switch screen, so it takes the marked listing. Asserted
+// through the real call path, because the marker is only useful if the
+// command that shows the screen is the one that asks for it.
+func TestNamespaceListingMarksTheCurrentNamespace(t *testing.T) {
+	kube := &recordingKubectl{output: namespaceTable, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := listSwitchTargets(services, false); err != nil {
+		t.Fatalf("listSwitchTargets: %v", err)
+	}
+
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "prod") && !strings.HasPrefix(line, "Namespaces") {
+			if !strings.Contains(line, "→") {
+				t.Errorf("row = %q, want the current namespace marked", line)
+			}
+			return
+		}
+	}
+	t.Errorf("output = %q, want a row for the current namespace", out.String())
 }

@@ -6,58 +6,223 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
 )
 
 func sortStrings(values []string) { sort.Strings(values) }
 
-// fetchMetadataField reads one metadata map (labels or annotations) off an
-// indexed resource.
+// fetchMetadataField reads one metadata map (labels or annotations) off a
+// referenced resource.
+// One reference, through the same fetch the batch uses — the reply shapes and
+// the sorting are parsed in exactly one place.
 func fetchMetadataField(
-	kubectl kubectl.Service, resolver IndexResolver, index int, field string,
+	kubectl kubectl.Service, resolver IndexResolver, ref state.Ref, field string,
 ) (keys []string, values map[string]string, err error) {
-	name, namespace, kind, err := resolver.Fields(index)
+	name, namespace, kind, err := resolver.Resolve(ref)
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := kubectl.Run([]string{"get", string(kind), name, "-n", namespace, "-o", "json"})
+	resolved := []Resolved{{Ref: ref, Name: name, Namespace: namespace, Kind: kind}}
+	results, err := fetchMetadataFields(kubectl, resolved, field)
 	if err != nil {
 		return nil, nil, err
 	}
+	return results[ref].keys, results[ref].values, nil
+}
 
-	var object struct {
-		Metadata map[string]json.RawMessage `json:"metadata"`
-	}
-	if err := json.Unmarshal([]byte(raw), &object); err != nil {
-		return nil, nil, err
+// metadataGroup is the resources of one kind in one namespace that a batched
+// read asks about — the most kubectl can fetch in a single call.
+type metadataGroup struct {
+	kind, namespace string
+	names           []string
+	refs            []state.Ref
+}
+
+// metadataResult is one resource's metadata field, ready to render.
+type metadataResult struct {
+	keys   []string
+	values map[string]string
+}
+
+// fetchMetadataFields reads one metadata field for several indexes, in one
+// kubectl call per (kind, namespace) rather than one per index.
+//
+// Measured on a 14-pod listing: fourteen serial calls took 1.12s where one
+// batched call returned the same data in 0.079s, and every call pays the round
+// trip again on a remote cluster. kubectl can fetch several names at once but
+// neither several namespaces nor several kinds, so the indexes are grouped —
+// which a spanning listing (kx get -A) and a mixed one (a tree walk) both
+// need.
+//
+// Replies are matched by metadata.name, not by position. kubectl happens to
+// return items in the order asked for, but nothing in its contract says so,
+// and a mismatch would attribute one resource's labels to another with nothing
+// on screen to give it away.
+func fetchMetadataFields(
+	kubectl kubectl.Service, resolved []Resolved, field string,
+) (map[state.Ref]metadataResult, error) {
+	var groups []*metadataGroup
+	byKey := map[string]*metadataGroup{}
+	for _, target := range resolved {
+		key := string(target.Kind) + "\x00" + target.Namespace
+		existing, ok := byKey[key]
+		if !ok {
+			existing = &metadataGroup{kind: string(target.Kind), namespace: target.Namespace}
+			byKey[key] = existing
+			groups = append(groups, existing)
+		}
+		existing.names = append(existing.names, target.Name)
+		existing.refs = append(existing.refs, target.Ref)
 	}
 
-	values = map[string]string{}
-	if encoded, ok := object.Metadata[field]; ok {
-		if err := json.Unmarshal(encoded, &values); err != nil {
-			return nil, nil, err
+	results := make(map[state.Ref]metadataResult, len(resolved))
+	for _, g := range groups {
+		byName, sole, err := g.read(kubectl, field)
+		if err != nil {
+			return nil, err
+		}
+		for i, ref := range g.refs {
+			values, ok := byName[g.names[i]]
+			// Asked for one name, kubectl either errored or answered about
+			// that resource, so the sole object is it — whether or not the
+			// reply carries a metadata.name to match on. The name match is
+			// there to tell several replies apart, and with one there is
+			// nothing to tell apart.
+			if !ok && len(g.names) == 1 && sole != nil {
+				values, ok = sole, true
+			}
+			if !ok {
+				// kubectl answered without it, which means it is gone: a
+				// stale index, and what withRefresh exists to recover from.
+				// Rendering it as a resource with no labels would read as a
+				// fact about the resource instead.
+				return nil, StaleResourceError{
+					Kind: kinds.Kind(g.kind), Name: g.names[i], Namespace: g.namespace, Ref: ref,
+				}
+			}
+			results[ref] = newMetadataResult(values)
 		}
 	}
-	keys = make([]string, 0, len(values))
+	return results, nil
+}
+
+// read fetches the group's metadata, in one API request where it can.
+//
+// kubectl makes a request per named resource when handed several names — 14
+// names measured 892ms against 97ms for the same fetch with none — so a group
+// of more than one asks for the collection and filters here. The extra objects
+// come back in the same single response that the named form would have paid a
+// round trip each for.
+//
+// One name stays a named fetch: listing a whole namespace to find one resource
+// is the slower half of that trade.
+//
+// A collection fetch needs list permission where a named get needs only get,
+// and RBAC granting the second without the first is ordinary — so a failed
+// listing falls back to naming each resource rather than turning a working
+// command into a permission error. The fallback's error is the one reported
+// when both fail, because it names the resource where the listing's names only
+// the collection.
+func (g *metadataGroup) read(
+	kubectl kubectl.Service, field string,
+) (byName map[string]map[string]string, sole map[string]string, err error) {
+	if len(g.names) > 1 {
+		raw, listErr := kubectl.Run([]string{
+			"get", g.kind, "-n", g.namespace, "-o", "json",
+		})
+		if listErr == nil {
+			return metadataByName(raw, field)
+		}
+	}
+	byName = map[string]map[string]string{}
+	for _, name := range g.names {
+		raw, nameErr := kubectl.Run([]string{
+			"get", g.kind, name, "-n", g.namespace, "-o", "json",
+		})
+		if nameErr != nil {
+			return nil, nil, nameErr
+		}
+		single, singleSole, parseErr := metadataByName(raw, field)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		if values, ok := single[name]; ok {
+			byName[name] = values
+			continue
+		}
+		if singleSole != nil {
+			byName[name] = singleSole
+		}
+	}
+	if len(g.names) == 1 {
+		for _, values := range byName {
+			sole = values
+		}
+	}
+	return byName, sole, nil
+}
+
+// metadataByName reads the field off every object in a kubectl reply, keyed by
+// name.
+//
+// Two shapes, because kubectl wraps a reply in a List only when it was asked
+// for several names: one name comes back as the bare object.
+// sole is the field off the only object in the reply, for the single-name case
+// that needs no name to match on; nil when the reply held more than one.
+func metadataByName(
+	raw, field string,
+) (byName map[string]map[string]string, sole map[string]string, err error) {
+	type object struct {
+		Metadata map[string]json.RawMessage `json:"metadata"`
+	}
+	var reply struct {
+		Items *[]object `json:"items"`
+		object
+	}
+	if err := json.Unmarshal([]byte(raw), &reply); err != nil {
+		return nil, nil, err
+	}
+	objects := []object{reply.object}
+	if reply.Items != nil {
+		objects = *reply.Items
+	}
+
+	byName = map[string]map[string]string{}
+	for _, item := range objects {
+		var name string
+		if encoded, ok := item.Metadata["name"]; ok {
+			if err := json.Unmarshal(encoded, &name); err != nil {
+				return nil, nil, err
+			}
+		}
+		values := map[string]string{}
+		if encoded, ok := item.Metadata[field]; ok {
+			if err := json.Unmarshal(encoded, &values); err != nil {
+				return nil, nil, err
+			}
+		}
+		byName[name] = values
+	}
+	if len(objects) == 1 {
+		sole = byName[""]
+		for _, values := range byName {
+			sole = values
+		}
+	}
+	return byName, sole, nil
+}
+
+// newMetadataResult sorts the keys for stable output: kubectl returns a JSON
+// object, and Go map iteration would reorder the rows on every run.
+func newMetadataResult(values map[string]string) metadataResult {
+	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
 	}
-	// Sorted for stable output: kubectl returns a JSON object, and Go map
-	// iteration would reorder the rows on every run.
 	sortStrings(keys)
-	return keys, values, nil
-}
-
-// MetadataReadCommand shows the labels or annotations on an indexed resource.
-type MetadataReadCommand struct {
-	Kubectl kubectl.Service
-	State   IndexResolver
-	// Field is the metadata key to read: "labels" or "annotations".
-	Field string
-}
-
-func (c MetadataReadCommand) Execute(index int) ([]string, map[string]string, error) {
-	return fetchMetadataField(c.Kubectl, c.State, index, c.Field)
+	return metadataResult{keys: keys, values: values}
 }
 
 var metadataVerbText = map[string]string{"label": "Labeled", "annotate": "Annotated"}
@@ -74,7 +239,7 @@ type MetadataWriteCommand struct {
 }
 
 func (c MetadataWriteCommand) Execute(
-	index int, setKeys []string, sets map[string]string, removes []string, overwrite bool,
+	ref state.Ref, setKeys []string, sets map[string]string, removes []string, overwrite bool,
 ) (string, error) {
 	if len(sets) == 0 && len(removes) == 0 {
 		return "", fmt.Errorf(
@@ -82,7 +247,7 @@ func (c MetadataWriteCommand) Execute(
 			c.Verb)
 	}
 
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +255,7 @@ func (c MetadataWriteCommand) Execute(
 	if !overwrite {
 		// kubectl would refuse the write anyway, but its error names only the
 		// first conflict; listing them all saves a round trip.
-		_, current, err := fetchMetadataField(c.Kubectl, c.State, index, c.Field)
+		_, current, err := fetchMetadataField(c.Kubectl, c.State, ref, c.Field)
 		if err != nil {
 			return "", err
 		}

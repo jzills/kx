@@ -43,7 +43,7 @@ func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {
 		State:   workload("web", kinds.Deployment),
 		Save:    states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, true); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 1 {
@@ -74,7 +74,7 @@ func TestTreeSavesWithoutQuery(t *testing.T) {
 	command := TreeCommand{
 		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, true); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if states.saved[0].Query != nil {
@@ -89,7 +89,7 @@ func TestUnindexedTreeSavesNothing(t *testing.T) {
 	command := TreeCommand{
 		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
 	}
-	if _, err := command.Execute(context.Background(), 1, false); err != nil {
+	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, false); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(states.saved) != 0 {
@@ -107,7 +107,7 @@ func TestTreeOnNamespaceIndexGraphsThatNamespace(t *testing.T) {
 		State: fakeResolver{name: "prod", namespace: "default", kind: kinds.Namespace},
 		Save:  states.Save,
 	}
-	node, err := command.Execute(context.Background(), 1, false)
+	node, err := command.Execute(context.Background(), state.Ref{Index: 1}, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -594,5 +594,27 @@ func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
 func TestTreeInvocationOmitsTheFlagWhenIndexing(t *testing.T) {
 	if line := treeInvocation(scopeArgs("", true), true, 0); strings.Contains(line, "--no-index") {
 		t.Errorf("invocation = %q, want no --no-index when indexing", line)
+	}
+}
+
+// A namespace with nothing in it is still the listing indexes now count
+// against. Saving no entry left the previous listing addressable — the same
+// hazard TestGetEmptyOutputSavesTheEmptyListing describes.
+func TestEmptyNamespaceTreeSavesTheEmptyEntry(t *testing.T) {
+	states := &fakeState{}
+	command := TreeCommand{
+		Builder: graph.Builder{Client: fake.NewSimpleClientset()}, Save: states.Save,
+	}
+	if _, err := command.ExecuteNamespace(context.Background(), "empty", true); err != nil {
+		t.Fatalf("ExecuteNamespace: %v", err)
+	}
+	if len(states.saved) != 1 {
+		t.Fatalf("saved %d entries for an empty walk, want 1", len(states.saved))
+	}
+	if states.saved[0].Resources.Len() != 0 {
+		t.Errorf("entry holds %d resources, want none", states.saved[0].Resources.Len())
+	}
+	if states.saved[0].Namespace != "empty" {
+		t.Errorf("entry.Namespace = %q, want empty", states.saved[0].Namespace)
 	}
 }

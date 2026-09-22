@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // getOptions carries the flags `get` and `secret` share. They delegate to the
@@ -27,21 +27,24 @@ type namespaceGroup struct {
 	Names     []string
 }
 
-// groupByNamespace collects resolved entries by namespace, preserving the order
-// each namespace was first seen so the stitched table lists rows in roughly the
-// order the indexes did. Always returns at least one group for a non-empty
-// input, so callers can read groups[0] without a length check.
-func groupByNamespace(entries []index.Entry) []namespaceGroup {
+// groupByNamespace collects resolved references by namespace, preserving the
+// order each namespace was first seen so the stitched table lists rows in
+// roughly the order the indexes did. Always returns at least one group for a
+// non-empty input, so callers can read groups[0] without a length check.
+//
+// Reads the namespace off each Resolved rather than resolving it again — the
+// resolution already happened once, in resolveRefs.
+func groupByNamespace(resolved []Resolved) []namespaceGroup {
 	var groups []namespaceGroup
 	at := map[string]int{}
-	for _, entry := range entries {
-		position, seen := at[entry.Namespace]
+	for _, target := range resolved {
+		position, seen := at[target.Namespace]
 		if !seen {
-			at[entry.Namespace] = len(groups)
-			groups = append(groups, namespaceGroup{Namespace: entry.Namespace})
+			at[target.Namespace] = len(groups)
+			groups = append(groups, namespaceGroup{Namespace: target.Namespace})
 			position = len(groups) - 1
 		}
-		groups[position].Names = append(groups[position].Names, entry.Name)
+		groups[position].Names = append(groups[position].Names, target.Name)
 	}
 	return groups
 }
@@ -60,10 +63,10 @@ func runGet(services Services, resource string, args []string, options getOption
 	// and a scan-anywhere loop that expanded it as a range broke that
 	// passthrough outright instead of erroring or ignoring it.
 	indexArgs, extra := splitLeadingIndexes(args)
-	var indexes []int
+	var refs []state.Ref
 	if len(indexArgs) > 0 {
 		var err error
-		indexes, err = parseIndexes(services.State, "indexes", indexArgs)
+		refs, err = parseRefs(services.State, "indexes", indexArgs)
 		if err != nil {
 			return err
 		}
@@ -74,10 +77,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	// way to relist anything — including the hint a kind mismatch prints.
 	switch strings.ToLower(resource) {
 	case "context", "contexts":
-		if len(indexes) == 0 {
+		if len(refs) == 0 {
 			return listSwitchTargets(services, true)
 		}
-		return switchTo(services, "context", indexes[0], true)
+		// A mark names a Kubernetes resource pinned by kx state, not a
+		// kubeconfig context — there is nothing for it to resolve against
+		// here, so it is refused rather than silently spent as index 0. See
+		// markRefusedForSlot (refs.go): newSwitchCommand hits the same case
+		// for `kx ns`/`kx context` and shares this wording.
+		if refs[0].Mark != "" {
+			return markRefusedForSlot(refs[0], "contexts")
+		}
+		return switchTo(services, "context", refs[0].Index, true)
 	}
 
 	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
@@ -90,22 +101,40 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	if options.Decode || options.HasKey {
-		return decodeSecrets(services, resource, indexes, extra, options)
-	}
-
-	if len(indexes) > 0 {
-		expected := kinds.Normalize(resource)
-		resolved := make([]index.Entry, 0, len(indexes))
-		for _, idx := range indexes {
-			// FieldsExpecting rather than Fields: the resource type was named on
-			// the command line, so an out-of-range index or an empty history can
-			// be reported against that kind instead of against whatever listing
-			// happens to be current.
-			name, ns, err := services.State.FieldsExpecting(idx, expected)
+		// Resolved only when the command already names a Secret-shaped
+		// resource and carries indexes: otherwise decodeSecrets's own guards
+		// (--decode required, kind mismatch) are what should fire, and firing
+		// resolveRefsExpecting first would replace those messages with a
+		// resolution error about an index that was never going to be
+		// fetched. When it does apply, resolving the whole batch here —
+		// before decodeSecrets fetches or renders anything — is what stops a
+		// bad index late in the batch from letting an earlier one's secret
+		// reach the terminal first.
+		var resolved []Resolved
+		if options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
+			var err error
+			resolved, err = resolveParsedExpecting(services.State, refs, kinds.Secret)
 			if err != nil {
 				return err
 			}
-			resolved = append(resolved, index.Entry{Name: name, Namespace: ns})
+		}
+		return decodeSecrets(services, resource, resolved, extra, options)
+	}
+
+	if len(refs) > 0 {
+		expected := kinds.Normalize(resource)
+		// resolveRefsExpecting resolves every index before any of them is
+		// acted on, so an out-of-range index late in the batch is caught
+		// before the first kubectl call rather than after some of them have
+		// already run. Expecting rather than resolveRefs's plain Resolve: the
+		// resource type was named on the command line, so a failure — out of
+		// range, no state, or an index left over from a listing of a
+		// different kind — is reported against that kind, the way
+		// FieldsExpecting always has, instead of generically or silently
+		// fetched as whatever the index actually names.
+		resolved, err := resolveParsedExpecting(services.State, refs, expected)
+		if err != nil {
+			return err
 		}
 		groups := groupByNamespace(resolved)
 
@@ -117,11 +146,11 @@ func runGet(services Services, resource string, args []string, options getOption
 		// first group's namespace, so a selection spanning namespaces came
 		// back as "pods ... not found", which reads as a resource that is
 		// gone rather than a request kubectl will not serve.
-		if len(indexes) > 1 && isWatch(extra) {
+		if len(resolved) > 1 && isWatch(extra) {
 			return fmt.Errorf(
 				"--watch takes a single resource; %d indexes were given. "+
 					"Watch one of them, or drop --watch to fetch them all.",
-				len(indexes))
+				len(resolved))
 		}
 
 		// Indexes from an -A listing can land in different namespaces, and
@@ -137,6 +166,9 @@ func runGet(services Services, resource string, args []string, options getOption
 				return err
 			}
 			render.IndexedTable(output, resource, render.AllNamespaces)
+			if output.Empty() {
+				render.PreviousListingNote(previousListing(services))
+			}
 			return nil
 		}
 
@@ -180,7 +212,32 @@ func runGet(services Services, resource string, args []string, options getOption
 		namespace = render.AllNamespaces
 	}
 	render.IndexedTable(output, resource, namespace)
+	if output.Empty() {
+		render.PreviousListingNote(previousListing(services))
+	}
 	return nil
+}
+
+// previousListing is the entry `kx state back` would return to, for the note an
+// empty listing offers.
+//
+// Read after the listing that found nothing has been saved, not before. The
+// entry that was current a moment ago is not always the one behind the new
+// one: a listing repeating the query the cursor is already on replaces that
+// entry rather than pushing beside it, so `kx get pods` (2 rows) followed by a
+// drained `kx get pods` offered "returns to Pods · 2 items" — the entry it had
+// just overwritten — and back landed on whatever was before that.
+//
+// Errors are ignored deliberately: no state yet is the ordinary first-run
+// case, and it means there is nothing to offer. So is a cursor at the bottom
+// of the stack, where there is nothing behind the current entry; the zero
+// State renders no note.
+func previousListing(services Services) state.State {
+	history, err := services.State.LoadHistory()
+	if err != nil || history.Cursor < 1 || history.Cursor >= len(history.States) {
+		return state.State{}
+	}
+	return history.States[history.Cursor-1]
 }
 
 // switchTo activates an indexed namespace or context.

@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/tree"
 	"github.com/jzills/kx/internal/web"
 )
@@ -54,16 +55,22 @@ type jsonReport struct {
 	// every resource it saves, so it is never the zero value in practice,
 	// but omitempty rather than required in case a future caller builds one
 	// from something that isn't state-backed.
-	Index    int           `json:"index,omitempty"`
+	Index int `json:"index,omitempty"`
+	// Mark is the name a mark-spent reference carried, for the same reason
+	// Index exists: so a consumer can name what was diagnosed. A mark has no
+	// position in a listing, so Index is 0 for one and omitted — without this
+	// the document said nothing at all about which reference produced it.
+	Mark     string        `json:"mark,omitempty"`
 	Verdict  string        `json:"verdict"`
 	Findings []jsonFinding `json:"findings"`
 }
 
 // reportOf converts one analysed resource, keeping the findings in the order
 // they were sorted into so the JSON and the terminal cannot disagree about
-// which one is the headline. index is the 1-based position state.Save
-// assigned it, or 0 when the caller has none to give.
-func reportOf(report diagnostics.Report, index int) jsonReport {
+// which one is the headline. ref is what named the resource: a 1-based
+// position, a mark, or the zero Ref when the caller has neither — a sweep
+// indexes what it saves, so it always has a position to give.
+func reportOf(report diagnostics.Report, ref state.Ref) jsonReport {
 	findings := make([]jsonFinding, 0, len(report.Findings))
 	for _, finding := range report.Findings {
 		findings = append(findings, jsonFinding{
@@ -77,7 +84,8 @@ func reportOf(report diagnostics.Report, index int) jsonReport {
 		Kind:      report.Kind,
 		Name:      report.Name,
 		Namespace: report.Namespace,
-		Index:     index,
+		Index:     ref.Index,
+		Mark:      ref.Mark,
 		Verdict:   report.Verdict.Token(),
 		Findings:  findings,
 	}
@@ -112,7 +120,7 @@ func rfc3339(timestamp time.Time) string {
 // tree and kx top each have one shape whatever they were pointed at. An
 // indexed run is a sweep of one, and saying so costs a wrapper and buys a
 // pipeline that reads `.resources[]` for both.
-func diagnosticJSON(report diagnostics.Report, index int) (string, error) {
+func diagnosticJSON(report diagnostics.Report, ref state.Ref) (string, error) {
 	healthy := 0
 	if report.Verdict == diagnostics.OK {
 		healthy = 1
@@ -125,7 +133,7 @@ func diagnosticJSON(report diagnostics.Report, index int) (string, error) {
 		Window:        windowLabel(report.Window),
 		Checked:       1,
 		Healthy:       healthy,
-		Resources:     []jsonReport{reportOf(report, index)},
+		Resources:     []jsonReport{reportOf(report, ref)},
 	})
 }
 
@@ -169,7 +177,7 @@ func triageJSON(result render.TriageResult) (string, error) {
 	// just saved to state in this same order — so a finding in the document
 	// and the number `kx diag <index>` would show it under are one figure.
 	for position, report := range result.All {
-		resources = append(resources, reportOf(report, position+1))
+		resources = append(resources, reportOf(report, state.Ref{Index: position + 1}))
 	}
 
 	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute

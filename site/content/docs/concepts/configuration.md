@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: ~/.kx/config.toml, the KX_* overrides, and when output is styled.
-weight: 3
+weight: 4
 ---
 
 `kx` reads `~/.kx/config.toml`. Every key has an environment variable that
@@ -74,7 +74,7 @@ the same thing.
 | Path | Environment | Contents |
 | --- | --- | --- |
 | `~/.kx/config.toml` | `KX_CONFIG` | The settings above. |
-| `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor; see [state](../state/). |
+| `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor, plus the marks that outlive them; see [state](../state/) and [marks](../marks/). |
 
 `KX_CONFIG` and `KX_STATE` point kx at a different file entirely, for a
 terminal or CI job that wants its own config or history rather than sharing

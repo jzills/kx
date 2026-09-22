@@ -70,7 +70,12 @@ func (c TopCommand) Execute(
 	// percentage columns before anything numbers them, and none of that goes
 	// back through text on the way.
 	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
+	// Headerless output that still says something is a shape kx cannot number,
+	// and prints as-is. Headerless *and* empty is a listing that found nothing
+	// — which is what kubectl top prints for an empty namespace, since "No
+	// resources found" goes to stderr — and that is saved below like any other
+	// listing, so the indexes it replaces stop resolving.
+	if headers == nil && strings.TrimSpace(output) != "" {
 		return c.Index.Add(output), namespace, nil
 	}
 	if filterTerm != "" {
@@ -84,31 +89,37 @@ func (c TopCommand) Execute(
 	}
 
 	indexed := c.Index.AddRows(headers, rows)
-	if len(indexed.Entries) > 0 {
-		var match *string
-		if filterTerm != "" {
-			match = &filterTerm
-		}
-		if extraArgs == nil {
-			extraArgs = []string{}
-		}
-		// An -A listing has no single namespace for the entry — each resource
-		// carries its own, read from the table's NAMESPACE column, exactly as
-		// `kx get -A` records them.
-		entryNamespace := namespace
-		if allNamespaces {
-			entryNamespace = ""
-		}
-		if err := c.State.Save(state.State{
-			Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
-			Namespace:     entryNamespace,
-			AllNamespaces: allNamespaces,
-			// Recorded as a `get pods` query so a stale entry refreshes into a
-			// listing, which is what the indexes were assigned against.
-			Query: &state.Query{Resource: "pods", Args: extraArgs, Match: match},
-		}); err != nil {
-			return index.Table{}, "", err
-		}
+	// Saved even when nothing was listed: an empty listing that saved no entry
+	// left the previous one resolving indexes. See GetCommand.Execute.
+	var match *string
+	if filterTerm != "" {
+		match = &filterTerm
+	}
+	if extraArgs == nil {
+		extraArgs = []string{}
+	}
+	// An -A listing has no single namespace for the entry — each resource
+	// carries its own, read from the table's NAMESPACE column, exactly as
+	// `kx get -A` records them.
+	entryNamespace := namespace
+	if allNamespaces {
+		entryNamespace = ""
+	}
+	if err := c.State.Save(state.State{
+		Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
+		Namespace:     entryNamespace,
+		AllNamespaces: allNamespaces,
+		// Recorded as a `get pods` query so a stale entry refreshes into a
+		// listing, which is what the indexes were assigned against. Command
+		// keeps it from *being* that listing: top omits pods no metrics have
+		// arrived for and orders by usage, so the two hold different
+		// resources in a different order, and an entry that replaced the get
+		// listing put those numbers where the get listing's had been.
+		Query: &state.Query{
+			Resource: "pods", Args: extraArgs, Match: match, Command: "top",
+		},
+	}); err != nil {
+		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
 }
@@ -138,7 +149,9 @@ func (c TopCommand) ExecuteNodes(
 	// handed that namespace and filtered the node's warning events down to it,
 	// finding none, because node events live in default.
 	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
+	// Empty output is a listing that found nothing and is saved; anything else
+	// kx cannot number prints as-is. See Execute.
+	if headers == nil && strings.TrimSpace(output) != "" {
 		return c.Index.Add(output), namespace, nil
 	}
 	if filterTerm != "" {
@@ -147,24 +160,26 @@ func (c TopCommand) ExecuteNodes(
 	headers = relabelPercentColumns(headers)
 
 	indexed := c.Index.AddRows(headers, rows)
-	if len(indexed.Entries) > 0 {
-		if extraArgs == nil {
-			extraArgs = []string{}
-		}
-		var match *string
-		if filterTerm != "" {
-			match = &filterTerm
-		}
-		if err := c.State.Save(state.State{
-			Resources: resourcesFrom(indexed.Entries, kinds.Node),
-			Namespace: namespace,
-			// Recorded as a `get nodes` query, matching kx get nodes' own
-			// convention, so a stale entry refreshes into the same listing
-			// shape the indexes were assigned against.
-			Query: &state.Query{Resource: "nodes", Args: extraArgs, Match: match},
-		}); err != nil {
-			return index.Table{}, "", err
-		}
+	// Saved even when nothing was listed; see Execute above.
+	if extraArgs == nil {
+		extraArgs = []string{}
+	}
+	var match *string
+	if filterTerm != "" {
+		match = &filterTerm
+	}
+	if err := c.State.Save(state.State{
+		Resources: resourcesFrom(indexed.Entries, kinds.Node),
+		Namespace: namespace,
+		// Recorded as a `get nodes` query, matching kx get nodes' own
+		// convention, so a stale entry refreshes into the same listing
+		// shape the indexes were assigned against — and carrying the command
+		// that produced it, for the same reason Execute's entry does.
+		Query: &state.Query{
+			Resource: "nodes", Args: extraArgs, Match: match, Command: "top",
+		},
+	}); err != nil {
+		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
 }

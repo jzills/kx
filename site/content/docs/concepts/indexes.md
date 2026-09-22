@@ -47,6 +47,23 @@ kx describe 5..      # row 5 to the last row
 ```
 
 Ranges and single indexes mix freely — `kx delete 1 2..4 7..` is one command.
+An index named twice is one resource: overlapping ranges like `1..3 2..4` act
+on 1, 2, 3 and 4, each once.
+
+A range is trimmed to the listing rather than refused for overshooting it. On a
+14-row listing `13..20` acts on rows 13 and 14, the same two `13..` reaches —
+a range names a span, and what you get is the part of it that exists. A range
+entirely past the end is refused, because acting on nothing while appearing to
+succeed is worse than saying so:
+
+```bash
+kx describe 13..20   # rows 13 and 14, on a 14-row listing
+kx describe 20..30   # ✗ '20..30' starts past the current listing (14 items)
+```
+
+An index you type out is still taken literally: `kx delete 13 99` refuses the
+whole batch rather than deleting 13, because a delete cannot be undone and a
+number you wrote yourself is not a gesture at a span.
 
 ## Dropping the `get`
 
@@ -94,7 +111,9 @@ kx pods --field-selector status.phase=Running
 
 {{% kx-note %}}
 `-o json` and friends pass through too, but there is no table to number in
-that output, so nothing is indexed. The command prints what kubectl printed.
+that output, so nothing is indexed. The command prints what kubectl printed,
+and the listing you already had stays current — the numbers on screen before
+it still resolve.
 {{% /kx-note %}}
 
 ## Resources with no namespace

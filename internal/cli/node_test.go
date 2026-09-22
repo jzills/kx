@@ -27,7 +27,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 		command := NodeCommand{
 			Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment), Verb: verb,
 		}
-		_, err := command.Execute(1)
+		_, err := command.Execute(state.Ref{Index: 1})
 		if err == nil {
 			t.Fatalf("%s: succeeded on a Deployment", verb)
 		}
@@ -45,7 +45,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	message, err := command.Execute(1)
+	message, err := command.Execute(state.Ref{Index: 1})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 func TestCordonReportsAVanishedNodeAsStale(t *testing.T) {
 	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}, probeCode: 1}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	_, err := command.Execute(1)
+	_, err := command.Execute(state.Ref{Index: 1})
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -89,7 +89,7 @@ func TestDrainAbortsWithoutConfirmation(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return declined },
 	}
-	if err := command.Execute(1, false, nil); !errors.Is(err, declined) {
+	if err := command.Execute(state.Ref{Index: 1}, false, nil); !errors.Is(err, declined) {
 		t.Fatalf("err = %v, want the confirmation's own error", err)
 	}
 	if len(kubectl.interactive) != 0 {
@@ -112,7 +112,7 @@ func TestDrainSkipsTheatPromptWithYes(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { asked = true; return nil },
 	}
-	if err := command.Execute(1, true, nil); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if asked {
@@ -131,7 +131,7 @@ func TestDrainStreamsAndForwardsFlags(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	if err := command.Execute(1, true, []string{"--ignore-daemonsets", "--force"}); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, []string{"--ignore-daemonsets", "--force"}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	args := kubectl.interactive[0]
@@ -150,7 +150,7 @@ func TestDrainRefusesANonNode(t *testing.T) {
 		Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment),
 		Confirm: func(string) error { return nil },
 	}
-	err := command.Execute(1, true, nil)
+	err := command.Execute(state.Ref{Index: 1}, true, nil)
 	if err == nil || !strings.Contains(err.Error(), "'Deployment'") ||
 		!strings.Contains(err.Error(), "only Nodes") {
 		t.Errorf("err = %v, want it to name Deployment and Nodes", err)
@@ -165,7 +165,7 @@ func TestDrainForwardsAFailingExitCode(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	err := command.Execute(1, true, nil)
+	err := command.Execute(state.Ref{Index: 1}, true, nil)
 
 	var silent SilentError
 	if !errors.As(err, &silent) || silent.Code != 1 {
@@ -248,11 +248,11 @@ func mixedListing(t *testing.T, resources ...state.Resource) *state.Service {
 	return store
 }
 
-// validateIndexes exists so a batch does not half-apply, and the kind is as
-// much a precondition as the index resolving at all. The check used to live
-// inside Execute, one index at a time, so `kx cordon 1..3` over a listing
-// whose third entry is a Deployment cordoned the two nodes ahead of it,
-// printed two successes and then failed.
+// resolveRefs resolves every index before a batch acts on any of them, and
+// the kind is as much a precondition as the index resolving at all. The
+// check used to live inside Execute, one index at a time, so `kx cordon 1..3`
+// over a listing whose third entry is a Deployment cordoned the two nodes
+// ahead of it, printed two successes and then failed.
 func TestCordonRefusesAMixedBatchBeforeActingOnAnyOfIt(t *testing.T) {
 	for _, verb := range []string{"cordon", "uncordon"} {
 		kubectl := &recordingKubectl{}
@@ -316,7 +316,7 @@ func TestDrainReportsAVanishedNodeAsStale(t *testing.T) {
 	}
 
 	var stale StaleResourceError
-	err := command.Execute(1, false, nil)
+	err := command.Execute(state.Ref{Index: 1}, false, nil)
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %#v, want StaleResourceError", err)
 	}
@@ -339,10 +339,34 @@ func TestDrainProceedsWhenThePreflightFailsForAnotherReason(t *testing.T) {
 		Kubectl: kubectl, State: node("node-a"),
 		Confirm: func(string) error { return nil },
 	}
-	if err := command.Execute(1, true, nil); err != nil {
+	if err := command.Execute(state.Ref{Index: 1}, true, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(kubectl.interactive) != 1 {
 		t.Errorf("drain ran %d times, want 1: %v", len(kubectl.interactive), kubectl.interactive)
+	}
+}
+
+// An out-of-range index in the batch must cordon nothing. kx delete has
+// guaranteed this since it was written; cordon parsed without validating, so
+// it cordoned node 1 and then reported the failure — leaving the cluster in a
+// state the command had not been asked for.
+func TestCordonValidatesEveryIndexBeforeCordoningAny(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"node-a"}, kinds.Node),
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cmd := newCordonCommand(services, "cordon")
+	cmd.SetArgs([]string{"1", "99"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("cordon succeeded despite an out-of-range index in the batch")
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was called %d times, want 0 — index 99 is out of range and "+
+			"should be caught before node 1 is cordoned", len(kube.runs))
 	}
 }

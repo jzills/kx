@@ -27,8 +27,8 @@ type TreeCommand struct {
 
 // Execute graphs the resource an index names. A Namespace row graphs that
 // namespace itself — its own name, not the namespace the `kx get ns` ran in.
-func (c TreeCommand) Execute(ctx context.Context, index int, indexed bool) (*tree.Node, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c TreeCommand) Execute(ctx context.Context, ref state.Ref, indexed bool) (*tree.Node, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,12 @@ func (c TreeCommand) ExecuteAllNamespaces(
 func (c TreeCommand) save(
 	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
 ) error {
-	if !indexed || len(resources) == 0 {
+	// --no-index is display-only and must not disturb the listing the user is
+	// working through. An empty walk is a different thing: it *is* the listing
+	// now, and saving nothing for it left the previous one resolving indexes
+	// (see GetCommand.Execute), so `kx tree -n empty` then `kx delete 1` acted
+	// on whatever was listed before it.
+	if !indexed {
 		return nil
 	}
 	// Order is the order the indexes were assigned during the walk.
@@ -197,10 +202,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				scopeFlag = "--all-namespaces"
 			}
 			if len(args) > 0 && scopeFlag != "" {
-				return fmt.Errorf(
-					"'%s' cannot be combined with an index — an index already "+
-						"carries the namespace it was listed from. Drop the flag, "+
-						"or drop the index to sweep the namespace instead.", scopeFlag)
+				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 
 			client, err := services.Kubernetes()
@@ -300,11 +302,11 @@ func newTreeCommand(services Services) *cobra.Command {
 				return deliverPage(ctx, page, htmlOpts)
 			}
 
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
-			name, namespace, kind, err := services.State.Fields(index)
+			name, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
 			}
@@ -321,7 +323,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				}
 			}
 			stop := render.Status("resolving ownership graph")
-			node, err := command.Execute(ctx, index, indexed)
+			node, err := command.Execute(ctx, ref, indexed)
 			stop()
 			if err != nil {
 				return err

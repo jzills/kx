@@ -8,17 +8,23 @@ weight: 7
 
 Deletes one or more indexed resources, confirming each one individually — so declining one doesn't take the rest with it — unless --yes skips every prompt.
 
+kubectl's own flags pass through: --force --grace-period=0 for a pod that will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still prompts — kx does not read kubectl's flag semantics, and reading --dry-run=none as a dry run would skip the prompt on a real delete.
+
+Unrecognized flags are passed through to kubectl.
+
+Unrecognized flags are passed through to kubectl.
+
 ## Usage
 
 ```text
-kx delete [OPTIONS] <index>...
+kx delete [OPTIONS] <index>... [kubectl flags]
 ```
 
 ## Arguments
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing; run kx state to see it |
+| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 
@@ -40,4 +46,5 @@ kx delete 3
 kx delete 3 5 -y
 kx delete 3..5
 kx delete 3..
+kx delete 3 --force --grace-period=0
 ```

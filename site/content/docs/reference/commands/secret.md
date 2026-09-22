@@ -3,7 +3,7 @@
 title: "kx secret"
 linkTitle: "secret"
 description: "List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets."
-weight: 23
+weight: 25
 ---
 
 Lists Secrets exactly as kx get does. With --decode, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.
@@ -24,7 +24,7 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `[index]...` | Row number from the current listing; run kx state to see it |
+| `[index]...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Options
 

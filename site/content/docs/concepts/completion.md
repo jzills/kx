@@ -1,7 +1,7 @@
 ---
 title: Shell completion
 description: Tab-completion that names the resource behind each index, without calling the cluster.
-weight: 5
+weight: 6
 ---
 
 ```bash
@@ -26,7 +26,7 @@ Which is the difference between remembering a number and reading one.
 | Position | Candidates |
 | --- | --- |
 | The first word | Commands, plus every kind the shorthand accepts |
-| `<index>` | Indexes from the current listing, with names and kinds |
+| `<index>` | Indexes from the current listing, with names and kinds, plus every [mark](../marks/) as `@name` |
 | `<index>` for `kx ns` / `kx context` | The namespace and context slots, not the history stack |
 | `<position>` for `kx state` | History positions |
 | `<action>` for `kx rollout` | `status`, `restart`, `pause`, `resume`, `history`, `undo` |

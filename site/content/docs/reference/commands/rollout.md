@@ -3,10 +3,14 @@
 title: "kx rollout"
 linkTitle: "rollout"
 description: "Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet."
-weight: 20
+weight: 22
 ---
 
 Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams live and blocks until the rollout settles; the other actions run and return immediately.
+
+kubectl's own flags pass through, which is how undo reaches a particular revision: --to-revision, --revision for history, --timeout for status.
+
+Unrecognized flags are passed through to kubectl.
 
 ## Usage
 
@@ -19,7 +23,7 @@ kx rollout [OPTIONS] <action> <index>
 | Argument | Description |
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
-| `<index>` | Row number from the current listing; run kx state to see it |
+| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
 ## Global options
 
@@ -34,4 +38,6 @@ kx rollout [OPTIONS] <action> <index>
 kx rollout status 1
 kx rollout restart 1
 kx rollout undo 1
+kx rollout undo 1 --to-revision=2
+kx rollout status 1 --timeout=2m
 ```

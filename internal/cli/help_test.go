@@ -270,10 +270,16 @@ func TestMissingRequiredArgsSpeakInKxsVoiceNotCobras(t *testing.T) {
 		if err != nil {
 			t.Fatalf("root.Find(%q): %v", name, err)
 		}
-		if cmd.Args == nil {
-			t.Fatalf("%q has no Args validator", name)
-		}
-		got := cmd.Args(cmd, nil)
+		// A command that forwards kubectl's flags has no Args validator —
+		// cobra would run it against the unstripped argv — so its arity
+		// check lives in RunE, and that is the path to drive for the
+		// message. Both spellings must speak in kx's voice.
+		got := func() error {
+			if cmd.Args != nil {
+				return cmd.Args(cmd, nil)
+			}
+			return cmd.RunE(cmd, nil)
+		}()
 		if got == nil {
 			t.Fatalf("kx %s accepted zero arguments", name)
 		}
@@ -448,10 +454,10 @@ func TestEveryCommandAppearsInAHelpSection(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, cmd := range root.Commands() {
 		name := cmd.Name()
-		// `help` is cobra's and isn't part of kx's surface. Hidden commands are
-		// the pre-restructure kx back/forward/drop spellings, deliberately
-		// absent from --help now that kx state back/forward/drop are
-		// canonical — see NewRoot.
+		// `help` is cobra's and isn't part of kx's surface. A hidden command
+		// is deliberately absent from --help, so it cannot be required to
+		// appear in a section — there are none today, and the skip is what
+		// keeps adding one from failing this test for the wrong reason.
 		if name == "help" || cmd.Hidden {
 			continue
 		}
@@ -818,8 +824,8 @@ func TestSuggestForAddsWhatEditDistanceMisses(t *testing.T) {
 }
 
 // A suggestion for a spelling that already runs something is never seen, and
-// would be wrong if it were: `kx forward` is a real command, so offering
-// port-forward for it would contradict what the word does.
+// would be wrong if it were: cobra resolves the command before it ever reaches
+// suggestions, so the suggestion would contradict what the word already does.
 func TestSuggestForDoesNotShadowRealSpellings(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 

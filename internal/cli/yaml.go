@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,12 +26,20 @@ type YamlCommand struct {
 	State   IndexResolver
 }
 
-func (c YamlCommand) Execute(index int, show []string) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c YamlCommand) Execute(ref state.Ref, show []string, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
-	raw, err := c.Kubectl.Run([]string{"get", string(kind), name, "-n", namespace, "-o", "yaml"})
+	args := []string{"get", string(kind), name, "-n", namespace}
+	// kx's own -o yaml only when the caller named no format. Appended
+	// unconditionally it arrived beside the caller's, and kubectl resolved the
+	// pair by taking the last — so `kx yaml 1 -o json` worked by accident and
+	// would have broken the moment the order changed.
+	if !hasFlag(extraArgs, "--output", "-o") {
+		args = append(args, "-o", "yaml")
+	}
+	raw, err := c.Kubectl.Run(append(args, extraArgs...))
 	if err != nil {
 		return "", err
 	}

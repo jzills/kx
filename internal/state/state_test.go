@@ -759,6 +759,91 @@ func TestFieldsOutOfRangeNamesWhatTheListingHolds(t *testing.T) {
 	}
 }
 
+// An empty listing is still a listing, and it is the one an index now counts
+// against. "the current listing has 0 items" is technically true and useless:
+// it reads as a miscount rather than as "what you just listed found nothing",
+// and it points at kx state, where the fix is kx state back.
+func TestFieldsRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "pods"},
+	})
+
+	name, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatalf("Fields(1) = %q against an empty listing, want an error", name)
+	}
+	if name != "" {
+		t.Errorf("Fields(1) resolved to %q, which came from the previous listing", name)
+	}
+	for _, want := range []string{
+		"The current listing is empty",
+		"Pods · kube-public found none",
+		"Run 'kx state back' for the previous listing",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "out of range") {
+		t.Errorf("err = %q, want the empty listing named rather than an out-of-range count", err)
+	}
+}
+
+// The kind-checking path is the one kx scale, kx rollout and kx cordon take —
+// the destructive half of the command set — so it needs the same refusal, and
+// it keeps its own relist clause the way its out-of-range sibling does.
+func TestFieldsExpectingRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Deployment),
+		Namespace: "prod",
+	})
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "deploy"},
+	})
+
+	name, _, err := service.FieldsExpecting(1, kinds.Deployment)
+	if err == nil {
+		t.Fatalf("FieldsExpecting(1) = %q against an empty listing, want an error", name)
+	}
+	if name != "" {
+		t.Errorf("FieldsExpecting(1) resolved to %q, which came from the previous listing", name)
+	}
+	for _, want := range []string{
+		"The current listing is empty",
+		"Deployments · kube-public found none",
+		"kx state back",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// A listing with no query to name it still refuses the index; only the segment
+// naming what was listed drops out. kx tree and kx diag save entries with no
+// query, so this is the shape their empty sweeps take.
+func TestEmptyListingWithNoQueryStillRefusesTheIndex(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	save(t, service, State{Namespace: "prod"})
+
+	name, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatalf("Fields(1) = %q against an empty listing, want an error", name)
+	}
+	if !strings.Contains(err.Error(), "The current listing is empty") {
+		t.Errorf("err = %q, want it to say the listing is empty", err)
+	}
+	if strings.Contains(err.Error(), "found none") {
+		t.Errorf("err = %q, want no \"found none\" clause with nothing to name", err)
+	}
+}
+
 func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 	t.Run("out of range names the current listing and the relist", func(t *testing.T) {
 		service := newTestService(t, 10)
@@ -1713,5 +1798,855 @@ func TestLoadLeavesAClusterScopedListingWithoutANamespace(t *testing.T) {
 	}
 	if current.Namespace != "" {
 		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", current.Namespace)
+	}
+}
+
+// Empty entries are the cost of saving a listing that found nothing (see
+// Fields' refusal), and this is how they are swept back up. Only the empty
+// ones go: an entry holding resources is work the stack exists to keep.
+func TestDropEmptyRemovesOnlyTheEmptyEntries(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty-a", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty-b", Query: &Query{Resource: "pods"}})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 2 {
+		t.Errorf("dropped = %d, want 2", dropped)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2", len(history.States))
+	}
+	for i, want := range []string{"one", "two"} {
+		if names := history.States[i].Resources.Names(); len(names) != 1 || names[0] != want {
+			t.Errorf("States[%d] = %v, want [%s] — order did not survive", i, names, want)
+		}
+	}
+}
+
+// The cursor is a position in a slice that just got shorter. It has to follow
+// the entry it was on, or kx state back lands somewhere the user never was.
+func TestDropEmptyKeepsTheCursorOnItsEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+	if _, err := service.Navigate(-1); err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if history.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0 — it was on 'one', now the first entry", history.Cursor)
+	}
+	current, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if names := current.Resources.Names(); len(names) != 1 || names[0] != "one" {
+		t.Errorf("current entry = %v, want the one the cursor was on", names)
+	}
+}
+
+// Dropping the entry the cursor is on leaves it clamped inside the stack
+// rather than one past the end.
+func TestDropEmptyClampsTheCursorWhenItsOwnEntryGoes(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if history.Cursor != 0 {
+		t.Errorf("Cursor = %d, want 0", history.Cursor)
+	}
+	if _, err := service.Load(); err != nil {
+		t.Fatalf("Load after DropEmpty: %v", err)
+	}
+}
+
+// Nothing to drop is a no-op, not an error: the caller says so rather than
+// reprinting an unchanged stack as though something happened.
+func TestDropEmptyWithNothingToDropChangesNothing(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "default"})
+	save(t, service, State{Resources: pods("two"), Namespace: "default"})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 0 {
+		t.Errorf("dropped = %d, want 0", dropped)
+	}
+	if len(history.States) != 2 {
+		t.Errorf("len(States) = %d, want both entries kept", len(history.States))
+	}
+}
+
+// Unlike Drop, which refuses to remove the last entry so something stays
+// addressable, DropEmpty will empty the stack: keeping one entry that holds
+// nothing addressable is not worth the exception.
+func TestDropEmptyWillEmptyTheStack(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Namespace: "a", Query: &Query{Resource: "pods"}})
+	save(t, service, State{Namespace: "b", Query: &Query{Resource: "pods"}})
+
+	history, dropped, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if dropped != 2 || len(history.States) != 0 {
+		t.Errorf("dropped %d leaving %d entries, want 2 and 0", dropped, len(history.States))
+	}
+	if _, err := service.Load(); !errors.Is(err, ErrNoState) {
+		t.Errorf("Load error = %v, want ErrNoState for an emptied stack", err)
+	}
+}
+
+// Slots live outside the stack and are not history; only --all clears those.
+func TestDropEmptyLeavesTheSlotsAlone(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveNamed(State{
+		Resources: namespaces("default", "prod"), Namespace: "default",
+	}); err != nil {
+		t.Fatalf("SaveNamed: %v", err)
+	}
+	save(t, service, State{Namespace: "empty", Query: &Query{Resource: "pods"}})
+
+	history, _, err := service.DropEmpty()
+	if err != nil {
+		t.Fatalf("DropEmpty: %v", err)
+	}
+	if _, ok := history.Named[kinds.Namespace]; !ok {
+		t.Errorf("Named = %+v, want the namespace slot kept", history.Named)
+	}
+}
+
+// No state at all is the same failure Drop reports: there is no history to
+// sweep.
+func TestDropEmptyWithNoStateSaysSo(t *testing.T) {
+	service := newTestService(t, 10)
+	if _, _, err := service.DropEmpty(); !errors.Is(err, ErrNoState) {
+		t.Errorf("DropEmpty error = %v, want ErrNoState", err)
+	}
+}
+
+// The out-of-range hint offers the previous listing by its canonical spelling.
+// `kx back` was removed, and an error naming a command that no longer exists
+// sends the reader somewhere that answers "unknown command".
+func TestOutOfRangeBackHintNamesTheCanonicalSpelling(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	})
+	save(t, service, State{
+		Resources: NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	})
+
+	_, _, err := service.FieldsExpecting(9, kinds.Deployment)
+	if err == nil {
+		t.Fatal("index 9 of a 1-item listing resolved")
+	}
+	if !strings.Contains(err.Error(), "'kx state back'") {
+		t.Errorf("err = %q, want the hint spelled 'kx state back'", err)
+	}
+}
+
+// Commands are quoted with single quotes everywhere in kx — the out-of-range
+// message, the kind mismatch, the empty-listing refusal, the scope-flag
+// refusal, and five other uses of this very string. ErrNoState was the one
+// backtick in the codebase, and render's own error-style test documents the
+// single-quoted form.
+func TestErrNoStateQuotesTheCommandLikeEveryOtherMessage(t *testing.T) {
+	if strings.Contains(ErrNoState.Error(), "`") {
+		t.Errorf("ErrNoState = %q, want 'kx get <resource>' quoted the way kx quotes everywhere else",
+			ErrNoState.Error())
+	}
+	if !strings.Contains(ErrNoState.Error(), "'kx get <resource>'") {
+		t.Errorf("ErrNoState = %q, want it to name 'kx get <resource>'", ErrNoState.Error())
+	}
+}
+
+// Re-running kx get is the refresh idiom, so the stack filled with copies of
+// one listing: eight of ten entries were "Pods · diagnostics · 14 items" in an
+// ordinary session, and kx state back could not reach the Deployments listing
+// two commands earlier. A listing that repeats the query the cursor is already
+// on replaces it, so the stack holds distinct views.
+func TestSaveReplacesTheCurrentEntryWhenTheQueryRepeats(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query { return &Query{Resource: "pods", Args: []string{"-n", "prod"}} }
+
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("len(States) = %d, want 1 — the same query twice is one view", len(history.States))
+	}
+	// Replaced, not ignored: the second listing is what the cluster looks like
+	// now, and the whole reason to re-run.
+	if names := history.States[0].Resources.Names(); len(names) != 2 {
+		t.Errorf("entry holds %v, want the fresher listing's resources", names)
+	}
+}
+
+// A different query is a different view and pushes, so the stack is still a
+// history of what was looked at.
+func TestSaveKeepsListingsWithDifferentQueriesApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "deploy"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "staging",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — three different queries", len(history.States))
+	}
+}
+
+// Only against the entry the cursor is on. Comparing the whole stack would let
+// a re-list rewrite history at a distance: jump back two entries, re-run that
+// query, and an entry further forward would vanish.
+func TestSaveOnlyReplacesTheEntryAtTheCursor(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+	save(t, service, State{Resources: pods("web"), Namespace: "prod",
+		Query: &Query{Resource: "deploy"}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods"}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — pods, deploy, pods is what was looked at",
+			len(history.States))
+	}
+}
+
+// Entries with no query — a tree walk, a triage sweep — compare by what they
+// hold instead, so repeating one of those does not fill the stack either.
+func TestSaveReplacesAnIdenticalQuerylessEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	entry := func() State {
+		return State{Resources: pods("api", "web"), Namespace: "prod"}
+	}
+	save(t, service, entry())
+	save(t, service, entry())
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — the same walk twice is one view", len(history.States))
+	}
+}
+
+// A queryless entry holding something else still pushes: two tree walks of
+// different namespaces are two views.
+func TestSaveKeepsDifferentQuerylessEntriesApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	save(t, service, State{Resources: pods("api"), Namespace: "staging"})
+	save(t, service, State{Resources: pods("other"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3", len(history.States))
+	}
+}
+
+// A Ref carrying an index resolves exactly as Fields did — Resolve is the
+// shape that will also carry a mark, not a change of behaviour.
+func TestResolveAnIndexRefMatchesFields(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+
+	name, namespace, kind, err := service.Resolve(Ref{Index: 2})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	wantName, wantNamespace, wantKind, err := service.Fields(2)
+	if err != nil {
+		t.Fatalf("Fields: %v", err)
+	}
+	if name != wantName || namespace != wantNamespace || kind != wantKind {
+		t.Errorf("Resolve = (%q, %q, %q), want (%q, %q, %q)",
+			name, namespace, kind, wantName, wantNamespace, wantKind)
+	}
+}
+
+// A literal 0 is a typed index, not an absent one: parseIndex (internal/cli)
+// has no zero guard, so `kx describe 0` reaches here as Ref{Index: 0}, same as
+// any other out-of-range index, and must be reported the same way — naming
+// the listing so the user can pick a real one. An earlier version of this test
+// asserted the opposite (a dedicated "No resource reference given." message,
+// via a since-removed ref.Index == 0 guard in Resolve), which shipped as an
+// undetected regression: `kx describe 0` on develop reports out-of-range, and
+// this branch silently changed that message for an index the user did type.
+// There is no code path that hands Resolve a genuinely absent Ref — the
+// no-argument case is refused by the CLI layer before Resolve is ever called,
+// and kx cp's own zero Ref never reaches it either — so Ref{} is only ever the
+// same thing as a typed 0.
+func TestResolveOnZeroFallsThroughToTheOutOfRangeMessage(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	name, _, _, err := service.Resolve(Ref{})
+	if err == nil {
+		t.Fatalf("Resolve(Ref{}) = %q, want an error", name)
+	}
+	for _, want := range []string{"Index 0", "out of range", "1 Pod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// The kind-checking path takes a Ref too, so the destructive commands convert
+// without losing their kind guard.
+func TestResolveExpectingAnIndexRefChecksTheKind(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{
+		Resources: NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	})
+
+	if _, _, err := service.ResolveExpecting(Ref{Index: 1}, kinds.Deployment); err == nil {
+		t.Fatal("ResolveExpecting accepted a Pod where a Deployment was expected")
+	}
+	if _, _, err := service.ResolveExpecting(Ref{Index: 1}, kinds.Pod); err != nil {
+		t.Errorf("ResolveExpecting on a matching kind: %v", err)
+	}
+}
+
+// Marks are additive: a version-2 file written before marks existed decodes
+// with none, which is the correct reading of it. A schema bump would reset
+// every user's history to add a feature none of them is using yet.
+func TestHistoryWithoutMarksDecodesWithNone(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.Marks) != 0 {
+		t.Errorf("Marks = %v, want none", history.Marks)
+	}
+	if currentSchemaVersion != 2 {
+		t.Errorf("currentSchemaVersion = %d, want it unchanged at 2", currentSchemaVersion)
+	}
+}
+
+// A mark round-trips through the file with everything it needs to resolve:
+// what it names, where, and which cluster it was taken in.
+func TestMarksRoundTripThroughTheFile(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	mark, ok := history.Marks["api"]
+	if !ok {
+		t.Fatalf("Marks = %v, want an entry for api", history.Marks)
+	}
+	if mark.Name != "api-7d8f" || mark.Kind != kinds.Pod ||
+		mark.Namespace != "prod" || mark.Context != "staging" {
+		t.Errorf("mark = %+v, want api-7d8f/Pod/prod/staging", mark)
+	}
+}
+
+// A Ref spells itself the way the user wrote it, which is what the mark
+// errors quote back.
+func TestRefStringSpellsMarksWithTheSigil(t *testing.T) {
+	if got := (Ref{Mark: "api"}).String(); got != "@api" {
+		t.Errorf("Ref{Mark: api}.String() = %q, want @api", got)
+	}
+	if got := (Ref{Index: 3}).String(); got != "3" {
+		t.Errorf("Ref{Index: 3}.String() = %q, want 3", got)
+	}
+}
+
+func TestMarksListsWhatWasSaved(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-pod", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 2 || marks["api"].Name != "api-pod" || marks["web"].Name != "web-pod" {
+		t.Errorf("Marks() = %+v, want api and web", marks)
+	}
+}
+
+// Re-marking a name moves the pointer rather than adding a second entry.
+func TestSaveMarkReplacesAnExistingName(t *testing.T) {
+	service := newTestService(t, 10)
+	first := Mark{Resource: Resource{Name: "old", Kind: kinds.Pod, Namespace: "prod"}}
+	second := Mark{Resource: Resource{Name: "new", Kind: kinds.Pod, Namespace: "prod"}}
+	for _, mark := range []Mark{first, second} {
+		if err := service.SaveMark("api", mark); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 || marks["api"].Name != "new" {
+		t.Errorf("Marks() = %+v, want one entry naming new", marks)
+	}
+}
+
+func TestDropMarkRemovesOnlyThatName(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name, Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+	}
+	if err := service.DropMark("api"); err != nil {
+		t.Fatalf("DropMark: %v", err)
+	}
+
+	marks, _ := service.Marks()
+	if _, gone := marks["api"]; gone {
+		t.Error("api survived DropMark")
+	}
+	if _, kept := marks["web"]; !kept {
+		t.Error("DropMark removed web as well")
+	}
+}
+
+// Removing a name that was never marked says so rather than succeeding
+// silently — a typo should not look like a removal.
+func TestDropMarkReportsAnUnknownName(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.DropMark("nope"); err == nil {
+		t.Error("DropMark on an unknown name succeeded")
+	}
+}
+
+// DropMark and resolveMark (via Resolve) refuse an unknown name for the same
+// reason — a typo should not look like something else — and used to say so
+// in two different sentences: DropMark's opener matched resolveMark's, but
+// the tail diverged ("see the marks you have" vs. "to create one, or 'kx
+// mark' to list them"). One sentence, in one place, for a rule enforced in
+// several: this pins that the two error messages are now identical, modulo
+// the name.
+func TestDropMarkAndResolveMarkShareOneWording(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	dropErr := service.DropMark("nope")
+	if dropErr == nil {
+		t.Fatal("DropMark on an unknown name succeeded")
+	}
+	_, _, _, resolveErr := service.Resolve(Ref{Mark: "nope"})
+	if resolveErr == nil {
+		t.Fatal("Resolve on an unknown mark succeeded")
+	}
+	if dropErr.Error() != resolveErr.Error() {
+		t.Errorf("DropMark and Resolve disagree about an unknown mark:\n  DropMark: %q\n  Resolve:  %q",
+			dropErr, resolveErr)
+	}
+}
+
+// kx state drop --all leaves marks alone; this is the call that removes them.
+func TestDropAllMarksLeavesTheHistoryStack(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	if err := service.DropAllMarks(); err != nil {
+		t.Fatalf("DropAllMarks: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.Marks) != 0 {
+		t.Errorf("Marks = %v, want none", history.Marks)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want the history stack untouched", len(history.States))
+	}
+}
+
+// And the converse: clearing history leaves marks, which is the rule the
+// drop --all help text has to state.
+func TestDropAllLeavesMarks(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll: %v", err)
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Errorf("Marks = %+v, want marks to survive drop --all", marks)
+	}
+
+	// The other half of the rule: DropAll must still have cleared the stack.
+	// Checked here, alongside the marks surviving, so an implementation that
+	// mutated the loaded history in place instead of building a fresh literal
+	// — silently leaving the stack intact — cannot pass both at once.
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	// Only the stack is asserted on: loadHistory forces the cursor to 0
+	// whenever the stack is empty, so a cursor assertion here would hold no
+	// matter what DropAll wrote.
+	if len(history.States) != 0 {
+		t.Errorf("len(States) = %d, want the stack cleared", len(history.States))
+	}
+}
+
+// Save must preserve marks across a new listing.
+func TestSaveKeepsMarks(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	save(t, service, State{Resources: pods("web"), Namespace: "prod"})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	// The whole mark is checked, not just the key: Save rebuilding History
+	// carried the map across while losing what was in it would satisfy a
+	// presence check and still leave every `kx logs @api` unresolvable.
+	mark, ok := history.Marks["api"]
+	if !ok {
+		t.Fatalf("Marks[api] missing after Save, want marks to survive")
+	}
+	if mark.Name != "api" || mark.Kind != kinds.Pod || mark.Namespace != "prod" {
+		t.Errorf("Marks[api] = %+v, want api/Pod/prod intact", mark)
+	}
+}
+
+// A marks entry missing its name would decode to the zero Mark — a mark
+// naming the empty string in the empty namespace — the same failure
+// decodeEntry exists to prevent for a stack entry with no "resources". It
+// must be dropped, the way a broken slot drops, rather than stored.
+// A mark whose kind is missing is as unusable as one with no name, and fails
+// worse: the name still resolves, so kubectl is asked for a resource type of
+// "" and answers "the server doesn't have a resource type", which kx reports
+// as a stale resource — telling the user a running pod no longer exists and
+// advising them to re-mark it. Dropped on load like any other unreadable mark.
+func TestMarkWithoutKindDropsRatherThanBeingStored(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
+		`"cursor":0,"marks":{"api":{"name":"api-7d8f","namespace":"prod","context":"staging"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if mark, ok := history.Marks["api"]; ok {
+		t.Errorf("Marks[api] = %+v, want the kindless entry dropped", mark)
+	}
+}
+
+func TestMarkWithoutNameDropsRatherThanBeingStored(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],` +
+		`"cursor":0,"marks":{"api":{"context":"staging"}}}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if mark, ok := history.Marks["api"]; ok {
+		t.Errorf("Marks[api] = %+v, want the nameless entry dropped", mark)
+	}
+}
+
+// DropAll is the command reached for exactly when state has gone wrong, so a
+// corrupt file must not make it fail — it must still reset, the way it did
+// before marks existed. Losing marks along with the rest of a corrupt file is
+// the correct trade: a resettable file beats a preserved mark.
+func TestDropAllResetsACorruptFile(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := os.WriteFile(service.Path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := service.DropAll(); err != nil {
+		t.Fatalf("DropAll on a corrupt file: %v", err)
+	}
+
+	if _, err := service.Load(); !errors.Is(err, ErrNoState) {
+		t.Errorf("Load after DropAll on a corrupt file = %v, want ErrNoState", err)
+	}
+}
+
+// The point of a mark: it survives a re-list that moves every index.
+func TestResolveAMarkSurvivesARelist(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	// A re-list that reverses the order: index 1 is now web.
+	save(t, service, State{Resources: pods("web", "api"), Namespace: "prod"})
+
+	name, namespace, kind, err := service.Resolve(Ref{Mark: "api"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("Resolve(@api) = (%q, %q, %q), want api/prod/Pod", name, namespace, kind)
+	}
+}
+
+func TestResolveAnUnknownMarkSaysHowToMakeOne(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, err := service.Resolve(Ref{Mark: "nope"})
+	if err == nil {
+		t.Fatal("Resolve(@nope) succeeded with no such mark")
+	}
+	for _, want := range []string{
+		"No mark named 'nope'", "kx mark nope <index>", "kx mark",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// Names repeat across clusters, so a mark taken in staging must not resolve in
+// prod. This is the same hazard State.Context exists to prevent.
+func TestResolveAMarkFromAnotherContextRefuses(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "docker-desktop" }
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+		Context:  "staging",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	_, _, _, err := service.Resolve(Ref{Mark: "api"})
+	if err == nil {
+		t.Fatal("a staging mark resolved in docker-desktop")
+	}
+	for _, want := range []string{"@api", "staging", "docker-desktop"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// Either side unknown waives the check, matching checkContext's rule for
+// listings: a kubeconfig with no current context is a legitimate setup.
+func TestResolveAMarkWithNoRecordedContextIsAllowed(t *testing.T) {
+	service := newTestService(t, 10)
+	service.Context = func() string { return "docker-desktop" }
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	if _, _, _, err := service.Resolve(Ref{Mark: "api"}); err != nil {
+		t.Errorf("Resolve = %v, want a mark with no recorded context to resolve", err)
+	}
+}
+
+// A mark of the wrong kind is refused by the kind-checking path, the way an
+// index of the wrong kind already is.
+func TestResolveExpectingRefusesAMarkOfTheWrongKind(t *testing.T) {
+	service := newTestService(t, 10)
+	if err := service.SaveMark("api", Mark{
+		Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	_, _, err := service.ResolveExpecting(Ref{Mark: "api"}, kinds.Deployment)
+	if err == nil {
+		t.Fatal("a Pod mark resolved where a Deployment was expected")
+	}
+	for _, want := range []string{
+		"@api", "Pod/api", "not Deployment", "kx get deployments", "kx mark api",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+}
+
+// `kx top` and `kx get pods` are different views of the same kind: top omits
+// pods no metrics have arrived for and orders by usage, so the numbers on
+// screen belong to different resources. The entry top saves carries a `get
+// pods` query, because that is what a stale entry has to replay as, which made
+// the two indistinguishable here — top replaced the get listing instead of
+// pushing beside it, and `kx state back` could no longer reach it. The command
+// that produced the listing is part of which view it is.
+func TestSaveKeepsTopAndGetApart(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{}}})
+	save(t, service, State{Resources: pods("api"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{}, Command: "top"}})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2 — a top listing is not the get listing it followed",
+			len(history.States))
+	}
+	if names := history.States[0].Resources.Names(); len(names) != 2 {
+		t.Errorf("the entry behind holds %v, want the get listing's own resources", names)
+	}
+}
+
+// Two runs of kx top are still one view, so the refresh idiom does not fill
+// the stack with copies of it either.
+func TestSaveReplacesARepeatedTopListing(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query {
+		return &Query{Resource: "pods", Args: []string{}, Command: "top"}
+	}
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("len(States) = %d, want 1 — the same top listing twice is one view",
+			len(history.States))
+	}
+}
+
+// Several marks go in one write. Dropping them one call at a time re-read and
+// rewrote the file per name, and a failure partway through left the ones
+// already dropped gone with no record of what the user asked for.
+func TestDropMarksRemovesEveryNamedMark(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "db", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-0", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	if err := service.DropMarks([]string{"api", "web"}); err != nil {
+		t.Fatalf("DropMarks: %v", err)
+	}
+
+	marks, err := service.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if len(marks) != 1 {
+		t.Fatalf("marks = %+v, want db alone", marks)
+	}
+	if _, ok := marks["db"]; !ok {
+		t.Errorf("marks = %+v, want the unnamed mark left behind", marks)
+	}
+}
+
+// All or nothing. A name that is not a mark refuses the whole call, so a typo
+// in the middle of a batch does not take the marks before it with it.
+func TestDropMarksRemovesNothingWhenOneNameIsUnknown(t *testing.T) {
+	service := newTestService(t, 10)
+	for _, name := range []string{"api", "web"} {
+		if err := service.SaveMark(name, Mark{
+			Resource: Resource{Name: name + "-0", Kind: kinds.Pod, Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark(%s): %v", name, err)
+		}
+	}
+
+	err := service.DropMarks([]string{"api", "nope"})
+	if err == nil {
+		t.Fatal("DropMarks accepted a name that is not a mark")
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("err = %q, want it to name the mark it could not find", err)
+	}
+
+	marks, _ := service.Marks()
+	if len(marks) != 2 {
+		t.Errorf("marks = %+v, want both left — the batch removed nothing", marks)
 	}
 }

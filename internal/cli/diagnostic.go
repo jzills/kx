@@ -28,8 +28,8 @@ type DiagnosticCommand struct {
 	Diagnostics Gatherer
 }
 
-func (c DiagnosticCommand) Execute(ctx context.Context, index int) (diagnostics.Report, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DiagnosticCommand) Execute(ctx context.Context, ref state.Ref) (diagnostics.Report, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
@@ -123,18 +123,20 @@ func (c TriageCommand) Execute(
 		})
 	}
 
-	if len(entries) > 0 {
-		// namespace is already "" for a cluster-wide sweep — blanked above, the
-		// way client-go's listers spell "every namespace" — which is exactly what
-		// the entry wants: no single namespace, each resource recording its own.
-		// A second guard here would be dead code.
-		if err := c.Save(state.State{
-			Resources:     state.NewOrderedResources(entries),
-			Namespace:     namespace,
-			AllNamespaces: allNamespaces,
-		}); err != nil {
-			return render.TriageResult{}, err
-		}
+	// namespace is already "" for a cluster-wide sweep — blanked above, the way
+	// client-go's listers spell "every namespace" — which is exactly what the
+	// entry wants: no single namespace, each resource recording its own. A
+	// second guard here would be dead code.
+	//
+	// Saved even when the sweep checked nothing, because an empty sweep that
+	// saved no entry left the previous listing resolving indexes. See
+	// GetCommand.Execute.
+	if err := c.Save(state.State{
+		Resources:     state.NewOrderedResources(entries),
+		Namespace:     namespace,
+		AllNamespaces: allNamespaces,
+	}); err != nil {
+		return render.TriageResult{}, err
 	}
 
 	return result, nil
@@ -373,20 +375,20 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return sweepGate(result, failOn, threshold)
 			}
 
-			index, err := parseIndex("index", args[0])
+			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
 			}
 			stop := render.Status("gathering diagnostics")
 			report, err := DiagnosticCommand{
 				State: services.State, Diagnostics: service,
-			}.Execute(ctx, index)
+			}.Execute(ctx, ref)
 			stop()
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				document, err := diagnosticJSON(report, index)
+				document, err := diagnosticJSON(report, ref)
 				if err != nil {
 					return err
 				}

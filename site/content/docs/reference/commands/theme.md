@@ -3,7 +3,7 @@
 title: "kx theme"
 linkTitle: "theme"
 description: "List available color themes or persist a choice by name or index."
-weight: 30
+weight: 33
 ---
 
 Lists available color themes with a preview of each. A name, or the row number from that listing, persists a choice to config.

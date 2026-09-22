@@ -501,3 +501,45 @@ func TestStateOmitsTheNamespaceColumnForOneNamespace(t *testing.T) {
 		t.Errorf("single-namespace listing grew a NAMESPACE column:\n%s", out)
 	}
 }
+
+// An empty entry has no resources to name itself with, so kindLabel fell back
+// to "Mixed" and itemLabel to "0 items" — `kx state` captioned a listing that
+// found nothing as "Mixed · prod · 0 items", which reads as a listing of
+// several kinds that lost its rows. The query it was saved with says what was
+// actually asked for.
+func TestStateNamesAnEmptyListingFromItsQuery(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Namespace: "kube-public",
+			Query:     &state.Query{Resource: "pods"},
+			Context:   "docker-desktop",
+		})
+	})
+
+	for _, want := range []string{"Pods", "kube-public", "none found"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output = %q\n  missing %q", out, want)
+		}
+	}
+	for _, unwanted := range []string{"Mixed", "0 items"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output = %q, want no %q for an empty listing", out, unwanted)
+		}
+	}
+}
+
+// With no query there is nothing to name it with, so the kind segment drops
+// out rather than being invented. A tree walk and a triage sweep save entries
+// this shape.
+func TestStateEmptyListingWithNoQueryStillSaysNoneFound(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{Namespace: "prod"})
+	})
+
+	if !strings.Contains(out, "none found") {
+		t.Errorf("output = %q, want it to say none found", out)
+	}
+	if strings.Contains(out, "0 items") {
+		t.Errorf("output = %q, want no bare zero count", out)
+	}
+}

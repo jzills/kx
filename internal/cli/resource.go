@@ -13,23 +13,14 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// IndexResolver is the slice of the state service the index-taking commands
-// need: turning an index into the resource it names.
-type IndexResolver interface {
-	Fields(index int) (name, namespace string, kind kinds.Kind, err error)
-	// Count returns how many resources are in the current listing, used to
-	// resolve the open end of a "5.." range.
-	Count() (int, error)
-}
-
 // DescribeCommand shows kubectl describe output for an indexed resource.
 type DescribeCommand struct {
 	Kubectl kubectl.Service
 	State   IndexResolver
 }
 
-func (c DescribeCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DescribeCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -42,7 +33,7 @@ func (c DescribeCommand) Execute(index int, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way.
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -53,8 +44,8 @@ type EditCommand struct {
 	State   IndexResolver
 }
 
-func (c EditCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c EditCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -64,7 +55,7 @@ func (c EditCommand) Execute(index int, extraArgs []string) error {
 		return err
 	}
 	if code != 0 {
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -79,8 +70,8 @@ type DeleteCommand struct {
 	Status func(string) func()
 }
 
-func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
@@ -92,12 +83,35 @@ func (c DeleteCommand) Execute(index int, yes bool) (string, error) {
 		}
 	}
 	stop := c.Status("deleting")
-	_, err = c.Kubectl.Run([]string{"delete", string(kind), name, "-n", namespace})
+	_, err = c.Kubectl.Run(append(
+		[]string{"delete", string(kind), name, "-n", namespace}, extraArgs...))
 	stop()
 	if err != nil {
 		return "", err
 	}
+	if isDryRun(extraArgs) {
+		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), nil
+	}
 	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
+}
+
+// isDryRun reports whether extraArgs ask kubectl for a dry run, so kx's own
+// success line does not claim a deletion that did not happen — it replaces
+// kubectl's output ("pod \"x\" deleted (dry run)") with its own, so the
+// distinction is only there if kx puts it there.
+//
+// Deliberately narrow: only the two values that mean a dry run are recognised.
+// --dry-run=none is a real delete, and a spelling kubectl adds later is
+// unlabelled rather than guessed at — a missing "(dry run)" on a dry run is a
+// smaller failure than the label on a real one. This is the only place kx
+// reads a forwarded flag's meaning; the confirmation prompt deliberately does
+// not, since getting that wrong skips a safety step rather than a label.
+func isDryRun(extraArgs []string) bool {
+	value, _, err := extractString(extraArgs, "--dry-run", "")
+	if err != nil {
+		return false
+	}
+	return value == "client" || value == "server"
 }
 
 var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}
@@ -108,18 +122,18 @@ type ScaleCommand struct {
 	State   IndexResolver
 }
 
-func (c ScaleCommand) Execute(index, replicas int) (string, error) {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c ScaleCommand) Execute(ref state.Ref, replicas int, extraArgs []string) (string, error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
 	if !scalableKinds.Has(kind) {
 		return "", unsupportedKindError("scale", kind, scalableKinds)
 	}
-	_, err = c.Kubectl.Run([]string{
+	_, err = c.Kubectl.Run(append([]string{
 		"scale", string(kind) + "/" + name,
 		"--replicas=" + strconv.Itoa(replicas), "-n", namespace,
-	})
+	}, extraArgs...))
 	if err != nil {
 		return "", err
 	}
@@ -189,26 +203,27 @@ type RolloutCommand struct {
 }
 
 // Execute returns the captured output, or "" for actions that stream directly.
-func (c RolloutCommand) Execute(action string, index int) (string, error) {
+func (c RolloutCommand) Execute(action string, ref state.Ref, extraArgs []string) (string, error) {
 	if !isRolloutAction(action) {
 		return "", fmt.Errorf("kx rollout does not support '%s' — only %s.",
 			action, joinAnd(rolloutActionNames()))
 	}
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
 	}
 	if !rolloutKinds.Has(kind) {
 		return "", unsupportedKindError("rollout", kind, rolloutKinds)
 	}
-	args := []string{"rollout", action, string(kind) + "/" + name, "-n", namespace}
+	args := append(
+		[]string{"rollout", action, string(kind) + "/" + name, "-n", namespace}, extraArgs...)
 	if interactiveRolloutActions[action] {
 		code, err := c.Kubectl.RunInteractive(args, false)
 		if err != nil {
 			return "", err
 		}
 		if code != 0 {
-			return "", forwardExit(c.Kubectl, kind, name, namespace, code)
+			return "", forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 		}
 		return "", nil
 	}
@@ -226,8 +241,8 @@ type PortForwardCommand struct {
 	State   IndexResolver
 }
 
-func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c PortForwardCommand) Execute(ref state.Ref, port string, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -242,7 +257,7 @@ func (c PortForwardCommand) Execute(index int, port string, extraArgs []string) 
 		return err
 	}
 	if code != 0 {
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }
@@ -270,6 +285,17 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	if err != nil {
 		return err
 	}
+	// Guarded here rather than in RunE, unlike every other pass-through
+	// command: cp's index is embedded in a path argument ("1:/var/log/app.log"),
+	// so the namespace it resolves to is not known until resolve has run.
+	for _, pod := range []*resolvedPod{srcPod, destPod} {
+		if pod == nil {
+			continue
+		}
+		if err := refuseScopeFlag(extraArgs, pod.Namespace); err != nil {
+			return err
+		}
+	}
 	args := append([]string{"cp", src, dest}, extraArgs...)
 	code, err := c.Kubectl.RunInteractive(args, false)
 	if err != nil {
@@ -288,7 +314,13 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	if pod == nil {
 		return SilentError{Code: code}
 	}
-	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code)
+	// cp resolves its pod out of an "<index>:<path>" argument via strconv.Atoi,
+	// so there is no Ref in hand here the way the other commands have one — the
+	// zero Ref keeps today's refreshable behaviour, which is right for an index
+	// path. cp does not support marks: resolve (above) refuses one with a clear
+	// message rather than reaching here at all, so this path is only ever an
+	// index's.
+	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, state.Ref{})
 }
 
 // resolve rewrites an "<index>:<path>" argument into kubectl cp's own
@@ -299,6 +331,14 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 	before, path, found := strings.Cut(arg, ":")
 	if !found {
 		return arg, nil, nil
+	}
+	// Marks on cp are deliberately out of scope — there is no Ref here for one
+	// to ride along on, unlike every other command — but silently mishandling
+	// one is not: without this, strconv.Atoi below simply failed to parse
+	// "@api" and the whole argument fell through unchanged, handing kubectl
+	// the literal string "@api:/f" and a confusing message about a path.
+	if mark, ok := strings.CutPrefix(before, "@"); ok {
+		return "", nil, markRefusedForCp(mark)
 	}
 	index, err := strconv.Atoi(before)
 	if err != nil {
@@ -333,8 +373,8 @@ type LogsCommand struct {
 	Status  func(string) func()
 }
 
-func (c LogsCommand) Execute(index int, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c LogsCommand) Execute(ref state.Ref, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -347,7 +387,7 @@ func (c LogsCommand) Execute(index int, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			return forwardExit(c.Kubectl, kind, name, namespace, code)
+			return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 		}
 		return nil
 
@@ -449,8 +489,8 @@ func execTarget(kind kinds.Kind, name string) string {
 	return string(kind) + "/" + name
 }
 
-func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -471,7 +511,7 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed
@@ -497,7 +537,7 @@ func (c ExecCommand) Execute(index int, command, extraArgs []string) error {
 		return err
 	}
 
-	if err := ensureExists(c.Kubectl, kind, name, namespace); err != nil {
+	if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
 		return err
 	}
 	return fmt.Errorf(
@@ -525,8 +565,8 @@ type DebugCommand struct {
 	Image string
 }
 
-func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
-	name, namespace, kind, err := c.State.Fields(index)
+func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error {
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return err
 	}
@@ -597,7 +637,7 @@ func (c DebugCommand) Execute(index int, command, extraArgs []string) error {
 		// kubectl already printed its own message; what is left is deciding
 		// whether this was a stale index worth refreshing, and forwarding the
 		// exit code either way — the same shape describe and exec use.
-		return forwardExit(c.Kubectl, kind, name, namespace, code)
+		return forwardExit(c.Kubectl, kind, name, namespace, code, ref)
 	}
 	return nil
 }

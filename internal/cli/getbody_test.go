@@ -158,6 +158,50 @@ func TestGetIndexRangeRelist(t *testing.T) {
 	}
 }
 
+// A mark resolves the same way an index does, through the same leading-run
+// split and resolveRefsExpecting call — "kx get pods @api" relists the
+// resource pinned by the mark rather than treating "@api" as a name to fetch
+// literally.
+func TestGetResolvesAMarkOnTheCommandLine(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "nginx-abc-xyz", Kind: kinds.Pod, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	if err := runGet(services, "pods", []string{"@api"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	want := []string{"get", "pods", "nginx-abc-xyz", "-n", "prod"}
+	if joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+}
+
+// Contexts live in kubeconfig, not in kx state, so a mark — which names a
+// Kubernetes resource pinned from a listing — has nothing to resolve against
+// here. Refused rather than silently spent as index 0 (a mark Ref's Index is
+// always its zero value), which would have switched to whatever context
+// happens to sit first.
+func TestGetContextsRefusesAMark(t *testing.T) {
+	kube := &fakeKubectl{}
+	services := switchServices(t, kube)
+
+	err := runGet(services, "contexts", []string{"@api"}, getOptions{})
+	if err == nil {
+		t.Fatal("runGet(contexts, @api) succeeded, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "mark") {
+		t.Errorf("err = %q, want it to name the mark as the problem", err)
+	}
+	if len(kube.calls) != 0 {
+		t.Errorf("kubectl was called %d times, want 0", len(kube.calls))
+	}
+}
+
 // A kubectl flag value can legitimately contain ".." — JSONPath's recursive
 // descent, e.g. -o jsonpath={..metadata.name} — and must reach kubectl
 // untouched rather than being mistaken for a range token. Range/int
@@ -515,3 +559,156 @@ func TestGetClusterScopedRelistByIndexIsNotScopedToANamespace(t *testing.T) {
 const clusterScopedNodesTable = "NAME      STATUS   ROLES           AGE   VERSION\n" +
 	"node-a    Ready    control-plane   1d    v1.34.3\n" +
 	"node-b    Ready    <none>          1d    v1.34.3"
+
+// A relist naming a bad index fetches nothing. The relist resolved as it
+// grouped, so kx get pods 1 99 issued the kubectl call for index 1 and then
+// failed — a listing of some of what was asked for, saved as state.
+func TestRelistValidatesEveryIndexBeforeFetching(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	before := len(kube.calls)
+
+	if err := runGet(services, "pods", []string{"1", "99"}, getOptions{}); err == nil {
+		t.Fatal("relist succeeded despite an out-of-range index")
+	}
+	if after := len(kube.calls); after != before {
+		t.Errorf("made %d kubectl calls for a refused relist, want 0", after-before)
+	}
+}
+
+// The relist's out-of-range error must keep naming the exact command that
+// fixes it — "run 'kx get pods' to relist Pods" — not just a generic "index
+// out of range". Nothing pinned this before, and it silently regressed once
+// when the relist was first routed through resolveRefs's plain Resolve
+// instead of a kind-aware resolution; resolveRefsExpecting is what restores
+// it.
+func TestRelistOutOfRangeIndexNamesTheRelistCommand(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	err := runGet(services, "pods", []string{"1", "99"}, getOptions{})
+	if err == nil {
+		t.Fatal("relist succeeded despite an out-of-range index")
+	}
+	if !strings.Contains(err.Error(), "Run 'kx get pods' to relist") {
+		t.Errorf("err = %q, want it to name the relist command", err)
+	}
+}
+
+// An index left over from a listing of a different kind is refused rather
+// than silently fetched as whatever it actually names — resolveRefsExpecting
+// performs this check itself (via ResolveExpecting/FieldsExpecting), so no
+// explicit kind check needs to run afterward in runGet.
+func TestRelistRefusesAnIndexOfTheWrongKind(t *testing.T) {
+	kube := &fakeKubectl{}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := runGet(services, "pods", []string{"1"}, getOptions{})
+	if err == nil {
+		t.Fatal("relist accepted an index that resolved to the wrong kind")
+	}
+	for _, want := range []string{"Deployment/web", "not Pod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q\n  missing %q", err, want)
+		}
+	}
+	if len(kube.calls) != 0 {
+		t.Errorf("reached kubectl with %v; a kind mismatch must be refused first", kube.calls)
+	}
+}
+
+// An empty listing replaces the one before it, so the way back is offered at
+// the moment it becomes necessary rather than left to be discovered in
+// --help. The note names the listing it displaced, because "kx state back"
+// alone doesn't say what you would be going back to.
+func TestEmptyListingOffersTheWayBack(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{servicesOutput, ""}, namespace: "prod"}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "services", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	for _, want := range []string{"none found", "kx state back", "Services", "prod", "2 items"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q\n  missing %q", out.String(), want)
+		}
+	}
+}
+
+// The note names where `kx state back` actually goes, which is not always the
+// listing that was current a moment ago: re-running a query whose resources
+// have since gone replaces that entry rather than pushing beside it, so the
+// listing it named was the one the same command had just overwritten.
+// `kx get pods` (2 rows) then a drained `kx get pods` offered "Pods · prod ·
+// 2 items" and landed on the Services listing two commands back.
+func TestEmptyRelistNamesTheListingItWillReturnTo(t *testing.T) {
+	kube := &fakeKubectl{
+		outputs:   []string{servicesOutput, podsOutput, ""},
+		namespace: "prod",
+	}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "services", nil, getOptions{}); err != nil {
+		t.Fatalf("seed services: %v", err)
+	}
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed pods: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Services") {
+		t.Errorf("output = %q\n  want the way back to name the Services listing", out.String())
+	}
+	if strings.Contains(out.String(), "Pods · prod · 2 items") {
+		t.Errorf("output = %q\n  names the pods listing this run replaced", out.String())
+	}
+
+	// And the note is right: back lands where it said it would.
+	back, err := services.State.Navigate(-1)
+	if err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+	if names := back.Resources.Names(); len(names) != 2 || names[0] != "api" {
+		t.Errorf("kx state back returned %v, want the Services listing the note named", names)
+	}
+}
+
+// Nothing to go back to, so nothing is offered: the note would point at a
+// listing that does not exist.
+func TestFirstListingBeingEmptyOffersNoWayBack(t *testing.T) {
+	kube := &fakeKubectl{output: "", namespace: "prod"}
+	services := switchServices(t, kube)
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if strings.Contains(out.String(), "kx state back") {
+		t.Errorf("output = %q, want no way back offered with no previous listing", out.String())
+	}
+}

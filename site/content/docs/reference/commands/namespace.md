@@ -3,7 +3,7 @@
 title: "kx namespace"
 linkTitle: "namespace"
 description: "List namespaces, or switch to an indexed one; alias: kx ns."
-weight: 18
+weight: 19
 ---
 
 Lists namespaces, or switches to one by index.
@@ -26,7 +26,7 @@ kx namespace [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing; run kx state to see it |
+| `[index]` | Row number from the current listing; kx state shows them |
 
 ## Global options
 

@@ -1,7 +1,7 @@
 ---
 title: Themes
 description: Eleven palettes for the terminal, the HTML reports, and this page.
-weight: 4
+weight: 5
 ---
 
 ```bash

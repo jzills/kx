@@ -337,6 +337,20 @@ func (t Table) Indexable() bool { return t.Headers != nil }
 // resolves to whichever namespace the caller is standing in. False for an
 // ordinary single-namespace listing too — its table has no NAMESPACE column
 // either — so callers ask this only when they know the scope is -A.
+// Empty reports whether the table holds nothing to show — no indexable rows,
+// and no raw output to print instead.
+//
+// Exported so a caller can tell an empty listing apart from a populated one
+// without restating the test IndexedTable renders by: the two conditions used
+// to be spelled in both places, and a caller deciding "was that listing
+// empty?" for itself is how they drift.
+func (t Table) Empty() bool {
+	if !t.Indexable() {
+		return strings.TrimSpace(t.Raw) == ""
+	}
+	return len(t.Rows) == 0
+}
+
 func (t Table) Placed() bool {
 	for _, entry := range t.Entries {
 		if entry.Namespace != "" {
