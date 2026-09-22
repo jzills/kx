@@ -40,7 +40,21 @@ type NamedStateWriter interface {
 // call site that makes it.
 type slotOnly struct{ writer NamedStateWriter }
 
-func (s slotOnly) Save(entry state.State) error { return s.writer.SaveNamed(entry) }
+// A listing that found nothing is not written to the slot. A slot is filed
+// under the one kind it holds, and a listing holding nothing names no kind, so
+// SaveNamed refuses it — which reached the user as "state: a slot needs a
+// single-kind listing" where `kx ns` should have said none were found. The
+// slot keeps what it had, exactly as `kx contexts` has always left it.
+//
+// Unlike the history stack, a stale slot cannot resolve an index into the
+// wrong kind: `kx ns 2` reads the Namespace slot and nothing else, so the
+// worst it names is a namespace that has since gone, which relisting reports.
+func (s slotOnly) Save(entry state.State) error {
+	if entry.Resources.Len() == 0 {
+		return nil
+	}
+	return s.writer.SaveNamed(entry)
+}
 
 // GetCommand lists resources and saves the listing so later commands can
 // resolve indexes against it.
@@ -139,6 +153,20 @@ func (c GetCommand) Execute(
 	// that actually returned rows kx can't resolve is printed unnumbered.
 	if allNamespaces(extraArgs) && len(indexed.Entries) > 0 && !indexed.Placed() {
 		return index.Table{Raw: output}, namespace, nil
+	}
+	// Output kx cannot number leaves the current listing alone: `-o json`,
+	// `-o yaml` and `-o name` are printed as they arrived, and the numbers on
+	// screen still belong to the listing before them. Saved as an entry
+	// holding nothing, it wiped them — `kx get pods` then `kx get pods -o
+	// json` left `kx ref 1` reporting an empty listing the user never asked
+	// for.
+	//
+	// Not a table kx can read, rather than a table with no rows in it: the
+	// empty listing below has no header either (kubectl puts "No resources
+	// found" on stderr), and it is a fact about the cluster that the indexes
+	// must follow. What separates them is whether anything came back at all.
+	if !indexed.Indexable() && !indexed.Empty() {
+		return indexed, namespace, nil
 	}
 	// Saved unconditionally, including when the listing found nothing. An
 	// empty listing that saved no entry left the *previous* listing resolving

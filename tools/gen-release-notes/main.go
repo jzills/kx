@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/tools/internal/relnotes"
@@ -96,12 +97,68 @@ func previousTag(tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, candidate := range strings.Fields(listed) {
-		if candidate != tag {
-			return candidate, nil
+	return priorTag(tag, strings.Fields(listed))
+}
+
+// priorTag picks the highest tag below tag from a list of them.
+//
+// Below, not merely "the first one that isn't this release": the tags arrive
+// newest-first, so taking the first other entry is only right while releases
+// are strictly linear. Cutting v0.5.3 on an older line while v0.6.0 exists
+// returned v0.6.0, and `git log v0.6.0..v0.5.3` resolves to nothing — notes
+// with an empty middle tier and no error to say why.
+//
+// Tags that are not releases are not candidates: a repository accumulates
+// others, and a range against one of those covers whatever happens to sit
+// between them.
+func priorTag(tag string, tags []string) (string, error) {
+	this, ok := parseVersion(tag)
+	if !ok {
+		return "", fmt.Errorf("%s is not a release tag (want vX.Y.Z)", tag)
+	}
+	best, found := [3]int{}, ""
+	for _, candidate := range tags {
+		version, ok := parseVersion(candidate)
+		if !ok || !less(version, this) {
+			continue
+		}
+		if found == "" || less(best, version) {
+			best, found = version, candidate
 		}
 	}
-	return "", fmt.Errorf("no tag below %s — is this the first release?", tag)
+	if found == "" {
+		return "", fmt.Errorf("no tag below %s — is this the first release?", tag)
+	}
+	return found, nil
+}
+
+// parseVersion reads vX.Y.Z. Anything else is not a release tag.
+func parseVersion(tag string) ([3]int, bool) {
+	parts := strings.Split(strings.TrimPrefix(tag, "v"), ".")
+	if !strings.HasPrefix(tag, "v") || len(parts) != 3 {
+		return [3]int{}, false
+	}
+	var version [3]int
+	for i, part := range parts {
+		number, err := strconv.Atoi(part)
+		if err != nil || number < 0 {
+			return [3]int{}, false
+		}
+		version[i] = number
+	}
+	return version, true
+}
+
+// less orders two versions by major, then minor, then patch — the ordering
+// `git tag --sort=v:refname` applies, reimplemented because the candidates
+// have to be compared against a tag that does not exist yet.
+func less(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 // generatedNotes is GitHub's own "What's Changed" body for the range.

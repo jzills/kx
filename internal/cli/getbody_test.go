@@ -633,10 +633,10 @@ func TestRelistRefusesAnIndexOfTheWrongKind(t *testing.T) {
 // --help. The note names the listing it displaced, because "kx state back"
 // alone doesn't say what you would be going back to.
 func TestEmptyListingOffersTheWayBack(t *testing.T) {
-	kube := &fakeKubectl{outputs: []string{podsOutput, ""}, namespace: "prod"}
+	kube := &fakeKubectl{outputs: []string{servicesOutput, ""}, namespace: "prod"}
 	services := switchServices(t, kube)
 
-	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+	if err := runGet(services, "services", nil, getOptions{}); err != nil {
 		t.Fatalf("seed listing: %v", err)
 	}
 
@@ -646,10 +646,53 @@ func TestEmptyListingOffersTheWayBack(t *testing.T) {
 		t.Fatalf("runGet: %v", err)
 	}
 
-	for _, want := range []string{"none found", "kx state back", "Pods", "prod", "2 items"} {
+	for _, want := range []string{"none found", "kx state back", "Services", "prod", "2 items"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output = %q\n  missing %q", out.String(), want)
 		}
+	}
+}
+
+// The note names where `kx state back` actually goes, which is not always the
+// listing that was current a moment ago: re-running a query whose resources
+// have since gone replaces that entry rather than pushing beside it, so the
+// listing it named was the one the same command had just overwritten.
+// `kx get pods` (2 rows) then a drained `kx get pods` offered "Pods · prod ·
+// 2 items" and landed on the Services listing two commands back.
+func TestEmptyRelistNamesTheListingItWillReturnTo(t *testing.T) {
+	kube := &fakeKubectl{
+		outputs:   []string{servicesOutput, podsOutput, ""},
+		namespace: "prod",
+	}
+	services := switchServices(t, kube)
+
+	if err := runGet(services, "services", nil, getOptions{}); err != nil {
+		t.Fatalf("seed services: %v", err)
+	}
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed pods: %v", err)
+	}
+
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Services") {
+		t.Errorf("output = %q\n  want the way back to name the Services listing", out.String())
+	}
+	if strings.Contains(out.String(), "Pods · prod · 2 items") {
+		t.Errorf("output = %q\n  names the pods listing this run replaced", out.String())
+	}
+
+	// And the note is right: back lands where it said it would.
+	back, err := services.State.Navigate(-1)
+	if err != nil {
+		t.Fatalf("Navigate: %v", err)
+	}
+	if names := back.Resources.Names(); len(names) != 2 || names[0] != "api" {
+		t.Errorf("kx state back returned %v, want the Services listing the note named", names)
 	}
 }
 
