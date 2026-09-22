@@ -6,25 +6,17 @@ on:
       - 'release/**'
 
 jobs:
-  build-and-publish:
-    name: Build and Publish
+  # Everything this job does is disposable: it writes nothing outside the
+  # runner, so a release abandoned at the approval gate below leaves the
+  # release branch exactly as it was pushed.
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
-      # The default GITHUB_TOKEN can't push the version-bump commit below:
-      # release/** is protected by the restrict-release ruleset, and that
-      # bypasses only a specific user, not the github-actions bot (Integration
-      # bypass actors require an org-owned repo, which this isn't). RELEASE_PAT
-      # is a fine-grained PAT for this repo (Contents: read and write) issued
-      # under that user's account, so the push authenticates as an actor the
-      # ruleset already trusts.
       - uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Extract version from branch name
         id: version
@@ -33,10 +25,9 @@ jobs:
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
       # First, deliberately: a release whose summary nobody wrote is one this
-      # gate should stop while stopping is still free. Everything below this
-      # either publishes to PyPI, pushes a tag, or opens a pull request, and
-      # none of those come back cleanly. A missing file costs a commit to the
-      # release branch, whose push re-runs this workflow from the top.
+      # gate should stop while stopping is still free. A missing file costs a
+      # commit to the release branch, whose push re-runs this workflow from
+      # the top.
       - name: Require a release summary
         run: |
           NOTES="release-notes/v${{ steps.version.outputs.value }}.md"
@@ -55,27 +46,6 @@ jobs:
 
       - name: Run tests
         run: go test ./...
-
-      # The binary carries its version through -ldflags, so pyproject.toml is
-      # stamped only to keep the repo's recorded version honest and to supply
-      # the wheel metadata's name and description.
-      - name: Set version in pyproject.toml
-        run: |
-          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.value }}\"/" pyproject.toml
-
-      # [skip ci] matters here specifically because this pushes with
-      # RELEASE_PAT rather than the default GITHUB_TOKEN: GitHub only
-      # suppresses on-push retriggering for the built-in token, so a PAT
-      # push to release/** would otherwise kick off a second run of this
-      # same workflow, which fails at this exact step ("nothing to commit")
-      # since the version was already bumped by the first run.
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore: bump version to ${{ steps.version.outputs.value }} [skip ci]"
-          git push origin "${{ github.ref_name }}"
 
       # Binaries first: the wheels package them, so unlike the PyInstaller
       # pipeline the PyPI publish now depends on the build rather than
@@ -123,6 +93,10 @@ jobs:
           EXPECTED="kx v${{ steps.version.outputs.value }}"
           test "$ACTUAL" = "$EXPECTED" || { echo "expected '$EXPECTED', got '$ACTUAL'"; exit 1; }
 
+      # build_wheels.py takes the version as an argument and reads only the
+      # name, description and readme out of pyproject.toml, so the wheels are
+      # stamped correctly without the file being edited first. The edit that
+      # keeps the repo's recorded version honest belongs to the publish job.
       - name: Build wheels
         run: python3 scripts/build_wheels.py --version "${{ steps.version.outputs.value }}" --binaries dist/binaries
 
@@ -136,15 +110,6 @@ jobs:
             "dist/wheels/kx_cli-${{ steps.version.outputs.value }}-py3-none-manylinux_2_17_x86_64.whl"
           "$RUNNER_TEMP/venv/bin/kx" --version
 
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          python3 -m pip install --quiet twine
-          python3 -m twine check dist/wheels/*.whl
-          python3 -m twine upload --skip-existing dist/wheels/*.whl
-
       - name: Upload release archives
         uses: actions/upload-artifact@v7
         with:
@@ -154,10 +119,80 @@ jobs:
             dist/kx_v*.zip
           if-no-files-found: error
 
+      # Carried across the gate rather than rebuilt after it, so what is
+      # published is the artifact the checks above actually passed.
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-wheels
+          path: dist/wheels/*.whl
+          if-no-files-found: error
+
+  # The approval gate. Everything from here on writes somewhere that does not
+  # come back cleanly — PyPI refuses a re-upload, and the tag, the release and
+  # the pull requests below all follow from this job. The `release`
+  # environment carries the required-reviewer rule; the job does not start
+  # until a reviewer approves the run.
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # The default GITHUB_TOKEN can't push the version-bump commit below:
+      # release/** is protected by the restrict-release ruleset, and that
+      # bypasses only a specific user, not the github-actions bot (Integration
+      # bypass actors require an org-owned repo, which this isn't). RELEASE_PAT
+      # is a fine-grained PAT for this repo (Contents: read and write) issued
+      # under that user's account, so the push authenticates as an actor the
+      # ruleset already trusts.
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+
+      # The binary carries its version through -ldflags, so pyproject.toml is
+      # stamped only to keep the repo's recorded version honest and to supply
+      # the wheel metadata's name and description.
+      - name: Set version in pyproject.toml
+        run: |
+          sed -i "s/^version = .*/version = \"${{ needs.build.outputs.version }}\"/" pyproject.toml
+
+      # [skip ci] matters here specifically because this pushes with
+      # RELEASE_PAT rather than the default GITHUB_TOKEN: GitHub only
+      # suppresses on-push retriggering for the built-in token, so a PAT
+      # push to release/** would otherwise kick off a second run of this
+      # same workflow, which fails at this exact step ("nothing to commit")
+      # since the version was already bumped by the first run.
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ needs.build.outputs.version }} [skip ci]"
+          git push origin "${{ github.ref_name }}"
+
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          name: release-wheels
+          path: dist/wheels
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          python3 -m pip install --quiet twine
+          python3 -m twine check dist/wheels/*.whl
+          python3 -m twine upload --skip-existing dist/wheels/*.whl
+
   tag:
     name: Create Release Tag
     runs-on: ubuntu-latest
-    needs: build-and-publish
+    needs: [build, publish]
     permissions:
       contents: write
     steps:
@@ -167,13 +202,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${{ needs.build-and-publish.outputs.version }}"
-          git push origin "v${{ needs.build-and-publish.outputs.version }}"
+          git tag "v${{ needs.build.outputs.version }}"
+          git push origin "v${{ needs.build.outputs.version }}"
 
   github-release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-and-publish, tag]
+    needs: [build, publish, tag]
     permissions:
       contents: write
       actions: write
@@ -200,11 +235,14 @@ jobs:
       # which takes a glob, shipped those five images with every release from
       # v0.0.6 to v0.5.2. RUNNER_TEMP cannot collide with a tracked path,
       # which a differently-named directory in the workspace could again.
+      #
+      # Named, not merge-multiple: the run also carries the wheels the publish
+      # job consumed, and an unnamed download would stage those here too.
       - name: Download binary archives
         uses: actions/download-artifact@v8
         with:
+          name: release-archives
           path: ${{ runner.temp }}/release-assets
-          merge-multiple: true
 
       - name: Generate checksums
         run: cd "$RUNNER_TEMP/release-assets" && sha256sum *.tar.gz *.zip > SHA256SUMS
@@ -233,7 +271,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           go run ./tools/gen-release-notes \
-            --version "${{ needs.build-and-publish.outputs.version }}" \
+            --version "${{ needs.build.outputs.version }}" \
             --out "$RUNNER_TEMP/notes.md"
           echo "--- notes as published ---"
           cat "$RUNNER_TEMP/notes.md"
@@ -242,10 +280,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v${{ needs.build-and-publish.outputs.version }}" \
+          gh release create "v${{ needs.build.outputs.version }}" \
             "$RUNNER_TEMP"/release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "v${{ needs.build-and-publish.outputs.version }}" \
+            --title "v${{ needs.build.outputs.version }}" \
             --notes-file "$RUNNER_TEMP/notes.md"
 
       # krew-index runs exactly this validator on the PR the dispatch below
@@ -264,7 +302,7 @@ jobs:
           KREW_VERSION: v0.4.5
         run: |
           set -euo pipefail
-          tag="v${{ needs.build-and-publish.outputs.version }}"
+          tag="v${{ needs.build.outputs.version }}"
 
           # The bot's own renderer, so the manifest under test is the one it
           # will submit rather than our approximation of it.
@@ -296,12 +334,12 @@ jobs:
         run: |
           gh workflow run krew.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref "v${{ needs.build-and-publish.outputs.version }}"
+            --ref "v${{ needs.build.outputs.version }}"
 
   merge:
     name: Open PR to Main
     runs-on: ubuntu-latest
-    needs: build-and-publish
+    needs: [build, publish]
     permissions:
       contents: write
       pull-requests: write
@@ -312,8 +350,8 @@ jobs:
         run: |
           PR_URL=$(gh pr create \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Release v${{ needs.build-and-publish.outputs.version }}" \
-            --body "Automated release PR for v${{ needs.build-and-publish.outputs.version }}. Package published to PyPI successfully." \
+            --title "Release v${{ needs.build.outputs.version }}" \
+            --body "Automated release PR for v${{ needs.build.outputs.version }}. Package published to PyPI successfully." \
             --base main \
             --head "${{ github.ref_name }}")
           # --auto errors when the PR is already in clean status (nothing
@@ -323,7 +361,7 @@ jobs:
   merge-back:
     name: Merge Release Back to Develop
     runs-on: ubuntu-latest
-    needs: build-and-publish
+    needs: [build, publish]
     permissions:
       contents: write
       pull-requests: write
