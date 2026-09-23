@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"gopkg.in/yaml.v3"
 )
 
 // registerEvidenceTools adds the tools that read what happened to a resource
@@ -252,5 +255,214 @@ func (d mcpDeps) logs(_ context.Context, _ *mcp.CallToolRequest, in logsInput) (
 	out.Lines = countLines(text)
 	out.Truncated = truncated
 	out.Logs = text
+	return nil, out, nil
+}
+
+const (
+	defaultTopLimit = 200
+	maxTopLimit     = 1000
+)
+
+type topInput struct {
+	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to read; defaults to the current namespace. Not valid with nodes."`
+	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"Read across every namespace. Not valid with nodes."`
+	Nodes         bool   `json:"nodes,omitempty" jsonschema:"Report node usage against capacity instead of pod usage against limits."`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000."`
+}
+
+type topOutput struct {
+	Context string      `json:"context"`
+	Top     topDocument `json:"top"`
+}
+
+func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*mcp.CallToolResult, topOutput, error) {
+	if in.Namespace != "" {
+		if err := validNamespace(in.Namespace); err != nil {
+			return nil, topOutput{}, err
+		}
+	}
+	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+		return nil, topOutput{}, err
+	}
+	if in.Nodes {
+		if in.Namespace != "" {
+			return nil, topOutput{}, clusterScopedScopeError("namespace", "nodes")
+		}
+		if in.AllNamespaces {
+			return nil, topOutput{}, clusterScopedScopeError("allNamespaces", "nodes")
+		}
+	}
+
+	out := topOutput{Context: d.Kubectl.CurrentContext()}
+	command := TopCommand{Kubectl: d.Kubectl, State: discardWriter{}, Index: index.Service{}}
+
+	var indexed index.Table
+	var err error
+	resource := "pods"
+	var subject scanSubject
+	switch {
+	case in.Nodes:
+		resource = "nodes"
+		indexed, _, err = command.ExecuteNodes("", nil)
+	case in.AllNamespaces:
+		indexed, _, err = command.Execute("", []string{"-A"}, false)
+		subject.AllNamespaces = true
+	default:
+		namespace := in.Namespace
+		if namespace == "" {
+			namespace = d.Kubectl.CurrentNamespace()
+		}
+		indexed, _, err = command.Execute("", []string{"-n", namespace}, false)
+		subject.Namespace = namespace
+	}
+	if err != nil {
+		return nil, topOutput{}, err
+	}
+
+	rows := topPageRows(indexed)
+	// No numeric indexes in a tool result — see resolveTarget and the package
+	// doc comment in mcp.go. topPageRows reads the "X" column TopCommand just
+	// indexed, so every row's Index is zeroed before it goes near the document.
+	for i := range rows {
+		rows[i].Index = 0
+	}
+	total := len(rows)
+	limit := clampLimit(in.Limit, defaultTopLimit, maxTopLimit)
+	truncated := 0
+	if total > limit {
+		rows = rows[:limit]
+		truncated = total - limit
+	}
+	out.Top = topDocumentOf(subject, resource, rows)
+	out.Top.Truncated = truncated
+	return nil, out, nil
+}
+
+// fieldNamePattern is the shape a get_yaml field must have. Letters and
+// digits only, starting with a letter — findKeys matches a field against a
+// manifest's own map keys, which are YAML/JSON identifiers, never a kubectl
+// flag or a path expression, so there is no '-', '.' or '/' to allow.
+var fieldNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+
+// maxYAMLBytes bounds an encoded manifest kept in a tool result — 256 KiB,
+// matching logs' own bound (boundLogBytes). Unlike logs, a manifest is a
+// single document that cannot be cut mid-stream without producing invalid
+// YAML, so an oversized one is refused rather than truncated.
+const maxYAMLBytes = 256 * 1024
+
+// redactSecretAnnotation is the annotation kubectl apply stamps with the
+// whole manifest it last applied — a Secret's plaintext data included — so
+// get_yaml must redact it exactly as it redacts data and stringData.
+const redactSecretAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
+
+// redactSecret masks a Secret manifest's plaintext values: every value under
+// top-level data and stringData becomes "<redacted>" with its key kept, and
+// the last-applied-configuration annotation — which carries the whole
+// manifest, Secret data included — is redacted the same way.
+//
+// A pure function of the decoded document, so it has its own table test
+// independent of the tool plumbing around it. Anything other than a
+// map[string]any (a malformed or empty document) is returned unchanged: there
+// is nothing shaped like a Secret to redact.
+func redactSecret(document any) any {
+	root, ok := document.(map[string]any)
+	if !ok {
+		return document
+	}
+	redacted := make(map[string]any, len(root))
+	for key, value := range root {
+		redacted[key] = value
+	}
+	for _, key := range []string{"data", "stringData"} {
+		values, ok := redacted[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		masked := make(map[string]any, len(values))
+		for field := range values {
+			masked[field] = "<redacted>"
+		}
+		redacted[key] = masked
+	}
+	if metadata, ok := redacted["metadata"].(map[string]any); ok {
+		if annotations, ok := metadata["annotations"].(map[string]any); ok {
+			if _, present := annotations[redactSecretAnnotation]; present {
+				maskedAnnotations := make(map[string]any, len(annotations))
+				for key, value := range annotations {
+					maskedAnnotations[key] = value
+				}
+				maskedAnnotations[redactSecretAnnotation] = "<redacted>"
+				maskedMetadata := make(map[string]any, len(metadata))
+				for key, value := range metadata {
+					maskedMetadata[key] = value
+				}
+				maskedMetadata["annotations"] = maskedAnnotations
+				redacted["metadata"] = maskedMetadata
+			}
+		}
+	}
+	return redacted
+}
+
+type getYamlInput struct {
+	Target mcpTarget `json:"target" jsonschema:"The resource whose manifest to show."`
+	Fields []string  `json:"fields,omitempty" jsonschema:"Only these top-level or nested keys, shallowest match first — e.g. [\"spec\", \"status\"]."`
+}
+
+type yamlOutput struct {
+	Context   string `json:"context"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Mark      string `json:"mark,omitempty"`
+	Redacted  bool   `json:"redacted,omitempty"`
+	YAML      string `json:"yaml"`
+}
+
+func (d mcpDeps) getYAML(_ context.Context, _ *mcp.CallToolRequest, in getYamlInput) (*mcp.CallToolResult, yamlOutput, error) {
+	for _, field := range in.Fields {
+		if !fieldNamePattern.MatchString(field) {
+			return nil, yamlOutput{}, fmt.Errorf(
+				"field '%s' is not a manifest key — use letters and digits only, e.g. \"spec\".", field)
+		}
+	}
+
+	out := yamlOutput{Context: d.Kubectl.CurrentContext()}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, yamlOutput{}, err
+	}
+	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
+
+	raw, err := d.Kubectl.Run(target.getArgs("-o", "yaml"))
+	if err != nil {
+		return nil, yamlOutput{}, err
+	}
+
+	var document any
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		return nil, yamlOutput{}, err
+	}
+	// Redacted on the resolved kind, not the caller's own spelling of it — a
+	// mark that aliases a Secret must be redacted exactly as naming the
+	// Secret directly would be.
+	if target.Kind == kinds.Secret {
+		document = redactSecret(document)
+		out.Redacted = true
+	}
+	if len(in.Fields) > 0 {
+		document = findKeys(document, in.Fields)
+	}
+
+	encoded, err := encodeYAML(document)
+	if err != nil {
+		return nil, yamlOutput{}, err
+	}
+	if len(encoded) > maxYAMLBytes {
+		return nil, yamlOutput{}, fmt.Errorf(
+			"The manifest is %d KiB, over the 256 KiB limit — pass fields to narrow it, e.g. [\"spec\"].",
+			(len(encoded)+1023)/1024)
+	}
+	out.YAML = encoded
 	return nil, out, nil
 }

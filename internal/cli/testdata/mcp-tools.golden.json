@@ -287,6 +287,89 @@
     }
   },
   {
+    "name": "get_yaml",
+    "annotations": {
+      "idempotentHint": true,
+      "readOnlyHint": true,
+      "title": "Get YAML"
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "Only these top-level or nested keys, shallowest match first — e.g. [\"spec\", \"status\"].",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "target": {
+          "additionalProperties": false,
+          "description": "The resource whose manifest to show.",
+          "properties": {
+            "kind": {
+              "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+              "type": "string"
+            },
+            "mark": {
+              "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Resource name. Required unless mark is given.",
+              "type": "string"
+            },
+            "namespace": {
+              "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mark": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "yaml": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "context",
+        "kind",
+        "name",
+        "yaml"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "list_marks",
     "annotations": {
       "idempotentHint": true,
@@ -603,6 +686,121 @@
       "required": [
         "context",
         "mark"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "top",
+    "annotations": {
+      "idempotentHint": true,
+      "readOnlyHint": true,
+      "title": "Top"
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allNamespaces": {
+          "description": "Read across every namespace. Not valid with nodes.",
+          "type": "boolean"
+        },
+        "limit": {
+          "description": "Most rows to return; default 200, at most 1000.",
+          "type": "integer"
+        },
+        "namespace": {
+          "description": "Namespace to read; defaults to the current namespace. Not valid with nodes.",
+          "type": "string"
+        },
+        "nodes": {
+          "description": "Report node usage against capacity instead of pod usage against limits.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "top": {
+          "additionalProperties": false,
+          "properties": {
+            "allNamespaces": {
+              "type": "boolean"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "rows": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpu": {
+                    "type": "string"
+                  },
+                  "cpuPercent": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "index": {
+                    "type": "integer"
+                  },
+                  "memory": {
+                    "type": "string"
+                  },
+                  "memoryPercent": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "namespace": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "cpu",
+                  "memory",
+                  "cpuPercent",
+                  "memoryPercent"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "schemaVersion": {
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "resource",
+            "rows"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "context",
+        "top"
       ],
       "type": "object"
     }

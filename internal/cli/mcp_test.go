@@ -59,7 +59,7 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	want := map[string]bool{ // name → read-only
 		"list_marks": true, "mark": false, "list_resources": true, "diagnose": true, "tree": true,
-		"events": true, "logs": true,
+		"events": true, "logs": true, "top": true, "get_yaml": true,
 	}
 	if len(result.Tools) != len(want) {
 		t.Errorf("%d tools, want %d", len(result.Tools), len(want))
@@ -86,7 +86,7 @@ func TestMCPToolSurface(t *testing.T) {
 // reached kubectl or client-go couldn't quietly pass this by making the
 // recorded calls list look short and clean. This is the read-only promise as
 // a test, covering every path that reads a cluster: kubectl (list_resources,
-// mark, events, logs) and client-go (diagnose, tree).
+// mark, events, logs, top, get_yaml) and client-go (diagnose, tree).
 func TestMCPToolsOnlyRead(t *testing.T) {
 	kube := &recordingKubectl{
 		namespace: "prod",
@@ -97,6 +97,11 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 			"line1\nline2\n",        // logs on the Pod
 			`{"spec":{"selector":{"matchLabels":{"app":"web"}}}}`, // logs' selector read
 			"[api-pod] prefixed log line\n",                       // logs on the Deployment
+			topPodsFixture,                                        // top pods
+			podsJSON,                                              // top pods' limits lookup
+			nodesOutput,                                           // top nodes
+			"apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\n", // get_yaml
+			secretManifest, // get_yaml on a Secret
 		},
 	}
 	deployment := brokenDeployment("api", "prod")
@@ -121,6 +126,7 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 
 	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
 	podTarget := map[string]any{"kind": "pods", "name": "api-pod", "namespace": "prod"}
+	secretTarget := map[string]any{"kind": "secret", "name": "creds", "namespace": "prod"}
 	calls := []struct {
 		tool string
 		args map[string]any
@@ -146,6 +152,10 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 		{"events", map[string]any{"target": target}, 0, 1},
 		{"logs", map[string]any{"target": podTarget}, 1, 0},
 		{"logs", map[string]any{"target": target}, 2, 0},
+		{"top", map[string]any{}, 2, 1},
+		{"top", map[string]any{"nodes": true}, 1, 1},
+		{"get_yaml", map[string]any{"target": target}, 1, 0},
+		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0},
 	}
 	wantKubectlRuns, wantKubectlProbes := 0, 0
 	for _, call := range calls {

@@ -58,6 +58,18 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 		Annotations: readOnlyTool("Ownership tree"),
 	}, serialized(deps, deps.tree))
 	registerEvidenceTools(server, deps)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "top",
+		Description: "Current CPU and memory usage of pods (percent of their limits) or nodes " +
+			"(percent of capacity), from metrics-server.",
+		Annotations: readOnlyTool("Top"),
+	}, serialized(deps, deps.top))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_yaml",
+		Description: "A resource's manifest as YAML, optionally narrowed to named top-level or " +
+			"nested keys (fields). Secret values and the last-applied annotation are redacted.",
+		Annotations: readOnlyTool("Get YAML"),
+	}, serialized(deps, deps.getYAML))
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.
@@ -280,6 +292,14 @@ type diagnoseOutput struct {
 // saves what it swept so the terminal can spend the numbers it printed; the
 // server printed none, and saving would move the user's own indexes.
 func discardListing(state.State) error { return nil }
+
+// discardWriter is discardListing's StateWriter twin, for the CLI commands
+// (TopCommand) that take a StateWriter rather than a bare Save callable. The
+// server prints no listing to spend indexes against, so nothing here is ever
+// worth saving.
+type discardWriter struct{}
+
+func (discardWriter) Save(state.State) error { return nil }
 
 func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagnoseInput) (*mcp.CallToolResult, diagnoseOutput, error) {
 	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/state"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -286,5 +288,324 @@ func TestBoundLogBytesAdvancesToARuneBoundaryWhenThereIsNoNewline(t *testing.T) 
 	}
 	if !strings.HasSuffix(text, got) {
 		t.Errorf("kept text is not the tail of the original output")
+	}
+}
+
+func TestTopToolPodsReturnsRowsWithNoIndexAndLiveContext(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	deps := mcpTestDeps(t, kube)
+	var out topOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "top", map[string]any{}), &out)
+
+	if out.Context != kube.CurrentContext() {
+		t.Errorf("context = %q, want %q", out.Context, kube.CurrentContext())
+	}
+	if out.Top.Resource != "pods" {
+		t.Errorf("resource = %q, want pods", out.Top.Resource)
+	}
+	if len(out.Top.Rows) != 2 {
+		t.Fatalf("rows = %+v, want 2", out.Top.Rows)
+	}
+	for _, row := range out.Top.Rows {
+		if row.Index != 0 {
+			t.Errorf("row %+v carries an index", row)
+		}
+	}
+
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(raw)), `"index"`) {
+		t.Errorf("output carries an index: %s", raw)
+	}
+}
+
+func TestTopToolNodesRunsTopNodesNotThePodsPath(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{nodesOutput}}
+	deps := mcpTestDeps(t, kube)
+	var out topOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "top", map[string]any{"nodes": true}), &out)
+
+	if len(kube.runs) != 1 || kube.runs[0][0] != "top" || kube.runs[0][1] != "nodes" {
+		t.Fatalf("kubectl runs = %v, want a single 'top nodes'", kube.runs)
+	}
+	if out.Top.Resource != "nodes" {
+		t.Errorf("resource = %q, want nodes", out.Top.Resource)
+	}
+	if len(out.Top.Rows) != 2 {
+		t.Fatalf("rows = %+v, want 2", out.Top.Rows)
+	}
+}
+
+func TestTopToolMetricsServerUnavailableGivesTheSentence(t *testing.T) {
+	kube := &recordingKubectl{probeCode: 1}
+	deps := mcpTestDeps(t, kube)
+	result := callTool(t, connectMCP(t, deps), "top", map[string]any{})
+	if !result.IsError || !strings.Contains(toolText(result), "metrics-server is not available") {
+		t.Fatalf("result = %q, want the metrics-server sentence", toolText(result))
+	}
+}
+
+// TopCommand.Execute normally saves a listing to spend the indexes it just
+// printed. Nothing here was printed, so the server must build TopCommand with
+// a discarding writer rather than the real state.Service.
+func TestTopToolSavesNoListing(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	deps := mcpTestDeps(t, kube)
+	callTool(t, connectMCP(t, deps), "top", map[string]any{})
+	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Load = %v, want ErrNoState — the server saved a listing", err)
+	}
+}
+
+func TestTopToolLimitTruncates(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	deps := mcpTestDeps(t, kube)
+	var out topOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "top", map[string]any{"limit": 1}), &out)
+
+	if len(out.Top.Rows) != 1 {
+		t.Fatalf("rows = %+v, want 1", out.Top.Rows)
+	}
+	if out.Top.Truncated != 1 {
+		t.Errorf("truncated = %d, want 1", out.Top.Truncated)
+	}
+}
+
+func TestTopToolNodesWithNamespaceGetsTheClusterScopedSentence(t *testing.T) {
+	kube := &recordingKubectl{}
+	deps := mcpTestDeps(t, kube)
+	result := callTool(t, connectMCP(t, deps), "top", map[string]any{"nodes": true, "namespace": "prod"})
+	want := clusterScopedScopeError("namespace", "nodes").Error()
+	if !result.IsError || toolText(result) != want {
+		t.Errorf("result = %q, want %q", toolText(result), want)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %v before the refusal", kube.runs)
+	}
+}
+
+func TestGetYamlToolReturnsTheManifest(t *testing.T) {
+	kube := &recordingKubectl{output: "apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n"}
+	deps := mcpTestDeps(t, kube)
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+	}), &out)
+
+	want := []string{"get", "Deployment", "api", "-n", "prod", "-o", "yaml"}
+	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("kubectl args = %v, want %v", kube.runs, want)
+	}
+	if out.Kind != "Deployment" || out.Name != "api" || out.Namespace != "prod" {
+		t.Errorf("out = %+v", out)
+	}
+	if out.Redacted {
+		t.Errorf("redacted = true for a non-Secret")
+	}
+	if !strings.Contains(out.YAML, "replicas: 2") {
+		t.Errorf("yaml = %q, want it to carry spec.replicas", out.YAML)
+	}
+}
+
+func TestGetYamlToolFieldsNarrowsIt(t *testing.T) {
+	kube := &recordingKubectl{output: "apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\nstatus:\n  readyReplicas: 1\n"}
+	deps := mcpTestDeps(t, kube)
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+		"fields": []string{"spec"},
+	}), &out)
+
+	if !strings.Contains(out.YAML, "replicas: 2") {
+		t.Errorf("yaml = %q, want spec kept", out.YAML)
+	}
+	if strings.Contains(out.YAML, "readyReplicas") {
+		t.Errorf("yaml = %q, want status dropped", out.YAML)
+	}
+}
+
+const secretManifest = "apiVersion: v1\n" +
+	"kind: Secret\n" +
+	"metadata:\n" +
+	"  name: creds\n" +
+	"  annotations:\n" +
+	"    kubectl.kubernetes.io/last-applied-configuration: '{\"data\":{\"password\":\"c2VjcmV0\"}}'\n" +
+	"data:\n" +
+	"  password: c2VjcmV0\n" +
+	"stringData:\n" +
+	"  token: plaintext-token\n"
+
+func TestGetYamlToolRedactsASecret(t *testing.T) {
+	kube := &recordingKubectl{output: secretManifest}
+	deps := mcpTestDeps(t, kube)
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "secret", "name": "creds", "namespace": "prod"},
+	}), &out)
+
+	if !out.Redacted {
+		t.Fatalf("redacted = false, want true for a Secret")
+	}
+	if strings.Contains(out.YAML, "c2VjcmV0") || strings.Contains(out.YAML, "plaintext-token") {
+		t.Errorf("yaml leaks a Secret value: %s", out.YAML)
+	}
+	if !strings.Contains(out.YAML, "password: <redacted>") || !strings.Contains(out.YAML, "token: <redacted>") {
+		t.Errorf("yaml = %q, want the keys kept with redacted values", out.YAML)
+	}
+	if !strings.Contains(out.YAML, "last-applied-configuration: <redacted>") {
+		t.Errorf("yaml = %q, want the last-applied annotation redacted", out.YAML)
+	}
+}
+
+// A mark that aliases a Secret must be redacted on the kind it resolves to,
+// not on whatever the caller happened to spell in the target.
+func TestGetYamlToolRedactsASecretThroughAMark(t *testing.T) {
+	kube := &recordingKubectl{output: secretManifest}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.SaveMark("db", state.Mark{
+		Resource: state.Resource{Name: "creds", Kind: kinds.Secret, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"mark": "db"},
+	}), &out)
+
+	if !out.Redacted {
+		t.Fatalf("redacted = false, want true for a mark aliasing a Secret")
+	}
+	if strings.Contains(out.YAML, "c2VjcmV0") {
+		t.Errorf("yaml leaks a Secret value: %s", out.YAML)
+	}
+}
+
+func TestGetYamlToolDoesNotRedactANonSecret(t *testing.T) {
+	kube := &recordingKubectl{output: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  key: value\n"}
+	deps := mcpTestDeps(t, kube)
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "configmaps", "name": "cfg", "namespace": "prod"},
+	}), &out)
+
+	if out.Redacted {
+		t.Errorf("redacted = true for a ConfigMap")
+	}
+	if !strings.Contains(out.YAML, "key: value") {
+		t.Errorf("yaml = %q, want data kept as-is", out.YAML)
+	}
+}
+
+func TestGetYamlToolRefusesAnOversizedManifest(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n")
+	for i := 0; i < 20000; i++ {
+		fmt.Fprintf(&b, "  key%05d: filler-filler-filler-filler-filler\n", i)
+	}
+	kube := &recordingKubectl{output: b.String()}
+	deps := mcpTestDeps(t, kube)
+	result := callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "configmaps", "name": "cfg", "namespace": "prod"},
+	})
+	if !result.IsError || !strings.Contains(toolText(result), "over the 256 KiB limit") {
+		t.Fatalf("result = %q, want the size refusal", toolText(result))
+	}
+	if !strings.Contains(toolText(result), `["spec"]`) {
+		t.Errorf("result = %q, want the fields hint", toolText(result))
+	}
+}
+
+func TestGetYamlToolRefusesInvalidFieldNames(t *testing.T) {
+	for _, field := range []string{"meta-data", "spec.replicas", "-oyaml", "spec/replicas"} {
+		t.Run(field, func(t *testing.T) {
+			kube := &recordingKubectl{output: "apiVersion: v1\nkind: ConfigMap\n"}
+			deps := mcpTestDeps(t, kube)
+			result := callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+				"target": map[string]any{"kind": "configmaps", "name": "cfg", "namespace": "prod"},
+				"fields": []string{field},
+			})
+			if !result.IsError {
+				t.Errorf("field %q accepted, want a refusal", field)
+			}
+			if len(kube.runs) != 0 {
+				t.Errorf("field %q: kubectl ran %v before the refusal", field, kube.runs)
+			}
+		})
+	}
+}
+
+func TestRedactSecret(t *testing.T) {
+	tests := map[string]struct {
+		in   map[string]any
+		want map[string]any
+	}{
+		"nil data": {
+			in:   map[string]any{"kind": "Secret"},
+			want: map[string]any{"kind": "Secret"},
+		},
+		"empty maps": {
+			in:   map[string]any{"data": map[string]any{}, "stringData": map[string]any{}},
+			want: map[string]any{"data": map[string]any{}, "stringData": map[string]any{}},
+		},
+		"no annotations": {
+			in:   map[string]any{"metadata": map[string]any{"name": "creds"}},
+			want: map[string]any{"metadata": map[string]any{"name": "creds"}},
+		},
+		"data and stringData redacted, keys kept": {
+			in: map[string]any{
+				"data":       map[string]any{"password": "c2VjcmV0"},
+				"stringData": map[string]any{"token": "plaintext"},
+			},
+			want: map[string]any{
+				"data":       map[string]any{"password": "<redacted>"},
+				"stringData": map[string]any{"token": "<redacted>"},
+			},
+		},
+		"last-applied annotation redacted, others kept": {
+			in: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"kubectl.kubernetes.io/last-applied-configuration": `{"data":{"password":"c2VjcmV0"}}`,
+						"other": "kept",
+					},
+				},
+			},
+			want: map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
+						"kubectl.kubernetes.io/last-applied-configuration": "<redacted>",
+						"other": "kept",
+					},
+				},
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := redactSecret(tc.in)
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(tc.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("redactSecret(%v) = %s, want %s", tc.in, gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+// A non-map document (nil, a scalar, a malformed manifest) has nothing
+// shaped like a Secret to redact, so redactSecret must return it unchanged
+// rather than panic.
+func TestRedactSecretNonMapDocument(t *testing.T) {
+	for name, doc := range map[string]any{"nil": nil, "string": "not a manifest", "slice": []any{1, 2}} {
+		t.Run(name, func(t *testing.T) {
+			got := redactSecret(doc)
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(doc)
+			if string(gotJSON) != string(wantJSON) {
+				t.Errorf("redactSecret(%v) = %s, want unchanged %s", doc, gotJSON, wantJSON)
+			}
+		})
 	}
 }
