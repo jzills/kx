@@ -17,26 +17,27 @@ import (
 )
 
 // registerMCPTools adds every tool the server offers. One function, so the
-// public surface can be read in one place.
+// public surface can be read in one place — and every handler goes through
+// serialized, so no two calls ever run at once (see mcpDeps.mu).
 func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_marks",
 		Description: "List the kx marks: names the user pinned to resources, usable as a target's mark.",
 		Annotations: readOnlyTool("List marks"),
-	}, deps.listMarks)
+	}, serialized(deps, deps.listMarks))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "mark",
 		Description: "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand " +
 			"back the resource you found at fault. Refuses a name that is already a mark. Writes kx's " +
 			"local state only, never the cluster.",
 		Annotations: &mcp.ToolAnnotations{Title: "Mark a resource", DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
-	}, deps.mark)
+	}, serialized(deps, deps.mark))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_resources",
 		Description: "List resources of one kind by name and namespace — the names the other tools take. " +
 			"Defaults to the current namespace.",
 		Annotations: readOnlyTool("List resources"),
-	}, deps.listResources)
+	}, serialized(deps, deps.listResources))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "diagnose",
 		Description: "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, " +
@@ -45,7 +46,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, " +
 			"Ingress, Pod and Node.",
 		Annotations: readOnlyTool("Diagnose"),
-	}, deps.diagnose)
+	}, serialized(deps, deps.diagnose))
 	// Registered with an untyped output: a tree node's children are tree
 	// nodes, and the SDK's schema inference refuses a recursive type.
 	mcp.AddTool[treeInput, any](server, &mcp.Tool{
@@ -53,7 +54,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 		Description: "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → " +
 			"containers), or the whole ownership forest of a namespace when there is no target.",
 		Annotations: readOnlyTool("Ownership tree"),
-	}, deps.tree)
+	}, serialized(deps, deps.tree))
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.

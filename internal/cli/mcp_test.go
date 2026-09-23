@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -151,5 +152,58 @@ func TestMCPToolsOnlyEverGet(t *testing.T) {
 		if verb := action.GetVerb(); verb != "get" && verb != "list" && verb != "watch" {
 			t.Errorf("client-go %s %s — only get/list/watch are allowed", verb, action.GetResource().Resource)
 		}
+	}
+}
+
+// switchingKubectl reports whatever context the test last switched to.
+type switchingKubectl struct {
+	recordingKubectl
+	context string
+}
+
+func (k *switchingKubectl) CurrentContext() string { return k.context }
+
+// mapSource resolves one spelling, so a test can tell which source answered.
+type mapSource map[string]kinds.Kind
+
+func (m mapSource) Resolve(spelling string) (kinds.Kind, string, bool) {
+	kind, ok := m[spelling]
+	return kind, "", ok
+}
+
+func (mapSource) Namespaced(kinds.Kind) (bool, bool) { return false, false }
+
+// The discovery source is read once per process, which is right for a
+// command and wrong for a session: after a switch, a CRD's shorthand would go
+// on resolving from the old cluster's cache. The server rebuilds it when the
+// context moves — and only then.
+func TestMCPRebuildsKindDiscoveryWhenTheContextSwitches(t *testing.T) {
+	kinds.SetShorthandSource(mapSource{"gw": "GatewayFromA"})
+	t.Cleanup(func() { kinds.SetShorthandSource(nil) })
+
+	kube := &switchingKubectl{recordingKubectl: recordingKubectl{output: "NAME   AGE\nweb   1d\n"}, context: "a"}
+	built := 0
+	deps := mcpTestDeps(t, kube)
+	deps.Discovery = &mcpDiscovery{New: func() kinds.ShorthandSource {
+		built++
+		return mapSource{"gw": "GatewayFromB"}
+	}}
+	session := connectMCP(t, deps)
+	listKind := func() string {
+		var out listOutput
+		decodeStructured(t, callTool(t, session, "list_resources", map[string]any{"kind": "gw"}), &out)
+		return out.Kind
+	}
+
+	if got := listKind(); got != "GatewayFromA" || built != 0 {
+		t.Fatalf("first call: kind %q after %d rebuilds, want GatewayFromA and none", got, built)
+	}
+	listKind()
+	if built != 0 {
+		t.Errorf("rebuilt %d times with the context unchanged, want 0", built)
+	}
+	kube.context = "b"
+	if got := listKind(); got != "GatewayFromB" || built != 1 {
+		t.Errorf("after switching: kind %q after %d rebuilds, want GatewayFromB and 1", got, built)
 	}
 }

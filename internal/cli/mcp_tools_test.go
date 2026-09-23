@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
@@ -479,4 +481,107 @@ func TestTreeToolRefusesContradictoryScopes(t *testing.T) {
 			t.Errorf("%s: graphed, want a refusal", name)
 		}
 	}
+}
+
+// lockedKubectl is recordingKubectl made safe to share between goroutines,
+// so a concurrency test fails on what the server does rather than on the
+// fake's own bookkeeping. Run takes a moment, as a real kubectl does, which
+// holds mark's check-then-write window open long enough for concurrent calls
+// to land in it every time rather than now and then.
+type lockedKubectl struct {
+	mu sync.Mutex
+	recordingKubectl
+}
+
+func (k *lockedKubectl) Run(args []string) (string, error) {
+	time.Sleep(2 * time.Millisecond)
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.recordingKubectl.Run(args)
+}
+
+func (k *lockedKubectl) CurrentContext() string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.recordingKubectl.CurrentContext()
+}
+
+func (k *lockedKubectl) CurrentNamespace() string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.recordingKubectl.CurrentNamespace()
+}
+
+// The SDK runs each call on its own goroutine, and mark is a check followed
+// by a load-modify-save of the state file. Unserialized, concurrent marks
+// overwrote each other's saves — all reporting success — and several calls
+// with one name each passed the "already a mark" check and moved the mark.
+func TestConcurrentMarksAreNeitherLostNorMoved(t *testing.T) {
+	const calls = 20
+	target := map[string]any{"kind": "pods", "name": "api", "namespace": "prod"}
+
+	t.Run("distinct names all land", func(t *testing.T) {
+		deps := mcpTestDeps(t, &lockedKubectl{recordingKubectl: recordingKubectl{output: "pod/api\n"}})
+		session := connectMCP(t, deps)
+		var wg sync.WaitGroup
+		failures := make(chan string, calls)
+		for i := range calls {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+					Name: "mark", Arguments: map[string]any{"name": fmt.Sprintf("m%d", i), "target": target},
+				})
+				if err != nil {
+					failures <- err.Error()
+				} else if result.IsError {
+					failures <- toolText(result)
+				}
+			}()
+		}
+		wg.Wait()
+		close(failures)
+		for failure := range failures {
+			t.Errorf("mark failed: %s", failure)
+		}
+		marks, err := deps.State.Marks()
+		if err != nil || len(marks) != calls {
+			t.Errorf("%d marks stored (%v), want %d — concurrent saves lost some", len(marks), err, calls)
+		}
+	})
+
+	t.Run("one name is taken once", func(t *testing.T) {
+		deps := mcpTestDeps(t, &lockedKubectl{recordingKubectl: recordingKubectl{output: "pod/api\n"}})
+		session := connectMCP(t, deps)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		succeeded, refused := 0, 0
+		for i := range calls {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+					Name: "mark", Arguments: map[string]any{"name": "same", "target": map[string]any{
+						"kind": "pods", "name": fmt.Sprintf("api-%d", i), "namespace": "prod",
+					}},
+				})
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case err != nil:
+					t.Errorf("CallTool: %v", err)
+				case !result.IsError:
+					succeeded++
+				case strings.Contains(toolText(result), "@same already marks"):
+					refused++
+				default:
+					t.Errorf("unexpected failure: %s", toolText(result))
+				}
+			}()
+		}
+		wg.Wait()
+		if succeeded != 1 || refused != calls-1 {
+			t.Errorf("%d succeeded and %d were refused, want 1 and %d", succeeded, refused, calls-1)
+		}
+	})
 }

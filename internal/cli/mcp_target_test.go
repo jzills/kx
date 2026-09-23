@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jzills/kx/internal/config"
@@ -23,6 +24,7 @@ func mcpTestDeps(t *testing.T, kube kubectl.Service) mcpDeps {
 			Context: kube.CurrentContext,
 		},
 		Config: config.Default(),
+		mu:     &sync.Mutex{},
 	}
 }
 

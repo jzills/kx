@@ -8,8 +8,13 @@
 package cli
 
 import (
+	"context"
+	"sync"
+
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/discovery"
 	"github.com/jzills/kx/internal/k8s"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,6 +35,61 @@ type mcpDeps struct {
 	// Kubernetes builds a fresh API client, called once per tool call.
 	Kubernetes func() (kubernetes.Interface, error)
 	Config     config.Config
+	// Discovery, when set, keeps the kind-shorthand source in step with the
+	// live context. Nil leaves whatever source is installed alone — tests
+	// leave it nil so they never read the ambient kubeconfig's cache.
+	Discovery *mcpDiscovery
+
+	// mu serialises every tool call; serialized takes it, and nothing else
+	// does. The SDK runs each request on its own goroutine, and kx was built
+	// as a CLI that does one thing at a time:
+	//
+	//   - mark checks that a name is free and then load-modify-saves the
+	//     state file, so two concurrent marks lost each other's writes, and
+	//     two with one name both passed the check and moved the mark.
+	//   - internal/discovery swaps apimachinery's process-wide error handlers
+	//     while it reads the cache (withUnhandledErrorsSuppressed), which is
+	//     documented unsafe beside concurrent client-go use. Behind this lock
+	//     no other call's client-go work runs while it does.
+	//
+	// A pointer, so the value-receiver handlers all share the one lock.
+	mu *sync.Mutex
+}
+
+// mcpDiscovery rebuilds the kind-shorthand source when the context changes.
+//
+// cmd/kx/main.go installs one discovery.Source, which reads kubectl's cache
+// once per process — right for a command, stale for a server: after a switch
+// it would go on resolving a CRD's shorthand, and deciding its scope, from
+// the old cluster's cache. A fresh Source is lazy, so replacing it costs
+// nothing until a spelling kx doesn't know is looked up.
+type mcpDiscovery struct {
+	New     func() kinds.ShorthandSource
+	context string
+	seen    bool
+}
+
+// refresh installs a fresh source if the context moved since the last call.
+// The first call only records the context: the source main installed was
+// built for it and has not been read yet.
+func (m *mcpDiscovery) refresh(current string) {
+	if m.seen && current != m.context {
+		kinds.SetShorthandSource(m.New())
+	}
+	m.context, m.seen = current, true
+}
+
+// serialized wraps a tool handler so it runs alone, with the discovery
+// source current. Every tool is registered through it — see mcpDeps.mu.
+func serialized[In, Out any](d mcpDeps, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if d.Discovery != nil {
+			d.Discovery.refresh(d.Kubectl.CurrentContext())
+		}
+		return handler(ctx, req, in)
+	}
 }
 
 // liveMCPDeps builds the production dependencies with every cache off.
@@ -49,6 +109,8 @@ func liveMCPDeps(services Services) mcpDeps {
 		},
 		Kubernetes: func() (kubernetes.Interface, error) { return k8s.Client() },
 		Config:     services.Config,
+		Discovery:  &mcpDiscovery{New: func() kinds.ShorthandSource { return discovery.NewSource() }},
+		mu:         &sync.Mutex{},
 	}
 }
 
