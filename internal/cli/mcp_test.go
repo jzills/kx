@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +25,12 @@ import (
 // connected client session — the whole protocol, without a subprocess.
 func connectMCP(t *testing.T, deps mcpDeps) *mcp.ClientSession {
 	t.Helper()
+	return connectMCPWith(t, deps, nil)
+}
+
+// connectMCPWith is connectMCP with client options — a progress handler, say.
+func connectMCPWith(t *testing.T, deps mcpDeps, options *mcp.ClientOptions) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := newMCPServer(deps, "1.2.3").Connect(ctx, serverTransport, nil)
@@ -30,7 +38,7 @@ func connectMCP(t *testing.T, deps mcpDeps) *mcp.ClientSession {
 		t.Fatalf("server Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = serverSession.Close() })
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, options)
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatalf("client Connect: %v", err)
@@ -59,7 +67,7 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	want := map[string]bool{ // name → read-only
 		"list_marks": true, "mark": false, "list_resources": true, "diagnose": true, "tree": true,
-		"events": true, "logs": true, "top": true, "get_yaml": true,
+		"events": true, "logs": true, "top": true, "get_yaml": true, "scan": true,
 	}
 	if len(result.Tools) != len(want) {
 		t.Errorf("%d tools, want %d", len(result.Tools), len(want))
@@ -86,7 +94,8 @@ func TestMCPToolSurface(t *testing.T) {
 // reached kubectl or client-go couldn't quietly pass this by making the
 // recorded calls list look short and clean. This is the read-only promise as
 // a test, covering every path that reads a cluster: kubectl (list_resources,
-// mark, events, logs, top, get_yaml) and client-go (diagnose, tree).
+// mark, events, logs, top, get_yaml, scan) and client-go (diagnose, tree) —
+// and scan's scanner, which may only preflight and summarise.
 func TestMCPToolsOnlyRead(t *testing.T) {
 	kube := &recordingKubectl{
 		namespace: "prod",
@@ -101,7 +110,9 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 			podsJSON,                                              // top pods' limits lookup
 			nodesOutput,                                           // top nodes
 			"apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\n", // get_yaml
-			secretManifest, // get_yaml on a Secret
+			secretManifest,                  // get_yaml on a Secret
+			workloadJSON("api:v1", "db:v1"), // scan's image read of the Deployment
+			`{"items":[` + workloadJSON("api:v1", "web:v1") + `]}`, // scan's namespace sweep
 		},
 	}
 	deployment := brokenDeployment("api", "prod")
@@ -122,6 +133,11 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 	client := fake.NewSimpleClientset(namespace, deployment, replicaSet, pod)
 	deps := mcpTestDeps(t, kube)
 	deps.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+	deps.Config.Engine = "trivy"
+	scans := &fakeScanner{captures: []captured{
+		{image: "api:v1", stdout: "{}"}, {image: "db:v1", stdout: "{}"}, {image: "web:v1", stdout: "{}"},
+	}}
+	deps.Scanner = scans
 	session := connectMCP(t, deps)
 
 	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
@@ -136,28 +152,33 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 		// leaving an empty, technically-compliant runs list.
 		kubectlRuns   int
 		kubectlProbes int
+		// scannerCalls is how many scanner.Service calls it must make: the
+		// engine's preflight, then one summary per image.
+		scannerCalls int
 	}{
-		{"list_marks", map[string]any{}, 0, 0},
-		{"list_resources", map[string]any{"kind": "pods"}, 1, 0},
-		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1, 0},
-		{"diagnose", map[string]any{}, 0, 0},
-		{"diagnose", map[string]any{"allNamespaces": true}, 0, 0},
-		{"diagnose", map[string]any{"target": target}, 0, 0},
-		{"tree", map[string]any{}, 0, 0},
-		{"tree", map[string]any{"target": target}, 0, 0},
-		{"tree", map[string]any{"allNamespaces": true}, 0, 0},
-		{"mark", map[string]any{"name": "m", "target": target}, 1, 0},
+		{"list_marks", map[string]any{}, 0, 0, 0},
+		{"list_resources", map[string]any{"kind": "pods"}, 1, 0, 0},
+		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1, 0, 0},
+		{"diagnose", map[string]any{}, 0, 0, 0},
+		{"diagnose", map[string]any{"allNamespaces": true}, 0, 0, 0},
+		{"diagnose", map[string]any{"target": target}, 0, 0, 0},
+		{"tree", map[string]any{}, 0, 0, 0},
+		{"tree", map[string]any{"target": target}, 0, 0, 0},
+		{"tree", map[string]any{"allNamespaces": true}, 0, 0, 0},
+		{"mark", map[string]any{"name": "m", "target": target}, 1, 0, 0},
 		// No matching events in the fixture, so this exercises the
 		// staleness probe rather than a kubectl.Run.
-		{"events", map[string]any{"target": target}, 0, 1},
-		{"logs", map[string]any{"target": podTarget}, 1, 0},
-		{"logs", map[string]any{"target": target}, 2, 0},
-		{"top", map[string]any{}, 2, 1},
-		{"top", map[string]any{"nodes": true}, 1, 1},
-		{"get_yaml", map[string]any{"target": target}, 1, 0},
-		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0},
+		{"events", map[string]any{"target": target}, 0, 1, 0},
+		{"logs", map[string]any{"target": podTarget}, 1, 0, 0},
+		{"logs", map[string]any{"target": target}, 2, 0, 0},
+		{"top", map[string]any{}, 2, 1, 0},
+		{"top", map[string]any{"nodes": true}, 1, 1, 0},
+		{"get_yaml", map[string]any{"target": target}, 1, 0, 0},
+		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0, 0},
+		{"scan", map[string]any{"target": target}, 1, 0, 3},
+		{"scan", map[string]any{"namespace": "prod", "engine": "trivy"}, 1, 0, 3},
 	}
-	wantKubectlRuns, wantKubectlProbes := 0, 0
+	wantKubectlRuns, wantKubectlProbes, wantScannerCalls := 0, 0, 0
 	for _, call := range calls {
 		result := callTool(t, session, call.tool, call.args)
 		if result.IsError {
@@ -165,6 +186,7 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 		}
 		wantKubectlRuns += call.kubectlRuns
 		wantKubectlProbes += call.kubectlProbes
+		wantScannerCalls += call.scannerCalls
 	}
 
 	if len(kube.runs) != wantKubectlRuns {
@@ -181,6 +203,23 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 	for _, args := range kube.probes {
 		if len(args) == 0 || (args[0] != "get" && args[0] != "logs" && args[0] != "top") {
 			t.Errorf("kubectl probe %v — only get, logs and top are allowed", args)
+		}
+	}
+	// A scanner is a subprocess too, and pulls from registries: it may only
+	// ever be asked whether it is installed, or for its machine-readable
+	// summary of one image — never the passthrough argv, which carries
+	// caller-supplied flags.
+	if len(scans.argv) != wantScannerCalls {
+		t.Errorf("scanner ran %d times, want %d: %v", len(scans.argv), wantScannerCalls, scans.argv)
+	}
+	engine := scanner.Trivy{}
+	for _, argv := range scans.argv {
+		allowed := slices.Equal(argv, engine.PreflightArgv())
+		for _, image := range []string{"api:v1", "db:v1", "web:v1"} {
+			allowed = allowed || slices.Equal(argv, engine.SummaryArgv(image))
+		}
+		if !allowed {
+			t.Errorf("scanner %v — only the engine's preflight and summary argv are allowed", argv)
 		}
 	}
 	if len(kube.interactive) != 0 {

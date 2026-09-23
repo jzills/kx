@@ -95,18 +95,30 @@ type fakeScanner struct {
 	probeCode int
 	probeErr  error
 	captures  []captured
+	// capturing, when set, is called at the start of every Capture — a test
+	// can block a scan there to hold it mid-sweep.
+	capturing func()
 
 	mu    sync.Mutex
 	calls int
+	// argv is every Probe and Capture argv, in call order.
+	argv [][]string
 }
 
 func (f *fakeScanner) Scan([]string) (int, error) { return 0, nil }
-func (f *fakeScanner) Probe([]string) (int, error) {
+func (f *fakeScanner) Probe(argv []string) (int, error) {
+	f.mu.Lock()
+	f.argv = append(f.argv, argv)
+	f.mu.Unlock()
 	return f.probeCode, f.probeErr
 }
 func (f *fakeScanner) Capture(argv []string) (string, string, int, error) {
+	if f.capturing != nil {
+		f.capturing()
+	}
 	f.mu.Lock()
 	f.calls++
+	f.argv = append(f.argv, argv)
 	f.mu.Unlock()
 
 	image := argv[len(argv)-1]

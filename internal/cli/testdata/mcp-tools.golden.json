@@ -691,6 +691,170 @@
     }
   },
   {
+    "name": "scan",
+    "annotations": {
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": "Scan images"
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allNamespaces": {
+          "description": "Sweep every namespace when there is no target.",
+          "type": "boolean"
+        },
+        "engine": {
+          "description": "Scanner to use: grype, trivy or scout. Defaults to kx's configured engine.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out.",
+          "type": "integer"
+        },
+        "minSeverity": {
+          "description": "Least severe finding to list: critical, high, medium or low; default high. Counts always cover every severity.",
+          "type": "string"
+        },
+        "namespace": {
+          "description": "Namespace to sweep when there is no target; defaults to the current namespace.",
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "description": "The workload whose images to scan: a Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job or CronJob. Omit to sweep a namespace.",
+          "properties": {
+            "kind": {
+              "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+              "type": "string"
+            },
+            "mark": {
+              "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Resource name. Required unless mark is given.",
+              "type": "string"
+            },
+            "namespace": {
+              "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+              "type": "string"
+            }
+          },
+          "type": [
+            "null",
+            "object"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "scan": {
+          "additionalProperties": false,
+          "properties": {
+            "allNamespaces": {
+              "type": "boolean"
+            },
+            "images": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "counts": {
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "type": "object"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "fixedIn": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "installed": {
+                          "type": "string"
+                        },
+                        "package": {
+                          "type": "string"
+                        },
+                        "severity": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "severity"
+                      ],
+                      "type": "object"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "image",
+                  "findings"
+                ],
+                "type": "object"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "schemaVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "images"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "context",
+        "scan"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "top",
     "annotations": {
       "idempotentHint": true,

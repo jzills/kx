@@ -231,7 +231,7 @@ func (d mcpDeps) logs(_ context.Context, _ *mcp.CallToolRequest, in logsInput) (
 			return nil, logsOutput{}, errors.New(
 				"'container' applies to a Pod target — pick one of the workload's pods with tree.")
 		}
-		selector, err := (LogsCommand{Kubectl: d.Kubectl, Status: func(string) func() { return func() {} }}).
+		selector, err := (LogsCommand{Kubectl: d.Kubectl, Status: silentStatus}).
 			selector(target.Name, target.Namespace, target.Kind)
 		if err != nil {
 			return nil, logsOutput{}, err

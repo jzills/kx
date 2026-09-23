@@ -17,8 +17,8 @@ import (
 )
 
 // registerMCPTools adds every tool the server offers. One function, so the
-// public surface can be read in one place — and every handler goes through
-// serialized, so no two calls ever run at once (see mcpDeps.mu).
+// public surface can be read in one place — and every handler but scan's goes
+// through serialized, so no two calls ever run at once (see mcpDeps.mu).
 func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_marks",
@@ -70,6 +70,9 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"nested keys (fields). Secret values and the last-applied annotation are redacted.",
 		Annotations: readOnlyTool("Get YAML"),
 	}, serialized(deps, deps.getYAML))
+	// Not through serialized: a sweep can take minutes, so scan holds the
+	// lock only while it resolves images — see registerScanTool.
+	registerScanTool(server, deps)
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.

@@ -224,6 +224,9 @@ type jsonImage struct {
 	Error    string              `json:"error,omitempty"`
 	Counts   map[string]int      `json:"counts,omitempty"`
 	Findings []jsonVulnerability `json:"findings"`
+	// Truncated is how many findings a limit left unlisted — always zero for
+	// kx scan --json, which lists every finding, so omitted there.
+	Truncated int `json:"truncated,omitempty"`
 }
 
 // scanSubject names what a scan covered: one indexed workload, or a sweep of

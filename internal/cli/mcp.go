@@ -16,6 +16,7 @@ import (
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -35,6 +36,8 @@ type mcpDeps struct {
 	// Kubernetes builds a fresh API client, called once per tool call.
 	Kubernetes func() (kubernetes.Interface, error)
 	Config     config.Config
+	// Scanner runs the vulnerability scanner binaries for scan.
+	Scanner scanner.Service
 	// Discovery, when set, keeps the kind-shorthand source in step with the
 	// live context. Nil leaves whatever source is installed alone — tests
 	// leave it nil so they never read the ambient kubeconfig's cache.
@@ -110,6 +113,10 @@ func serialized[In, Out any](d mcpDeps, handler mcp.ToolHandlerFor[In, Out]) mcp
 	}
 }
 
+// silentStatus is the Status the CLI commands a tool reuses are built with.
+// Their spinners draw on the terminal, and a server's stdout is the protocol.
+func silentStatus(string) func() { return func() {} }
+
 // liveMCPDeps builds the production dependencies with every cache off.
 //
 // kubectl.Exec{} rather than kubectl.New(): a nil context cache reads the
@@ -127,6 +134,7 @@ func liveMCPDeps(services Services) mcpDeps {
 		},
 		Kubernetes: func() (kubernetes.Interface, error) { return k8s.Client() },
 		Config:     services.Config,
+		Scanner:    services.scannerService(),
 		Discovery:  &mcpDiscovery{New: func() kinds.ShorthandSource { return discovery.NewSource() }},
 		mu:         &sync.Mutex{},
 	}
