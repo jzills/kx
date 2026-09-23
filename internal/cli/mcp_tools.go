@@ -51,6 +51,15 @@ func readOnlyTool(title string) *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}
 }
 
+// scopeConflict refuses a namespace named beside allNamespaces — the MCP
+// spelling of the refusal kx get and kx diag make for -n beside -A.
+func scopeConflict(namespace string, allNamespaces bool) error {
+	if namespace != "" && allNamespaces {
+		return errors.New("'allNamespaces' and 'namespace' cannot be combined.")
+	}
+	return nil
+}
+
 func boolPtr(value bool) *bool { return &value }
 
 // mcpMark is one mark as a tool reports it. Resource, not Name, holds the
@@ -163,8 +172,8 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if strings.ContainsAny(in.Kind, ",/") || strings.EqualFold(in.Kind, "all") {
 		return nil, listOutput{}, fmt.Errorf("'%s' is not one resource type — list one kind per call.", in.Kind)
 	}
-	if in.Namespace != "" && in.AllNamespaces {
-		return nil, listOutput{}, errors.New("'allNamespaces' and 'namespace' cannot be combined.")
+	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+		return nil, listOutput{}, err
 	}
 	kind := kinds.Normalize(in.Kind)
 	isClusterScoped := clusterScoped(in.Kind)
@@ -237,8 +246,8 @@ type diagnoseOutput struct {
 func discardListing(state.State) error { return nil }
 
 func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagnoseInput) (*mcp.CallToolResult, diagnoseOutput, error) {
-	if in.Namespace != "" && in.AllNamespaces {
-		return nil, diagnoseOutput{}, errors.New("'allNamespaces' and 'namespace' cannot be combined.")
+	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+		return nil, diagnoseOutput{}, err
 	}
 	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.Full) {
 		return nil, diagnoseOutput{}, errors.New(
