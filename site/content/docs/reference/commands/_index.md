@@ -60,7 +60,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 
 | Command | Description |
 |---|---|
-| [`kx mcp`](mcp/) | Serve kx's diagnostics, ownership trees and marks to AI agents over MCP (stdio). |
+| [`kx mcp`](mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 
 ## Shell
 

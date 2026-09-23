@@ -149,10 +149,11 @@ func liveMCPDeps(services Services) mcpDeps {
 
 // mcpInstructions is what a client shows its model about the server as a whole.
 const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kubeconfig. " +
-	"Start with diagnose (no target) to find what is unhealthy, then diagnose or tree a " +
-	"specific resource. Resources are named by kind/name/namespace, or by a kx mark — a " +
-	"name the user pinned to a resource (list_marks shows them). Every tool is read-only " +
-	"against the cluster; mark only records a name in kx's local state."
+	"Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, " +
+	"logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a " +
+	"kind by name. Resources are named by kind/name/namespace, or by a kx mark — a name the " +
+	"user pinned to a resource (list_marks shows them); mark pins one. Every tool is read-only " +
+	"against the cluster except mark, which only records a name in kx's local state."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	server := mcp.NewServer(
@@ -166,9 +167,13 @@ func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 func newMCPCommand(services Services, version string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Serve kx's diagnostics, ownership trees and marks to AI agents over MCP (stdio).",
+		Short: "Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio).",
 		Long: "Runs a Model Context Protocol server on stdin/stdout, for an MCP client — " +
 			"Claude Code, an IDE, an agent framework — to start as a subprocess.\n\n" +
+			"Ten tools: list_marks and mark for kx's marks; list_resources to list a kind; " +
+			"diagnose and tree for a resource's health and ownership; events and logs for what " +
+			"happened; top for current usage; get_yaml for its manifest (Secrets redacted); and " +
+			"scan for image CVEs.\n\n" +
 			"Every tool is read-only against the cluster. Resources are named by kind and name " +
 			"or by a mark, never by index, and the server never touches the listing your " +
 			"terminal's indexes resolve against. The one thing it writes is a new mark, and it " +
