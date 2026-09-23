@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -156,5 +157,82 @@ func TestListMarksToolReturnsMarksSortedByName(t *testing.T) {
 	}
 	if out.Marks[0].Resource != "api-1" || out.Marks[0].Kind != "Pod" || out.Context != "test" {
 		t.Errorf("first = %+v, context %q", out.Marks[0], out.Context)
+	}
+}
+
+func TestListResourcesParsesKubectlsTable(t *testing.T) {
+	kube := &recordingKubectl{output: podsOutput, namespace: "prod"}
+	deps := mcpTestDeps(t, kube)
+	var out listOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "list_resources", map[string]any{"kind": "pods"}), &out)
+	if strings.Join(kube.runs[0], " ") != "get pods -n prod" {
+		t.Errorf("kubectl args = %v", kube.runs[0])
+	}
+	if out.Total != 2 || len(out.Resources) != 2 || out.Resources[0].Name != "nginx-abc-xyz" ||
+		out.Resources[0].Kind != "Pod" || out.Resources[0].Namespace != "prod" {
+		t.Errorf("out = %+v", out)
+	}
+}
+
+func TestListResourcesAcrossNamespacesKeepsEachRowsNamespace(t *testing.T) {
+	output := "NAMESPACE   NAME   READY   STATUS    RESTARTS   AGE\n" +
+		"a           web    1/1     Running   0          1d\n" +
+		"b           web    1/1     Running   0          1d\n"
+	kube := &recordingKubectl{output: output}
+	var out listOutput
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "list_resources",
+		map[string]any{"kind": "pods", "allNamespaces": true}), &out)
+	if strings.Join(kube.runs[0], " ") != "get pods -A" {
+		t.Errorf("kubectl args = %v", kube.runs[0])
+	}
+	if len(out.Resources) != 2 || out.Resources[0].Namespace != "a" || out.Resources[1].Namespace != "b" {
+		t.Errorf("resources = %+v", out.Resources)
+	}
+}
+
+func TestListResourcesCapsRowsAndSaysHowManyThereWere(t *testing.T) {
+	var table strings.Builder
+	table.WriteString("NAME   AGE\n")
+	for i := 0; i < 5; i++ {
+		fmt.Fprintf(&table, "cm-%d   1d\n", i)
+	}
+	var out listOutput
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, &recordingKubectl{output: table.String()})),
+		"list_resources", map[string]any{"kind": "cm", "limit": 2}), &out)
+	if out.Total != 5 || len(out.Resources) != 2 {
+		t.Errorf("total %d, %d returned; want 5 and 2", out.Total, len(out.Resources))
+	}
+}
+
+// Nothing found is an empty listing, not an error: kubectl prints nothing on
+// stdout and says "No resources found" on stderr.
+func TestListResourcesTreatsNoOutputAsNoResources(t *testing.T) {
+	var out listOutput
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, &recordingKubectl{})),
+		"list_resources", map[string]any{"kind": "pods"}), &out)
+	if out.Total != 0 || out.Resources == nil {
+		t.Errorf("out = %+v, want an empty, non-null list", out)
+	}
+}
+
+func TestListResourcesRefusesContradictoryScopes(t *testing.T) {
+	session := connectMCP(t, mcpTestDeps(t, &recordingKubectl{}))
+	for name, args := range map[string]map[string]any{
+		"ns and all":    {"kind": "pods", "namespace": "a", "allNamespaces": true},
+		"ns on nodes":   {"kind": "nodes", "namespace": "a"},
+		"several kinds": {"kind": "pods,svc"},
+		"all":           {"kind": "all"},
+	} {
+		if result := callTool(t, session, "list_resources", args); !result.IsError {
+			t.Errorf("%s: listed, want a refusal", name)
+		}
+	}
+}
+
+func TestListResourcesSavesNoListing(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{output: podsOutput})
+	callTool(t, connectMCP(t, deps), "list_resources", map[string]any{"kind": "pods"})
+	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Load = %v, want ErrNoState — the server saved a listing", err)
 	}
 }

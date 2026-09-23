@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -25,6 +28,12 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"local state only, never the cluster.",
 		Annotations: &mcp.ToolAnnotations{Title: "Mark a resource", DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	}, deps.mark)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_resources",
+		Description: "List resources of one kind by name and namespace — the names the other tools take. " +
+			"Defaults to the current namespace.",
+		Annotations: readOnlyTool("List resources"),
+	}, deps.listResources)
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.
@@ -111,4 +120,87 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 		return nil, markOutput{}, err
 	}
 	return nil, markOutput{Context: mark.Context, Mark: mcpMarkOf(name, mark)}, nil
+}
+
+const (
+	defaultListLimit = 200
+	maxListLimit     = 1000
+)
+
+type listInput struct {
+	Kind          string `json:"kind" jsonschema:"Resource type as kubectl spells it: pods, deploy, svc, nodes, a CRD's name. One type."`
+	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to list; defaults to the current namespace."`
+	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"List across every namespace."`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
+}
+
+type listedResource struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+type listOutput struct {
+	Context       string           `json:"context"`
+	Kind          string           `json:"kind"`
+	Namespace     string           `json:"namespace,omitempty"`
+	AllNamespaces bool             `json:"allNamespaces,omitempty"`
+	Total         int              `json:"total"`
+	Resources     []listedResource `json:"resources"`
+}
+
+func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in listInput) (*mcp.CallToolResult, listOutput, error) {
+	if strings.ContainsAny(in.Kind, ",/") || strings.EqualFold(in.Kind, "all") {
+		return nil, listOutput{}, fmt.Errorf("'%s' is not one resource type — list one kind per call.", in.Kind)
+	}
+	if in.Namespace != "" && in.AllNamespaces {
+		return nil, listOutput{}, errors.New("'allNamespaces' and 'namespace' cannot be combined.")
+	}
+	kind := kinds.Normalize(in.Kind)
+	namespaced, known := kinds.Namespaced(kind)
+	clusterScoped := known && !namespaced
+	if clusterScoped && (in.Namespace != "" || in.AllNamespaces) {
+		return nil, listOutput{}, fmt.Errorf("%s is cluster-scoped and takes no namespace.", kind)
+	}
+
+	args := []string{"get", in.Kind}
+	namespace := ""
+	switch {
+	case clusterScoped:
+	case in.AllNamespaces:
+		args = append(args, "-A")
+	default:
+		namespace = in.Namespace
+		if namespace == "" {
+			namespace = d.Kubectl.CurrentNamespace()
+		}
+		args = append(args, "-n", namespace)
+	}
+	output, err := d.Kubectl.Run(args)
+	if err != nil {
+		return nil, listOutput{}, err
+	}
+	table := index.Service{}.Add(output)
+	if !table.Indexable() && strings.TrimSpace(output) != "" {
+		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
+	}
+
+	limit := in.Limit
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	limit = min(limit, maxListLimit)
+	out := listOutput{
+		Context: d.Kubectl.CurrentContext(), Kind: string(kind), Namespace: namespace,
+		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
+		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
+	}
+	for _, entry := range table.Entries[:min(len(table.Entries), limit)] {
+		rowNamespace := namespace
+		if entry.Namespace != "" {
+			rowNamespace = entry.Namespace
+		}
+		out.Resources = append(out.Resources, listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace})
+	}
+	return nil, out, nil
 }
