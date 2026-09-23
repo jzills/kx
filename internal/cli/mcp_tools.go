@@ -1,8 +1,114 @@
 package cli
 
-import "github.com/modelcontextprotocol/go-sdk/mcp"
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/jzills/kx/internal/state"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
 
 // registerMCPTools adds every tool the server offers. One function, so the
 // public surface can be read in one place.
 func registerMCPTools(server *mcp.Server, deps mcpDeps) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_marks",
+		Description: "List the kx marks: names the user pinned to resources, usable as a target's mark.",
+		Annotations: readOnlyTool("List marks"),
+	}, deps.listMarks)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "mark",
+		Description: "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand " +
+			"back the resource you found at fault. Refuses a name that is already a mark. Writes kx's " +
+			"local state only, never the cluster.",
+		Annotations: &mcp.ToolAnnotations{Title: "Mark a resource", DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
+	}, deps.mark)
+}
+
+// readOnlyTool annotates a tool that reads the cluster and writes nothing.
+func readOnlyTool(title string) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+// mcpMark is one mark as a tool reports it. Resource, not Name, holds the
+// resource's name: Name is the mark's own.
+type mcpMark struct {
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Resource  string `json:"resource"`
+	Namespace string `json:"namespace,omitempty"`
+	Context   string `json:"context,omitempty"`
+}
+
+func mcpMarkOf(name string, mark state.Mark) mcpMark {
+	return mcpMark{
+		Name: name, Kind: string(mark.Kind), Resource: mark.Name,
+		Namespace: mark.Namespace, Context: mark.Context,
+	}
+}
+
+type listMarksOutput struct {
+	Context string    `json:"context"`
+	Marks   []mcpMark `json:"marks"`
+}
+
+func (d mcpDeps) listMarks(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, listMarksOutput, error) {
+	marks, err := d.State.Marks()
+	if err != nil {
+		return nil, listMarksOutput{}, err
+	}
+	out := listMarksOutput{Context: d.Kubectl.CurrentContext(), Marks: make([]mcpMark, 0, len(marks))}
+	for name, mark := range marks {
+		out.Marks = append(out.Marks, mcpMarkOf(name, mark))
+	}
+	sort.Slice(out.Marks, func(i, j int) bool { return out.Marks[i].Name < out.Marks[j].Name })
+	return nil, out, nil
+}
+
+type markInput struct {
+	Name   string    `json:"name" jsonschema:"The mark's name: letters, digits, '-', '_' and '.', not a bare number. A leading @ is dropped."`
+	Target mcpTarget `json:"target" jsonschema:"The resource to mark."`
+}
+
+type markOutput struct {
+	Context string  `json:"context"`
+	Mark    mcpMark `json:"mark"`
+}
+
+func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (*mcp.CallToolResult, markOutput, error) {
+	name := strings.TrimPrefix(in.Name, "@")
+	if err := validMarkName(name); err != nil {
+		return nil, markOutput{}, err
+	}
+	marks, err := d.State.Marks()
+	if err != nil {
+		return nil, markOutput{}, err
+	}
+	if existing, ok := marks[name]; ok {
+		return nil, markOutput{}, fmt.Errorf(
+			"@%s already marks %s/%s — marks belong to the user, so this tool never moves one. Choose another name.",
+			name, existing.Kind, existing.Name)
+	}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, markOutput{}, err
+	}
+	// kx mark only ever pins a resource it has just listed. Nothing here was
+	// listed, so ask once that it exists: a mark on nothing would surface
+	// later as a NotFound the user never caused.
+	if _, err := d.Kubectl.Run(target.getArgs("-o", "name")); err != nil {
+		return nil, markOutput{}, err
+	}
+	mark := state.Mark{
+		Resource: state.Resource{Name: target.Name, Kind: target.Kind, Namespace: target.Namespace},
+		Context:  d.Kubectl.CurrentContext(),
+	}
+	if err := d.State.SaveMark(name, mark); err != nil {
+		return nil, markOutput{}, err
+	}
+	return nil, markOutput{Context: mark.Context, Mark: mcpMarkOf(name, mark)}, nil
 }
