@@ -5,6 +5,12 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // connectMCP starts the server over an in-memory transport and returns a
@@ -67,25 +73,66 @@ func TestMCPToolSurface(t *testing.T) {
 }
 
 // Every tool, driven through the protocol with every argument shape it takes,
-// may ask kubectl only to get. This is the read-only promise as a test.
+// may ask kubectl only to get, may ask client-go only to read (get/list/watch,
+// never a write verb), and every one of those calls must actually succeed —
+// so a tool that started erroring out before it ever reached kubectl or
+// client-go couldn't quietly pass this by making the recorded calls list look
+// short and clean. This is the read-only promise as a test, covering both of
+// the paths that read a cluster: kubectl (list_resources, mark) and
+// client-go (diagnose, tree).
 func TestMCPToolsOnlyEverGet(t *testing.T) {
 	kube := &recordingKubectl{output: podsOutput, namespace: "prod"}
-	deps := mcpDiagDeps(t, kube, brokenDeployment("api", "prod"))
+	deployment := brokenDeployment("api", "prod")
+	// A Namespace object (graph.Builder.Namespaces lists actual Namespace
+	// objects, not namespaces inferred from a workload's metadata — see
+	// treeFixture) plus a ReplicaSet/Pod chain owned by the Deployment, so
+	// every call — including both allNamespaces sweeps — has something to
+	// find and succeeds rather than erroring on an empty fixture.
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}}
+	replicaSet := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
+		Name: "api-rs", Namespace: "prod", UID: types.UID("api-rs"),
+		OwnerReferences: []metav1.OwnerReference{{UID: types.UID("api")}},
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "api-pod", Namespace: "prod", UID: types.UID("api-pod"),
+		OwnerReferences: []metav1.OwnerReference{{UID: types.UID("api-rs")}},
+	}}
+	client := fake.NewSimpleClientset(namespace, deployment, replicaSet, pod)
+	deps := mcpTestDeps(t, kube)
+	deps.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
 	session := connectMCP(t, deps)
+
 	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
-	for _, call := range []struct {
+	calls := []struct {
 		tool string
 		args map[string]any
+		// kubectlRuns is how many kubectl.Run calls this exact call must make
+		// — 0 for anything that reads through client-go instead — so a tool
+		// that stops calling kubectl (or client-go) altogether cannot pass by
+		// leaving an empty, technically-compliant runs list.
+		kubectlRuns int
 	}{
-		{"list_marks", map[string]any{}},
-		{"list_resources", map[string]any{"kind": "pods"}},
-		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}},
-		{"diagnose", map[string]any{}},
-		{"diagnose", map[string]any{"target": target}},
-		{"tree", map[string]any{"target": target}},
-		{"mark", map[string]any{"name": "m", "target": target}},
-	} {
-		callTool(t, session, call.tool, call.args)
+		{"list_marks", map[string]any{}, 0},
+		{"list_resources", map[string]any{"kind": "pods"}, 1},
+		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1},
+		{"diagnose", map[string]any{}, 0},
+		{"diagnose", map[string]any{"allNamespaces": true}, 0},
+		{"diagnose", map[string]any{"target": target}, 0},
+		{"tree", map[string]any{"target": target}, 0},
+		{"tree", map[string]any{"allNamespaces": true}, 0},
+		{"mark", map[string]any{"name": "m", "target": target}, 1},
+	}
+	wantKubectlRuns := 0
+	for _, call := range calls {
+		result := callTool(t, session, call.tool, call.args)
+		if result.IsError {
+			t.Fatalf("%s %v failed: %s", call.tool, call.args, toolText(result))
+		}
+		wantKubectlRuns += call.kubectlRuns
+	}
+
+	if len(kube.runs) != wantKubectlRuns {
+		t.Errorf("kubectl ran %d times, want %d: %v", len(kube.runs), wantKubectlRuns, kube.runs)
 	}
 	for _, args := range kube.runs {
 		if len(args) == 0 || args[0] != "get" {
@@ -94,5 +141,15 @@ func TestMCPToolsOnlyEverGet(t *testing.T) {
 	}
 	if len(kube.interactive) != 0 {
 		t.Errorf("interactive kubectl calls: %v", kube.interactive)
+	}
+
+	actions := client.Actions()
+	if len(actions) == 0 {
+		t.Fatal("no client-go actions recorded — diagnose and tree read through client-go, so this check saw nothing to verify")
+	}
+	for _, action := range actions {
+		if verb := action.GetVerb(); verb != "get" && verb != "list" && verb != "watch" {
+			t.Errorf("client-go %s %s — only get/list/watch are allowed", verb, action.GetResource().Resource)
+		}
 	}
 }
