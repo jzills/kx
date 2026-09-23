@@ -57,6 +57,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"are cut breadth-first at limit nodes; truncated says how many were left out.",
 		Annotations: readOnlyTool("Ownership tree"),
 	}, serialized(deps, deps.tree))
+	registerEvidenceTools(server, deps)
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.

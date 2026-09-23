@@ -59,6 +59,7 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	want := map[string]bool{ // name → read-only
 		"list_marks": true, "mark": false, "list_resources": true, "diagnose": true, "tree": true,
+		"events": true, "logs": true,
 	}
 	if len(result.Tools) != len(want) {
 		t.Errorf("%d tools, want %d", len(result.Tools), len(want))
@@ -79,15 +80,25 @@ func TestMCPToolSurface(t *testing.T) {
 }
 
 // Every tool, driven through the protocol with every argument shape it takes,
-// may ask kubectl only to get, may ask client-go only to read (get/list/watch,
-// never a write verb), and every one of those calls must actually succeed —
-// so a tool that started erroring out before it ever reached kubectl or
-// client-go couldn't quietly pass this by making the recorded calls list look
-// short and clean. This is the read-only promise as a test, covering both of
-// the paths that read a cluster: kubectl (list_resources, mark) and
-// client-go (diagnose, tree).
-func TestMCPToolsOnlyEverGet(t *testing.T) {
-	kube := &recordingKubectl{output: podsOutput, namespace: "prod"}
+// may ask kubectl only to get, log or top, may ask client-go only to read
+// (get/list/watch, never a write verb), and every one of those calls must
+// actually succeed — so a tool that started erroring out before it ever
+// reached kubectl or client-go couldn't quietly pass this by making the
+// recorded calls list look short and clean. This is the read-only promise as
+// a test, covering every path that reads a cluster: kubectl (list_resources,
+// mark, events, logs) and client-go (diagnose, tree).
+func TestMCPToolsOnlyRead(t *testing.T) {
+	kube := &recordingKubectl{
+		namespace: "prod",
+		outputs: []string{
+			podsOutput,              // list_resources pods
+			podsOutput,              // list_resources pods -A
+			"deployment.apps/api\n", // mark's existence check
+			"line1\nline2\n",        // logs on the Pod
+			`{"spec":{"selector":{"matchLabels":{"app":"web"}}}}`, // logs' selector read
+			"[api-pod] prefixed log line\n",                       // logs on the Deployment
+		},
+	}
 	deployment := brokenDeployment("api", "prod")
 	// A Namespace object (graph.Builder.Namespaces lists actual Namespace
 	// objects, not namespaces inferred from a workload's metadata — see
@@ -109,6 +120,7 @@ func TestMCPToolsOnlyEverGet(t *testing.T) {
 	session := connectMCP(t, deps)
 
 	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
+	podTarget := map[string]any{"kind": "pods", "name": "api-pod", "namespace": "prod"}
 	calls := []struct {
 		tool string
 		args map[string]any
@@ -116,34 +128,49 @@ func TestMCPToolsOnlyEverGet(t *testing.T) {
 		// — 0 for anything that reads through client-go instead — so a tool
 		// that stops calling kubectl (or client-go) altogether cannot pass by
 		// leaving an empty, technically-compliant runs list.
-		kubectlRuns int
+		kubectlRuns   int
+		kubectlProbes int
 	}{
-		{"list_marks", map[string]any{}, 0},
-		{"list_resources", map[string]any{"kind": "pods"}, 1},
-		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1},
-		{"diagnose", map[string]any{}, 0},
-		{"diagnose", map[string]any{"allNamespaces": true}, 0},
-		{"diagnose", map[string]any{"target": target}, 0},
-		{"tree", map[string]any{}, 0},
-		{"tree", map[string]any{"target": target}, 0},
-		{"tree", map[string]any{"allNamespaces": true}, 0},
-		{"mark", map[string]any{"name": "m", "target": target}, 1},
+		{"list_marks", map[string]any{}, 0, 0},
+		{"list_resources", map[string]any{"kind": "pods"}, 1, 0},
+		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1, 0},
+		{"diagnose", map[string]any{}, 0, 0},
+		{"diagnose", map[string]any{"allNamespaces": true}, 0, 0},
+		{"diagnose", map[string]any{"target": target}, 0, 0},
+		{"tree", map[string]any{}, 0, 0},
+		{"tree", map[string]any{"target": target}, 0, 0},
+		{"tree", map[string]any{"allNamespaces": true}, 0, 0},
+		{"mark", map[string]any{"name": "m", "target": target}, 1, 0},
+		// No matching events in the fixture, so this exercises the
+		// staleness probe rather than a kubectl.Run.
+		{"events", map[string]any{"target": target}, 0, 1},
+		{"logs", map[string]any{"target": podTarget}, 1, 0},
+		{"logs", map[string]any{"target": target}, 2, 0},
 	}
-	wantKubectlRuns := 0
+	wantKubectlRuns, wantKubectlProbes := 0, 0
 	for _, call := range calls {
 		result := callTool(t, session, call.tool, call.args)
 		if result.IsError {
 			t.Fatalf("%s %v failed: %s", call.tool, call.args, toolText(result))
 		}
 		wantKubectlRuns += call.kubectlRuns
+		wantKubectlProbes += call.kubectlProbes
 	}
 
 	if len(kube.runs) != wantKubectlRuns {
 		t.Errorf("kubectl ran %d times, want %d: %v", len(kube.runs), wantKubectlRuns, kube.runs)
 	}
 	for _, args := range kube.runs {
-		if len(args) == 0 || args[0] != "get" {
-			t.Errorf("kubectl %v — only get is allowed", args)
+		if len(args) == 0 || (args[0] != "get" && args[0] != "logs" && args[0] != "top") {
+			t.Errorf("kubectl %v — only get, logs and top are allowed", args)
+		}
+	}
+	if len(kube.probes) != wantKubectlProbes {
+		t.Errorf("kubectl probed %d times, want %d: %v", len(kube.probes), wantKubectlProbes, kube.probes)
+	}
+	for _, args := range kube.probes {
+		if len(args) == 0 || (args[0] != "get" && args[0] != "logs" && args[0] != "top") {
+			t.Errorf("kubectl probe %v — only get, logs and top are allowed", args)
 		}
 	}
 	if len(kube.interactive) != 0 {

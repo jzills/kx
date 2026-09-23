@@ -169,6 +169,124 @@
     }
   },
   {
+    "name": "events",
+    "annotations": {
+      "idempotentHint": true,
+      "readOnlyHint": true,
+      "title": "Events"
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "Most events to return, newest first; default 100, at most 500.",
+          "type": "integer"
+        },
+        "since": {
+          "description": "Only events newer than this — 30m, 24h, 7d. Defaults to kx's events_max_age setting.",
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "description": "The resource whose events to show.",
+          "properties": {
+            "kind": {
+              "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+              "type": "string"
+            },
+            "mark": {
+              "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Resource name. Required unless mark is given.",
+              "type": "string"
+            },
+            "namespace": {
+              "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "reason",
+              "kind",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mark": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "integer"
+        },
+        "window": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "context",
+        "kind",
+        "name",
+        "total",
+        "events"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "list_marks",
     "annotations": {
       "idempotentHint": true,
@@ -306,6 +424,99 @@
         "kind",
         "total",
         "resources"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "logs",
+    "annotations": {
+      "idempotentHint": true,
+      "readOnlyHint": true,
+      "title": "Logs"
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "description": "Container name, for a Pod with more than one. Not valid with an aggregate target — pick one pod instead.",
+          "type": "string"
+        },
+        "previous": {
+          "description": "Show the previous (crashed) container's logs instead of the current one's.",
+          "type": "boolean"
+        },
+        "since": {
+          "description": "Only log lines from this far back — 30m, 24h, 7d.",
+          "type": "string"
+        },
+        "tail": {
+          "description": "Lines to keep per pod, most recent first; default 200, at most 2000.",
+          "type": "integer"
+        },
+        "target": {
+          "additionalProperties": false,
+          "description": "The Pod, or workload whose pods to aggregate, to show logs for.",
+          "properties": {
+            "kind": {
+              "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+              "type": "string"
+            },
+            "mark": {
+              "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Resource name. Required unless mark is given.",
+              "type": "string"
+            },
+            "namespace": {
+              "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "logs": {
+          "type": "string"
+        },
+        "mark": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "context",
+        "kind",
+        "name",
+        "lines",
+        "logs"
       ],
       "type": "object"
     }
