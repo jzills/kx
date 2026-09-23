@@ -456,13 +456,29 @@ type jsonTopRow struct {
 	MemoryPct *int   `json:"memoryPercent"`
 }
 
-// topJSON serialises a usage listing, built from the same rows the table and
-// the HTML page render.
+// topDocument is the one shape kx top --json emits, and what the MCP server's
+// top tool returns as structured content.
+//
+// Truncated is how many rows a limit left out — always zero for kx top
+// --json, which has no limit of its own and so never sets it — but present
+// here rather than as a second type, matching how treeDocument carries a
+// Truncated only tree's caller ever sets.
+type topDocument struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	Resource      string       `json:"resource"`
+	Namespace     string       `json:"namespace,omitempty"`
+	AllNamespaces bool         `json:"allNamespaces,omitempty"`
+	Rows          []jsonTopRow `json:"rows"`
+	Truncated     int          `json:"truncated,omitempty"`
+}
+
+// topDocumentOf converts a usage listing's rows into topJSON's document,
+// unencoded, for the MCP server to return as structured content.
 //
 // Resource names what was listed — "pods" or "nodes" — because the two have
 // different percentage meanings: a pod's is against its limits, a node's
 // against its capacity, and nothing else in the document says which.
-func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
+func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topDocument {
 	converted := make([]jsonTopRow, 0, len(rows))
 	for _, row := range rows {
 		converted = append(converted, jsonTopRow{
@@ -471,16 +487,17 @@ func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, e
 			CPUPct: percentOf(row.CPUPct), MemoryPct: percentOf(row.MemPct),
 		})
 	}
-	return encode(struct {
-		SchemaVersion int          `json:"schemaVersion"`
-		Resource      string       `json:"resource"`
-		Namespace     string       `json:"namespace,omitempty"`
-		AllNamespaces bool         `json:"allNamespaces,omitempty"`
-		Rows          []jsonTopRow `json:"rows"`
-	}{
-		reportSchemaVersion, resource,
-		subject.Namespace, subject.AllNamespaces, converted,
-	})
+	return topDocument{
+		SchemaVersion: reportSchemaVersion, Resource: resource,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
+		Rows: converted,
+	}
+}
+
+// topJSON serialises a usage listing, built from the same rows the table and
+// the HTML page render.
+func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
+	return encode(topDocumentOf(subject, resource, rows))
 }
 
 func percentOf(usage web.Usage) *int {
