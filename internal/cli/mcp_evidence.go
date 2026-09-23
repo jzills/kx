@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
@@ -26,7 +27,7 @@ func registerEvidenceTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "logs",
 		Description: "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/" +
-			"DaemonSet/Job/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+			"DaemonSet/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
 		Annotations: readOnlyTool("Logs"),
 	}, serialized(deps, deps.logs))
 }
@@ -35,13 +36,6 @@ const (
 	defaultEventsLimit = 100
 	maxEventsLimit     = 500
 )
-
-func eventsLimit(requested int) int {
-	if requested <= 0 {
-		return defaultEventsLimit
-	}
-	return min(requested, maxEventsLimit)
-}
 
 // staleTargetError turns a StaleResourceError into a sentence an MCP caller
 // can act on. StaleResourceError.Error() is written for a CLI index or mark —
@@ -119,7 +113,7 @@ func (d mcpDeps) events(ctx context.Context, _ *mcp.CallToolRequest, in eventsIn
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Timestamp.After(rows[j].Timestamp) })
 	out.Total = len(rows)
-	limit := eventsLimit(in.Limit)
+	limit := clampLimit(in.Limit, defaultEventsLimit, maxEventsLimit)
 	kept := rows
 	if len(rows) > limit {
 		kept = rows[:limit]
@@ -141,15 +135,11 @@ const (
 	maxLogBytes = 256 * 1024
 )
 
-func logsTailLimit(requested int) int {
-	if requested <= 0 {
-		return defaultLogTail
-	}
-	return min(requested, maxLogTail)
-}
-
 // boundLogBytes keeps the last maxLogBytes of output, cut at a line boundary
-// so the first line kept is never a fragment.
+// so the first line kept is never a fragment. When that window holds no
+// newline at all — one line longer than the whole cap — there is no line
+// boundary to cut at, so it advances to the next UTF-8 rune boundary instead;
+// the kept text still starts mid-line, but is always valid UTF-8.
 func boundLogBytes(output string) (string, bool) {
 	if len(output) <= maxLogBytes {
 		return output, false
@@ -157,6 +147,10 @@ func boundLogBytes(output string) (string, bool) {
 	cut := output[len(output)-maxLogBytes:]
 	if idx := strings.IndexByte(cut, '\n'); idx >= 0 {
 		cut = cut[idx+1:]
+	} else {
+		for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
+			cut = cut[1:]
+		}
 	}
 	return cut, true
 }
@@ -214,7 +208,7 @@ func (d mcpDeps) logs(_ context.Context, _ *mcp.CallToolRequest, in logsInput) (
 		return nil, logsOutput{}, err
 	}
 	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
-	tail := logsTailLimit(in.Tail)
+	tail := clampLimit(in.Tail, defaultLogTail, maxLogTail)
 
 	var args []string
 	switch {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/kinds"
 	corev1 "k8s.io/api/core/v1"
@@ -260,5 +261,30 @@ func TestLogsToolBoundsOutputAtTheLineBoundary(t *testing.T) {
 	}
 	if out.Lines != countLines(out.Logs) {
 		t.Errorf("lines = %d, want %d matching the kept text", out.Lines, countLines(out.Logs))
+	}
+}
+
+// A single line longer than the whole cap has no newline to cut at, so the
+// naive "last maxLogBytes bytes" slice can start in the middle of a
+// multi-byte rune. boundLogBytes must advance to the next rune boundary
+// instead, so the kept text is always valid UTF-8.
+func TestBoundLogBytesAdvancesToARuneBoundaryWhenThereIsNoNewline(t *testing.T) {
+	// "世" is 3 bytes in UTF-8; maxLogBytes (256 KiB) is not a multiple of 3,
+	// so the naive cut point lands inside a rune's bytes rather than at its
+	// start.
+	text := strings.Repeat("世", 100000) // 300,000 bytes, one line, no newline
+	got, truncated := boundLogBytes(text)
+
+	if !truncated {
+		t.Fatalf("truncated = false, want true for %d bytes with no newline", len(text))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("boundLogBytes returned invalid UTF-8: %q", got)
+	}
+	if len(got) > maxLogBytes {
+		t.Errorf("kept %d bytes, want at most %d", len(got), maxLogBytes)
+	}
+	if !strings.HasSuffix(text, got) {
+		t.Errorf("kept text is not the tail of the original output")
 	}
 }

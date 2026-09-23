@@ -76,6 +76,19 @@ func scopeConflict(namespace string, allNamespaces bool) error {
 
 func boolPtr(value bool) *bool { return &value }
 
+// clampLimit resolves a "how many" argument against the default it takes
+// when absent and the cap it may not exceed: a non-positive value (an
+// omitted field decodes to zero) takes def, and anything larger is capped at
+// max. Shared by every tool that bounds a listing — list_resources, tree,
+// events and logs's tail — so the four don't drift into four different
+// definitions of "unset".
+func clampLimit(requested, def, max int) int {
+	if requested <= 0 {
+		return def
+	}
+	return min(requested, max)
+}
+
 // mcpMark is one mark as a tool reports it. Resource, not Name, holds the
 // resource's name: Name is the mark's own.
 type mcpMark struct {
@@ -234,11 +247,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
 
-	limit := in.Limit
-	if limit <= 0 {
-		limit = defaultListLimit
-	}
-	limit = min(limit, maxListLimit)
+	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: d.Kubectl.CurrentContext(), Kind: string(kind), Namespace: namespace,
 		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
@@ -353,10 +362,7 @@ type treeOutput struct {
 }
 
 func treeLimit(requested int) int {
-	if requested <= 0 {
-		return defaultTreeLimit
-	}
-	return min(requested, maxTreeLimit)
+	return clampLimit(requested, defaultTreeLimit, maxTreeLimit)
 }
 
 // pruneTree keeps the first limit nodes of roots in breadth-first order and
