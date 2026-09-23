@@ -40,6 +40,37 @@ func TestResolveTargetNormalizesKubectlSpellings(t *testing.T) {
 	}
 }
 
+// kubectl reads "secrets." and "secrets.v1." as core/v1 Secrets, but
+// kinds.Normalize passes them through verbatim — so every check keyed on the
+// canonical kind (redaction, the cluster-scope table) would miss them, and a
+// mark would store the odd spelling. A core-group dotted spelling is reduced
+// to its plain form first; a real API group is left alone.
+func TestResolveTargetNormalisesCoreGroupDottedSpellings(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
+	for spelling, want := range map[string]kinds.Kind{
+		"secrets.":                     kinds.Secret,
+		"secrets.v1.":                  kinds.Secret,
+		"secret.v1.":                   kinds.Secret,
+		"Secret.v1.":                   kinds.Secret,
+		"pods.v1.":                     kinds.Pod,
+		"nodes.":                       kinds.Node,
+		"certificates.cert-manager.io": "certificates.cert-manager.io",
+		"deployments.v1.apps":          "deployments.v1.apps",
+	} {
+		got, err := deps.resolveTarget(mcpTarget{Kind: spelling, Name: "x"})
+		if err != nil {
+			t.Errorf("%s: %v", spelling, err)
+			continue
+		}
+		if got.Kind != want {
+			t.Errorf("%s: kind = %q, want %q", spelling, got.Kind, want)
+		}
+	}
+	if got, _ := deps.resolveTarget(mcpTarget{Kind: "nodes.", Name: "n1"}); got.Namespace != "" {
+		t.Errorf("nodes.: namespace = %q, want none for a cluster-scoped kind", got.Namespace)
+	}
+}
+
 func TestResolveTargetRefusesANamespaceOnAClusterScopedKind(t *testing.T) {
 	deps := mcpTestDeps(t, &recordingKubectl{})
 	_, err := deps.resolveTarget(mcpTarget{Kind: "nodes", Name: "n1", Namespace: "prod"})

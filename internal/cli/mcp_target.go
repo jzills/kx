@@ -53,7 +53,8 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 	if err := validKind(target.Kind); err != nil {
 		return resolvedTarget{}, err
 	}
-	if strings.EqualFold(target.Kind, "all") {
+	spelling := coreGroupSpelling(target.Kind)
+	if strings.EqualFold(spelling, "all") {
 		return resolvedTarget{}, errors.New("'all' is not one resource type — give the resource's own kind.")
 	}
 	if err := validObjectName(target.Name); err != nil {
@@ -64,18 +65,38 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 			return resolvedTarget{}, err
 		}
 	}
-	kind := kinds.Normalize(target.Kind)
+	kind := kinds.Normalize(spelling)
 	namespace := target.Namespace
 	// Unknown scope (a CRD with no discovery cache) is treated as namespaced,
 	// the same default every kx command takes.
-	if clusterScoped(target.Kind) {
+	if clusterScoped(spelling) {
 		if namespace != "" {
-			return resolvedTarget{}, clusterScopedScopeError("namespace", target.Kind)
+			return resolvedTarget{}, clusterScopedScopeError("namespace", spelling)
 		}
 	} else if namespace == "" {
 		namespace = d.Kubectl.CurrentNamespace()
 	}
 	return resolvedTarget{Kind: kind, Name: target.Name, Namespace: namespace}, nil
+}
+
+// coreGroupDotted is a kind spelled with the core API group's empty group
+// made explicit: "secrets." (resource and empty group) or "secrets.v1."
+// (resource, version v1, empty group).
+var coreGroupDotted = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*)(\.v1)?\.$`)
+
+// coreGroupSpelling reduces a core-group dotted spelling to its plain form,
+// so "secrets.v1." normalises to Secret exactly as "secrets" does.
+//
+// kubectl reads both spellings as core/v1 resources, but kinds.Normalize
+// passes them through verbatim — and every check keyed on the canonical kind
+// (Secret redaction above all, and the cluster-scope table) would then miss
+// them, and a mark would store the odd spelling. A real API group
+// (certificates.cert-manager.io, deployments.v1.apps) is left untouched.
+func coreGroupSpelling(kind string) string {
+	if match := coreGroupDotted.FindStringSubmatch(kind); match != nil {
+		return match[1]
+	}
+	return kind
 }
 
 // getArgs builds the kubectl arguments naming a resolved target, leaving -n

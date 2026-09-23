@@ -355,6 +355,13 @@ const maxYAMLBytes = 256 * 1024
 // get_yaml must redact it exactly as it redacts data and stringData.
 const redactSecretAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
 
+// isCoreSecret reports whether a decoded manifest is a core/v1 Secret. A kind
+// named Secret in any other API group is not one.
+func isCoreSecret(document any) bool {
+	root, ok := document.(map[string]any)
+	return ok && root["kind"] == string(kinds.Secret) && root["apiVersion"] == "v1"
+}
+
 // redactSecret masks a Secret manifest's plaintext values: every value under
 // top-level data and stringData becomes "<redacted>" with its key kept, and
 // the last-applied-configuration annotation — which carries the whole
@@ -445,8 +452,10 @@ func (d mcpDeps) getYAML(_ context.Context, _ *mcp.CallToolRequest, in getYamlIn
 	}
 	// Redacted on the resolved kind, not the caller's own spelling of it — a
 	// mark that aliases a Secret must be redacted exactly as naming the
-	// Secret directly would be.
-	if target.Kind == kinds.Secret {
+	// Secret directly would be — and on what came back as well: kubectl
+	// accepts spellings of a Secret that no kind check can list in full, so a
+	// document that is a core/v1 Secret is redacted however it was asked for.
+	if target.Kind == kinds.Secret || isCoreSecret(document) {
 		document = redactSecret(document)
 		out.Redacted = true
 	}

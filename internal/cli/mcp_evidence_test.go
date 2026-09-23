@@ -11,6 +11,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -482,6 +483,100 @@ func TestGetYamlToolRedactsASecretThroughAMark(t *testing.T) {
 	}
 }
 
+// kubectl resolves each of these to core/v1 Secrets. Every one must come
+// back redacted, with no plaintext anywhere in the result.
+func TestGetYamlToolRedactsDottedSecretSpellings(t *testing.T) {
+	for _, spelling := range []string{"secrets.", "secrets.v1.", "secret.v1.", "Secret.v1."} {
+		t.Run(spelling, func(t *testing.T) {
+			kube := &recordingKubectl{output: secretManifest}
+			deps := mcpTestDeps(t, kube)
+			result := callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+				"target": map[string]any{"kind": spelling, "name": "creds", "namespace": "prod"},
+			})
+			var out yamlOutput
+			decodeStructured(t, result, &out)
+			if !out.Redacted {
+				t.Errorf("redacted = false, want true")
+			}
+			if out.Kind != string(kinds.Secret) {
+				t.Errorf("kind = %q, want the canonical Secret", out.Kind)
+			}
+			assertNoSecretPlaintext(t, result)
+		})
+	}
+}
+
+// A mark taken on a dotted spelling must store the canonical kind, so a
+// later get_yaml by that mark is redacted like any other Secret.
+func TestMarkWithADottedSecretKindIsRedactedThroughTheMark(t *testing.T) {
+	kube := &recordingKubectl{output: secretManifest}
+	deps := mcpTestDeps(t, kube)
+	session := connectMCP(t, deps)
+	if result := callTool(t, session, "mark", map[string]any{
+		"name":   "db",
+		"target": map[string]any{"kind": "secrets.", "name": "creds", "namespace": "prod"},
+	}); result.IsError {
+		t.Fatalf("mark: %s", toolText(result))
+	}
+	marks, err := deps.State.Marks()
+	if err != nil {
+		t.Fatalf("Marks: %v", err)
+	}
+	if got := marks["db"].Kind; got != kinds.Secret {
+		t.Errorf("stored kind = %q, want the canonical Secret", got)
+	}
+	result := callTool(t, session, "get_yaml", map[string]any{"target": map[string]any{"mark": "db"}})
+	var out yamlOutput
+	decodeStructured(t, result, &out)
+	if !out.Redacted {
+		t.Errorf("redacted = false, want true for a mark taken on secrets.")
+	}
+	assertNoSecretPlaintext(t, result)
+}
+
+// Redaction is decided by what came back as well as by what was asked for:
+// a manifest that is a core/v1 Secret is redacted whatever the target's kind
+// was spelled as.
+func TestGetYamlToolRedactsASecretByContent(t *testing.T) {
+	kube := &recordingKubectl{output: secretManifest}
+	deps := mcpTestDeps(t, kube)
+	result := callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "widgets", "name": "creds", "namespace": "prod"},
+	})
+	var out yamlOutput
+	decodeStructured(t, result, &out)
+	if !out.Redacted {
+		t.Errorf("redacted = false, want true for a manifest that is a Secret")
+	}
+	assertNoSecretPlaintext(t, result)
+}
+
+// A kind named Secret in some other API group is not a core Secret.
+func TestGetYamlToolDoesNotRedactASecretKindInAnotherGroup(t *testing.T) {
+	kube := &recordingKubectl{output: "apiVersion: example.com/v1\nkind: Secret\nmetadata:\n  name: x\ndata:\n  key: value\n"}
+	deps := mcpTestDeps(t, kube)
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"kind": "secrets.example.com", "name": "x", "namespace": "prod"},
+	}), &out)
+	if out.Redacted || !strings.Contains(out.YAML, "key: value") {
+		t.Errorf("out = %+v, want a non-core Secret kind left as-is", out)
+	}
+}
+
+func assertNoSecretPlaintext(t *testing.T, result *mcp.CallToolResult) {
+	t.Helper()
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	for _, plaintext := range []string{"c2VjcmV0", "plaintext-token"} {
+		if strings.Contains(string(encoded), plaintext) {
+			t.Errorf("result leaks %q: %s", plaintext, encoded)
+		}
+	}
+}
+
 func TestGetYamlToolDoesNotRedactANonSecret(t *testing.T) {
 	kube := &recordingKubectl{output: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cfg\ndata:\n  key: value\n"}
 	deps := mcpTestDeps(t, kube)
@@ -541,9 +636,13 @@ func TestRedactSecret(t *testing.T) {
 		in   map[string]any
 		want map[string]any
 	}{
-		"nil data": {
+		"absent data": {
 			in:   map[string]any{"kind": "Secret"},
 			want: map[string]any{"kind": "Secret"},
+		},
+		"nil data": {
+			in:   map[string]any{"kind": "Secret", "data": nil, "stringData": nil},
+			want: map[string]any{"kind": "Secret", "data": nil, "stringData": nil},
 		},
 		"empty maps": {
 			in:   map[string]any{"data": map[string]any{}, "stringData": map[string]any{}},
