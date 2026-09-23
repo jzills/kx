@@ -28,8 +28,9 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "mark",
 		Description: "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand " +
-			"back the resource you found at fault. Refuses a name that is already a mark. Writes kx's " +
-			"local state only, never the cluster.",
+			"back the resource you found at fault. The target may itself be a mark, giving that resource a " +
+			"second name. Refuses a name that is already a mark, and a kind, name or namespace that is not " +
+			"shaped like one (a leading '-' reads as a kubectl flag). Writes kx's local state only, never the cluster.",
 		Annotations: &mcp.ToolAnnotations{Title: "Mark a resource", DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	}, serialized(deps, deps.mark))
 	mcp.AddTool(server, &mcp.Tool{
@@ -121,6 +122,11 @@ type markOutput struct {
 
 func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (*mcp.CallToolResult, markOutput, error) {
 	name := strings.TrimPrefix(in.Name, "@")
+	// Before validMarkName, whose empty-name refusal is the CLI's and
+	// suggests an index.
+	if strings.TrimSpace(name) == "" {
+		return nil, markOutput{}, errors.New("A mark needs a name — give one such as 'culprit'.")
+	}
 	if err := validMarkName(name); err != nil {
 		return nil, markOutput{}, err
 	}
@@ -277,13 +283,15 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	if err != nil {
 		return nil, diagnoseOutput{}, err
 	}
+	// The context before the client: read after, a switch in between would
+	// label this cluster's answer with the next one's name.
+	out := diagnoseOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
 	if err != nil {
 		return nil, diagnoseOutput{}, err
 	}
 	service := diagnostics.New(client)
 	service.MaxAge = window
-	out := diagnoseOutput{Context: d.Kubectl.CurrentContext()}
 
 	if in.Target != nil {
 		target, err := d.resolveTarget(*in.Target)
@@ -400,13 +408,14 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		return nil, nil, errors.New(
 			"'namespace' and 'allNamespaces' apply without a target — a target already names its namespace.")
 	}
+	// The context before the client, as in diagnose.
+	out := treeOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
 	if err != nil {
 		return nil, nil, err
 	}
 	// Save is never reached with indexed=false; discardListing is belt and braces.
 	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: discardListing}
-	out := treeOutput{Context: d.Kubectl.CurrentContext()}
 
 	switch {
 	case in.Target != nil:

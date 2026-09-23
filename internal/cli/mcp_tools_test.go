@@ -138,9 +138,13 @@ func TestMarkToolLeavesTheHistoryStackAlone(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	callTool(t, connectMCP(t, deps), "mark", map[string]any{
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
 		"name": "x", "target": map[string]any{"kind": "pods", "name": "x", "namespace": "prod"},
 	})
+	// A mark that failed would leave the stack alone trivially.
+	if result.IsError {
+		t.Fatalf("mark failed: %s", toolText(result))
+	}
 	name, namespace, _, err := deps.State.Fields(1)
 	if err != nil || name != "web-1" || namespace != "prod" {
 		t.Errorf("index 1 = %s/%s, %v; want web-1/prod", name, namespace, err)
@@ -671,6 +675,61 @@ func TestTreeLimitDefaultsAndClamps(t *testing.T) {
 	for in, want := range map[int]int{0: defaultTreeLimit, -1: defaultTreeLimit, 7: 7, 99999: maxTreeLimit} {
 		if got := treeLimit(in); got != want {
 			t.Errorf("treeLimit(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// orderKubectl logs each context read, so a test can see it against the
+// client being built.
+type orderKubectl struct {
+	recordingKubectl
+	log *[]string
+}
+
+func (k *orderKubectl) CurrentContext() string {
+	*k.log = append(*k.log, "context")
+	return "test"
+}
+
+// A result's context is its label for which cluster answered. Read after the
+// client was built, a switch in between would label one cluster's answer
+// with the next one's name; read first, the label can only be as old as the
+// client, never newer.
+func TestDiagnoseAndTreeReadTheContextBeforeBuildingAClient(t *testing.T) {
+	for _, call := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"diagnose", map[string]any{}},
+		{"tree", map[string]any{}},
+	} {
+		var log []string
+		deps := mcpTestDeps(t, &orderKubectl{recordingKubectl: recordingKubectl{namespace: "prod"}, log: &log})
+		client := treeFixture().Client
+		deps.Kubernetes = func() (kubernetes.Interface, error) {
+			log = append(log, "client")
+			return client, nil
+		}
+		if result := callTool(t, connectMCP(t, deps), call.tool, call.args); result.IsError {
+			t.Fatalf("%s: %s", call.tool, toolText(result))
+		}
+		if len(log) < 2 || log[0] != "context" {
+			t.Errorf("%s: %v, want the context read before the client is built", call.tool, log)
+		}
+	}
+}
+
+// validMarkName's empty-name refusal is the CLI's, and suggests an index —
+// the one thing an agent must never spend. The tool words its own.
+func TestMarkToolRefusesAnEmptyNameInItsOwnWords(t *testing.T) {
+	session := connectMCP(t, mcpTestDeps(t, &recordingKubectl{output: "pod/x\n"}))
+	for _, name := range []string{"", "@", "  "} {
+		result := callTool(t, session, "mark", map[string]any{
+			"name": name, "target": map[string]any{"kind": "pods", "name": "x"},
+		})
+		text := toolText(result)
+		if !result.IsError || strings.Contains(text, "kx mark") || !strings.Contains(text, "needs a name") {
+			t.Errorf("name %q: %s, want the tool's own empty-name refusal", name, text)
 		}
 	}
 }

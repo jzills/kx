@@ -124,6 +124,7 @@ func TestMCPToolsOnlyEverGet(t *testing.T) {
 		{"diagnose", map[string]any{}, 0},
 		{"diagnose", map[string]any{"allNamespaces": true}, 0},
 		{"diagnose", map[string]any{"target": target}, 0},
+		{"tree", map[string]any{}, 0},
 		{"tree", map[string]any{"target": target}, 0},
 		{"tree", map[string]any{"allNamespaces": true}, 0},
 		{"mark", map[string]any{"name": "m", "target": target}, 1},

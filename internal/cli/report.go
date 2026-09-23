@@ -51,10 +51,9 @@ type jsonReport struct {
 	// Index is the number this resource was assigned in state, so a
 	// consumer that finds something worth acting on can name it — `kx diag
 	// 4` — without a second listing. The same convention kx tree --json
-	// already uses for jsonTreeNode.Index: present because a sweep indexes
-	// every resource it saves, so it is never the zero value in practice,
-	// but omitempty rather than required in case a future caller builds one
-	// from something that isn't state-backed.
+	// already uses for jsonTreeNode.Index: a CLI sweep indexes every resource
+	// it saves, so there it is always set, but omitempty because the MCP
+	// server's documents are never state-backed and always leave it out.
 	Index int `json:"index,omitempty"`
 	// Mark is the name a mark-spent reference carried, for the same reason
 	// Index exists: so a consumer can name what was diagnosed. A mark has no
