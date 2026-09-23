@@ -167,7 +167,7 @@ func (c ScanCommand) ScanImage(engineName, image string, extra []string) (int, e
 	if err != nil {
 		return 1, err
 	}
-	if err := imageReferenceError(image); err != nil {
+	if err := imageReferenceError(engine.Name(), image); err != nil {
 		return 1, err
 	}
 	return c.Scanner.Scan(engine.PassthroughArgv(image, extra))
@@ -297,7 +297,7 @@ dispatch:
 // image of "--output=/home/u/.bashrc" would otherwise reach the scanner as a
 // flag and write a file on the machine running kx. The sweep goes on.
 func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.ImageScan, error) {
-	if err := imageReferenceError(image); err != nil {
+	if err := imageReferenceError(engine.Name(), image); err != nil {
 		return scanner.ImageScan{Image: image, Error: err.Error()}, nil
 	}
 	stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
@@ -318,30 +318,36 @@ func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.Ima
 	}, nil
 }
 
-// scannerSources are the scheme prefixes a scanner reads as "scan this source"
-// rather than as part of an image name: grype's dir:, file:, sbom: and archive
-// sources plus its registry:, docker: and podman: selectors, and docker
-// scout's fs, archive, local and image schemes. dir:/ or fs:///home/u would
-// have the scanner catalogue the machine running kx.
+// grypeSources are the scheme prefixes grype reads as "scan this source"
+// rather than as part of an image name: its dir:, file:, sbom: and archive
+// sources, and its registry:, docker: and podman: selectors. dir:/ would have
+// grype catalogue the machine running kx.
+//
+// Grype's alone. Trivy and scout take registry:2 and docker:24-dind — both
+// official images — as the image references they are, so refusing these
+// names for every engine would stop them scanning real workloads. Scout's
+// own sources (fs://, archive://, local://…) all need "://", which is refused
+// for every engine.
 //
 // Matched against the text before the first ':', lowercased. A real
-// reference never has one of these there: that text is a repository
-// (nginx:1.25), a registry host (registry.example.com:5000/app) or a name
-// ending in a digest's algorithm (ghcr.io/x/y@sha256:…).
-var scannerSources = map[string]bool{
+// reference never has one of these there under grype: grype would read it as
+// a source selector and scan something other than the image the pod runs.
+var grypeSources = map[string]bool{
 	"dir": true, "file": true, "sbom": true, "docker-archive": true,
 	"oci-archive": true, "oci-dir": true, "singularity": true,
 	"registry": true, "docker": true, "podman": true,
-	"fs": true, "archive": true, "local": true, "image": true,
 }
 
-// imageReferenceError refuses an image reference a scanner would read as
-// something other than an image: a flag, or a source scheme. Every engine puts
-// the image last in argv with no "--" before it (not every scanner honours
-// one), and the reference comes from a pod spec anyone who can create a
-// workload wrote — so it is checked here, on kx's side, before it goes near a
-// command line.
-func imageReferenceError(image string) error {
+// imageReferenceError refuses an image reference the named engine would read
+// as something other than an image: a flag, or a source scheme. Every engine
+// puts the image last in argv with no "--" before it (not every scanner
+// honours one), and the reference comes from a pod spec anyone who can create
+// a workload wrote — so it is checked here, on kx's side, before it goes near
+// a command line.
+//
+// A leading '-' and a "://" are refused for every engine: no real reference
+// has either. Grype's source-scheme prefixes are refused only for grype.
+func imageReferenceError(engineName, image string) error {
 	if strings.HasPrefix(image, "-") {
 		return fmt.Errorf(
 			"'%s' is not an image reference — it starts with '-', which a scanner would read as a flag.",
@@ -350,7 +356,8 @@ func imageReferenceError(image string) error {
 	source := ""
 	if scheme, _, found := strings.Cut(image, "://"); found {
 		source = scheme + "://"
-	} else if scheme, _, found := strings.Cut(image, ":"); found && scannerSources[strings.ToLower(scheme)] {
+	} else if scheme, _, found := strings.Cut(image, ":"); found &&
+		engineName == (scanner.Grype{}).Name() && grypeSources[strings.ToLower(scheme)] {
 		source = scheme + ":"
 	}
 	if source != "" {
@@ -692,7 +699,7 @@ func newScanCommand(services Services) *cobra.Command {
 					render.Section(image)
 					// Reported and skipped, as the summary gives it an error
 					// row: one hostile pod spec shouldn't end the sweep.
-					if err := imageReferenceError(image); err != nil {
+					if err := imageReferenceError(engine, image); err != nil {
 						render.Error(err.Error())
 						continue
 					}

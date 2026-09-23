@@ -421,7 +421,7 @@ func TestMCPScanKeepsAFailedImagesRow(t *testing.T) {
 // or carrying a scanner source scheme comes back as its own error row and
 // never reaches the scanner's argv.
 func TestMCPScanRefusesFlagAndSchemeShapedImagesInASweep(t *testing.T) {
-	for _, image := range []string{"--output=/home/u/.bashrc", "dir:/", "fs:///home/u"} {
+	for _, image := range []string{"--output=/home/u/.bashrc", "fs:///home/u"} {
 		t.Run(image, func(t *testing.T) { testMCPScanRefusesImageInASweep(t, image) })
 	}
 }
@@ -440,12 +440,35 @@ func testMCPScanRefusesImageInASweep(t *testing.T, image string) {
 	if !slices.Equal(findingIDs(api), []string{"C1"}) {
 		t.Errorf("api:v1 = %+v, want it scanned", api)
 	}
-	if hostile.Image != image || hostile.Error != refusedImageReferences[image] {
-		t.Errorf("hostile image = %+v, want an error row refusing it with %q", hostile, refusedImageReferences[image])
+	if hostile.Image != image || hostile.Error != everyEngineRefusedImages[image] {
+		t.Errorf("hostile image = %+v, want an error row refusing it with %q", hostile, everyEngineRefusedImages[image])
 	}
 	for _, argv := range fake.argv {
 		if slices.Contains(argv, image) {
 			t.Errorf("scanner called with %v", argv)
+		}
+	}
+}
+
+// registry:2 is the official registry image: trivy scans it, and grype —
+// which would read "registry:" as a source selector — refuses it as a row.
+func TestMCPScanGatesGrypeSourceSchemesOnTheEngine(t *testing.T) {
+	list := `{"items":[` + workloadJSON("registry:2") + `]}`
+	for engine, wantError := range map[string]string{
+		"trivy": "",
+		"grype": grypeRefusedImages["registry:2"],
+	} {
+		fake := &fakeScanner{captures: []captured{{image: "registry:2", stdout: emptyReports[engine]}}}
+		deps, _ := scanDeps(t, fake, list)
+		var out scanOutput
+		decodeStructured(t, callTool(t, connectMCP(t, deps), "scan",
+			map[string]any{"allNamespaces": true, "engine": engine}), &out)
+		if len(out.Scan.Images) != 1 || out.Scan.Images[0].Error != wantError {
+			t.Errorf("%s: images = %+v, want error %q", engine, out.Scan.Images, wantError)
+		}
+		scanned := fake.calls > 0
+		if scanned != (wantError == "") {
+			t.Errorf("%s: scanner ran %d times, want scanned = %v", engine, fake.calls, wantError == "")
 		}
 	}
 }

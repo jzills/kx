@@ -249,12 +249,22 @@ func TestSummarizeRecordsPerImageFailures(t *testing.T) {
 // An image reference comes from a pod spec anyone who can create a workload
 // wrote, and every engine puts it last in argv with no "--" before it. One
 // starting with '-' would be read as a scanner flag — --output=~/.bashrc
-// writes a file on the machine running kx — and one carrying a scanner source
-// scheme (dir:/, fs:///home/u) would have the scanner catalogue the machine
-// running kx instead of an image. Either is refused as that image's error
-// row, never handed to the scanner, and the rest of the sweep goes on.
-var refusedImageReferences = map[string]string{
-	"--output=/home/u/.bashrc":  "'--output=/home/u/.bashrc' is not an image reference — it starts with '-', which a scanner would read as a flag.",
+// writes a file on the machine running kx — and one carrying "://" is a
+// source URL to scout (fs:///home/u catalogues the machine running kx). No
+// real reference has either, so every engine refuses them.
+var everyEngineRefusedImages = map[string]string{
+	"--output=/home/u/.bashrc": "'--output=/home/u/.bashrc' is not an image reference — it starts with '-', which a scanner would read as a flag.",
+	"fs:///home/u":             "'fs:///home/u' is not an image reference — it names the scanner source 'fs://', which would scan something other than an image.",
+	"oci-dir://tmp/a":          "'oci-dir://tmp/a' is not an image reference — it names the scanner source 'oci-dir://', which would scan something other than an image.",
+	"registry://nginx":         "'registry://nginx' is not an image reference — it names the scanner source 'registry://', which would scan something other than an image.",
+	"anything://x":             "'anything://x' is not an image reference — it names the scanner source 'anything://', which would scan something other than an image.",
+}
+
+// Grype alone reads these prefixes as sources and selectors — dir:/ scans the
+// machine running kx, registry:2 asks for an image called "2" — so grype
+// refuses them. Trivy and scout take registry:2 and docker:24-dind, both
+// official images, as the references they are.
+var grypeRefusedImages = map[string]string{
 	"dir:/":                     "'dir:/' is not an image reference — it names the scanner source 'dir:', which would scan something other than an image.",
 	"DIR:/home/u":               "'DIR:/home/u' is not an image reference — it names the scanner source 'DIR:', which would scan something other than an image.",
 	"file:/etc/passwd":          "'file:/etc/passwd' is not an image reference — it names the scanner source 'file:', which would scan something other than an image.",
@@ -263,20 +273,14 @@ var refusedImageReferences = map[string]string{
 	"oci-archive:/tmp/a.tar":    "'oci-archive:/tmp/a.tar' is not an image reference — it names the scanner source 'oci-archive:', which would scan something other than an image.",
 	"oci-dir:/tmp/a":            "'oci-dir:/tmp/a' is not an image reference — it names the scanner source 'oci-dir:', which would scan something other than an image.",
 	"singularity:/tmp/a.sif":    "'singularity:/tmp/a.sif' is not an image reference — it names the scanner source 'singularity:', which would scan something other than an image.",
-	"registry:nginx":            "'registry:nginx' is not an image reference — it names the scanner source 'registry:', which would scan something other than an image.",
-	"docker:nginx":              "'docker:nginx' is not an image reference — it names the scanner source 'docker:', which would scan something other than an image.",
+	"registry:2":                "'registry:2' is not an image reference — it names the scanner source 'registry:', which would scan something other than an image.",
+	"docker:24-dind":            "'docker:24-dind' is not an image reference — it names the scanner source 'docker:', which would scan something other than an image.",
 	"podman:nginx":              "'podman:nginx' is not an image reference — it names the scanner source 'podman:', which would scan something other than an image.",
-	"fs:/home/u":                "'fs:/home/u' is not an image reference — it names the scanner source 'fs:', which would scan something other than an image.",
-	"archive:/tmp/a.tar":        "'archive:/tmp/a.tar' is not an image reference — it names the scanner source 'archive:', which would scan something other than an image.",
-	"local:nginx":               "'local:nginx' is not an image reference — it names the scanner source 'local:', which would scan something other than an image.",
-	"image:nginx":               "'image:nginx' is not an image reference — it names the scanner source 'image:', which would scan something other than an image.",
-	"fs:///home/u":              "'fs:///home/u' is not an image reference — it names the scanner source 'fs://', which would scan something other than an image.",
-	"oci-dir://tmp/a":           "'oci-dir://tmp/a' is not an image reference — it names the scanner source 'oci-dir://', which would scan something other than an image.",
-	"anything://x":              "'anything://x' is not an image reference — it names the scanner source 'anything://', which would scan something other than an image.",
 }
 
-// Real references whose text before the first ':' is a host, a repository or
-// a digest's algorithm-bearing name — none of them a scanner source.
+// Real references under every engine: the text before the first ':' is a
+// repository, a registry host or a digest-bearing name, or a prefix no engine
+// reads as a source without "://".
 var acceptedImageReferences = []string{
 	"nginx:1.25",
 	"registry.example.com:5000/app:v1",
@@ -284,44 +288,91 @@ var acceptedImageReferences = []string{
 	"docker.io/library/nginx:1.25",
 	"localhost:5000/app",
 	"nginx",
+	"image:nginx",
+	"fs:/home/u",
+	"archive:v1",
+	"local:v1",
 }
 
+var scanEngineNames = []string{"grype", "trivy", "scout"}
+
+func TestImageReferenceErrorPerEngine(t *testing.T) {
+	for _, engine := range scanEngineNames {
+		for image, want := range everyEngineRefusedImages {
+			if err := imageReferenceError(engine, image); err == nil || err.Error() != want {
+				t.Errorf("%s %q: err = %v, want %q", engine, image, err, want)
+			}
+		}
+		for image, want := range grypeRefusedImages {
+			err := imageReferenceError(engine, image)
+			if engine == "grype" && (err == nil || err.Error() != want) {
+				t.Errorf("grype %q: err = %v, want %q", image, err, want)
+			}
+			if engine != "grype" && err != nil {
+				t.Errorf("%s %q: err = %v, want it accepted — only grype reads this as a source", engine, image, err)
+			}
+		}
+		for _, image := range acceptedImageReferences {
+			if err := imageReferenceError(engine, image); err != nil {
+				t.Errorf("%s %q: err = %v, want it accepted", engine, image, err)
+			}
+		}
+	}
+}
+
+// emptyReports is a clean report in each summary format Summarize parses.
+var emptyReports = map[string]string{"trivy": `{"Results":[]}`, "grype": `{"matches":[]}`}
+
+// A refused reference is that image's error row, never handed to the scanner,
+// and the rest of the sweep goes on.
 func TestSummarizeRefusesFlagAndSchemeShapedImages(t *testing.T) {
-	for image, want := range refusedImageReferences {
-		t.Run(image, func(t *testing.T) {
-			fake := &fakeScanner{captures: []captured{
-				{image: "good:v1", stdout: `{"Results":[]}`},
-			}}
-			rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
-				Summarize("trivy", []string{image, "good:v1"}, nil)
-			if err != nil {
-				t.Fatalf("Summarize: %v", err)
-			}
-			if len(rows) != 2 || rows[0].Error != want || rows[0].Image != image {
-				t.Fatalf("rows = %+v, want %q refused with %q", rows, image, want)
-			}
-			if rows[1].Error != "" || rows[1].Counts == nil {
-				t.Errorf("the good image = %+v, want it scanned", rows[1])
-			}
-			for _, argv := range fake.argv {
-				if slices.Contains(argv, image) {
-					t.Errorf("scanner called with %v", argv)
+	refusals := map[string]map[string]string{"trivy": everyEngineRefusedImages, "grype": {}}
+	for image, want := range everyEngineRefusedImages {
+		refusals["grype"][image] = want
+	}
+	for image, want := range grypeRefusedImages {
+		refusals["grype"][image] = want
+	}
+	for engine, refused := range refusals {
+		for image, want := range refused {
+			t.Run(engine+" "+image, func(t *testing.T) {
+				fake := &fakeScanner{captures: []captured{{image: "good:v1", stdout: emptyReports[engine]}}}
+				rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
+					Summarize(engine, []string{image, "good:v1"}, nil)
+				if err != nil {
+					t.Fatalf("Summarize: %v", err)
 				}
-			}
-			if fake.calls != 1 {
-				t.Errorf("scanner captured %d times, want 1 (the good image only)", fake.calls)
-			}
-		})
+				if len(rows) != 2 || rows[0].Error != want || rows[0].Image != image {
+					t.Fatalf("rows = %+v, want %q refused with %q", rows, image, want)
+				}
+				if rows[1].Error != "" || rows[1].Counts == nil {
+					t.Errorf("the good image = %+v, want it scanned", rows[1])
+				}
+				for _, argv := range fake.argv {
+					if slices.Contains(argv, image) {
+						t.Errorf("scanner called with %v", argv)
+					}
+				}
+				if fake.calls != 1 {
+					t.Errorf("scanner captured %d times, want 1 (the good image only)", fake.calls)
+				}
+			})
+		}
 	}
 }
 
+// Under trivy, real references scan — including registry:2 and
+// docker:24-dind, which only grype would misread.
 func TestSummarizeAcceptsRealImageReferences(t *testing.T) {
-	fake := &fakeScanner{}
-	for _, image := range acceptedImageReferences {
-		fake.captures = append(fake.captures, captured{image: image, stdout: `{"Results":[]}`})
+	images := slices.Clone(acceptedImageReferences)
+	for image := range grypeRefusedImages {
+		images = append(images, image)
 	}
-	rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
-		Summarize("trivy", acceptedImageReferences, nil)
+	fake := &fakeScanner{}
+	for _, image := range images {
+		fake.captures = append(fake.captures, captured{image: image, stdout: emptyReports["trivy"]})
+	}
+	rows, err := ScanCommand{Scanner: fake, Status: noStatus}.Summarize("trivy", images, nil)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -330,33 +381,38 @@ func TestSummarizeAcceptsRealImageReferences(t *testing.T) {
 			t.Errorf("%s = %+v, want it scanned", row.Image, row)
 		}
 	}
-	if fake.calls != len(acceptedImageReferences) {
-		t.Errorf("scanner captured %d times, want %d", fake.calls, len(acceptedImageReferences))
+	if fake.calls != len(images) {
+		t.Errorf("scanner captured %d times, want %d", fake.calls, len(images))
 	}
 }
 
 // --full streams the scanner's own report through the passthrough argv, which
-// has the same image-last shape, so it refuses the same references.
+// has the same image-last shape, so it refuses the same references per engine.
 func TestScanImageRefusesFlagAndSchemeShapedImages(t *testing.T) {
-	for image, want := range refusedImageReferences {
-		t.Run(image, func(t *testing.T) {
-			fake := &fakeScanner{}
-			if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).
-				ScanImage("grype", image, nil); err == nil || err.Error() != want {
-				t.Errorf("err = %v, want %q", err, want)
-			}
-			if fake.scans != 0 {
-				t.Errorf("scanner ran %d times, want none", fake.scans)
-			}
-		})
-	}
-	for _, image := range acceptedImageReferences {
+	scanImage := func(engine, image string) (error, int) {
 		fake := &fakeScanner{}
-		if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).ScanImage("grype", image, nil); err != nil {
-			t.Errorf("%s: err = %v, want it scanned", image, err)
+		_, err := (ScanCommand{Scanner: fake, Status: noStatus}).ScanImage(engine, image, nil)
+		return err, fake.scans
+	}
+	for _, engine := range scanEngineNames {
+		for image, want := range everyEngineRefusedImages {
+			if err, scans := scanImage(engine, image); err == nil || err.Error() != want || scans != 0 {
+				t.Errorf("%s %q: err = %v, %d scans; want %q and none", engine, image, err, scans, want)
+			}
 		}
-		if fake.scans != 1 {
-			t.Errorf("%s: scanner ran %d times, want once", image, fake.scans)
+		for image, want := range grypeRefusedImages {
+			err, scans := scanImage(engine, image)
+			if engine == "grype" && (err == nil || err.Error() != want || scans != 0) {
+				t.Errorf("grype %q: err = %v, %d scans; want %q and none", image, err, scans, want)
+			}
+			if engine != "grype" && (err != nil || scans != 1) {
+				t.Errorf("%s %q: err = %v, %d scans; want it scanned", engine, image, err, scans)
+			}
+		}
+		for _, image := range acceptedImageReferences {
+			if err, scans := scanImage(engine, image); err != nil || scans != 1 {
+				t.Errorf("%s %q: err = %v, %d scans; want it scanned", engine, image, err, scans)
+			}
 		}
 	}
 }

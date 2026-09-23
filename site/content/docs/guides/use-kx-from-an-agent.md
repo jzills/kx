@@ -73,8 +73,9 @@ Every kind, name and namespace an agent sends is validated before it reaches
 kubectl's argv — a leading `-` is refused rather than read as a flag — so a
 target can name a real resource but never inject one. Image references a
 `scan` reads out of pod specs get the same treatment: one that starts with `-`
-or names a scanner source such as `dir:` or `fs://` comes back as an error row
-and never reaches the scanner.
+or contains `://` (a source URL to scout, such as `fs:///home`) — or, under
+grype, starts with one of its source prefixes such as `dir:` — comes back as
+an error row and never reaches the scanner.
 
 {{% kx-note %}}
 Marks are shared with your terminal, not private to the agent. `kx mark api 3`
