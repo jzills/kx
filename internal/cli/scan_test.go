@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -248,47 +249,115 @@ func TestSummarizeRecordsPerImageFailures(t *testing.T) {
 // An image reference comes from a pod spec anyone who can create a workload
 // wrote, and every engine puts it last in argv with no "--" before it. One
 // starting with '-' would be read as a scanner flag — --output=~/.bashrc
-// writes a file on the machine running kx — so it is refused as that image's
-// error row, never handed to the scanner, and the rest of the sweep goes on.
-func TestSummarizeRefusesAFlagShapedImage(t *testing.T) {
-	fake := &fakeScanner{captures: []captured{
-		{image: "good:v1", stdout: `{"Results":[]}`},
-	}}
+// writes a file on the machine running kx — and one carrying a scanner source
+// scheme (dir:/, fs:///home/u) would have the scanner catalogue the machine
+// running kx instead of an image. Either is refused as that image's error
+// row, never handed to the scanner, and the rest of the sweep goes on.
+var refusedImageReferences = map[string]string{
+	"--output=/home/u/.bashrc":  "'--output=/home/u/.bashrc' is not an image reference — it starts with '-', which a scanner would read as a flag.",
+	"dir:/":                     "'dir:/' is not an image reference — it names the scanner source 'dir:', which would scan something other than an image.",
+	"DIR:/home/u":               "'DIR:/home/u' is not an image reference — it names the scanner source 'DIR:', which would scan something other than an image.",
+	"file:/etc/passwd":          "'file:/etc/passwd' is not an image reference — it names the scanner source 'file:', which would scan something other than an image.",
+	"sbom:/tmp/x.json":          "'sbom:/tmp/x.json' is not an image reference — it names the scanner source 'sbom:', which would scan something other than an image.",
+	"docker-archive:/tmp/a.tar": "'docker-archive:/tmp/a.tar' is not an image reference — it names the scanner source 'docker-archive:', which would scan something other than an image.",
+	"oci-archive:/tmp/a.tar":    "'oci-archive:/tmp/a.tar' is not an image reference — it names the scanner source 'oci-archive:', which would scan something other than an image.",
+	"oci-dir:/tmp/a":            "'oci-dir:/tmp/a' is not an image reference — it names the scanner source 'oci-dir:', which would scan something other than an image.",
+	"singularity:/tmp/a.sif":    "'singularity:/tmp/a.sif' is not an image reference — it names the scanner source 'singularity:', which would scan something other than an image.",
+	"registry:nginx":            "'registry:nginx' is not an image reference — it names the scanner source 'registry:', which would scan something other than an image.",
+	"docker:nginx":              "'docker:nginx' is not an image reference — it names the scanner source 'docker:', which would scan something other than an image.",
+	"podman:nginx":              "'podman:nginx' is not an image reference — it names the scanner source 'podman:', which would scan something other than an image.",
+	"fs:/home/u":                "'fs:/home/u' is not an image reference — it names the scanner source 'fs:', which would scan something other than an image.",
+	"archive:/tmp/a.tar":        "'archive:/tmp/a.tar' is not an image reference — it names the scanner source 'archive:', which would scan something other than an image.",
+	"local:nginx":               "'local:nginx' is not an image reference — it names the scanner source 'local:', which would scan something other than an image.",
+	"image:nginx":               "'image:nginx' is not an image reference — it names the scanner source 'image:', which would scan something other than an image.",
+	"fs:///home/u":              "'fs:///home/u' is not an image reference — it names the scanner source 'fs://', which would scan something other than an image.",
+	"oci-dir://tmp/a":           "'oci-dir://tmp/a' is not an image reference — it names the scanner source 'oci-dir://', which would scan something other than an image.",
+	"anything://x":              "'anything://x' is not an image reference — it names the scanner source 'anything://', which would scan something other than an image.",
+}
+
+// Real references whose text before the first ':' is a host, a repository or
+// a digest's algorithm-bearing name — none of them a scanner source.
+var acceptedImageReferences = []string{
+	"nginx:1.25",
+	"registry.example.com:5000/app:v1",
+	"ghcr.io/x/y@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	"docker.io/library/nginx:1.25",
+	"localhost:5000/app",
+	"nginx",
+}
+
+func TestSummarizeRefusesFlagAndSchemeShapedImages(t *testing.T) {
+	for image, want := range refusedImageReferences {
+		t.Run(image, func(t *testing.T) {
+			fake := &fakeScanner{captures: []captured{
+				{image: "good:v1", stdout: `{"Results":[]}`},
+			}}
+			rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
+				Summarize("trivy", []string{image, "good:v1"}, nil)
+			if err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			if len(rows) != 2 || rows[0].Error != want || rows[0].Image != image {
+				t.Fatalf("rows = %+v, want %q refused with %q", rows, image, want)
+			}
+			if rows[1].Error != "" || rows[1].Counts == nil {
+				t.Errorf("the good image = %+v, want it scanned", rows[1])
+			}
+			for _, argv := range fake.argv {
+				if slices.Contains(argv, image) {
+					t.Errorf("scanner called with %v", argv)
+				}
+			}
+			if fake.calls != 1 {
+				t.Errorf("scanner captured %d times, want 1 (the good image only)", fake.calls)
+			}
+		})
+	}
+}
+
+func TestSummarizeAcceptsRealImageReferences(t *testing.T) {
+	fake := &fakeScanner{}
+	for _, image := range acceptedImageReferences {
+		fake.captures = append(fake.captures, captured{image: image, stdout: `{"Results":[]}`})
+	}
 	rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
-		Summarize("trivy", []string{"--output=/home/u/.bashrc", "good:v1"}, nil)
+		Summarize("trivy", acceptedImageReferences, nil)
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
-	want := "'--output=/home/u/.bashrc' is not an image reference — it starts with '-', which a scanner would read as a flag."
-	if len(rows) != 2 || rows[0].Error != want || rows[0].Image != "--output=/home/u/.bashrc" {
-		t.Fatalf("rows = %+v, want the flag-shaped image refused with %q", rows, want)
-	}
-	if rows[1].Error != "" || rows[1].Counts == nil {
-		t.Errorf("the good image = %+v, want it scanned", rows[1])
-	}
-	for _, argv := range fake.argv {
-		for _, arg := range argv {
-			if strings.HasPrefix(arg, "--output") {
-				t.Errorf("scanner called with %v", argv)
-			}
+	for _, row := range rows {
+		if row.Error != "" || row.Counts == nil {
+			t.Errorf("%s = %+v, want it scanned", row.Image, row)
 		}
 	}
-	if fake.calls != 1 {
-		t.Errorf("scanner captured %d times, want 1 (the good image only)", fake.calls)
+	if fake.calls != len(acceptedImageReferences) {
+		t.Errorf("scanner captured %d times, want %d", fake.calls, len(acceptedImageReferences))
 	}
 }
 
 // --full streams the scanner's own report through the passthrough argv, which
 // has the same image-last shape, so it refuses the same references.
-func TestScanImageRefusesAFlagShapedImage(t *testing.T) {
-	fake := &fakeScanner{}
-	if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).
-		ScanImage("trivy", "--output=/home/u/.bashrc", nil); err == nil ||
-		!strings.Contains(err.Error(), "is not an image reference") {
-		t.Errorf("err = %v, want the image refused", err)
+func TestScanImageRefusesFlagAndSchemeShapedImages(t *testing.T) {
+	for image, want := range refusedImageReferences {
+		t.Run(image, func(t *testing.T) {
+			fake := &fakeScanner{}
+			if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).
+				ScanImage("grype", image, nil); err == nil || err.Error() != want {
+				t.Errorf("err = %v, want %q", err, want)
+			}
+			if fake.scans != 0 {
+				t.Errorf("scanner ran %d times, want none", fake.scans)
+			}
+		})
 	}
-	if fake.scans != 0 {
-		t.Errorf("scanner ran %d times, want none", fake.scans)
+	for _, image := range acceptedImageReferences {
+		fake := &fakeScanner{}
+		if _, err := (ScanCommand{Scanner: fake, Status: noStatus}).ScanImage("grype", image, nil); err != nil {
+			t.Errorf("%s: err = %v, want it scanned", image, err)
+		}
+		if fake.scans != 1 {
+			t.Errorf("%s: scanner ran %d times, want once", image, fake.scans)
+		}
 	}
 }
 

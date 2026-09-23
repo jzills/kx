@@ -318,16 +318,45 @@ func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.Ima
 	}, nil
 }
 
-// imageReferenceError refuses an image reference a scanner would read as a
-// flag. Every engine puts the image last in argv with no "--" before it (not
-// every scanner honours one), and the reference comes from a pod spec anyone
-// who can create a workload wrote — so it is checked here, on kx's side,
-// before it goes near a command line.
+// scannerSources are the scheme prefixes a scanner reads as "scan this source"
+// rather than as part of an image name: grype's dir:, file:, sbom: and archive
+// sources plus its registry:, docker: and podman: selectors, and docker
+// scout's fs, archive, local and image schemes. dir:/ or fs:///home/u would
+// have the scanner catalogue the machine running kx.
+//
+// Matched against the text before the first ':', lowercased. A real
+// reference never has one of these there: that text is a repository
+// (nginx:1.25), a registry host (registry.example.com:5000/app) or a name
+// ending in a digest's algorithm (ghcr.io/x/y@sha256:…).
+var scannerSources = map[string]bool{
+	"dir": true, "file": true, "sbom": true, "docker-archive": true,
+	"oci-archive": true, "oci-dir": true, "singularity": true,
+	"registry": true, "docker": true, "podman": true,
+	"fs": true, "archive": true, "local": true, "image": true,
+}
+
+// imageReferenceError refuses an image reference a scanner would read as
+// something other than an image: a flag, or a source scheme. Every engine puts
+// the image last in argv with no "--" before it (not every scanner honours
+// one), and the reference comes from a pod spec anyone who can create a
+// workload wrote — so it is checked here, on kx's side, before it goes near a
+// command line.
 func imageReferenceError(image string) error {
 	if strings.HasPrefix(image, "-") {
 		return fmt.Errorf(
 			"'%s' is not an image reference — it starts with '-', which a scanner would read as a flag.",
 			image)
+	}
+	source := ""
+	if scheme, _, found := strings.Cut(image, "://"); found {
+		source = scheme + "://"
+	} else if scheme, _, found := strings.Cut(image, ":"); found && scannerSources[strings.ToLower(scheme)] {
+		source = scheme + ":"
+	}
+	if source != "" {
+		return fmt.Errorf(
+			"'%s' is not an image reference — it names the scanner source '%s', which would scan something other than an image.",
+			image, source)
 	}
 	return nil
 }

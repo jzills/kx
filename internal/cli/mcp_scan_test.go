@@ -308,9 +308,16 @@ func TestMCPScanKeepsAFailedImagesRow(t *testing.T) {
 }
 
 // A namespace sweep reads images other people wrote. One shaped like a flag
-// comes back as its own error row and never reaches the scanner's argv.
-func TestMCPScanRefusesAFlagShapedImageInASweep(t *testing.T) {
-	list := `{"items":[` + workloadJSON("api:v1", "--output=/home/u/.bashrc") + `]}`
+// or carrying a scanner source scheme comes back as its own error row and
+// never reaches the scanner's argv.
+func TestMCPScanRefusesFlagAndSchemeShapedImagesInASweep(t *testing.T) {
+	for _, image := range []string{"--output=/home/u/.bashrc", "dir:/", "fs:///home/u"} {
+		t.Run(image, func(t *testing.T) { testMCPScanRefusesImageInASweep(t, image) })
+	}
+}
+
+func testMCPScanRefusesImageInASweep(t *testing.T, image string) {
+	list := `{"items":[` + workloadJSON("api:v1", image) + `]}`
 	fake := &fakeScanner{captures: []captured{{image: "api:v1", stdout: trivyReport(t, [2]string{"C1", "CRITICAL"})}}}
 	deps, _ := scanDeps(t, fake, list)
 	session := connectMCP(t, deps)
@@ -323,11 +330,11 @@ func TestMCPScanRefusesAFlagShapedImageInASweep(t *testing.T) {
 	if !slices.Equal(findingIDs(api), []string{"C1"}) {
 		t.Errorf("api:v1 = %+v, want it scanned", api)
 	}
-	if !strings.Contains(hostile.Error, "is not an image reference") {
-		t.Errorf("flag-shaped image = %+v, want an error row refusing it", hostile)
+	if hostile.Image != image || hostile.Error != refusedImageReferences[image] {
+		t.Errorf("hostile image = %+v, want an error row refusing it with %q", hostile, refusedImageReferences[image])
 	}
 	for _, argv := range fake.argv {
-		if slices.Contains(argv, "--output=/home/u/.bashrc") {
+		if slices.Contains(argv, image) {
 			t.Errorf("scanner called with %v", argv)
 		}
 	}
