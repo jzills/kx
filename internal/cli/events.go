@@ -35,6 +35,18 @@ func (c EventsCommand) Execute(ctx context.Context, ref state.Ref) ([]events.Row
 	if err != nil {
 		return nil, err
 	}
+	return c.executeResolved(ctx, kind, name, namespace, ref)
+}
+
+// ExecuteResource fetches events for a resource that is already resolved —
+// from an index, or named outright by an MCP client, which has no index (and
+// no Ref) to give. The staleness check below then carries the zero Ref, whose
+// Error() reads sensibly with no index or mark to name.
+func (c EventsCommand) ExecuteResource(ctx context.Context, kind kinds.Kind, name, namespace string) ([]events.Row, error) {
+	return c.executeResolved(ctx, kind, name, namespace, state.Ref{})
+}
+
+func (c EventsCommand) executeResolved(ctx context.Context, kind kinds.Kind, name, namespace string, ref state.Ref) ([]events.Row, error) {
 	all, err := c.Events.Get(ctx, namespace)
 	if err != nil {
 		return nil, err
