@@ -353,6 +353,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
+| `kx mcp` | Serve kx's diagnostics, ownership trees and marks to AI agents over MCP (stdio). |
 | `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 <!-- commands-table-end -->
 

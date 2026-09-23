@@ -56,6 +56,12 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx engine [<name>]`](engine/) | List available scan engines or persist a default choice by name or index. |
 | [`kx theme [<name>]`](theme/) | List available color themes or persist a choice by name or index. |
 
+## Integrations
+
+| Command | Description |
+|---|---|
+| [`kx mcp`](mcp/) | Serve kx's diagnostics, ownership trees and marks to AI agents over MCP (stdio). |
+
 ## Shell
 
 | Command | Description |
