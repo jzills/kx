@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -49,6 +50,20 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 			"'%s' is not one resource type — give the kind and the name separately, one resource per target.",
 			target.Kind)
 	}
+	if err := validKind(target.Kind); err != nil {
+		return resolvedTarget{}, err
+	}
+	if strings.EqualFold(target.Kind, "all") {
+		return resolvedTarget{}, errors.New("'all' is not one resource type — give the resource's own kind.")
+	}
+	if err := validObjectName("name", target.Name); err != nil {
+		return resolvedTarget{}, err
+	}
+	if target.Namespace != "" {
+		if err := validObjectName("namespace", target.Namespace); err != nil {
+			return resolvedTarget{}, err
+		}
+	}
 	kind := kinds.Normalize(target.Kind)
 	namespace := target.Namespace
 	// Unknown scope (a CRD with no discovery cache) is treated as namespaced,
@@ -71,4 +86,37 @@ func (r resolvedTarget) getArgs(extra ...string) []string {
 		args = append(args, "-n", r.Namespace)
 	}
 	return append(args, extra...)
+}
+
+// Every kind, name and namespace a tool is given lands in kubectl's argv, and
+// kubectl reads anything with a leading '-' as a flag: a name of "-lapp=api"
+// turns an existence check into a selector query, and "--server=…" sends the
+// kubeconfig's credentials elsewhere. So each is held to the shape Kubernetes
+// itself gives it before it goes near a command line.
+var (
+	kindPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9.-]*$`)
+	// A DNS subdomain, the shape Kubernetes requires of most object names and
+	// (as a stricter DNS label) of every namespace.
+	objectNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+)
+
+const maxObjectNameLength = 253
+
+func validKind(kind string) error {
+	if !kindPattern.MatchString(kind) {
+		return fmt.Errorf(
+			"kind '%s' is not a resource type — give one such as pods, deploy or a CRD's plural name.", kind)
+	}
+	return nil
+}
+
+// validObjectName checks a name or namespace; field is which of the two, so the
+// refusal names the argument to fix.
+func validObjectName(field, value string) error {
+	if len(value) > maxObjectNameLength || !objectNamePattern.MatchString(value) {
+		return fmt.Errorf(
+			"%s '%s' is not a Kubernetes name — use lowercase letters, digits, '-' and '.', starting and ending with a letter or digit.",
+			field, value)
+	}
+	return nil
 }

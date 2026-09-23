@@ -182,6 +182,14 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if strings.ContainsAny(in.Kind, ",/") || strings.EqualFold(in.Kind, "all") {
 		return nil, listOutput{}, fmt.Errorf("'%s' is not one resource type — list one kind per call.", in.Kind)
 	}
+	if err := validKind(in.Kind); err != nil {
+		return nil, listOutput{}, err
+	}
+	if in.Namespace != "" {
+		if err := validObjectName("namespace", in.Namespace); err != nil {
+			return nil, listOutput{}, err
+		}
+	}
 	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, listOutput{}, err
 	}

@@ -108,3 +108,92 @@ func TestLiveKubectlRereadsTheContext(t *testing.T) {
 		t.Errorf("context = %q after switching, want b — the server is caching", got)
 	}
 }
+
+// Every target field reaches kubectl's argv. A name of "-lapp=api" turns the
+// existence check into a selector query that succeeds — and the mark it
+// stores would later hand `kx delete @x` a selector-wide delete; a name of
+// "--server=…" sends the kubeconfig's credentials somewhere else. So a kind,
+// name or namespace that is not shaped like one is refused before anything
+// runs, and nothing is stored.
+func TestMarkToolRefusesFlagShapedTargets(t *testing.T) {
+	for label, target := range map[string]map[string]any{
+		"selector name":       {"kind": "pods", "name": "-lapp=api", "namespace": "prod"},
+		"server name":         {"kind": "pods", "name": "--server=https://evil"},
+		"context name":        {"kind": "pods", "name": "--context=x"},
+		"kubeconfig name":     {"kind": "pods", "name": "--kubeconfig=/tmp/x"},
+		"output name":         {"kind": "pods", "name": "-oyaml"},
+		"name with a space":   {"kind": "pods", "name": "api web"},
+		"uppercase name":      {"kind": "pods", "name": "API"},
+		"name ending in dash": {"kind": "pods", "name": "api-"},
+		"overlong name":       {"kind": "pods", "name": strings.Repeat("a", 254)},
+		"flag kind":           {"kind": "--context=x", "name": "api"},
+		"short flag kind":     {"kind": "-oyaml", "name": "api"},
+		"two kinds":           {"kind": "pods,svc", "name": "api"},
+		"kind/name":           {"kind": "pod/x", "name": "api"},
+		"all":                 {"kind": "all", "name": "api"},
+		"flag namespace":      {"kind": "pods", "name": "api", "namespace": "-A"},
+		"kubeconfig ns":       {"kind": "pods", "name": "api", "namespace": "--kubeconfig=/tmp/x"},
+		"uppercase ns":        {"kind": "pods", "name": "api", "namespace": "Prod"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			kube := &recordingKubectl{output: "pod/api\n"}
+			deps := mcpTestDeps(t, kube)
+			result := callTool(t, connectMCP(t, deps), "mark", map[string]any{"name": "x", "target": target})
+			if !result.IsError {
+				t.Fatalf("marked %v, want a refusal", target)
+			}
+			if len(kube.runs) != 0 {
+				t.Errorf("kubectl ran %v before the target was refused", kube.runs)
+			}
+			if marks, _ := deps.State.Marks(); len(marks) != 0 {
+				t.Errorf("marks = %+v, want none stored", marks)
+			}
+		})
+	}
+}
+
+// diagnose and tree take the same target, through the same resolveTarget.
+func TestResolveTargetRefusesFlagShapedFields(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{})
+	for _, target := range []mcpTarget{
+		{Kind: "pods", Name: "-lapp=api"},
+		{Kind: "pods", Name: "--server=https://evil"},
+		{Kind: "-oyaml", Name: "api"},
+		{Kind: "pods", Name: "api", Namespace: "-A"},
+	} {
+		if _, err := deps.resolveTarget(target); err == nil {
+			t.Errorf("%+v resolved, want a refusal", target)
+		}
+	}
+	// Real spellings still resolve: a CRD's dotted plural, a dotted name.
+	for _, target := range []mcpTarget{
+		{Kind: "certificates.cert-manager.io", Name: "web-tls"},
+		{Kind: "Deployment", Name: "api.v2", Namespace: "kube-system"},
+	} {
+		if _, err := deps.resolveTarget(target); err != nil {
+			t.Errorf("%+v: %v, want it resolved", target, err)
+		}
+	}
+}
+
+func TestListResourcesRefusesFlagShapedArguments(t *testing.T) {
+	for label, args := range map[string]map[string]any{
+		"flag kind":       {"kind": "-oyaml"},
+		"context kind":    {"kind": "--context=x"},
+		"server kind":     {"kind": "--server=https://evil"},
+		"flag namespace":  {"kind": "pods", "namespace": "-A"},
+		"kubeconfig ns":   {"kind": "pods", "namespace": "--kubeconfig=/tmp/x"},
+		"namespace space": {"kind": "pods", "namespace": "a b"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			kube := &recordingKubectl{output: podsOutput}
+			result := callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "list_resources", args)
+			if !result.IsError {
+				t.Fatalf("listed %v, want a refusal", args)
+			}
+			if len(kube.runs) != 0 {
+				t.Errorf("kubectl ran %v before the arguments were refused", kube.runs)
+			}
+		})
+	}
+}
