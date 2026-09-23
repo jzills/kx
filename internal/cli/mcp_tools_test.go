@@ -368,3 +368,66 @@ func TestDiagnoseRefusesContradictoryArguments(t *testing.T) {
 		}
 	}
 }
+
+type treeResult struct {
+	Context string `json:"context"`
+	Tree    struct {
+		Roots []jsonTreeNode `json:"roots"`
+	} `json:"tree"`
+}
+
+func mcpTreeDeps(t *testing.T) mcpDeps {
+	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
+	client := treeFixture().Client
+	deps.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+	return deps
+}
+
+func TestTreeToolGraphsATargetWithoutIndexes(t *testing.T) {
+	deps := mcpTreeDeps(t)
+	var out treeResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "tree", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "web", "namespace": "prod"},
+	}), &out)
+	if len(out.Tree.Roots) != 1 || out.Tree.Roots[0].Name != "web" {
+		t.Fatalf("roots = %+v", out.Tree.Roots)
+	}
+	var walk func(node jsonTreeNode)
+	walk = func(node jsonTreeNode) {
+		if node.Index != 0 {
+			t.Errorf("%s carries index %d", node.Name, node.Index)
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(out.Tree.Roots[0])
+	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Load = %v; the tree saved a listing", err)
+	}
+}
+
+func TestTreeToolGraphsTheCurrentNamespaceByDefault(t *testing.T) {
+	var out treeResult
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTreeDeps(t)), "tree", map[string]any{}), &out)
+	if len(out.Tree.Roots) != 1 {
+		t.Fatalf("roots = %+v, want the prod namespace forest", out.Tree.Roots)
+	}
+}
+
+// The same refusal list_resources and diagnose make for -n beside -A,
+// spelled the same way for tree — and, on top of it, tree's own rule that a
+// target already names its namespace.
+func TestTreeToolRefusesContradictoryScopes(t *testing.T) {
+	session := connectMCP(t, mcpTreeDeps(t))
+	target := map[string]any{"kind": "deploy", "name": "web", "namespace": "prod"}
+	for name, args := range map[string]map[string]any{
+		"target and namespace": {"target": target, "namespace": "prod"},
+		"target and all":       {"target": target, "allNamespaces": true},
+		"namespace and all":    {"namespace": "prod", "allNamespaces": true},
+	} {
+		if result := callTool(t, session, "tree", args); !result.IsError {
+			t.Errorf("%s: graphed, want a refusal", name)
+		}
+	}
+}

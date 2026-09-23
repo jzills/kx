@@ -400,29 +400,46 @@ func treeNodeOf(node *tree.Node) jsonTreeNode {
 	return converted
 }
 
-// treeJSON serialises an ownership graph — one root for an indexed resource or
-// a single namespace, several for an -A forest.
+// treeDocument is the one shape kx tree --json emits, indexed or swept — and
+// what the MCP server's tree tool returns as structured content.
 //
-// Always a list, even for the one-root shapes, so a consumer parses every kx
-// tree document the same way. kx scan already takes that view of its images.
-func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
+// Always a list of Roots, even for the one-root shapes, so a consumer parses
+// every kx tree document the same way. kx scan already takes that view of its
+// images.
+type treeDocument struct {
+	SchemaVersion int            `json:"schemaVersion"`
+	Kind          string         `json:"kind,omitempty"`
+	Name          string         `json:"name,omitempty"`
+	Namespace     string         `json:"namespace,omitempty"`
+	AllNamespaces bool           `json:"allNamespaces,omitempty"`
+	Roots         []jsonTreeNode `json:"roots"`
+}
+
+// treeDocumentOf converts an ownership graph — one root for an indexed
+// resource or a single namespace, several for an -A forest — into
+// treeJSON's document, unencoded, for the MCP server to return as structured
+// content.
+func treeDocumentOf(subject scanSubject, roots []*tree.Node) treeDocument {
 	converted := make([]jsonTreeNode, 0, len(roots))
 	for _, root := range roots {
 		if root != nil {
 			converted = append(converted, treeNodeOf(root))
 		}
 	}
-	return encode(struct {
-		SchemaVersion int            `json:"schemaVersion"`
-		Kind          string         `json:"kind,omitempty"`
-		Name          string         `json:"name,omitempty"`
-		Namespace     string         `json:"namespace,omitempty"`
-		AllNamespaces bool           `json:"allNamespaces,omitempty"`
-		Roots         []jsonTreeNode `json:"roots"`
-	}{
-		reportSchemaVersion, string(subject.Kind), subject.Name,
-		subject.Namespace, subject.AllNamespaces, converted,
-	})
+	return treeDocument{
+		SchemaVersion: reportSchemaVersion,
+		Kind:          string(subject.Kind),
+		Name:          subject.Name,
+		Namespace:     subject.Namespace,
+		AllNamespaces: subject.AllNamespaces,
+		Roots:         converted,
+	}
+}
+
+// treeJSON serialises an ownership graph — one root for an indexed resource or
+// a single namespace, several for an -A forest.
+func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
+	return encode(treeDocumentOf(subject, roots))
 }
 
 // jsonTopRow is one pod's or node's usage.

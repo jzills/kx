@@ -32,10 +32,17 @@ func (c TreeCommand) Execute(ctx context.Context, ref state.Ref, indexed bool) (
 	if err != nil {
 		return nil, err
 	}
+	return c.ExecuteResource(ctx, kind, name, namespace, indexed)
+}
+
+// ExecuteResource graphs a resource that is already resolved. A Namespace
+// graphs that namespace itself.
+func (c TreeCommand) ExecuteResource(
+	ctx context.Context, kind kinds.Kind, name, namespace string, indexed bool,
+) (*tree.Node, error) {
 	if kind == kinds.Namespace {
 		return c.ExecuteNamespace(ctx, name, indexed)
 	}
-
 	node, resources, err := c.Builder.BuildResource(ctx, kind, name, namespace, indexed)
 	if err != nil {
 		return nil, err

@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/graph"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/tree"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -44,6 +46,14 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"Ingress, Pod and Node.",
 		Annotations: readOnlyTool("Diagnose"),
 	}, deps.diagnose)
+	// Registered with an untyped output: a tree node's children are tree
+	// nodes, and the SDK's schema inference refuses a recursive type.
+	mcp.AddTool[treeInput, any](server, &mcp.Tool{
+		Name: "tree",
+		Description: "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → " +
+			"containers), or the whole ownership forest of a namespace when there is no target.",
+		Annotations: readOnlyTool("Ownership tree"),
+	}, deps.tree)
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.
@@ -300,6 +310,65 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 			}
 		}
 		out.Diagnosis.Resources = kept
+	}
+	return nil, out, nil
+}
+
+type treeInput struct {
+	Target        *mcpTarget `json:"target,omitempty" jsonschema:"The resource to graph. Omit to graph a namespace."`
+	Namespace     string     `json:"namespace,omitempty" jsonschema:"Namespace to graph when there is no target; defaults to the current namespace."`
+	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Graph every namespace when there is no target."`
+}
+
+type treeOutput struct {
+	Context string       `json:"context"`
+	Tree    treeDocument `json:"tree"`
+}
+
+func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput) (*mcp.CallToolResult, any, error) {
+	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+		return nil, nil, err
+	}
+	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces) {
+		return nil, nil, errors.New(
+			"'namespace' and 'allNamespaces' apply without a target — a target already names its namespace.")
+	}
+	client, err := d.Kubernetes()
+	if err != nil {
+		return nil, nil, err
+	}
+	// Save is never reached with indexed=false; discardListing is belt and braces.
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: discardListing}
+	out := treeOutput{Context: d.Kubectl.CurrentContext()}
+
+	switch {
+	case in.Target != nil:
+		target, err := d.resolveTarget(*in.Target)
+		if err != nil {
+			return nil, nil, err
+		}
+		node, err := command.ExecuteResource(ctx, target.Kind, target.Name, target.Namespace, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		out.Tree = treeDocumentOf(scanSubject{Kind: target.Kind, Name: target.Name, Namespace: target.Namespace},
+			[]*tree.Node{node})
+	case in.AllNamespaces:
+		roots, _, err := command.ExecuteAllNamespaces(ctx, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true}, roots)
+	default:
+		namespace := in.Namespace
+		if namespace == "" {
+			namespace = d.Kubectl.CurrentNamespace()
+		}
+		node, err := command.ExecuteNamespace(ctx, namespace, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		out.Tree = treeDocumentOf(scanSubject{Namespace: namespace}, []*tree.Node{node})
 	}
 	return nil, out, nil
 }
