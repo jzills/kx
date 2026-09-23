@@ -194,7 +194,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, err
 	}
 	if in.Namespace != "" {
-		if err := validObjectName("namespace", in.Namespace); err != nil {
+		if err := validNamespace(in.Namespace); err != nil {
 			return nil, listOutput{}, err
 		}
 	}

@@ -136,6 +136,9 @@ func TestMarkToolRefusesFlagShapedTargets(t *testing.T) {
 		"flag namespace":      {"kind": "pods", "name": "api", "namespace": "-A"},
 		"kubeconfig ns":       {"kind": "pods", "name": "api", "namespace": "--kubeconfig=/tmp/x"},
 		"uppercase ns":        {"kind": "pods", "name": "api", "namespace": "Prod"},
+		"leading colon name":  {"kind": "clusterroles", "name": ":foo"},
+		"colon namespace":     {"kind": "pods", "name": "api", "namespace": "system:prod"},
+		"dotted namespace":    {"kind": "pods", "name": "api", "namespace": "prod.eu"},
 	} {
 		t.Run(label, func(t *testing.T) {
 			kube := &recordingKubectl{output: "pod/api\n"}
@@ -197,5 +200,23 @@ func TestListResourcesRefusesFlagShapedArguments(t *testing.T) {
 				t.Errorf("kubectl ran %v before the arguments were refused", kube.runs)
 			}
 		})
+	}
+}
+
+// RBAC's own objects are named with colons — system:aggregate-to-admin,
+// system:controller:… — and a colon is inert in argv, so a name may carry
+// one anywhere but first. Only a leading '-' is dangerous.
+func TestMarkToolAcceptsColonedRBACNames(t *testing.T) {
+	kube := &recordingKubectl{output: "clusterrole.rbac.authorization.k8s.io/system:aggregate-to-admin\n"}
+	deps := mcpTestDeps(t, kube)
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
+		"name": "admin", "target": map[string]any{"kind": "clusterroles", "name": "system:aggregate-to-admin"},
+	})
+	if result.IsError {
+		t.Fatalf("mark refused a real RBAC name: %s", toolText(result))
+	}
+	marks, _ := deps.State.Marks()
+	if marks["admin"].Name != "system:aggregate-to-admin" {
+		t.Errorf("marks = %+v, want admin on system:aggregate-to-admin", marks)
 	}
 }

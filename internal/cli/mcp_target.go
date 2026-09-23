@@ -56,11 +56,11 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 	if strings.EqualFold(target.Kind, "all") {
 		return resolvedTarget{}, errors.New("'all' is not one resource type — give the resource's own kind.")
 	}
-	if err := validObjectName("name", target.Name); err != nil {
+	if err := validObjectName(target.Name); err != nil {
 		return resolvedTarget{}, err
 	}
 	if target.Namespace != "" {
-		if err := validObjectName("namespace", target.Namespace); err != nil {
+		if err := validNamespace(target.Namespace); err != nil {
 			return resolvedTarget{}, err
 		}
 	}
@@ -95,12 +95,20 @@ func (r resolvedTarget) getArgs(extra ...string) []string {
 // itself gives it before it goes near a command line.
 var (
 	kindPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9.-]*$`)
-	// A DNS subdomain, the shape Kubernetes requires of most object names and
-	// (as a stricter DNS label) of every namespace.
-	objectNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+	// A DNS subdomain — the shape Kubernetes requires of most object names —
+	// plus ':' anywhere after the first character, because RBAC's own objects
+	// are named system:aggregate-to-admin and system:controller:…. A colon is
+	// inert in argv; only a leading '-' is not, and the first character must
+	// still be a letter or digit.
+	objectNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.:]*[a-z0-9:])?$`)
+	// A DNS label, the stricter shape every namespace has: no '.', no ':'.
+	namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
-const maxObjectNameLength = 253
+const (
+	maxObjectNameLength = 253
+	maxNamespaceLength  = 63
+)
 
 func validKind(kind string) error {
 	if !kindPattern.MatchString(kind) {
@@ -110,13 +118,20 @@ func validKind(kind string) error {
 	return nil
 }
 
-// validObjectName checks a name or namespace; field is which of the two, so the
-// refusal names the argument to fix.
-func validObjectName(field, value string) error {
-	if len(value) > maxObjectNameLength || !objectNamePattern.MatchString(value) {
+func validObjectName(name string) error {
+	if len(name) > maxObjectNameLength || !objectNamePattern.MatchString(name) {
 		return fmt.Errorf(
-			"%s '%s' is not a Kubernetes name — use lowercase letters, digits, '-' and '.', starting and ending with a letter or digit.",
-			field, value)
+			"name '%s' is not a Kubernetes name — use lowercase letters, digits, '-', '.' and ':', starting with a letter or digit.",
+			name)
+	}
+	return nil
+}
+
+func validNamespace(namespace string) error {
+	if len(namespace) > maxNamespaceLength || !namespacePattern.MatchString(namespace) {
+		return fmt.Errorf(
+			"namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
+			namespace)
 	}
 	return nil
 }
