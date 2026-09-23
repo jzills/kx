@@ -306,6 +306,32 @@ func TestMCPScanKeepsAFailedImagesRow(t *testing.T) {
 	}
 }
 
+// A namespace sweep reads images other people wrote. One shaped like a flag
+// comes back as its own error row and never reaches the scanner's argv.
+func TestMCPScanRefusesAFlagShapedImageInASweep(t *testing.T) {
+	list := `{"items":[` + workloadJSON("api:v1", "--output=/home/u/.bashrc") + `]}`
+	fake := &fakeScanner{captures: []captured{{image: "api:v1", stdout: trivyReport(t, [2]string{"C1", "CRITICAL"})}}}
+	deps, _ := scanDeps(t, fake, list)
+	session := connectMCP(t, deps)
+	var out scanOutput
+	decodeStructured(t, callTool(t, session, "scan", map[string]any{"allNamespaces": true}), &out)
+	if len(out.Scan.Images) != 2 {
+		t.Fatalf("%d images, want 2", len(out.Scan.Images))
+	}
+	api, hostile := out.Scan.Images[0], out.Scan.Images[1]
+	if !slices.Equal(findingIDs(api), []string{"C1"}) {
+		t.Errorf("api:v1 = %+v, want it scanned", api)
+	}
+	if !strings.Contains(hostile.Error, "is not an image reference") {
+		t.Errorf("flag-shaped image = %+v, want an error row refusing it", hostile)
+	}
+	for _, argv := range fake.argv {
+		if slices.Contains(argv, "--output=/home/u/.bashrc") {
+			t.Errorf("scanner called with %v", argv)
+		}
+	}
+}
+
 // A client that sends a progress token hears once per image scanned; one
 // that doesn't hears nothing.
 func TestMCPScanReportsProgressWhenAsked(t *testing.T) {

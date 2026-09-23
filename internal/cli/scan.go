@@ -166,6 +166,9 @@ func (c ScanCommand) ScanImage(engineName, image string, extra []string) (int, e
 	if err != nil {
 		return 1, err
 	}
+	if err := imageReferenceError(image); err != nil {
+		return 1, err
+	}
 	return c.Scanner.Scan(engine.PassthroughArgv(image, extra))
 }
 
@@ -263,7 +266,15 @@ func (c ScanCommand) Summarize(
 // scanImage is one image's scan. The error return is reserved for a failure
 // that is not the scanner's own verdict; anything the scanner reported lands on
 // the row.
+//
+// A flag-shaped image reference (see imageReferenceError) is refused on its
+// row rather than scanned: the API server only rejects whitespace, so an
+// image of "--output=/home/u/.bashrc" would otherwise reach the scanner as a
+// flag and write a file on the machine running kx. The sweep goes on.
 func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.ImageScan, error) {
+	if err := imageReferenceError(image); err != nil {
+		return scanner.ImageScan{Image: image, Error: err.Error()}, nil
+	}
 	stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
 	if err != nil {
 		return scanner.ImageScan{}, err
@@ -280,6 +291,20 @@ func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.Ima
 		Counts:   scanner.CountBySeverity(findings),
 		Findings: findings,
 	}, nil
+}
+
+// imageReferenceError refuses an image reference a scanner would read as a
+// flag. Every engine puts the image last in argv with no "--" before it (not
+// every scanner honours one), and the reference comes from a pod spec anyone
+// who can create a workload wrote — so it is checked here, on kx's side,
+// before it goes near a command line.
+func imageReferenceError(image string) error {
+	if strings.HasPrefix(image, "-") {
+		return fmt.Errorf(
+			"'%s' is not an image reference — it starts with '-', which a scanner would read as a flag.",
+			image)
+	}
+	return nil
 }
 
 // ansiEscape matches the CSI sequences a scanner uses to colour its own
@@ -611,6 +636,12 @@ func newScanCommand(services Services) *cobra.Command {
 						render.Raw("")
 					}
 					render.Section(image)
+					// Reported and skipped, as the summary gives it an error
+					// row: one hostile pod spec shouldn't end the sweep.
+					if err := imageReferenceError(image); err != nil {
+						render.Error(err.Error())
+						continue
+					}
 					if _, err := command.ScanImage(engine, image, extra); err != nil {
 						return err
 					}
