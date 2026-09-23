@@ -40,9 +40,11 @@ type mcpDeps struct {
 	// leave it nil so they never read the ambient kubeconfig's cache.
 	Discovery *mcpDiscovery
 
-	// mu serialises every tool call; serialized takes it, and nothing else
-	// does. The SDK runs each request on its own goroutine, and kx was built
-	// as a CLI that does one thing at a time:
+	// mu serialises tool calls; locked takes it, and nothing else does.
+	// Every tool runs wholly under it except scan, which holds it only while
+	// resolving images and releases it for the scanners themselves. The SDK
+	// runs each request on its own goroutine, and kx was built as a CLI that
+	// does one thing at a time:
 	//
 	//   - mark checks that a name is free and then load-modify-saves the
 	//     state file, so two concurrent marks lost each other's writes, and
@@ -79,16 +81,32 @@ func (m *mcpDiscovery) refresh(current string) {
 	m.context, m.seen = current, true
 }
 
-// serialized wraps a tool handler so it runs alone, with the discovery
-// source current. Every tool is registered through it — see mcpDeps.mu.
+// locked runs fn alone, with the discovery source current. It is the one
+// place mu is taken — serialized is built on it, and scan calls it directly
+// for its resolve phase only (see registerMCPTools).
+func (d mcpDeps) locked(fn func() error) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.Discovery != nil {
+		d.Discovery.refresh(d.Kubectl.CurrentContext())
+	}
+	return fn()
+}
+
+// serialized wraps a tool handler so the whole of it runs under locked. Every
+// tool but scan is registered through it — see mcpDeps.mu.
 func serialized[In, Out any](d mcpDeps, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		if d.Discovery != nil {
-			d.Discovery.refresh(d.Kubectl.CurrentContext())
-		}
-		return handler(ctx, req, in)
+		var (
+			result *mcp.CallToolResult
+			out    Out
+		)
+		err := d.locked(func() error {
+			var err error
+			result, out, err = handler(ctx, req, in)
+			return err
+		})
+		return result, out, err
 	}
 }
 

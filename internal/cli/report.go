@@ -242,9 +242,20 @@ type scanSubject struct {
 	AllNamespaces bool
 }
 
-// scanJSON serialises a scan's rows, the same ones the summary table and the
-// HTML report are built from.
-func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
+// scanDocument is the one shape kx scan --json emits, and what the MCP
+// server's scan tool returns as structured content.
+type scanDocument struct {
+	SchemaVersion int         `json:"schemaVersion"`
+	Kind          kinds.Kind  `json:"kind,omitempty"`
+	Name          string      `json:"name,omitempty"`
+	Namespace     string      `json:"namespace,omitempty"`
+	AllNamespaces bool        `json:"allNamespaces,omitempty"`
+	Images        []jsonImage `json:"images"`
+}
+
+// scanDocumentOf converts a scan's rows into scanJSON's document, unencoded,
+// for the MCP server to return as structured content.
+func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument {
 	images := make([]jsonImage, 0, len(rows))
 	for _, row := range rows {
 		findings := make([]jsonVulnerability, 0, len(row.Findings))
@@ -263,17 +274,16 @@ func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
 			Counts: countTokens(row.Counts), Findings: findings,
 		})
 	}
-	return encode(struct {
-		SchemaVersion int         `json:"schemaVersion"`
-		Kind          kinds.Kind  `json:"kind,omitempty"`
-		Name          string      `json:"name,omitempty"`
-		Namespace     string      `json:"namespace,omitempty"`
-		AllNamespaces bool        `json:"allNamespaces,omitempty"`
-		Images        []jsonImage `json:"images"`
-	}{
-		reportSchemaVersion, subject.Kind, subject.Name,
-		subject.Namespace, subject.AllNamespaces, images,
-	})
+	return scanDocument{
+		SchemaVersion: reportSchemaVersion, Kind: subject.Kind, Name: subject.Name,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces, Images: images,
+	}
+}
+
+// scanJSON serialises a scan's rows, the same ones the summary table and the
+// HTML report are built from.
+func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
+	return encode(scanDocumentOf(subject, rows))
 }
 
 // severityToken is the document spelling of a scanner's severity label.

@@ -68,6 +68,13 @@ func (c ScanCommand) Execute(ref state.Ref, engine string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.ExecuteResource(kind, name, namespace, engine)
+}
+
+// ExecuteResource resolves the unique images of one workload named directly,
+// with no index or Ref to resolve — the MCP server's entry point, mirroring
+// DiagnosticCommand.ExecuteResource.
+func (c ScanCommand) ExecuteResource(kind kinds.Kind, name, namespace, engine string) ([]string, error) {
 	if !scannableKinds.Has(kind) {
 		return nil, unsupportedKindError("scan", kind, scannableKinds)
 	}
