@@ -40,7 +40,7 @@ func TestResolveTargetNormalizesKubectlSpellings(t *testing.T) {
 func TestResolveTargetRefusesANamespaceOnAClusterScopedKind(t *testing.T) {
 	deps := mcpTestDeps(t, &recordingKubectl{})
 	_, err := deps.resolveTarget(mcpTarget{Kind: "nodes", Name: "n1", Namespace: "prod"})
-	if err == nil || !strings.Contains(err.Error(), "cluster-scoped") {
+	if err == nil || !strings.Contains(err.Error(), "outside any namespace") {
 		t.Fatalf("err = %v, want a cluster-scoped refusal", err)
 	}
 	got, err := deps.resolveTarget(mcpTarget{Kind: "nodes", Name: "n1"})

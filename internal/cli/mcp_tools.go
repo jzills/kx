@@ -157,16 +157,19 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, errors.New("'allNamespaces' and 'namespace' cannot be combined.")
 	}
 	kind := kinds.Normalize(in.Kind)
-	namespaced, known := kinds.Namespaced(kind)
-	clusterScoped := known && !namespaced
-	if clusterScoped && (in.Namespace != "" || in.AllNamespaces) {
-		return nil, listOutput{}, fmt.Errorf("%s is cluster-scoped and takes no namespace.", kind)
+	isClusterScoped := clusterScoped(in.Kind)
+	if isClusterScoped && (in.Namespace != "" || in.AllNamespaces) {
+		flag := "namespace"
+		if in.AllNamespaces {
+			flag = "allNamespaces"
+		}
+		return nil, listOutput{}, clusterScopedScopeError(flag, in.Kind)
 	}
 
 	args := []string{"get", in.Kind}
 	namespace := ""
 	switch {
-	case clusterScoped:
+	case isClusterScoped:
 	case in.AllNamespaces:
 		args = append(args, "-A")
 	default:

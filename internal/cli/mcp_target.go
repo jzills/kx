@@ -53,10 +53,9 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 	namespace := target.Namespace
 	// Unknown scope (a CRD with no discovery cache) is treated as namespaced,
 	// the same default every kx command takes.
-	if namespaced, known := kinds.Namespaced(kind); known && !namespaced {
+	if clusterScoped(target.Kind) {
 		if namespace != "" {
-			return resolvedTarget{}, fmt.Errorf(
-				"%s is cluster-scoped and takes no namespace — drop 'namespace'.", kind)
+			return resolvedTarget{}, clusterScopedScopeError("namespace", target.Kind)
 		}
 	} else if namespace == "" {
 		namespace = d.Kubectl.CurrentNamespace()
