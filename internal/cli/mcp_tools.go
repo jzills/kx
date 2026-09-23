@@ -351,8 +351,14 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		if err != nil {
 			return nil, nil, err
 		}
-		out.Tree = treeDocumentOf(scanSubject{Kind: target.Kind, Name: target.Name, Namespace: target.Namespace},
-			[]*tree.Node{node})
+		// A Namespace target graphs that namespace itself, so it is the scope
+		// rather than the subject — the same distinction the CLI's indexed
+		// --json path draws for a Namespace row (tree.go).
+		subject := scanSubject{Kind: target.Kind, Name: target.Name, Namespace: target.Namespace}
+		if target.Kind == kinds.Namespace {
+			subject = scanSubject{Namespace: target.Name}
+		}
+		out.Tree = treeDocumentOf(subject, []*tree.Node{node})
 	case in.AllNamespaces:
 		roots, _, err := command.ExecuteAllNamespaces(ctx, false)
 		if err != nil {

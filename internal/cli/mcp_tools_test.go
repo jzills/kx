@@ -372,7 +372,11 @@ func TestDiagnoseRefusesContradictoryArguments(t *testing.T) {
 type treeResult struct {
 	Context string `json:"context"`
 	Tree    struct {
-		Roots []jsonTreeNode `json:"roots"`
+		Kind          string         `json:"kind"`
+		Name          string         `json:"name"`
+		Namespace     string         `json:"namespace"`
+		AllNamespaces bool           `json:"allNamespaces"`
+		Roots         []jsonTreeNode `json:"roots"`
 	} `json:"tree"`
 }
 
@@ -381,6 +385,26 @@ func mcpTreeDeps(t *testing.T) mcpDeps {
 	client := treeFixture().Client
 	deps.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
 	return deps
+}
+
+// assertNoTreeIndexes walks every root and fails if any node — down to
+// containers — carries an index, the way an unindexed MCP tree must: an agent
+// spending the user's indexes would act on whatever listing the user has
+// open, so the server's tree never assigns them.
+func assertNoTreeIndexes(t *testing.T, roots []jsonTreeNode) {
+	t.Helper()
+	var walk func(node jsonTreeNode)
+	walk = func(node jsonTreeNode) {
+		if node.Index != 0 {
+			t.Errorf("%s carries index %d", node.Name, node.Index)
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	for _, root := range roots {
+		walk(root)
+	}
 }
 
 func TestTreeToolGraphsATargetWithoutIndexes(t *testing.T) {
@@ -392,27 +416,52 @@ func TestTreeToolGraphsATargetWithoutIndexes(t *testing.T) {
 	if len(out.Tree.Roots) != 1 || out.Tree.Roots[0].Name != "web" {
 		t.Fatalf("roots = %+v", out.Tree.Roots)
 	}
-	var walk func(node jsonTreeNode)
-	walk = func(node jsonTreeNode) {
-		if node.Index != 0 {
-			t.Errorf("%s carries index %d", node.Name, node.Index)
-		}
-		for _, child := range node.Children {
-			walk(child)
-		}
-	}
-	walk(out.Tree.Roots[0])
+	assertNoTreeIndexes(t, out.Tree.Roots)
 	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
 		t.Errorf("Load = %v; the tree saved a listing", err)
 	}
 }
 
 func TestTreeToolGraphsTheCurrentNamespaceByDefault(t *testing.T) {
+	deps := mcpTreeDeps(t)
 	var out treeResult
-	decodeStructured(t, callTool(t, connectMCP(t, mcpTreeDeps(t)), "tree", map[string]any{}), &out)
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "tree", map[string]any{}), &out)
 	if len(out.Tree.Roots) != 1 {
 		t.Fatalf("roots = %+v, want the prod namespace forest", out.Tree.Roots)
 	}
+	assertNoTreeIndexes(t, out.Tree.Roots)
+	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Load = %v; the tree saved a listing", err)
+	}
+}
+
+// A Namespace target graphs that namespace itself, so it is the scope rather
+// than the subject — the same distinction the CLI's indexed --json path draws
+// for a Namespace row (tree.go: `if kind == kinds.Namespace { subject =
+// scanSubject{Namespace: name} }`). The MCP tool must draw it the same way.
+func TestTreeToolOnANamespaceTargetMatchesTheCLIsSubject(t *testing.T) {
+	var out treeResult
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTreeDeps(t)), "tree", map[string]any{
+		"target": map[string]any{"kind": "namespace", "name": "prod"},
+	}), &out)
+	if out.Tree.Namespace != "prod" || out.Tree.Kind != "" || out.Tree.Name != "" {
+		t.Errorf("tree subject = %+v, want namespace=prod with no kind or name", out.Tree)
+	}
+}
+
+// The allNamespaces branch had no coverage at all.
+func TestTreeToolGraphsEveryNamespace(t *testing.T) {
+	var out treeResult
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTreeDeps(t)), "tree", map[string]any{
+		"allNamespaces": true,
+	}), &out)
+	if !out.Tree.AllNamespaces {
+		t.Errorf("tree.allNamespaces = false, want true")
+	}
+	if len(out.Tree.Roots) != 1 || out.Tree.Roots[0].Name != "prod" {
+		t.Fatalf("roots = %+v, want one root for the fixture's prod namespace", out.Tree.Roots)
+	}
+	assertNoTreeIndexes(t, out.Tree.Roots)
 }
 
 // The same refusal list_resources and diagnose make for -n beside -A,
