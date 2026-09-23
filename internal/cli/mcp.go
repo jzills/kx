@@ -153,7 +153,7 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a " +
 	"kind by name. Resources are named by kind/name/namespace, or by a kx mark — a name the " +
 	"user pinned to a resource (list_marks shows them); mark pins one. Every tool is read-only " +
-	"against the cluster except mark, which only records a name in kx's local state."
+	"against the cluster; mark alone writes anything, and only a name in kx's local state."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	server := mcp.NewServer(

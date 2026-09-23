@@ -46,23 +46,23 @@ kx reads the same kubeconfig your shell does, so whatever
 | `logs` | Recent container logs, one pod or a workload's pods aggregated. |
 | `top` | Current CPU and memory, against limits or node capacity. |
 | `get_yaml` | A resource's manifest, narrowable to a few fields, Secrets redacted. |
-| `scan` | Image CVEs from the configured scanner. |
+| `scan` | Image CVEs from the configured scanner, at most 50 images a call by default. |
 
-[Command reference →](../../reference/commands/mcp/) has each tool's full
-argument list.
+Your MCP client lists each tool's arguments itself, from the server's
+`tools/list` reply, with a description of every one.
 
 ## What it will never do
 
-Every tool but `mark` is read-only against the cluster: kubectl only ever
-runs `get`, `logs` and `top`; client-go only ever `get`s, `list`s and
+Every tool, `mark` included, is read-only against the cluster: kubectl only
+ever runs `get`, `logs` and `top`; client-go only ever `get`s, `list`s and
 `watch`es. Nothing an agent calls here deletes, patches, scales, execs,
 port-forwards or edits anything.
 
 `mark` is the one write, and it writes kx's own state, not the cluster — the
 same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit`
 resolves the same resource whether you or the agent set it. It only ever
-adds: it refuses to move a name that already marks something else, and there
-is no tool to remove one.
+adds: it refuses any name that is already a mark, even one on the same
+resource, and there is no tool to remove one.
 
 The server never touches the history your `kx get` builds. An agent's
 `diagnose` or `tree` never saves a listing, so `kx 3` in your terminal
@@ -71,7 +71,10 @@ alongside it.
 
 Every kind, name and namespace an agent sends is validated before it reaches
 kubectl's argv — a leading `-` is refused rather than read as a flag — so a
-target can name a real resource but never inject one.
+target can name a real resource but never inject one. Image references a
+`scan` reads out of pod specs get the same treatment: one that starts with `-`
+or names a scanner source such as `dir:` or `fs://` comes back as an error row
+and never reaches the scanner.
 
 {{% kx-note %}}
 Marks are shared with your terminal, not private to the agent. `kx mark api 3`
@@ -86,6 +89,11 @@ from then on.
 the `kubectl.kubernetes.io/last-applied-configuration` annotation, which
 carries a Secret's whole last-applied manifest, plaintext data included. Keys
 are kept; values become `<redacted>`.
+
+Redaction goes by what kubectl returns as well as by what was asked for: any
+manifest that comes back as a core `v1` Secret is redacted, however its kind
+was spelled (`secret`, `secrets.v1.`) and whether it was named directly or
+through a mark.
 
 ## Context follows your kubeconfig, live
 

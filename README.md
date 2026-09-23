@@ -275,9 +275,9 @@ claude mcp add kx -- kx mcp
 ```
 
 Ten tools cover marks, listing, diagnostics, ownership, events, logs, usage,
-manifests (Secrets redacted) and image scanning. Every one but `mark` is
-read-only against the cluster, `mark` only ever adds a name, and none of it
-touches the listing your own indexes resolve against. The server follows your
+manifests (Secrets redacted) and image scanning. Every one is read-only
+against the cluster; `mark`, the one write, only ever adds a name to kx's own
+state, and none of it touches the listing your own indexes resolve against. The server follows your
 kubeconfig live, and every result names the context it read.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/)
