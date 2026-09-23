@@ -52,7 +52,8 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool[treeInput, any](server, &mcp.Tool{
 		Name: "tree",
 		Description: "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → " +
-			"containers), or the whole ownership forest of a namespace when there is no target.",
+			"containers), or the whole ownership forest of a namespace when there is no target. Large graphs " +
+			"are cut breadth-first at limit nodes; truncated says how many were left out.",
 		Annotations: readOnlyTool("Ownership tree"),
 	}, serialized(deps, deps.tree))
 }
@@ -323,15 +324,72 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	return nil, out, nil
 }
 
+const (
+	defaultTreeLimit = 500
+	maxTreeLimit     = 2000
+)
+
 type treeInput struct {
 	Target        *mcpTarget `json:"target,omitempty" jsonschema:"The resource to graph. Omit to graph a namespace."`
 	Namespace     string     `json:"namespace,omitempty" jsonschema:"Namespace to graph when there is no target; defaults to the current namespace."`
 	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Graph every namespace when there is no target."`
+	Limit         int        `json:"limit,omitempty" jsonschema:"Most nodes to return, containers included; default 500, at most 2000. The graph is cut breadth-first, and truncated counts what was left out."`
 }
 
 type treeOutput struct {
 	Context string       `json:"context"`
 	Tree    treeDocument `json:"tree"`
+	// Truncated is how many nodes the limit left out; absent when none were.
+	Truncated int `json:"truncated,omitempty"`
+}
+
+func treeLimit(requested int) int {
+	if requested <= 0 {
+		return defaultTreeLimit
+	}
+	return min(requested, maxTreeLimit)
+}
+
+// pruneTree keeps the first limit nodes of roots in breadth-first order and
+// returns how many it dropped.
+//
+// Breadth-first because the top of a graph is what names the next thing to
+// look at: a forest cut depth-first would spend the whole budget on the first
+// Deployment's containers and never mention the second Deployment. Sibling
+// order is the graph walk's own, so the same cluster is always cut the same
+// way.
+func pruneTree(roots []jsonTreeNode, limit int) ([]jsonTreeNode, int) {
+	total := countNodes(roots)
+	if total <= limit {
+		return roots, 0
+	}
+	kept := 0
+	// Each entry is one node's list of children; the queue visits them level
+	// by level, so every kept node's parent was kept before it.
+	queue := []*[]jsonTreeNode{&roots}
+	for len(queue) > 0 {
+		siblings := queue[0]
+		queue = queue[1:]
+		room := limit - kept
+		if len(*siblings) > room {
+			*siblings = (*siblings)[:room]
+		}
+		kept += len(*siblings)
+		for i := range *siblings {
+			if len((*siblings)[i].Children) > 0 {
+				queue = append(queue, &(*siblings)[i].Children)
+			}
+		}
+	}
+	return roots, total - kept
+}
+
+func countNodes(roots []jsonTreeNode) int {
+	count := 0
+	for _, root := range roots {
+		count += 1 + countNodes(root.Children)
+	}
+	return count
 }
 
 func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput) (*mcp.CallToolResult, any, error) {
@@ -385,5 +443,6 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		}
 		out.Tree = treeDocumentOf(scanSubject{Namespace: namespace}, []*tree.Node{node})
 	}
+	out.Tree.Roots, out.Truncated = pruneTree(out.Tree.Roots, treeLimit(in.Limit))
 	return nil, out, nil
 }

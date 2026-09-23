@@ -14,6 +14,7 @@ import (
 	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -584,4 +585,92 @@ func TestConcurrentMarksAreNeitherLostNorMoved(t *testing.T) {
 			t.Errorf("%d succeeded and %d were refused, want 1 and %d", succeeded, refused, calls-1)
 		}
 	})
+}
+
+// countTreeNodes counts every node under roots, containers included.
+func countTreeNodes(roots []jsonTreeNode) int {
+	count := 0
+	for _, root := range roots {
+		count += 1 + countTreeNodes(root.Children)
+	}
+	return count
+}
+
+// A Deployment with six pods of two containers each: 1 + 1 + 6 + 12 = 20
+// nodes, far more than a small limit.
+func wideTreeDeps(t *testing.T) mcpDeps {
+	t.Helper()
+	objects := []runtime.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod", UID: "d1"}},
+		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
+			Name: "web-abc", Namespace: "prod", UID: "rs1",
+			OwnerReferences: []metav1.OwnerReference{{UID: "d1"}},
+		}},
+	}
+	for i := range 6 {
+		objects = append(objects, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("web-abc-%d", i), Namespace: "prod", UID: types.UID(fmt.Sprintf("p%d", i)),
+				OwnerReferences: []metav1.OwnerReference{{UID: "rs1"}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}, {Name: "sidecar"}}},
+		})
+	}
+	return mcpDiagDeps(t, &recordingKubectl{namespace: "prod"}, objects...)
+}
+
+type boundedTreeResult struct {
+	treeResult
+	Truncated int `json:"truncated"`
+}
+
+// Every tool bounds what it returns. A tree is cut breadth-first, so what is
+// kept is the top of the graph — the part that names what to look at next —
+// and truncated says how much was left out.
+func TestTreeToolCapsNodesAndSaysHowManyWereLeftOut(t *testing.T) {
+	session := connectMCP(t, wideTreeDeps(t))
+	target := map[string]any{"kind": "deploy", "name": "web", "namespace": "prod"}
+
+	var whole boundedTreeResult
+	decodeStructured(t, callTool(t, session, "tree", map[string]any{"target": target}), &whole)
+	total := countTreeNodes(whole.Tree.Roots)
+	if total != 20 || whole.Truncated != 0 {
+		t.Fatalf("default: %d nodes, truncated %d; want all 20 and no truncation", total, whole.Truncated)
+	}
+
+	var cut boundedTreeResult
+	decodeStructured(t, callTool(t, session, "tree", map[string]any{"target": target, "limit": 5}), &cut)
+	if got := countTreeNodes(cut.Tree.Roots); got != 5 || cut.Truncated != 15 {
+		t.Fatalf("limit 5: %d nodes, truncated %d; want 5 and 15", got, cut.Truncated)
+	}
+	// Breadth-first: web, web-abc, then the first three pods — no containers.
+	rs := cut.Tree.Roots[0].Children[0]
+	if rs.Name != "web-abc" || len(rs.Children) != 3 || rs.Children[0].Name != "web-abc-0" {
+		t.Errorf("kept %+v, want web-abc with its first three pods", rs)
+	}
+	for _, pod := range rs.Children {
+		if len(pod.Children) != 0 {
+			t.Errorf("%s kept containers %+v past the limit", pod.Name, pod.Children)
+		}
+	}
+
+	// Nine is every pod plus one container, and the one kept is the first
+	// pod's first — the walk's own order, not whichever group came last.
+	var nine boundedTreeResult
+	decodeStructured(t, callTool(t, session, "tree", map[string]any{"target": target, "limit": 9}), &nine)
+	pods := nine.Tree.Roots[0].Children[0].Children
+	if len(pods) != 6 || nine.Truncated != 11 {
+		t.Fatalf("limit 9: %d pods, truncated %d; want 6 and 11", len(pods), nine.Truncated)
+	}
+	if len(pods[0].Children) != 1 || pods[0].Children[0].Name != "app" {
+		t.Errorf("web-abc-0 kept %+v, want only its first container", pods[0].Children)
+	}
+}
+
+func TestTreeLimitDefaultsAndClamps(t *testing.T) {
+	for in, want := range map[int]int{0: defaultTreeLimit, -1: defaultTreeLimit, 7: 7, 99999: maxTreeLimit} {
+		if got := treeLimit(in); got != want {
+			t.Errorf("treeLimit(%d) = %d, want %d", in, got, want)
+		}
+	}
 }
