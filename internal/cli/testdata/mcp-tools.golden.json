@@ -709,6 +709,10 @@
           "description": "Scanner to use: grype, trivy or scout. Defaults to kx's configured engine.",
           "type": "string"
         },
+        "imageLimit": {
+          "description": "Most images to scan, in the order they were found; default 50, at most 200. truncatedImages counts the images left unscanned.",
+          "type": "integer"
+        },
         "limit": {
           "description": "Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out.",
           "type": "integer"
@@ -754,6 +758,9 @@
       "additionalProperties": false,
       "properties": {
         "context": {
+          "type": "string"
+        },
+        "mark": {
           "type": "string"
         },
         "scan": {
@@ -845,6 +852,9 @@
             "images"
           ],
           "type": "object"
+        },
+        "truncatedImages": {
+          "type": "integer"
         }
       },
       "required": [

@@ -25,7 +25,8 @@ func registerScanTool(server *mcp.Server, deps mcpDeps) {
 		Name: "scan",
 		Description: "Scan container images for known CVEs with the configured engine (grype, trivy or " +
 			"scout). A namespace sweep can take minutes; progress is reported when the client asks for it. " +
-			"Counts cover every severity; findings list the worst first.",
+			"Counts cover every severity; findings list the worst first. At most imageLimit images are scanned, " +
+			"in the order they were found; truncatedImages counts the rest.",
 		// Not idempotent: a scanner pulls fresh vulnerability data, so the
 		// same image can report differently from one call to the next. Open
 		// world because it reaches registries and vulnerability databases.
@@ -37,6 +38,10 @@ const (
 	defaultScanFindingsLimit = 20
 	maxScanFindingsLimit     = 200
 	defaultMinSeverity       = "high"
+	// A sweep's images are bounded as well as each image's findings, so a
+	// cluster-wide sweep cannot run for hours or return an unbounded result.
+	defaultScanImageLimit = 50
+	maxScanImageLimit     = 200
 )
 
 type scanInput struct {
@@ -46,11 +51,18 @@ type scanInput struct {
 	Engine        string     `json:"engine,omitempty" jsonschema:"Scanner to use: grype, trivy or scout. Defaults to kx's configured engine."`
 	MinSeverity   string     `json:"minSeverity,omitempty" jsonschema:"Least severe finding to list: critical, high, medium or low; default high. Counts always cover every severity."`
 	Limit         int        `json:"limit,omitempty" jsonschema:"Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out."`
+	ImageLimit    int        `json:"imageLimit,omitempty" jsonschema:"Most images to scan, in the order they were found; default 50, at most 200. truncatedImages counts the images left unscanned."`
 }
 
 type scanOutput struct {
-	Context string       `json:"context"`
-	Scan    scanDocument `json:"scan"`
+	Context string `json:"context"`
+	// Mark is the mark the target was given as, echoed the way every other
+	// target-taking tool echoes it.
+	Mark string       `json:"mark,omitempty"`
+	Scan scanDocument `json:"scan"`
+	// TruncatedImages counts the images found but not scanned because of
+	// imageLimit.
+	TruncatedImages int `json:"truncatedImages,omitempty"`
 }
 
 // severityRank is a document severity's position in scanner.Severities, most
@@ -147,6 +159,7 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 			// the engine is installed before reading the cluster.
 			images, err = command.ExecuteResource(target.Kind, target.Name, target.Namespace, engine)
 			subject = scanSubject{Kind: target.Kind, Name: target.Name, Namespace: target.Namespace}
+			out.Mark = target.Mark
 			return err
 		}
 		scope := scanScope{Namespace: in.Namespace, All: in.AllNamespaces}
@@ -159,6 +172,11 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 	})
 	if err != nil {
 		return nil, scanOutput{}, err
+	}
+
+	if imageLimit := clampLimit(in.ImageLimit, defaultScanImageLimit, maxScanImageLimit); len(images) > imageLimit {
+		out.TruncatedImages = len(images) - imageLimit
+		images = images[:imageLimit]
 	}
 
 	// The scan phase, outside the lock: only the scanner binaries run here,

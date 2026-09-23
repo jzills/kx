@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -239,6 +241,114 @@ func TestMCPScanSweepsANamespace(t *testing.T) {
 		if want := []string{"api:v1", "shared:v1", "web:v1"}; !slices.Equal(images, want) {
 			t.Errorf("%v: images %v, want %v", tc.args, images, want)
 		}
+	}
+}
+
+// A sweep scans at most imageLimit images — default 50, at most 200 — in the
+// order they were found, and truncatedImages counts the rest. Under the limit
+// the field is left out altogether.
+func TestMCPScanCapsImagesPerScan(t *testing.T) {
+	numbered := func(n int) []string {
+		images := make([]string, n)
+		for i := range images {
+			images[i] = fmt.Sprintf("img%03d:v1", i)
+		}
+		return images
+	}
+	for _, tc := range []struct {
+		name          string
+		found         int
+		imageLimit    int
+		wantScanned   int
+		wantTruncated int
+	}{
+		{"explicit limit", 5, 2, 2, 3},
+		{"default limit", 60, 0, 50, 10},
+		{"limit capped at the maximum", 250, 500, 200, 50},
+		{"under the limit", 3, 0, 3, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			found := numbered(tc.found)
+			fake := &fakeScanner{}
+			deps, _ := scanDeps(t, fake, `{"items":[`+workloadJSON(found...)+`]}`)
+			args := map[string]any{}
+			if tc.imageLimit != 0 {
+				args["imageLimit"] = tc.imageLimit
+			}
+			result := callTool(t, connectMCP(t, deps), "scan", args)
+			var out scanOutput
+			decodeStructured(t, result, &out)
+
+			var scanned []string
+			for _, image := range out.Scan.Images {
+				scanned = append(scanned, image.Image)
+			}
+			if want := found[:tc.wantScanned]; !slices.Equal(scanned, want) {
+				t.Errorf("scanned %v, want the first %d found", scanned, tc.wantScanned)
+			}
+			if fake.calls != tc.wantScanned {
+				t.Errorf("scanner ran %d times, want %d", fake.calls, tc.wantScanned)
+			}
+			if out.TruncatedImages != tc.wantTruncated {
+				t.Errorf("truncatedImages = %d, want %d", out.TruncatedImages, tc.wantTruncated)
+			}
+			structured, _ := json.Marshal(result.StructuredContent)
+			if present := strings.Contains(string(structured), `"truncatedImages"`); present != (tc.wantTruncated > 0) {
+				t.Errorf("truncatedImages present = %v in %s, want %v", present, structured, tc.wantTruncated > 0)
+			}
+		})
+	}
+}
+
+// Progress counts toward the images that will be scanned, not every image
+// found.
+func TestMCPScanProgressTotalIsTheImagesScanned(t *testing.T) {
+	images := []string{"a:v1", "b:v1", "c:v1"}
+	fake := &fakeScanner{}
+	deps, _ := scanDeps(t, fake, workloadJSON(images...))
+	notes := make(chan *mcp.ProgressNotificationParams, 16)
+	session := connectMCPWith(t, deps, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			notes <- req.Params
+		},
+	})
+	params := &mcp.CallToolParams{Name: "scan", Arguments: map[string]any{"target": deployTarget, "imageLimit": 2}}
+	params.SetProgressToken("capped")
+	if result, err := session.CallTool(context.Background(), params); err != nil || result.IsError {
+		t.Fatalf("scan: %v %s", err, toolText(result))
+	}
+	for range 2 {
+		select {
+		case note := <-notes:
+			if note.Total != 2 || !strings.HasSuffix(note.Message, " of 2 images") {
+				t.Errorf("note = %+v, want a total of 2", note)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no progress notification")
+		}
+	}
+}
+
+// Like every other target-taking tool, scan echoes the mark a target was
+// given as, and leaves the field out otherwise.
+func TestMCPScanEchoesTheMark(t *testing.T) {
+	fake := &fakeScanner{}
+	deps, _ := scanDeps(t, fake, workloadJSON("api:v1"), workloadJSON("api:v1"))
+	if err := deps.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
+		Context:  "test",
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	session := connectMCP(t, deps)
+	var byMark, byName scanOutput
+	decodeStructured(t, callTool(t, session, "scan", map[string]any{"target": map[string]any{"mark": "@api"}}), &byMark)
+	decodeStructured(t, callTool(t, session, "scan", map[string]any{"target": deployTarget}), &byName)
+	if byMark.Mark != "api" {
+		t.Errorf("mark = %q, want api", byMark.Mark)
+	}
+	if byName.Mark != "" {
+		t.Errorf("mark = %q for a kind-and-name target, want none", byName.Mark)
 	}
 }
 
