@@ -84,6 +84,27 @@ func TestEventsToolSinceDropsOlderEvents(t *testing.T) {
 	}
 }
 
+// A bad since is refused naming the tool's own field, not the CLI flag the
+// agent never saw — the same sentence from every tool that takes one.
+func TestMCPSinceRefusalsNameTheField(t *testing.T) {
+	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
+	session := connectMCP(t, mcpDiagDeps(t, &recordingKubectl{namespace: "prod"}, brokenDeployment("api", "prod")))
+	for tool, args := range map[string]map[string]any{
+		"events":   {"target": target, "since": "soon"},
+		"logs":     {"target": target, "since": "soon"},
+		"diagnose": {"since": "soon"},
+	} {
+		result := callTool(t, session, tool, args)
+		text := toolText(result)
+		if !result.IsError || !strings.HasPrefix(text, "'since': invalid duration \"soon\"") {
+			t.Errorf("%s: result = %q, want a refusal naming 'since'", tool, text)
+		}
+		if strings.Contains(text, "--since") {
+			t.Errorf("%s: result = %q names the CLI flag", tool, text)
+		}
+	}
+}
+
 func TestEventsToolLimitCapsAndSetsTruncated(t *testing.T) {
 	now := time.Now()
 	objects := []runtime.Object{brokenDeployment("api", "prod")}

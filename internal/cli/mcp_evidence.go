@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -83,7 +82,7 @@ type eventsOutput struct {
 }
 
 func (d mcpDeps) events(ctx context.Context, _ *mcp.CallToolRequest, in eventsInput) (*mcp.CallToolResult, eventsOutput, error) {
-	window, err := resolveWindow(in.Since, d.Config.EventsMaxAge)
+	window, err := resolveWindowAs("since", in.Since, d.Config.EventsMaxAge)
 	if err != nil {
 		return nil, eventsOutput{}, err
 	}
@@ -198,9 +197,9 @@ func (d mcpDeps) logs(_ context.Context, _ *mcp.CallToolRequest, in logsInput) (
 	}
 	var sinceArg string
 	if in.Since != "" {
-		window, err := config.ParseDuration(in.Since)
+		window, err := resolveWindowAs("since", in.Since, 0)
 		if err != nil {
-			return nil, logsOutput{}, fmt.Errorf("'--since': %w", err)
+			return nil, logsOutput{}, err
 		}
 		sinceArg = window.String()
 	}

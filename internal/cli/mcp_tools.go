@@ -312,7 +312,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 		return nil, diagnoseOutput{}, errors.New(
 			"'namespace', 'allNamespaces' and 'full' apply to a sweep — a target already names its namespace. Drop them, or drop the target to sweep.")
 	}
-	window, err := resolveWindow(in.Since, d.Config.DiagMaxAge)
+	window, err := resolveWindowAs("since", in.Since, d.Config.DiagMaxAge)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
 	}
