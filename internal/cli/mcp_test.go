@@ -1,7 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -205,5 +210,51 @@ func TestMCPRebuildsKindDiscoveryWhenTheContextSwitches(t *testing.T) {
 	kube.context = "b"
 	if got := listKind(); got != "GatewayFromB" || built != 1 {
 		t.Errorf("after switching: kind %q after %d rebuilds, want GatewayFromB and 1", got, built)
+	}
+}
+
+// The tools' schemas are the contract an agent is prompted with: renaming a
+// field, dropping a description or loosening a type changes what every client
+// sends. Pinned whole, so any change shows up as a diff to review.
+// Regenerate with: KX_UPDATE_GOLDEN=1 go test ./internal/cli -run TestMCPToolSchemas
+func TestMCPToolSchemas(t *testing.T) {
+	session := connectMCP(t, mcpTestDeps(t, &recordingKubectl{}))
+	result, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type schema struct {
+		Name         string               `json:"name"`
+		Annotations  *mcp.ToolAnnotations `json:"annotations"`
+		InputSchema  any                  `json:"inputSchema"`
+		OutputSchema any                  `json:"outputSchema"`
+	}
+	tools := make([]schema, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		tools = append(tools, schema{tool.Name, tool.Annotations, tool.InputSchema, tool.OutputSchema})
+	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	got, err := json.MarshalIndent(tools, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+
+	path := filepath.Join("testdata", "mcp-tools.golden.json")
+	if os.Getenv("KX_UPDATE_GOLDEN") != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v — regenerate with KX_UPDATE_GOLDEN=1", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("tool schemas differ from %s — if the change is intended, regenerate with "+
+			"KX_UPDATE_GOLDEN=1 go test ./internal/cli -run TestMCPToolSchemas\ngot:\n%s", path, got)
 	}
 }
