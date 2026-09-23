@@ -33,6 +33,14 @@ func (c DiagnosticCommand) Execute(ctx context.Context, ref state.Ref) (diagnost
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
+	return c.ExecuteResource(ctx, kind, name, namespace)
+}
+
+// ExecuteResource diagnoses a resource that is already resolved — from an
+// index, or named outright by an MCP client, which has no index to give.
+func (c DiagnosticCommand) ExecuteResource(
+	ctx context.Context, kind kinds.Kind, name, namespace string,
+) (diagnostics.Report, error) {
 	if !diagnostics.SupportedKinds.Has(kind) {
 		return diagnostics.Report{}, unsupportedKindError(
 			"diagnostic", kind, diagnostics.SupportedKinds)

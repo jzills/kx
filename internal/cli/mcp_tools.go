@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
@@ -34,6 +35,15 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"Defaults to the current namespace.",
 		Annotations: readOnlyTool("List resources"),
 	}, deps.listResources)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "diagnose",
+		Description: "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, " +
+			"container states, restarts, warning events — and returns findings ranked most specific first. " +
+			"With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. " +
+			"Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, " +
+			"Ingress, Pod and Node.",
+		Annotations: readOnlyTool("Diagnose"),
+	}, deps.diagnose)
 }
 
 // readOnlyTool annotates a tool that reads the cluster and writes nothing.
@@ -204,6 +214,83 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 			rowNamespace = entry.Namespace
 		}
 		out.Resources = append(out.Resources, listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace})
+	}
+	return nil, out, nil
+}
+
+type diagnoseInput struct {
+	Target        *mcpTarget `json:"target,omitempty" jsonschema:"One resource to diagnose. Omit to sweep a namespace."`
+	Namespace     string     `json:"namespace,omitempty" jsonschema:"Namespace to sweep when there is no target; defaults to the current namespace."`
+	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Sweep every namespace when there is no target."`
+	Since         string     `json:"since,omitempty" jsonschema:"Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting."`
+	Full          bool       `json:"full,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
+}
+
+type diagnoseOutput struct {
+	Context   string             `json:"context"`
+	Diagnosis diagnosticDocument `json:"diagnosis"`
+}
+
+// discardListing is the Save a server-side sweep is built with. TriageCommand
+// saves what it swept so the terminal can spend the numbers it printed; the
+// server printed none, and saving would move the user's own indexes.
+func discardListing(state.State) error { return nil }
+
+func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagnoseInput) (*mcp.CallToolResult, diagnoseOutput, error) {
+	if in.Namespace != "" && in.AllNamespaces {
+		return nil, diagnoseOutput{}, errors.New("'allNamespaces' and 'namespace' cannot be combined.")
+	}
+	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.Full) {
+		return nil, diagnoseOutput{}, errors.New(
+			"'namespace', 'allNamespaces' and 'full' apply to a sweep — a target already names its namespace. Drop them, or drop the target to sweep.")
+	}
+	window, err := resolveWindow(in.Since, d.Config.DiagMaxAge)
+	if err != nil {
+		return nil, diagnoseOutput{}, err
+	}
+	client, err := d.Kubernetes()
+	if err != nil {
+		return nil, diagnoseOutput{}, err
+	}
+	service := diagnostics.New(client)
+	service.MaxAge = window
+	out := diagnoseOutput{Context: d.Kubectl.CurrentContext()}
+
+	if in.Target != nil {
+		target, err := d.resolveTarget(*in.Target)
+		if err != nil {
+			return nil, diagnoseOutput{}, err
+		}
+		report, err := DiagnosticCommand{Diagnostics: service}.ExecuteResource(
+			ctx, target.Kind, target.Name, target.Namespace)
+		if err != nil {
+			return nil, diagnoseOutput{}, err
+		}
+		out.Diagnosis = diagnosticDocumentOf(report, state.Ref{Mark: target.Mark})
+		return nil, out, nil
+	}
+
+	namespace := in.Namespace
+	if namespace == "" && !in.AllNamespaces {
+		namespace = d.Kubectl.CurrentNamespace()
+	}
+	result, err := TriageCommand{Diagnostics: service, Save: discardListing, Window: window}.
+		Execute(ctx, namespace, in.AllNamespaces, true)
+	if err != nil {
+		return nil, diagnoseOutput{}, err
+	}
+	out.Diagnosis = triageDocument(result, false)
+	// Unlike --json, which carries every resource because nothing scrolls
+	// past a machine: an agent pays for every token of a healthy row, and
+	// checked/healthy already say how many there were.
+	if !in.Full {
+		kept := out.Diagnosis.Resources[:0]
+		for _, resource := range out.Diagnosis.Resources {
+			if resource.Verdict != diagnostics.OK.Token() {
+				kept = append(kept, resource)
+			}
+		}
+		out.Diagnosis.Resources = kept
 	}
 	return nil, out, nil
 }

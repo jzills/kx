@@ -11,6 +11,12 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // callTool invokes a tool through the protocol, the way a client would.
@@ -234,5 +240,131 @@ func TestListResourcesSavesNoListing(t *testing.T) {
 	callTool(t, connectMCP(t, deps), "list_resources", map[string]any{"kind": "pods"})
 	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
 		t.Errorf("Load = %v, want ErrNoState — the server saved a listing", err)
+	}
+}
+
+// A Deployment wanting two replicas with none ready is the cheapest critical
+// verdict to build against a fake API server.
+func mcpDiagDeps(t *testing.T, kube *recordingKubectl, objects ...runtime.Object) mcpDeps {
+	t.Helper()
+	deps := mcpTestDeps(t, kube)
+	client := fake.NewSimpleClientset(objects...)
+	deps.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+	return deps
+}
+
+func brokenDeployment(name, namespace string) *appsv1.Deployment {
+	replicas := int32(2)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name)},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+	}
+}
+
+func healthyDeployment(name, namespace string) *appsv1.Deployment {
+	replicas := int32(1)
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name)},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status:     appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1, AvailableReplicas: 1, UpdatedReplicas: 1},
+	}
+}
+
+type diagnoseResult struct {
+	Context   string `json:"context"`
+	Diagnosis struct {
+		Checked   int `json:"checked"`
+		Healthy   int `json:"healthy"`
+		Resources []struct {
+			Kind    string `json:"kind"`
+			Name    string `json:"name"`
+			Index   int    `json:"index"`
+			Mark    string `json:"mark"`
+			Verdict string `json:"verdict"`
+		} `json:"resources"`
+	} `json:"diagnosis"`
+}
+
+func TestDiagnoseOneTarget(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{}, brokenDeployment("api", "prod"))
+	var out diagnoseResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "diagnose", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+	}), &out)
+	if len(out.Diagnosis.Resources) != 1 || out.Diagnosis.Resources[0].Verdict != "critical" {
+		t.Fatalf("diagnosis = %+v", out.Diagnosis)
+	}
+	if out.Diagnosis.Resources[0].Index != 0 {
+		t.Errorf("index = %d, want none", out.Diagnosis.Resources[0].Index)
+	}
+}
+
+func TestDiagnoseNamesTheMarkItWasGiven(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{}, brokenDeployment("api", "prod"))
+	if err := deps.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out diagnoseResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "diagnose",
+		map[string]any{"target": map[string]any{"mark": "@api"}}), &out)
+	if out.Diagnosis.Resources[0].Mark != "api" {
+		t.Errorf("mark = %q, want api", out.Diagnosis.Resources[0].Mark)
+	}
+}
+
+// A sweep returns only what is wrong unless asked for everything, carries no
+// indexes, and — the reason it exists as its own test — leaves the listing
+// the user's terminal indexes resolve against exactly where it was.
+func TestDiagnoseSweepIsUnhealthyOnlyUnindexedAndSavesNothing(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{namespace: "prod"},
+		brokenDeployment("api", "prod"), healthyDeployment("web", "prod"))
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"user-pod"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := connectMCP(t, deps)
+
+	var out diagnoseResult
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{}), &out)
+	if out.Diagnosis.Checked != 2 || out.Diagnosis.Healthy != 1 {
+		t.Errorf("checked %d healthy %d, want 2 and 1", out.Diagnosis.Checked, out.Diagnosis.Healthy)
+	}
+	if len(out.Diagnosis.Resources) != 1 || out.Diagnosis.Resources[0].Name != "api" {
+		t.Errorf("resources = %+v, want only api", out.Diagnosis.Resources)
+	}
+	for _, resource := range out.Diagnosis.Resources {
+		if resource.Index != 0 {
+			t.Errorf("%s carries index %d", resource.Name, resource.Index)
+		}
+	}
+
+	var full diagnoseResult
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"full": true}), &full)
+	if len(full.Diagnosis.Resources) != 2 {
+		t.Errorf("full sweep returned %d resources, want 2", len(full.Diagnosis.Resources))
+	}
+
+	name, _, _, err := deps.State.Fields(1)
+	if err != nil || name != "user-pod" {
+		t.Errorf("index 1 = %q, %v; the sweep replaced the user's listing", name, err)
+	}
+}
+
+func TestDiagnoseRefusesContradictoryArguments(t *testing.T) {
+	session := connectMCP(t, mcpDiagDeps(t, &recordingKubectl{}))
+	target := map[string]any{"kind": "deploy", "name": "api"}
+	for name, args := range map[string]map[string]any{
+		"target and namespace": {"target": target, "namespace": "prod"},
+		"target and all":       {"target": target, "allNamespaces": true},
+		"target and full":      {"target": target, "full": true},
+		"namespace and all":    {"namespace": "prod", "allNamespaces": true},
+		"bad since":            {"since": "soon"},
+	} {
+		if result := callTool(t, session, "diagnose", args); !result.IsError {
+			t.Errorf("%s: diagnosed, want a refusal", name)
+		}
 	}
 }

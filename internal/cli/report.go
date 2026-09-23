@@ -121,11 +121,17 @@ func rfc3339(timestamp time.Time) string {
 // indexed run is a sweep of one, and saying so costs a wrapper and buys a
 // pipeline that reads `.resources[]` for both.
 func diagnosticJSON(report diagnostics.Report, ref state.Ref) (string, error) {
+	return encode(diagnosticDocumentOf(report, ref))
+}
+
+// diagnosticDocumentOf is diagnosticJSON's document, unencoded, for the MCP
+// server to return as structured content.
+func diagnosticDocumentOf(report diagnostics.Report, ref state.Ref) diagnosticDocument {
 	healthy := 0
 	if report.Verdict == diagnostics.OK {
 		healthy = 1
 	}
-	return encode(diagnosticDocument{
+	return diagnosticDocument{
 		SchemaVersion: reportSchemaVersion,
 		Kind:          report.Kind,
 		Name:          report.Name,
@@ -134,7 +140,7 @@ func diagnosticJSON(report diagnostics.Report, ref state.Ref) (string, error) {
 		Checked:       1,
 		Healthy:       healthy,
 		Resources:     []jsonReport{reportOf(report, ref)},
-	})
+	}
 }
 
 // diagnosticDocument is the one shape kx diag --json emits, indexed or swept.
@@ -172,18 +178,29 @@ type diagnosticDocument struct {
 // governs how much of a table fits on a screen, and nothing is scrolling past
 // a machine. The HTML report takes the same view for the same reason.
 func triageJSON(result render.TriageResult) (string, error) {
+	return encode(triageDocument(result, true))
+}
+
+// triageDocument is triageJSON's document. indexed says whether each resource
+// carries the position TriageCommand saved it at; an MCP sweep saves nothing,
+// so a number there would name a row of whatever listing the user has open.
+func triageDocument(result render.TriageResult, indexed bool) diagnosticDocument {
 	resources := make([]jsonReport, 0, len(result.All))
 	// 1-based position in result.All, matching the index TriageCommand.Execute
 	// just saved to state in this same order — so a finding in the document
 	// and the number `kx diag <index>` would show it under are one figure.
 	for position, report := range result.All {
-		resources = append(resources, reportOf(report, state.Ref{Index: position + 1}))
+		ref := state.Ref{}
+		if indexed {
+			ref.Index = position + 1
+		}
+		resources = append(resources, reportOf(report, ref))
 	}
 
 	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute
 	// blanks it before Sweep runs, since there is no single namespace the
 	// listing came from.
-	return encode(diagnosticDocument{
+	return diagnosticDocument{
 		SchemaVersion: reportSchemaVersion,
 		Namespace:     result.Namespace,
 		AllNamespaces: result.AllNamespaces,
@@ -191,7 +208,7 @@ func triageJSON(result render.TriageResult) (string, error) {
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Resources:     resources,
-	})
+	}
 }
 
 type jsonVulnerability struct {
