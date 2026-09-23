@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -405,6 +406,66 @@ func TestTopToolNodesWithNamespaceGetsTheClusterScopedSentence(t *testing.T) {
 	}
 	if len(kube.runs) != 0 {
 		t.Errorf("kubectl ran %v before the refusal", kube.runs)
+	}
+}
+
+// allNamespaces reads pods across every namespace: kubectl gets -A, the
+// document says allNamespaces, and each row carries its own namespace — with
+// no index, the same as a single-namespace read.
+func TestTopToolAllNamespacesReadsEveryNamespace(t *testing.T) {
+	kube := &recordingKubectl{namespace: "prod", outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
+	deps := mcpTestDeps(t, kube)
+	var out topOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "top", map[string]any{"allNamespaces": true}), &out)
+
+	if len(kube.runs) == 0 || !slices.Contains(kube.runs[0], "-A") || slices.Contains(kube.runs[0], "-n") {
+		t.Errorf("kubectl runs = %v, want the first read across every namespace", kube.runs)
+	}
+	if !out.Top.AllNamespaces || out.Top.Namespace != "" {
+		t.Errorf("scope = namespace %q, allNamespaces %v; want allNamespaces alone",
+			out.Top.Namespace, out.Top.AllNamespaces)
+	}
+	if out.Context != kube.CurrentContext() {
+		t.Errorf("context = %q, want %q", out.Context, kube.CurrentContext())
+	}
+	if len(out.Top.Rows) != 2 {
+		t.Fatalf("rows = %+v, want 2", out.Top.Rows)
+	}
+	for i, want := range []string{"prod", "staging"} {
+		row := out.Top.Rows[i]
+		if row.Name != "web-1" || row.Namespace != want || row.Index != 0 {
+			t.Errorf("row %d = %+v, want web-1 in %s with no index", i, row, want)
+		}
+	}
+	if _, err := deps.State.Load(); !errors.Is(err, state.ErrNoState) {
+		t.Errorf("Load = %v, want ErrNoState — the server saved a listing", err)
+	}
+}
+
+func TestTopToolRefusesAllNamespacesWithNodesOrANamespace(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"nodes": {
+			args: map[string]any{"nodes": true, "allNamespaces": true},
+			want: clusterScopedScopeError("allNamespaces", "nodes").Error(),
+		},
+		"namespace": {
+			args: map[string]any{"namespace": "prod", "allNamespaces": true},
+			want: scopeConflict("prod", true).Error(),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			kube := &recordingKubectl{}
+			result := callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "top", tc.args)
+			if !result.IsError || toolText(result) != tc.want {
+				t.Errorf("result = %q, want %q", toolText(result), tc.want)
+			}
+			if len(kube.runs) != 0 {
+				t.Errorf("kubectl ran %v before the refusal", kube.runs)
+			}
+		})
 	}
 }
 

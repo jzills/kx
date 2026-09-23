@@ -292,7 +292,9 @@ func TestMCPRebuildsKindDiscoveryWhenTheContextSwitches(t *testing.T) {
 
 // The tools' schemas are the contract an agent is prompted with: renaming a
 // field, dropping a description or loosening a type changes what every client
-// sends. Pinned whole, so any change shows up as a diff to review.
+// sends. Pinned whole — with each tool's description and the server's
+// instructions, which are prompt text too — so any change shows up as a diff
+// to review.
 // Regenerate with: KX_UPDATE_GOLDEN=1 go test ./internal/cli -run TestMCPToolSchemas
 func TestMCPToolSchemas(t *testing.T) {
 	session := connectMCP(t, mcpTestDeps(t, &recordingKubectl{}))
@@ -302,16 +304,23 @@ func TestMCPToolSchemas(t *testing.T) {
 	}
 	type schema struct {
 		Name         string               `json:"name"`
+		Description  string               `json:"description"`
 		Annotations  *mcp.ToolAnnotations `json:"annotations"`
 		InputSchema  any                  `json:"inputSchema"`
 		OutputSchema any                  `json:"outputSchema"`
 	}
 	tools := make([]schema, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		tools = append(tools, schema{tool.Name, tool.Annotations, tool.InputSchema, tool.OutputSchema})
+		tools = append(tools, schema{tool.Name, tool.Description, tool.Annotations, tool.InputSchema, tool.OutputSchema})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	got, err := json.MarshalIndent(tools, "", "  ")
+	// Read from the handshake, as a client sees them, rather than from the
+	// constant.
+	golden := struct {
+		Instructions string   `json:"instructions"`
+		Tools        []schema `json:"tools"`
+	}{session.InitializeResult().Instructions, tools}
+	got, err := json.MarshalIndent(golden, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
