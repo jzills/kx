@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,9 +96,9 @@ type fakeScanner struct {
 	probeCode int
 	probeErr  error
 	captures  []captured
-	// capturing, when set, is called at the start of every Capture — a test
-	// can block a scan there to hold it mid-sweep.
-	capturing func()
+	// capturing, when set, is called with the argv at the start of every
+	// Capture — a test can block a scan there to hold it mid-sweep.
+	capturing func(argv []string)
 
 	mu    sync.Mutex
 	calls int
@@ -120,7 +121,7 @@ func (f *fakeScanner) Probe(argv []string) (int, error) {
 }
 func (f *fakeScanner) Capture(argv []string) (string, string, int, error) {
 	if f.capturing != nil {
-		f.capturing()
+		f.capturing(argv)
 	}
 	f.mu.Lock()
 	f.calls++
@@ -288,6 +289,54 @@ func TestScanImageRefusesAFlagShapedImage(t *testing.T) {
 	}
 	if fake.scans != 0 {
 		t.Errorf("scanner ran %d times, want none", fake.scans)
+	}
+}
+
+// A cancelled sweep stops handing out images: the scans already running
+// finish, no new one starts, and the context's error comes back.
+func TestSummarizeContextStopsStartingScansOnceCancelled(t *testing.T) {
+	entered := make(chan string, 8)
+	release := make(chan struct{})
+	fake := &fakeScanner{capturing: func(argv []string) {
+		entered <- argv[len(argv)-1]
+		<-release
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type result struct {
+		rows []scanner.ImageScan
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		rows, err := ScanCommand{Scanner: fake, Status: noStatus}.
+			SummarizeContext(ctx, "trivy", []string{"a:v1", "b:v1", "c:v1", "d:v1"}, nil)
+		done <- result{rows, err}
+	}()
+	// Both workers are now holding an image, so nothing can take a third.
+	for range scanWorkers {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the workers never reached the scanner")
+		}
+	}
+	cancel()
+	close(release)
+
+	select {
+	case got := <-done:
+		if !errors.Is(got.err, context.Canceled) || got.rows != nil {
+			t.Errorf("SummarizeContext = %v, %v; want no rows and context.Canceled", got.rows, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SummarizeContext did not return after cancellation")
+	}
+	select {
+	case image := <-entered:
+		t.Errorf("%s was scanned after the sweep was cancelled", image)
+	default:
 	}
 }
 

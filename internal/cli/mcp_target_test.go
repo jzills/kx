@@ -23,8 +23,9 @@ func mcpTestDeps(t *testing.T, kube kubectl.Service) mcpDeps {
 			MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json"),
 			Context: kube.CurrentContext,
 		},
-		Config: config.Default(),
-		mu:     &sync.Mutex{},
+		Config:    config.Default(),
+		mu:        &sync.Mutex{},
+		scanSlots: make(chan struct{}, 1),
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,6 +217,17 @@ const scanWorkers = 2
 func (c ScanCommand) Summarize(
 	engineName string, images []string, onScanned func(),
 ) ([]scanner.ImageScan, error) {
+	return c.SummarizeContext(context.Background(), engineName, images, onScanned)
+}
+
+// SummarizeContext is Summarize, stopped by ctx: once it is done no further
+// image is handed to a worker, the scans already running are waited for —
+// the scanner service has no way to kill one, and returning early would free
+// the caller to start more scans on top of them — and ctx's error is
+// returned in place of the rows.
+func (c ScanCommand) SummarizeContext(
+	ctx context.Context, engineName string, images []string, onScanned func(),
+) ([]scanner.ImageScan, error) {
 	engine, err := scanner.GetEngine(engineName)
 	if err != nil {
 		return nil, err
@@ -247,11 +259,24 @@ func (c ScanCommand) Summarize(
 			}
 		}()
 	}
+dispatch:
 	for position := range images {
-		positions <- position
+		// Checked first as well: when a worker is free and ctx is done, the
+		// select below would pick between them at random.
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case positions <- position:
+		case <-ctx.Done():
+			break dispatch
+		}
 	}
 	close(positions)
 	group.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// In order, so the reported failure is the same one a serial sweep would
 	// have stopped on rather than whichever goroutine happened to finish first.

@@ -161,8 +161,16 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 		return nil, scanOutput{}, err
 	}
 
-	// The scan phase, outside the lock: only the scanner binaries run here.
-	rows, err := command.Summarize(engine, images, scanProgress(ctx, req, len(images)))
+	// The scan phase, outside the lock: only the scanner binaries run here,
+	// one scan's worth at a time. A caller that gives up while queued leaves
+	// the queue, and one that gives up mid-scan stops further images.
+	select {
+	case d.scanSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, scanOutput{}, ctx.Err()
+	}
+	defer func() { <-d.scanSlots }()
+	rows, err := command.SummarizeContext(ctx, engine, images, scanProgress(ctx, req, len(images)))
 	if err != nil {
 		return nil, scanOutput{}, err
 	}

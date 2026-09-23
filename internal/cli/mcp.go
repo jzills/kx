@@ -59,6 +59,12 @@ type mcpDeps struct {
 	//
 	// A pointer, so the value-receiver handlers all share the one lock.
 	mu *sync.Mutex
+
+	// scanSlots admits one scan's scanners at a time: capacity 1. scan runs
+	// its scanners outside mu, and scanWorkers is sized for one machine's
+	// memory — two agents sweeping at once must not run two pools. Taken
+	// only after mu is released, so a queued scan never holds up other tools.
+	scanSlots chan struct{}
 }
 
 // mcpDiscovery rebuilds the kind-shorthand source when the context changes.
@@ -137,6 +143,7 @@ func liveMCPDeps(services Services) mcpDeps {
 		Scanner:    services.scannerService(),
 		Discovery:  &mcpDiscovery{New: func() kinds.ShorthandSource { return discovery.NewSource() }},
 		mu:         &sync.Mutex{},
+		scanSlots:  make(chan struct{}, 1),
 	}
 }
 

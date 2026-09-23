@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -379,14 +380,235 @@ func TestMCPScanReportsProgressWhenAsked(t *testing.T) {
 			t.Fatalf("heard %d progress notifications, want %d", len(progress), len(images))
 		}
 	}
-	slices.Sort(progress)
+	// In arrival order: MCP requires progress to rise with every
+	// notification, and two workers finishing together must not send 2
+	// before 1.
 	if !slices.Equal(progress, []float64{1, 2, 3}) {
-		t.Errorf("progress = %v, want 1, 2 and 3", progress)
+		t.Errorf("progress = %v in arrival order, want 1, 2, 3", progress)
 	}
 	select {
 	case note := <-notes:
 		t.Errorf("an extra notification: %+v", note)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// Progress counts images finished, not positions: the second image finishes
+// first here (the first is held until its notification reaches the client),
+// and must still be reported as 1. The race between two workers' count and
+// send is TestMCPScanReportsProgressWhenAsked's to catch — no fake can pause
+// a worker between the two, so that one is caught by repetition.
+func TestMCPScanProgressRisesWhenImagesFinishOutOfOrder(t *testing.T) {
+	notes := make(chan float64, 8)
+	firstGo := make(chan struct{})
+	fake := &fakeScanner{
+		captures: []captured{{image: "a:v1", stdout: "{}"}, {image: "b:v1", stdout: "{}"}},
+		capturing: func(argv []string) {
+			if argv[len(argv)-1] == "a:v1" {
+				<-firstGo
+			}
+		},
+	}
+	deps, _ := scanDeps(t, fake, workloadJSON("a:v1", "b:v1"))
+	session := connectMCPWith(t, deps, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			notes <- req.Params.Progress
+		},
+	})
+	params := &mcp.CallToolParams{Name: "scan", Arguments: map[string]any{"target": deployTarget}}
+	params.SetProgressToken("order")
+	finished := make(chan error, 1)
+	go func() {
+		_, err := session.CallTool(context.Background(), params)
+		finished <- err
+	}()
+
+	var progress []float64
+	select {
+	case p := <-notes:
+		progress = append(progress, p)
+	case <-time.After(5 * time.Second):
+		close(firstGo)
+		t.Fatal("no progress for the image that finished first")
+	}
+	close(firstGo)
+	select {
+	case p := <-notes:
+		progress = append(progress, p)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no progress for the second image")
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(progress, []float64{1, 2}) {
+		t.Errorf("progress = %v in arrival order, want 1, 2", progress)
+	}
+}
+
+// One scan at a time: the scanner pool is sized for memory, so two agents'
+// sweeps must not each bring their own. A second scan resolves, then waits
+// for the first to finish before any of its images starts.
+func TestMCPScanRunsOneScanAtATime(t *testing.T) {
+	entered := make(chan string, 4)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	fake := &fakeScanner{
+		captures: []captured{{image: "a:v1", stdout: "{}"}, {image: "b:v1", stdout: "{}"}},
+		capturing: func(argv []string) {
+			entered <- argv[len(argv)-1]
+			<-release
+		},
+	}
+	deps, _ := scanDeps(t, fake, workloadJSON("a:v1"), workloadJSON("b:v1"))
+	session := connectMCP(t, deps)
+	// Both deferred ahead of the sessions' cleanups: a scan stuck waiting
+	// for the slot is cancelled rather than hanging the session's close.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer unblock()
+
+	scan := func(done chan<- error) {
+		_, err := session.CallTool(ctx,
+			&mcp.CallToolParams{Name: "scan", Arguments: map[string]any{"target": deployTarget}})
+		done <- err
+	}
+	first, second := make(chan error, 1), make(chan error, 1)
+	go scan(first)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first scan never reached the scanner")
+	}
+	go scan(second)
+	select {
+	case image := <-entered:
+		t.Fatalf("%s started while another scan was running", image)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	unblock()
+	for _, done := range []chan error{first, second} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a scan did not finish after the scanner was released")
+		}
+	}
+	if image := <-entered; image != "b:v1" {
+		t.Errorf("second scan scanned %s, want b:v1", image)
+	}
+}
+
+// A caller that gives up stops the scan: images not yet started never are,
+// and a scan still queued for the slot never starts. The server's handler
+// has to have returned for the next scan to get the slot, which is what the
+// last call proves.
+func TestMCPScanStopsWhenTheCallerCancels(t *testing.T) {
+	entered := make(chan string, 8)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	fake := &fakeScanner{capturing: func(argv []string) {
+		entered <- argv[len(argv)-1]
+		<-release
+	}}
+	deps, _ := scanDeps(t, fake,
+		workloadJSON("a:v1", "b:v1", "c:v1", "d:v1"), // the sweep that is cancelled
+		workloadJSON("queued:v1"),                    // the scan cancelled while queued
+		workloadJSON("after:v1"),                     // the scan that proves the slot is free
+	)
+	session := connectMCP(t, deps)
+	testCtx, cancelTest := context.WithCancel(context.Background())
+	defer cancelTest()
+	defer unblock()
+
+	call := func(ctx context.Context, done chan<- error) {
+		_, err := session.CallTool(ctx,
+			&mcp.CallToolParams{Name: "scan", Arguments: map[string]any{"target": deployTarget}})
+		done <- err
+	}
+	sweepCtx, cancelSweep := context.WithCancel(context.Background())
+	defer cancelSweep()
+	sweep := make(chan error, 1)
+	go call(sweepCtx, sweep)
+	for range scanWorkers {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the sweep's workers never reached the scanner")
+		}
+	}
+	queuedCtx, cancelQueued := context.WithCancel(context.Background())
+	queued := make(chan error, 1)
+	go call(queuedCtx, queued)
+	time.Sleep(200 * time.Millisecond) // let it resolve and queue for the slot
+
+	cancelQueued()
+	cancelSweep()
+	for _, done := range []chan error{sweep, queued} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a cancelled call did not return")
+		}
+	}
+	// The client returns at once and sends notifications/cancelled from a
+	// goroutine afterwards, so the server's request context is cancelled a
+	// moment after the calls above return. Nothing observable marks that
+	// moment, so give it one before freeing the workers.
+	time.Sleep(300 * time.Millisecond)
+	unblock()
+
+	after := make(chan error, 1)
+	go call(testCtx, after)
+	select {
+	case err := <-after:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the next scan never got the slot — the cancelled scan still holds it")
+	}
+	close(entered)
+	var started []string
+	for image := range entered {
+		started = append(started, image)
+	}
+	if !slices.Equal(started, []string{"after:v1"}) {
+		t.Errorf("after cancelling, scanned %v; want only after:v1", started)
+	}
+}
+
+// A caller that gives up while its scan is queued behind another leaves the
+// queue at once, rather than holding a goroutine until the slot frees and
+// only then noticing.
+func TestMCPScanLeavesTheQueueWhenCancelled(t *testing.T) {
+	fake := &fakeScanner{captures: []captured{{image: "a:v1", stdout: "{}"}}}
+	deps, _ := scanDeps(t, fake, workloadJSON("a:v1"))
+	deps.scanSlots <- struct{}{} // another scan holds the slot
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := deps.scan(ctx, &mcp.CallToolRequest{}, scanInput{Target: &mcpTarget{Kind: "deploy", Name: "api"}})
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled scan stayed queued for the slot")
+	}
+	if fake.calls != 0 {
+		t.Errorf("scanned %d images, want none", fake.calls)
 	}
 }
 
@@ -399,7 +621,7 @@ func TestMCPScanReleasesTheLockWhileScanning(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	fake := &fakeScanner{
 		captures: []captured{{image: "api:v1", stdout: "{}"}},
-		capturing: func() {
+		capturing: func([]string) {
 			select {
 			case entered <- struct{}{}:
 			default:
