@@ -268,7 +268,7 @@ so a pipeline can tell "the cluster is sick" from "the check never ran".
 
 `kx mcp` runs a Model Context Protocol server on stdio, so an agent — Claude
 Code, an IDE, an agent framework — reads a cluster the way you do: by kind and
-name, or by a mark, never by index.
+name, by a mark, or by an index from your current listing.
 
 ```bash
 claude mcp add kx -- kx mcp
@@ -277,8 +277,18 @@ claude mcp add kx -- kx mcp
 Ten tools cover marks, listing, diagnostics, ownership, events, logs, usage,
 manifests (Secrets redacted) and image scanning. Every one is read-only
 against the cluster; `mark`, the one write, only ever adds a name to kx's own
-state, and none of it touches the listing your own indexes resolve against. The server follows your
-kubeconfig live, and every result names the context it read.
+state. An index the agent is given is read against your current listing and
+never saved. Start it with `--write-listings` and the agent's own listings —
+`list_resources`, a diagnose sweep, `tree` and `top` — save to your history
+too, tagged so `kx state` and `kx delete`/`kx drain` say where the numbers
+came from.
+
+```bash
+claude mcp add kx -- kx mcp --write-listings
+```
+
+The server follows your kubeconfig live, and every result names the context
+it read.
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/)
 

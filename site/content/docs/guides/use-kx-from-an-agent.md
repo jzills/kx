@@ -1,13 +1,13 @@
 ---
 title: Use kx from an agent
-description: kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only, and never touches your indexes.
+description: kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only against the cluster, with index sharing opt-in.
 weight: 9
 ---
 
 `kx mcp` runs a Model Context Protocol server on stdin/stdout. An agent gets
 the same view of the cluster kx gives you — health, ownership, events, logs,
-usage, manifests, image scans — without ever touching the listing your
-terminal's own indexes resolve against.
+usage, manifests, image scans — and can read the numbers from your terminal's
+own listing, without ever writing to it unless you ask it to.
 
 ## Setup
 
@@ -64,10 +64,11 @@ resolves the same resource whether you or the agent set it. It only ever
 adds: it refuses any name that is already a mark, even one on the same
 resource, and there is no tool to remove one.
 
-The server never touches the history your `kx get` builds. An agent's
-`diagnose` or `tree` never saves a listing, so `kx 3` in your terminal
-resolves the same resource before, during and after an agent session runs
-alongside it.
+By default, the server never touches the history your `kx get` builds. An
+agent's `list_resources`, `diagnose` or `tree` never saves a listing, so
+`kx 3` in your terminal resolves the same resource before, during and after
+an agent session runs alongside it. That only changes if you start the server
+with `--write-listings` — see the next section.
 
 Every kind, name and namespace an agent sends is validated before it reaches
 kubectl's argv — a leading `-` is refused rather than read as a flag — so a
@@ -83,6 +84,48 @@ at your prompt and an agent's `mark` tool write and read the same names, so a
 mark you hand an agent, or one it sets and tells you about, works either way
 from then on.
 {{% /kx-note %}}
+
+## Sharing indexes with the agent
+
+Indexes cross the bridge between your terminal and the agent in both
+directions.
+
+**Terminal → agent.** You run `kx get pods`, then tell an agent "diagnose 3".
+Give the agent an `index` of `3` in place of a `kind`/`name` target — a mark
+also works the same way — and it resolves against whatever listing your
+terminal currently has open, the same row `kx describe 3` would name. This
+read is always on, needs no setup, and never writes anything: the agent
+learns the resolved name and namespace back in the result, never the number
+it sent.
+
+**Agent → terminal.** By default an agent's own listings — `list_resources`,
+a `diagnose` sweep, `tree`, `top` — are never saved, so there's nothing in
+them for you to spend from your shell. Start the server with
+`--write-listings` and that changes: those four tools save what they list to
+your kx history exactly as the matching CLI command would, and return each
+row's index. `kx tree 3` counts as a listing tool for this too — a `tree`
+call with a target still saves the whole walk it returns, so a node it shows
+you keeps the index it was saved at.
+
+```bash
+claude mcp add kx -- kx mcp --write-listings
+```
+
+An agent-made listing is tagged, so you can tell it apart from your own:
+`kx state` shows it with a `via kx mcp` caption, and `kx delete`/`kx drain`
+add "— from a kx mcp listing" to their confirm prompt when the index you're
+spending resolves against one. Past that tag, it's an ordinary entry on your
+history stack — `kx state back` steps behind it like any other listing.
+
+**Accepted risk.** With `--write-listings` on, an agent's listing becomes
+your *current* listing the moment it saves, so `kx delete 3` right after can
+mean the agent's row 3, not the one you last ran `kx get` for. The tag and
+the confirm wording are there so you notice before you answer yes; `kx state
+back` is the way out if you didn't mean to act on it. The same live-resolution
+rule that makes index reads useful also makes them relative: an index always
+resolves against whatever listing is current *at the moment of the call*, so
+relisting between speaking a number and the agent acting on it changes what
+that number means — in the terminal or from an agent, alike.
 
 ## Secrets
 
