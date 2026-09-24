@@ -134,7 +134,7 @@ func TestLiveKubectlRereadsTheContext(t *testing.T) {
 	}
 	t.Setenv("KUBECONFIG", path)
 	write("a")
-	deps := liveMCPDeps(Services{State: &state.Service{}, Config: config.Default()})
+	deps := liveMCPDeps(Services{State: &state.Service{}, Config: config.Default()}, false)
 	if got := deps.Kubectl.CurrentContext(); got != "a" {
 		t.Fatalf("context = %q, want a", got)
 	}

@@ -10,8 +10,10 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/scanner"
+	"github.com/jzills/kx/internal/state"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -87,21 +89,41 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 }
 
-// Every tool, driven through the protocol with every argument shape it takes,
-// may ask kubectl only to get, log or top, may ask client-go only to read
-// (get/list/watch, never a write verb), and every one of those calls must
-// actually succeed — so a tool that started erroring out before it ever
-// reached kubectl or client-go couldn't quietly pass this by making the
-// recorded calls list look short and clean. This is the read-only promise as
-// a test, covering every path that reads a cluster: kubectl (list_resources,
-// mark, events, logs, top, get_yaml, scan) and client-go (diagnose, tree) —
-// and scan's scanner, which may only preflight and summarise.
-func TestMCPToolsOnlyRead(t *testing.T) {
+// podsAllNamespacesOutput is kubectl get pods -A: a NAMESPACE column places
+// every row, which is what lets --write-listings save it.
+const podsAllNamespacesOutput = "NAMESPACE   NAME      READY   STATUS    RESTARTS   AGE\n" +
+	"prod        api-pod   1/1     Running   0          1d\n"
+
+// readOnlyCall is one call the read-only guards drive through the protocol.
+type readOnlyCall struct {
+	tool string
+	args map[string]any
+	// kubectlRuns is how many kubectl.Run calls this exact call must make
+	// — 0 for anything that reads through client-go instead — so a tool
+	// that stops calling kubectl (or client-go) altogether cannot pass by
+	// leaving an empty, technically-compliant runs list.
+	kubectlRuns   int
+	kubectlProbes int
+	// scannerCalls is how many scanner.Service calls it must make: the
+	// engine's preflight, then one summary per image.
+	scannerCalls int
+	// lists says the call is a listing --write-listings saves: list_resources,
+	// the diagnose sweep, tree and top. Every other call must leave the history
+	// stack alone whatever the flag says.
+	lists bool
+}
+
+// readOnlyFixture is every tool with every argument shape it takes, and the
+// fakes that answer them — shared by the flag-off guard below and the
+// flag-on one in mcp_listings_test.go, so the two cannot drift onto different
+// sets of calls.
+func readOnlyFixture(t *testing.T) (mcpDeps, *recordingKubectl, *fake.Clientset, *fakeScanner, []readOnlyCall) {
+	t.Helper()
 	kube := &recordingKubectl{
 		namespace: "prod",
 		outputs: []string{
 			podsOutput,              // list_resources pods
-			podsOutput,              // list_resources pods -A
+			podsAllNamespacesOutput, // list_resources pods -A
 			"deployment.apps/api\n", // mark's existence check
 			"line1\nline2\n",        // logs on the Pod
 			`{"spec":{"selector":{"matchLabels":{"app":"web"}}}}`, // logs' selector read
@@ -138,55 +160,110 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 		{image: "api:v1", stdout: "{}"}, {image: "db:v1", stdout: "{}"}, {image: "web:v1", stdout: "{}"},
 	}}
 	deps.Scanner = scans
-	session := connectMCP(t, deps)
 
 	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
 	podTarget := map[string]any{"kind": "pods", "name": "api-pod", "namespace": "prod"}
 	secretTarget := map[string]any{"kind": "secret", "name": "creds", "namespace": "prod"}
-	calls := []struct {
-		tool string
-		args map[string]any
-		// kubectlRuns is how many kubectl.Run calls this exact call must make
-		// — 0 for anything that reads through client-go instead — so a tool
-		// that stops calling kubectl (or client-go) altogether cannot pass by
-		// leaving an empty, technically-compliant runs list.
-		kubectlRuns   int
-		kubectlProbes int
-		// scannerCalls is how many scanner.Service calls it must make: the
-		// engine's preflight, then one summary per image.
-		scannerCalls int
-	}{
-		{"list_marks", map[string]any{}, 0, 0, 0},
-		{"list_resources", map[string]any{"kind": "pods"}, 1, 0, 0},
-		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1, 0, 0},
-		{"diagnose", map[string]any{}, 0, 0, 0},
-		{"diagnose", map[string]any{"allNamespaces": true}, 0, 0, 0},
-		{"diagnose", map[string]any{"target": target}, 0, 0, 0},
-		{"tree", map[string]any{}, 0, 0, 0},
-		{"tree", map[string]any{"target": target}, 0, 0, 0},
-		{"tree", map[string]any{"allNamespaces": true}, 0, 0, 0},
-		{"mark", map[string]any{"name": "m", "target": target}, 1, 0, 0},
+	calls := []readOnlyCall{
+		{"list_marks", map[string]any{}, 0, 0, 0, false},
+		{"list_resources", map[string]any{"kind": "pods"}, 1, 0, 0, true},
+		{"list_resources", map[string]any{"kind": "pods", "allNamespaces": true}, 1, 0, 0, true},
+		{"diagnose", map[string]any{}, 0, 0, 0, true},
+		{"diagnose", map[string]any{"allNamespaces": true}, 0, 0, 0, true},
+		{"diagnose", map[string]any{"target": target}, 0, 0, 0, false},
+		{"tree", map[string]any{}, 0, 0, 0, true},
+		{"tree", map[string]any{"target": target}, 0, 0, 0, true},
+		{"tree", map[string]any{"allNamespaces": true}, 0, 0, 0, true},
+		{"mark", map[string]any{"name": "m", "target": target}, 1, 0, 0, false},
 		// No matching events in the fixture, so this exercises the
 		// staleness probe rather than a kubectl.Run.
-		{"events", map[string]any{"target": target}, 0, 1, 0},
-		{"logs", map[string]any{"target": podTarget}, 1, 0, 0},
-		{"logs", map[string]any{"target": target}, 2, 0, 0},
-		{"top", map[string]any{}, 2, 1, 0},
-		{"top", map[string]any{"nodes": true}, 1, 1, 0},
-		{"get_yaml", map[string]any{"target": target}, 1, 0, 0},
-		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0, 0},
-		{"scan", map[string]any{"target": target}, 1, 0, 3},
-		{"scan", map[string]any{"namespace": "prod", "engine": "trivy"}, 1, 0, 3},
+		{"events", map[string]any{"target": target}, 0, 1, 0, false},
+		{"logs", map[string]any{"target": podTarget}, 1, 0, 0, false},
+		{"logs", map[string]any{"target": target}, 2, 0, 0, false},
+		{"top", map[string]any{}, 2, 1, 0, true},
+		{"top", map[string]any{"nodes": true}, 1, 1, 0, true},
+		{"get_yaml", map[string]any{"target": target}, 1, 0, 0, false},
+		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0, 0, false},
+		{"scan", map[string]any{"target": target}, 1, 0, 3, false},
+		{"scan", map[string]any{"namespace": "prod", "engine": "trivy"}, 1, 0, 3, false},
 	}
+	return deps, kube, client, scans, calls
+}
+
+// seedUserListing saves the listing a user's own `kx get pods -n prod` would,
+// so a guard has something of the user's for a stray save to disturb.
+func seedUserListing(t *testing.T, deps mcpDeps) {
+	t.Helper()
+	if err := deps.State.Save(getListing("pods", "", []string{"-n", "prod"}, "prod",
+		index.Service{}.Add(podsOutput).Entries)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every tool, driven through the protocol with every argument shape it takes,
+// may ask kubectl only to get, log or top, may ask client-go only to read
+// (get/list/watch, never a write verb), and every one of those calls must
+// actually succeed — so a tool that started erroring out before it ever
+// reached kubectl or client-go couldn't quietly pass this by making the
+// recorded calls list look short and clean. This is the read-only promise as
+// a test, covering every path that reads a cluster: kubectl (list_resources,
+// mark, events, logs, top, get_yaml, scan) and client-go (diagnose, tree) —
+// and scan's scanner, which may only preflight and summarise.
+//
+// With --write-listings off, which is the default, it is the local-state
+// promise too: the state file ends byte-for-byte what the user's own listing
+// plus the one mark makes it, and no result carries an index.
+func TestMCPToolsOnlyRead(t *testing.T) {
+	deps, kube, client, scans, calls := readOnlyFixture(t)
+	seedUserListing(t, deps)
+	// What the file must end as: the user's listing, untouched, beside the
+	// one mark the calls make — written by the state service itself onto a
+	// copy, so the comparison is against kx's own encoding rather than a
+	// hand-written expectation of it.
+	want := &state.Service{MaxHistory: deps.State.MaxHistory, Path: filepath.Join(t.TempDir(), "want.json")}
+	seeded, err := os.ReadFile(deps.State.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want.Path, seeded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := want.SaveMark("m", state.Mark{
+		Resource: state.Resource{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
+		Context:  kube.CurrentContext(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := connectMCP(t, deps)
+
 	wantKubectlRuns, wantKubectlProbes, wantScannerCalls := 0, 0, 0
 	for _, call := range calls {
 		result := callTool(t, session, call.tool, call.args)
 		if result.IsError {
 			t.Fatalf("%s %v failed: %s", call.tool, call.args, toolText(result))
 		}
+		raw, err := json.Marshal(result.StructuredContent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"index"`)) {
+			t.Errorf("%s %v: output carries an index with --write-listings off: %s", call.tool, call.args, raw)
+		}
 		wantKubectlRuns += call.kubectlRuns
 		wantKubectlProbes += call.kubectlProbes
 		wantScannerCalls += call.scannerCalls
+	}
+
+	got, err := os.ReadFile(deps.State.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBytes, err := os.ReadFile(want.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, wantBytes) {
+		t.Errorf("state file changed beyond the mark:\ngot  %s\nwant %s", got, wantBytes)
 	}
 
 	if len(kube.runs) != wantKubectlRuns {

@@ -5,7 +5,14 @@
 // row number from the user's current kx listing. An index read is always on:
 // it is read-only, resolved live against whatever the user's terminal has
 // open, and never echoed back as a number, so an agent copies the name
-// forward rather than the digit. Nothing here writes the history stack.
+// forward rather than the digit.
+//
+// By default nothing here writes the history stack. Started with
+// --write-listings, the listing tools — list_resources, the diagnose sweep,
+// tree and top — save their listings as the CLI commands they mirror would,
+// tagged SourceMCP, and return each row's index in them: the numbers an agent
+// shows are then ones the user can spend in kx, and kx's destructive confirms
+// say whose listing they came from.
 package cli
 
 import (
@@ -43,6 +50,10 @@ type mcpDeps struct {
 	// live context. Nil leaves whatever source is installed alone — tests
 	// leave it nil so they never read the ambient kubeconfig's cache.
 	Discovery *mcpDiscovery
+	// WriteListings is kx mcp --write-listings: the listing tools save what
+	// they list to the user's history, tagged as the agent's, and return the
+	// indexes. Off, the server writes nothing but marks. See listingSave.
+	WriteListings bool
 
 	// mu serialises tool calls; locked takes it, and nothing else does.
 	// Every tool runs wholly under it except scan, which holds it only while
@@ -120,6 +131,41 @@ func serialized[In, Out any](d mcpDeps, handler mcp.ToolHandlerFor[In, Out]) mcp
 	}
 }
 
+// listingSave is the Save a listing tool hands the CLI command it reuses.
+//
+// Off, it is discardListing: the server prints no numbers, and saving would
+// move the user's own indexes. On, it saves through the user's state service —
+// cursor dedupe, per-kind slots and the live context stamp all exactly as the
+// CLI command would get them — with the entry tagged as the agent's, so kx
+// state and the destructive confirms can say so.
+func (d mcpDeps) listingSave() func(state.State) error {
+	if !d.WriteListings {
+		return discardListing
+	}
+	return func(entry state.State) error {
+		entry.Source = state.SourceMCP
+		return d.State.Save(entry)
+	}
+}
+
+// listingWriter is listingSave for the CLI commands (TopCommand) that take a
+// StateWriter rather than a bare Save callable.
+func (d mcpDeps) listingWriter() StateWriter {
+	return saveFunc(d.listingSave())
+}
+
+// saveFunc adapts a Save callable to StateWriter.
+type saveFunc func(state.State) error
+
+func (f saveFunc) Save(entry state.State) error { return f(entry) }
+
+// indexed says whether a listing tool's output carries indexes: only when its
+// listing was saved, since a number that names no saved row would be read
+// against whatever listing the user has open.
+func (d mcpDeps) indexed() bool {
+	return d.WriteListings
+}
+
 // silentStatus is the Status the CLI commands a tool reuses are built with.
 // Their spinners draw on the terminal, and a server's stdout is the protocol.
 func silentStatus(string) func() { return func() {} }
@@ -130,7 +176,7 @@ func silentStatus(string) func() { return func() {} }
 // kubeconfig on every CurrentContext call. The state service shares the CLI's
 // file — marks are the point of sharing it — but stamps and checks context
 // through the uncached reader.
-func liveMCPDeps(services Services) mcpDeps {
+func liveMCPDeps(services Services, writeListings bool) mcpDeps {
 	kube := kubectl.Exec{}
 	return mcpDeps{
 		Kubectl: kube,
@@ -145,6 +191,8 @@ func liveMCPDeps(services Services) mcpDeps {
 		Discovery:  &mcpDiscovery{New: func() kinds.ShorthandSource { return discovery.NewSource() }},
 		mu:         &sync.Mutex{},
 		scanSlots:  make(chan struct{}, 1),
+
+		WriteListings: writeListings,
 	}
 }
 
@@ -155,8 +203,9 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the " +
 	"user pinned to a resource (list_marks shows them) — or by an index: a row number from the " +
 	"user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to " +
-	"the user before acting on an index. mark pins one. Every tool is read-only against the " +
-	"cluster; mark alone writes anything, and only a name in kx's local state."
+	"the user before acting on an index. mark pins one. If results carry an index, that is the " +
+	"row's number in the user's kx history, and the user can spend it in kx. Every tool is " +
+	"read-only against the cluster; anything written goes only to kx's local state."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	server := mcp.NewServer(
@@ -168,7 +217,7 @@ func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 }
 
 func newMCPCommand(services Services, version string) *cobra.Command {
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio).",
 		Long: "Runs a Model Context Protocol server on stdin/stdout, for an MCP client — " +
@@ -179,17 +228,30 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 			"scan for image CVEs.\n\n" +
 			"Every tool is read-only against the cluster. Resources are named by kind and name, " +
 			"by a mark, or by an index — a row number from your terminal's current listing, read " +
-			"live and never written back as a number. The one thing it writes is a new mark, and " +
+			"live. By default the one thing it writes is a new mark, and " +
 			"it refuses to move one you already set.\n\n" +
 			"The server follows your kubeconfig live: switch context and the next call reads " +
-			"the new cluster, and says so in its result.",
-		Example: "  claude mcp add kx -- kx mcp",
-		Args:    cobra.NoArgs,
+			"the new cluster, and says so in its result.\n\n" +
+			"With --write-listings, what the agent lists — list_resources, a diagnose sweep, " +
+			"tree and top — is saved to your kx history as `kx get`, `kx diag`, `kx tree` and " +
+			"`kx top` would save it, and each row carries its index, so a number the agent " +
+			"quotes works in your terminal. Those listings are tagged: kx state says 'via kx mcp', " +
+			"and kx delete and kx drain say an index came from one before they act.",
+		Example: "  claude mcp add kx -- kx mcp\n" +
+			"  claude mcp add kx -- kx mcp --write-listings",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			writeListings, _ := cmd.Flags().GetBool("write-listings")
 			// Built here rather than in NewRoot: tests construct the root with
 			// a zero Services, whose State is nil.
-			server := newMCPServer(liveMCPDeps(services), version)
+			server := newMCPServer(liveMCPDeps(services, writeListings), version)
 			return server.Run(cmd.Context(), &mcp.StdioTransport{})
 		},
 	}
+	// No environment variable: the flag sits in the MCP client's server
+	// config, where it is visible and deliberate, and a stray export must not
+	// change what an agent can do to your state.
+	command.Flags().Bool("write-listings", false,
+		"Save the agent's listings to your kx history, tagged as agent-made, so their indexes work in your terminal")
+	return command
 }

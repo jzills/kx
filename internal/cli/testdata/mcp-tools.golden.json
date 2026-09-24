@@ -1,9 +1,9 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. Every tool is read-only against the cluster; mark alone writes anything, and only a name in kx's local state.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx. Every tool is read-only against the cluster; anything written goes only to kx's local state.",
   "tools": [
     {
       "name": "diagnose",
-      "description": "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node.",
+      "description": "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without full, the numbers skip the healthy rows left out.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -446,7 +446,7 @@
     },
     {
       "name": "list_resources",
-      "description": "List resources of one kind by name and namespace — the names the other tools take. Defaults to the current namespace.",
+      "description": "List resources of one kind by name and namespace — the names the other tools take. Defaults to the current namespace. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx get would save it, and each row carries its index there.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -496,6 +496,10 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "index": {
+                  "description": "This row's number in the user's kx history, present only when kx mcp runs with --write-listings; the user can spend it in kx.",
+                  "type": "integer"
+                },
                 "kind": {
                   "type": "string"
                 },
@@ -900,7 +904,7 @@
     },
     {
       "name": "top",
-      "description": "Current CPU and memory usage of pods (percent of their limits) or nodes (percent of capacity), from metrics-server.",
+      "description": "Current CPU and memory usage of pods (percent of their limits) or nodes (percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx top would save it, and each row carries its index there.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -1016,7 +1020,7 @@
     },
     {
       "name": "tree",
-      "description": "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → containers), or the whole ownership forest of a namespace when there is no target. Large graphs are cut breadth-first at limit nodes; truncated says how many were left out.",
+      "description": "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → containers), or the whole ownership forest of a namespace when there is no target. Large graphs are cut breadth-first at limit nodes; truncated says how many were left out. When kx mcp runs with --write-listings, the whole walk is saved to the user's kx history, as kx tree would save it, and each node but a container or a namespace root carries its index there; a limit cuts what is returned, not what is saved.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,

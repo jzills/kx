@@ -37,7 +37,8 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_resources",
 		Description: "List resources of one kind by name and namespace — the names the other tools take. " +
-			"Defaults to the current namespace.",
+			"Defaults to the current namespace. When kx mcp runs with --write-listings, the listing is " +
+			"saved to the user's kx history, as kx get would save it, and each row carries its index there.",
 		Annotations: readOnlyTool("List resources"),
 	}, serialized(deps, deps.listResources))
 	mcp.AddTool(server, &mcp.Tool{
@@ -46,7 +47,9 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"container states, restarts, warning events — and returns findings ranked most specific first. " +
 			"With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. " +
 			"Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, " +
-			"Ingress, Pod and Node.",
+			"Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's " +
+			"kx history, every swept resource in the order returned, and each carries its index there — so " +
+			"without full, the numbers skip the healthy rows left out.",
 		Annotations: readOnlyTool("Diagnose"),
 	}, serialized(deps, deps.diagnose))
 	// Registered with an untyped output: a tree node's children are tree
@@ -55,14 +58,19 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 		Name: "tree",
 		Description: "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → " +
 			"containers), or the whole ownership forest of a namespace when there is no target. Large graphs " +
-			"are cut breadth-first at limit nodes; truncated says how many were left out.",
+			"are cut breadth-first at limit nodes; truncated says how many were left out. When kx mcp runs " +
+			"with --write-listings, the whole walk is saved to the user's kx history, as kx tree would save " +
+			"it, and each node but a container or a namespace root carries its index there; a limit cuts " +
+			"what is returned, not what is saved.",
 		Annotations: readOnlyTool("Ownership tree"),
 	}, serialized(deps, deps.tree))
 	registerEvidenceTools(server, deps)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "top",
 		Description: "Current CPU and memory usage of pods (percent of their limits) or nodes " +
-			"(percent of capacity), from metrics-server.",
+			"(percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the " +
+			"listing is saved to the user's kx history, as kx top would save it, and each row carries " +
+			"its index there.",
 		Annotations: readOnlyTool("Top"),
 	}, serialized(deps, deps.top))
 	mcp.AddTool(server, &mcp.Tool{
@@ -202,6 +210,9 @@ type listInput struct {
 }
 
 type listedResource struct {
+	// Index is the row's position in the saved listing; absent unless kx mcp
+	// runs with --write-listings, when there is a saved listing to be in.
+	Index     int    `json:"index,omitempty" jsonschema:"This row's number in the user's kx history, present only when kx mcp runs with --write-listings; the user can spend it in kx."`
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
@@ -263,18 +274,36 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
 
+	// Saved as `kx get <kind>` saves it, and under the same rules: an empty
+	// listing is saved, since it is the listing now, and an -A table whose rows
+	// cannot be placed is not — GetCommand prints that one unnumbered, and an
+	// index into it would resolve in whatever namespace the user stands in.
+	indexed := d.indexed()
+	if indexed && in.AllNamespaces && len(table.Entries) > 0 && !table.Placed() {
+		indexed = false
+	}
+	if indexed {
+		if err := d.listingSave()(getListing(in.Kind, "", args[2:], namespace, table.Entries)); err != nil {
+			return nil, listOutput{}, err
+		}
+	}
+
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: d.Kubectl.CurrentContext(), Kind: string(kind), Namespace: namespace,
 		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
 		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
-	for _, entry := range table.Entries[:min(len(table.Entries), limit)] {
+	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {
 		rowNamespace := namespace
 		if entry.Namespace != "" {
 			rowNamespace = entry.Namespace
 		}
-		out.Resources = append(out.Resources, listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace})
+		row := listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace}
+		if indexed {
+			row.Index = position + 1
+		}
+		out.Resources = append(out.Resources, row)
 	}
 	return nil, out, nil
 }
@@ -292,18 +321,12 @@ type diagnoseOutput struct {
 	Diagnosis diagnosticDocument `json:"diagnosis"`
 }
 
-// discardListing is the Save a server-side sweep is built with. TriageCommand
-// saves what it swept so the terminal can spend the numbers it printed; the
-// server printed none, and saving would move the user's own indexes.
+// discardListing is the Save a listing tool is built with when
+// --write-listings is off (see mcpDeps.listingSave). TriageCommand and the
+// rest save what they listed so the terminal can spend the numbers they
+// printed; the server printed none, and saving would move the user's own
+// indexes.
 func discardListing(state.State) error { return nil }
-
-// discardWriter is discardListing's StateWriter twin, for the CLI commands
-// (TopCommand) that take a StateWriter rather than a bare Save callable. The
-// server prints no listing to spend indexes against, so nothing here is ever
-// worth saving.
-type discardWriter struct{}
-
-func (discardWriter) Save(state.State) error { return nil }
 
 func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagnoseInput) (*mcp.CallToolResult, diagnoseOutput, error) {
 	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
@@ -345,12 +368,15 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	if namespace == "" && !in.AllNamespaces {
 		namespace = d.Kubectl.CurrentNamespace()
 	}
-	result, err := TriageCommand{Diagnostics: service, Save: discardListing, Window: window}.
+	// Saved whole, healthy rows included, as kx diag saves it: the filter
+	// below narrows only what is returned, so each index it keeps is still
+	// the row's position in the saved sweep.
+	result, err := TriageCommand{Diagnostics: service, Save: d.listingSave(), Window: window}.
 		Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
 	}
-	out.Diagnosis = triageDocument(result, false)
+	out.Diagnosis = triageDocument(result, d.indexed())
 	// Unlike --json, which carries every resource because nothing scrolls
 	// past a machine: an agent pays for every token of a healthy row, and
 	// checked/healthy already say how many there were.
@@ -445,8 +471,12 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Save is never reached with indexed=false; discardListing is belt and braces.
-	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: discardListing}
+	// With --write-listings off, Save is never reached (indexed is false);
+	// listingSave's discardListing is belt and braces. On, the walk is saved
+	// whole before pruneTree cuts what is returned, so a pruned node keeps
+	// the index it was saved at and every number kept is a saved position.
+	indexed := d.indexed()
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: d.listingSave()}
 
 	switch {
 	case in.Target != nil:
@@ -454,7 +484,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		if err != nil {
 			return nil, nil, err
 		}
-		node, err := command.ExecuteResource(ctx, target.Kind, target.Name, target.Namespace, false)
+		node, err := command.ExecuteResource(ctx, target.Kind, target.Name, target.Namespace, indexed)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -467,8 +497,13 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		}
 		out.Tree = treeDocumentOf(subject, []*tree.Node{node})
 	case in.AllNamespaces:
-		roots, _, err := command.ExecuteAllNamespaces(ctx, false)
+		roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
 		if err != nil {
+			return nil, nil, err
+		}
+		// ExecuteAllNamespaces saves nothing itself; the CLI saves the forest
+		// after the walk, with no entry namespace, and so does this.
+		if err := command.save(resources, "", indexed, true); err != nil {
 			return nil, nil, err
 		}
 		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true}, roots)
@@ -477,7 +512,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		if namespace == "" {
 			namespace = d.Kubectl.CurrentNamespace()
 		}
-		node, err := command.ExecuteNamespace(ctx, namespace, false)
+		node, err := command.ExecuteNamespace(ctx, namespace, indexed)
 		if err != nil {
 			return nil, nil, err
 		}

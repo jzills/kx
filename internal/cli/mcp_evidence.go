@@ -293,7 +293,7 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 	}
 
 	out := topOutput{Context: d.Kubectl.CurrentContext()}
-	command := TopCommand{Kubectl: d.Kubectl, State: discardWriter{}, Index: index.Service{}}
+	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(), Index: index.Service{}}
 
 	var indexed index.Table
 	var err error
@@ -319,11 +319,15 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 	}
 
 	rows := topPageRows(indexed)
-	// No numeric indexes in a tool result — see resolveTarget and the package
-	// doc comment in mcp.go. topPageRows reads the "X" column TopCommand just
-	// indexed, so every row's Index is zeroed before it goes near the document.
-	for i := range rows {
-		rows[i].Index = 0
+	// topPageRows reads the "X" column TopCommand just indexed. Those numbers
+	// are positions in the listing TopCommand saved — when it saved one. With
+	// --write-listings off it saved nothing, so every row's Index is zeroed
+	// before it goes near the document: a number there would name a row of
+	// whatever listing the user has open.
+	if !d.indexed() {
+		for i := range rows {
+			rows[i].Index = 0
+		}
 	}
 	total := len(rows)
 	limit := clampLimit(in.Limit, defaultTopLimit, maxTopLimit)
