@@ -135,23 +135,31 @@ func serialized[In, Out any](d mcpDeps, handler mcp.ToolHandlerFor[In, Out]) mcp
 //
 // Off, it is discardListing: the server prints no numbers, and saving would
 // move the user's own indexes. On, it saves through the user's state service —
-// cursor dedupe, per-kind slots and the live context stamp all exactly as the
-// CLI command would get them — with the entry tagged as the agent's, so kx
-// state and the destructive confirms can say so.
-func (d mcpDeps) listingSave() func(state.State) error {
+// cursor dedupe and per-kind slots exactly as the CLI command would get them —
+// with the entry tagged as the agent's, so kx state and the destructive
+// confirms can say so.
+//
+// context is the one the handler read once, before building a client or
+// running kubectl, and the entry is stamped with it rather than left for
+// Save's live stamp. A sweep or walk takes time; a user who switches context
+// while it runs would otherwise have cluster A's rows filed under B, the
+// context check would pass in B, and `kx delete 3` would act on a same-named
+// resource there. Save's stamp leaves a preset Context alone.
+func (d mcpDeps) listingSave(context string) func(state.State) error {
 	if !d.WriteListings {
 		return discardListing
 	}
 	return func(entry state.State) error {
 		entry.Source = state.SourceMCP
+		entry.Context = context
 		return d.State.Save(entry)
 	}
 }
 
 // listingWriter is listingSave for the CLI commands (TopCommand) that take a
 // StateWriter rather than a bare Save callable.
-func (d mcpDeps) listingWriter() StateWriter {
-	return saveFunc(d.listingSave())
+func (d mcpDeps) listingWriter(context string) StateWriter {
+	return saveFunc(d.listingSave(context))
 }
 
 // saveFunc adapts a Save callable to StateWriter.

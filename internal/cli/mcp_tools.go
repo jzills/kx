@@ -265,6 +265,10 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, clusterScopedScopeError(flag, in.Kind)
 	}
 
+	// The context before kubectl runs: it labels the output and stamps the
+	// saved listing, so a switch mid-call cannot file these rows under the
+	// next context (see listingSave).
+	current := d.Kubectl.CurrentContext()
 	args := []string{"get", in.Kind}
 	namespace := ""
 	switch {
@@ -296,14 +300,14 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		indexed = false
 	}
 	if indexed {
-		if err := d.listingSave()(getListing(in.Kind, "", args[2:], namespace, table.Entries)); err != nil {
+		if err := d.listingSave(current)(getListing(in.Kind, "", args[2:], namespace, table.Entries)); err != nil {
 			return nil, listOutput{}, err
 		}
 	}
 
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
-		Context: d.Kubectl.CurrentContext(), Kind: string(kind), Namespace: namespace,
+		Context: current, Kind: string(kind), Namespace: namespace,
 		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
 		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
@@ -354,7 +358,8 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 		return nil, diagnoseOutput{}, err
 	}
 	// The context before the client: read after, a switch in between would
-	// label this cluster's answer with the next one's name.
+	// label this cluster's answer with the next one's name — and, with
+	// --write-listings, stamp its saved sweep with it (see listingSave).
 	out := diagnoseOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
 	if err != nil {
@@ -384,7 +389,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// Saved whole, healthy rows included, as kx diag saves it: the filter
 	// below narrows only what is returned, so each index it keeps is still
 	// the row's position in the saved sweep.
-	result, err := TriageCommand{Diagnostics: service, Save: d.listingSave(), Window: window}.
+	result, err := TriageCommand{Diagnostics: service, Save: d.listingSave(out.Context), Window: window}.
 		Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
@@ -478,7 +483,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		return nil, nil, errors.New(
 			"'namespace' and 'allNamespaces' apply without a target — a target already names its namespace.")
 	}
-	// The context before the client, as in diagnose.
+	// The context before the client, as in diagnose; it stamps the saved walk.
 	out := treeOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
 	if err != nil {
@@ -489,7 +494,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 	// whole before pruneTree cuts what is returned, so a pruned node keeps
 	// the index it was saved at and every number kept is a saved position.
 	indexed := d.indexed()
-	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: d.listingSave()}
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: d.listingSave(out.Context)}
 
 	switch {
 	case in.Target != nil:

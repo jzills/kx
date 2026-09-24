@@ -292,8 +292,10 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 		}
 	}
 
+	// Read once, before kubectl runs: it labels the output and stamps the
+	// saved listing (see listingSave).
 	out := topOutput{Context: d.Kubectl.CurrentContext()}
-	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(), Index: index.Service{}}
+	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(out.Context), Index: index.Service{}}
 
 	var indexed index.Table
 	var err error

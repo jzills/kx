@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -863,5 +864,88 @@ func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 			!after.IdempotentHint || after.Title != before.Title || after.OpenWorldHint != before.OpenWorldHint {
 			t.Errorf("%s with the flag = %+v, want not read-only, explicitly non-destructive, idempotent, title kept", name, after)
 		}
+	}
+}
+
+// midCallSwitchKubectl is a kubectl whose context moves under the call: the first
+// CurrentContext read says "a", every later one "b" — the user switching
+// context in their terminal while an agent's sweep or walk is still running.
+type midCallSwitchKubectl struct {
+	*recordingKubectl
+	reads int
+}
+
+func (k *midCallSwitchKubectl) CurrentContext() string {
+	k.reads++
+	if k.reads == 1 {
+		return "a"
+	}
+	return "b"
+}
+
+// A listing is stamped with the context it was read in, not the one live when
+// Save runs. Stamped at save time, a switch mid-call would file cluster a's
+// rows under b, the context check would pass in b, and `kx delete 3` would act
+// on a same-named resource in the wrong cluster.
+func TestWriteListingsStampTheContextTheListingWasReadIn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tool  string
+		input map[string]any
+		deps  func(t *testing.T, kube *midCallSwitchKubectl) mcpDeps
+	}{
+		{"list_resources", "list_resources", map[string]any{"kind": "pods"}, func(t *testing.T, kube *midCallSwitchKubectl) mcpDeps {
+			kube.output = podsOutput
+			return mcpTestDeps(t, kube)
+		}},
+		{"diagnose sweep", "diagnose", map[string]any{}, func(t *testing.T, kube *midCallSwitchKubectl) mcpDeps {
+			deps := mcpTestDeps(t, kube)
+			client := mcpDiagDeps(t, &recordingKubectl{}, brokenDeployment("api", "prod"))
+			deps.Kubernetes = client.Kubernetes
+			return deps
+		}},
+		{"tree", "tree", map[string]any{}, func(t *testing.T, kube *midCallSwitchKubectl) mcpDeps {
+			deps := mcpTestDeps(t, kube)
+			deps.Kubernetes = mcpTreeDeps(t).Kubernetes
+			return deps
+		}},
+		{"top", "top", map[string]any{}, func(t *testing.T, kube *midCallSwitchKubectl) mcpDeps {
+			kube.outputs = []string{topPodsFixture, podsJSON}
+			return mcpTestDeps(t, kube)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &midCallSwitchKubectl{recordingKubectl: &recordingKubectl{namespace: "prod"}}
+			deps := tc.deps(t, kube)
+			deps.WriteListings = true
+			var out struct {
+				Context string `json:"context"`
+			}
+			decodeStructured(t, callTool(t, connectMCP(t, deps), tc.tool, tc.input), &out)
+			if out.Context != "a" {
+				t.Errorf("output context = %q, want a — the one the listing was read in", out.Context)
+			}
+
+			history, err := deps.State.LoadHistory()
+			if err != nil {
+				t.Fatalf("LoadHistory: %v", err)
+			}
+			if len(history.States) != 1 {
+				t.Fatalf("%d entries saved, want 1", len(history.States))
+			}
+			if got := history.States[0].Context; got != "a" {
+				t.Errorf("saved context = %q, want a — stamped at save time it names the context switched to", got)
+			}
+
+			// The user is now in b, so spending the agent's index is refused.
+			_, _, _, err = deps.State.Fields(1)
+			var mismatch state.ContextMismatchError
+			if !errors.As(err, &mismatch) {
+				t.Fatalf("Fields(1) in b = %v, want the context-mismatch refusal", err)
+			}
+			if !strings.Contains(err.Error(), "listed in context 'a'; the current context is 'b'") {
+				t.Errorf("refusal = %q", err)
+			}
+		})
 	}
 }
