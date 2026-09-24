@@ -130,17 +130,19 @@ same as any new listing would.
 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes
 your *current* listing the moment it saves, so `kx delete 3` right after can
-mean the agent's row 3, not the one you last ran `kx get` for. Every command
-that spends an index now says so when the index it resolves came from an
-agent's listing. `kx delete` and `kx drain` fold that into their confirm
-prompt — the suffix appears before you answer it, and again, without a
-prompt, if you skip it with `--yes`/`-y`. Every other command that spends an
-index — `kx scale`, `kx rollout`, `kx cordon`, `kx debug`, `kx edit`,
-`kx exec`, `kx label`, `kx annotate`, `kx cp` and the rest — prints a muted
-line to stderr before it acts: `Index 3 is from a kx mcp listing —
+mean the agent's row 3, not the one you last ran `kx get` for. Every
+mutating command now says so when the index it resolves came from an agent's
+listing. `kx delete` and `kx drain` fold that into their confirm prompt, so
+you see it before you answer; skip the prompt with `--yes`/`-y` and they print
+the stderr notice below in its place. `kx scale`, `kx rollout` (`restart`,
+`undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`,
+`kx edit`, `kx exec`, `kx label`, `kx annotate` and `kx cp` print a muted line
+to stderr before they act: `Index 3 is from a kx mcp listing —
 Pod/web-healthy-abc123. Run 'kx state' to see it.` It is a notice, not a
 prompt — nothing pauses, stdout is unchanged, and the exit code doesn't
-change either. `kx state` shows which listing is current; `kx state back` is
+change either. Commands that only read — `kx describe`, `kx logs`, `kx yaml`,
+`kx port-forward`, `kx events`, `kx tree`, `kx diag`, and `kx rollout status`
+and `history` — print nothing. `kx state` shows which listing is current; `kx state back` is
 the way out if it isn't the one you meant. The same live-resolution rule that
 makes index reads useful also makes them relative: an index always resolves
 against whatever listing is current *at the moment of the call*, so relisting
@@ -152,8 +154,11 @@ mid-write to `~/.kx/state.json` — a mark from your terminal while
 `--write-listings` saves a sweep, say. Every write takes a lock file beside
 the state file first, so one write finishes before the next one reads,
 instead of the two racing and one silently overwriting the other. A writer
-that can't get the lock within a few seconds fails rather than hanging or
-guessing.
+that can't get the lock within a few seconds, because another kx holds it,
+fails rather than hanging. Where no lock can be taken at all — a filesystem
+that doesn't support locking, or a lock file kx can't open even read-only —
+the write goes ahead unlocked, as kx wrote before the lock existed, rather
+than refusing every write.
 
 ## Secrets
 
