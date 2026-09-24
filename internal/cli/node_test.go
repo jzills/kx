@@ -176,6 +176,30 @@ func TestDrainConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 	}
 }
 
+// Drain has a kubectl round trip (the vanished-node preflight) between
+// resolving its target and building the confirm prompt — exactly the window
+// a second, independent read of the listing's Source used to race a
+// concurrent kx mcp save in. Resolve panics on singleReadResolver, so this
+// fails loudly if that second read is ever reintroduced.
+func TestDrainResolvesTargetAndProvenanceInOneRead(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := &singleReadResolver{fakeResolver: node("node-a"), source: state.SourceMCP}
+	var prompted string
+	command := DrainCommand{
+		Kubectl: kubectl, State: resolver,
+		Confirm: func(m string) error { prompted = m; return nil },
+	}
+	if err := command.Execute(state.Ref{Index: 1}, false, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resolver.resolveWithSourceCalls != 1 {
+		t.Errorf("ResolveWithSource called %d times, want exactly 1", resolver.resolveWithSourceCalls)
+	}
+	if want := "Evict all pods from Node/node-a — from a kx mcp listing?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
 func TestDrainRefusesANonNode(t *testing.T) {
 	command := DrainCommand{
 		Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment),

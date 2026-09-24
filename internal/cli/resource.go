@@ -71,7 +71,9 @@ type DeleteCommand struct {
 }
 
 func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
-	name, namespace, kind, err := c.State.Resolve(ref)
+	// Resolved once, target and provenance together — see resolveWithProvenance
+	// for why a second, independent read of the listing's Source is refused.
+	name, namespace, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +81,7 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (str
 	// repainting status line cannot be read.
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(c.State, ref))); err != nil {
+			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
 			return "", err
 		}
 	}

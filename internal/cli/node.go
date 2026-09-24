@@ -68,7 +68,11 @@ type DrainCommand struct {
 
 // Execute drains one indexed node, streaming kubectl's own progress.
 func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error {
-	name, _, kind, err := c.State.Resolve(ref)
+	// Resolved once, target and provenance together, and before the kubectl
+	// preflight below — a drain's round trip to the cluster is exactly the
+	// window a second, independent read of the listing's Source used to race
+	// a concurrent kx mcp save in. See resolveWithProvenance.
+	name, _, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
 		return err
 	}
@@ -90,7 +94,7 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict all pods from Node/%s%s?", name, listingProvenance(c.State, ref))); err != nil {
+			"Evict all pods from Node/%s%s?", name, listingProvenance(source))); err != nil {
 			return err
 		}
 	}

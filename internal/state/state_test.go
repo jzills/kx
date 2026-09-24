@@ -2788,30 +2788,78 @@ func TestSourceSurvivesNavigateDropAndSave(t *testing.T) {
 	}
 }
 
-// CurrentSource answers with the cursor entry's tag, and ErrNoState when
-// there is nothing to read — the same failure Load reports.
-func TestCurrentSource(t *testing.T) {
+// ResolveWithSource answers an index ref with the cursor entry's tag, and
+// ErrNoState when there is nothing to read — the same failure Load reports.
+// It replaced a separate CurrentSource method precisely because that method
+// was a second, independent Load(): a caller resolving a target and then
+// asking CurrentSource for "the current listing's Source" could have a save
+// land between the two, naming a different listing than the one the target
+// came from. ResolveWithSource reads both from the one Load its index
+// resolves against.
+func TestResolveWithSource(t *testing.T) {
 	service := newTestService(t, 10)
-	if _, err := service.CurrentSource(); !errors.Is(err, ErrNoState) {
-		t.Fatalf("CurrentSource on an empty store: err = %v, want ErrNoState", err)
+	if _, _, _, _, err := service.ResolveWithSource(Ref{Index: 1}); !errors.Is(err, ErrNoState) {
+		t.Fatalf("ResolveWithSource on an empty store: err = %v, want ErrNoState", err)
 	}
 
 	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
-	source, err := service.CurrentSource()
+	name, namespace, kind, source, err := service.ResolveWithSource(Ref{Index: 1})
 	if err != nil {
-		t.Fatalf("CurrentSource: %v", err)
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("ResolveWithSource = %q/%q/%q, want api/prod/Pod", name, namespace, kind)
 	}
 	if source != "" {
-		t.Errorf("CurrentSource = %q, want \"\" for a user-made listing", source)
+		t.Errorf("source = %q, want \"\" for a user-made listing", source)
 	}
 
 	save(t, service, State{Resources: pods("web"), Namespace: "prod", Source: SourceMCP,
 		Query: &Query{Resource: "pods", Args: []string{"web"}}})
-	source, err = service.CurrentSource()
+	name, _, _, source, err = service.ResolveWithSource(Ref{Index: 1})
 	if err != nil {
-		t.Fatalf("CurrentSource: %v", err)
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "web" {
+		t.Errorf("name = %q, want web", name)
 	}
 	if source != SourceMCP {
-		t.Errorf("CurrentSource = %q, want %q", source, SourceMCP)
+		t.Errorf("source = %q, want %q", source, SourceMCP)
+	}
+}
+
+// A mark ref never carries a Source: it is pinned by a name the user chose,
+// not read off whatever listing happens to be current, so ResolveWithSource
+// answers "" for one even when the current listing is tagged.
+func TestResolveWithSourceAnswersEmptyForAMark(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+	if err := service.SaveMark("db", Mark{Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"}}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	name, namespace, kind, source, err := service.ResolveWithSource(Ref{Mark: "db"})
+	if err != nil {
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("ResolveWithSource = %q/%q/%q, want api/prod/Pod", name, namespace, kind)
+	}
+	if source != "" {
+		t.Errorf("source = %q, want \"\" for a mark — it is not from a listing", source)
+	}
+}
+
+// ResolveWithSource shares Resolve's own failure modes — same context check,
+// same out-of-range message — because it shares Resolve's code
+// (fieldsWithSource/resolveMark), not a second copy of it.
+func TestResolveWithSourceMatchesResolveOnFailure(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, wantErr := service.Fields(99)
+	_, _, _, _, gotErr := service.ResolveWithSource(Ref{Index: 99})
+	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() {
+		t.Errorf("ResolveWithSource(99) err = %v, want the same as Fields(99): %v", gotErr, wantErr)
 	}
 }

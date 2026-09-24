@@ -63,18 +63,50 @@ func workload(name string, kind kinds.Kind) fakeResolver {
 	return fakeResolver{name: name, namespace: "prod", kind: kind}
 }
 
-// sourcedResolver adds CurrentSource to fakeResolver, for tests that check the
-// "from a kx mcp listing" confirm-prompt suffix. Kept separate from
+// sourcedResolver adds ResolveWithSource to fakeResolver, for tests that check
+// the "from a kx mcp listing" confirm-prompt suffix. Kept separate from
 // fakeResolver itself so every other test's fake keeps satisfying only
-// IndexResolver, the way listingProvenance's optional-interface check expects
-// existing fakes to.
+// IndexResolver, the way resolveWithProvenance's optional-interface check
+// expects existing fakes to.
 type sourcedResolver struct {
 	fakeResolver
 	source string
 }
 
-func (f sourcedResolver) CurrentSource() (string, error) {
-	return f.source, nil
+// ResolveWithSource mirrors state.Service's own contract: a mark ref never
+// carries a Source, whatever this fake was configured with, because a mark
+// is not read off any listing.
+func (f sourcedResolver) ResolveWithSource(ref state.Ref) (string, string, kinds.Kind, string, error) {
+	name, namespace, kind, err := f.fakeResolver.Resolve(ref)
+	if ref.Mark != "" {
+		return name, namespace, kind, "", err
+	}
+	return name, namespace, kind, f.source, err
+}
+
+// singleReadResolver proves that the delete/drain confirm path resolves a
+// target and its provenance from one read, not from Resolve plus a second,
+// independent lookup — the TOCTOU window resolveWithProvenance exists to
+// close (a concurrent kx mcp save could land between two separate reads).
+// Resolve panics if it is ever called on this type: ResolveWithSource is the
+// only path a caller may take once a resolver offers it, and resolveCalls
+// counts ResolveWithSource's own invocations so a test can assert exactly
+// one.
+type singleReadResolver struct {
+	fakeResolver
+	source                 string
+	resolveWithSourceCalls int
+}
+
+func (f *singleReadResolver) Resolve(state.Ref) (string, string, kinds.Kind, error) {
+	panic("Resolve called despite ResolveWithSource being available — " +
+		"the TOCTOU this type guards against was reintroduced")
+}
+
+func (f *singleReadResolver) ResolveWithSource(ref state.Ref) (string, string, kinds.Kind, string, error) {
+	f.resolveWithSourceCalls++
+	name, namespace, kind, err := f.fakeResolver.Resolve(ref)
+	return name, namespace, kind, f.source, err
 }
 
 // recordingKubectl captures every invocation so tests can assert on the exact
@@ -543,6 +575,32 @@ func TestDeleteConfirmOmitsProvenanceForAMarkRef(t *testing.T) {
 	}
 	if want := "Delete Pod/nginx in prod?"; prompted != want {
 		t.Errorf("prompt = %q, want %q — a mark is not from a listing", prompted, want)
+	}
+}
+
+// The confirm path must resolve the target and its provenance from a single
+// read. Resolve panics on singleReadResolver, so this fails loudly if the
+// TOCTOU (Resolve for the target, then a second, independent read for its
+// Source) is ever reintroduced — and resolveWithSourceCalls pins the read
+// count at exactly one.
+func TestDeleteResolvesTargetAndProvenanceInOneRead(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	resolver := &singleReadResolver{fakeResolver: pod("nginx"), source: state.SourceMCP}
+	var prompted string
+	_, err := DeleteCommand{
+		Kubectl: kubectl,
+		State:   resolver,
+		Confirm: func(m string) error { prompted = m; return nil },
+		Status:  noStatus,
+	}.Execute(state.Ref{Index: 1}, false, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resolver.resolveWithSourceCalls != 1 {
+		t.Errorf("ResolveWithSource called %d times, want exactly 1", resolver.resolveWithSourceCalls)
+	}
+	if want := "Delete Pod/nginx in prod — from a kx mcp listing?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
 	}
 }
 

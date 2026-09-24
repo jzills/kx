@@ -322,10 +322,11 @@ func (r *Renderer) SwitchTargets(history state.History, live Live) {
 			r.Blank()
 		}
 		scope, context := slotCaption(kind, entry, live)
-		// A slot is never saved by the MCP server (see State.Source's doc), so
-		// there is nothing for a provenance note to say here — "" is passed
-		// rather than viaCaption(entry) to keep that a fact about this call
-		// site, not a coincidence of what entry happens to hold.
+		// "" rather than viaCaption(entry): a slot never shows a provenance
+		// note here, whatever Source the entry happens to carry. `kx state
+		// --targets` answers "where does this slot point, and where am I
+		// now" — a slot's own listing history isn't the question it's asking,
+		// so there is nothing for a tag to usefully say in this view.
 		r.listing(entry, scope, context, "")
 		rendered++
 	}

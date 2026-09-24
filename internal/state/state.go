@@ -749,19 +749,6 @@ func (s *Service) Load() (State, error) {
 	return backfilled(history.States[history.Cursor]), nil
 }
 
-// CurrentSource reports the Source tag on the cursor entry — "" for a
-// user-made listing, SourceMCP for one an MCP tool made — so a caller that
-// only has an IndexResolver can ask the resolver rather than reaching into
-// State itself. ErrNoState passes through unchanged, the same failure Load
-// reports on an empty store.
-func (s *Service) CurrentSource() (string, error) {
-	entry, err := s.Load()
-	if err != nil {
-		return "", err
-	}
-	return entry.Source, nil
-}
-
 // LoadHistory returns the whole stack.
 //
 // Every entry backfilled, because the views built on this one render each
@@ -1141,27 +1128,37 @@ func (s *Service) checkContext(entry State, idx int, relist string) error {
 	}
 }
 
-// Fields resolves an index to the resource it names, plus its namespace and kind.
+// Fields resolves an index to the resource it names, plus its namespace and
+// kind. It is fieldsWithSource with the entry's Source dropped, for the many
+// callers that have no use for it.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
+	name, namespace, kind, _, err = s.fieldsWithSource(idx)
+	return name, namespace, kind, err
+}
+
+// fieldsWithSource is Fields plus the Source of the one Load() it reads the
+// index against — the entry's provenance, not a second, independent read of
+// it. See ResolveWithSource for why that distinction is load-bearing.
+func (s *Service) fieldsWithSource(idx int) (name, namespace string, kind kinds.Kind, source string, err error) {
 	current, err := s.Load()
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if err := s.checkContext(current, idx, ""); err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if current.Resources.Len() == 0 {
-		return "", "", "", emptyListing(current,
+		return "", "", "", "", emptyListing(current,
 			"Run 'kx state back' for the previous listing.")
 	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
-		return "", "", "", outOfRange(idx, current)
+		return "", "", "", "", outOfRange(idx, current)
 	}
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	return name, namespaceAt(current, idx), kind, nil
+	return name, namespaceAt(current, idx), kind, current.Source, nil
 }
 
 // resolveMark looks a mark up and refuses one taken in another cluster.
@@ -1222,6 +1219,29 @@ func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err
 		return s.resolveMark(ref)
 	}
 	return s.Fields(ref.Index)
+}
+
+// ResolveWithSource is Resolve plus the Source of the listing an index ref
+// resolved against, read from the same Load() that resolved it.
+//
+// This exists so a confirm prompt can name a listing's provenance without a
+// second, independent read: a caller that resolved the target via Resolve and
+// then asked a separate method for "the current listing's Source" was really
+// asking two different questions of two different Load()s, and a save landing
+// between them (kx mcp saves concurrently with the user's own session) could
+// answer the second against a listing that has nothing to do with the index
+// just resolved — the confirm prompt would name a "kx mcp listing" for a
+// target that came from the user's own, or vice versa. One Load, one Source,
+// naming the same entry the target came from, is what removes that window.
+//
+// A mark ref answers "": a mark is pinned by a name the user chose, not read
+// off whatever listing happens to be current, so it has no listing to name.
+func (s *Service) ResolveWithSource(ref Ref) (name, namespace string, kind kinds.Kind, source string, err error) {
+	if ref.Mark != "" {
+		name, namespace, kind, err = s.resolveMark(ref)
+		return name, namespace, kind, "", err
+	}
+	return s.fieldsWithSource(ref.Index)
 }
 
 // ResolveExpecting is Resolve for a command that has already named the kind it
