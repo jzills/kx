@@ -181,15 +181,6 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 	if err := validMarkName(name); err != nil {
 		return nil, markOutput{}, err
 	}
-	marks, err := d.State.Marks()
-	if err != nil {
-		return nil, markOutput{}, err
-	}
-	if existing, ok := marks[name]; ok {
-		return nil, markOutput{}, fmt.Errorf(
-			"@%s already marks %s/%s — marks belong to the user, so this tool never moves one. Choose another name.",
-			name, existing.Kind, existing.Name)
-	}
 	target, err := d.resolveTarget(in.Target)
 	if err != nil {
 		return nil, markOutput{}, err
@@ -204,8 +195,16 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 		Resource: state.Resource{Name: target.Name, Kind: target.Kind, Namespace: target.Namespace},
 		Context:  d.Kubectl.CurrentContext(),
 	}
-	if err := d.State.SaveMark(name, mark); err != nil {
+	// One lock hold for the check and the write: a mark the user adds from a
+	// terminal between a separate check and SaveMark would otherwise be moved.
+	existing, err := d.State.SaveMarkIfAbsent(name, mark)
+	if err != nil {
 		return nil, markOutput{}, err
+	}
+	if existing != nil {
+		return nil, markOutput{}, fmt.Errorf(
+			"@%s already marks %s/%s — marks belong to the user, so this tool never moves one. Choose another name.",
+			name, existing.Kind, existing.Name)
 	}
 	return nil, markOutput{Context: mark.Context, Mark: mcpMarkOf(name, mark)}, nil
 }
