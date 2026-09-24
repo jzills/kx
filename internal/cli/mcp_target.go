@@ -63,7 +63,8 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 		if err != nil {
 			return resolvedTarget{}, err
 		}
-		if err := validateResolved(string(kind), name, namespace); err != nil {
+		kind, err = validateResolved(string(kind), name, namespace)
+		if err != nil {
 			return resolvedTarget{}, err
 		}
 		return resolvedTarget{Kind: kind, Name: name, Namespace: namespace}, nil
@@ -75,7 +76,8 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 		if err != nil {
 			return resolvedTarget{}, err
 		}
-		if err := validateResolved(string(kind), name, namespace); err != nil {
+		kind, err = validateResolved(string(kind), name, namespace)
+		if err != nil {
 			return resolvedTarget{}, err
 		}
 		return resolvedTarget{Kind: kind, Name: name, Namespace: namespace, Mark: mark}, nil
@@ -92,8 +94,8 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 		return resolvedTarget{}, err
 	}
 	spelling := coreGroupSpelling(target.Kind)
-	if strings.EqualFold(spelling, "all") {
-		return resolvedTarget{}, errors.New("'all' is not one resource type — give the resource's own kind.")
+	if err := refuseAll(spelling); err != nil {
+		return resolvedTarget{}, err
 	}
 	if err := validObjectName(target.Name); err != nil {
 		return resolvedTarget{}, err
@@ -195,22 +197,37 @@ func validNamespace(namespace string) error {
 	return nil
 }
 
-// validateResolved re-applies the flag-injection checks to a target resolved
-// via a mark or an index, whose kind, name and namespace came from the state
-// file rather than from the caller directly. A typed target is checked as it
-// is parsed; a mark or an index is checked here, once resolved, closing the
-// gap where either was trusted outright.
-func validateResolved(kind, name, namespace string) error {
+// refuseAll refuses kubectl's "all" category, which names many resource
+// types rather than one.
+func refuseAll(spelling string) error {
+	if strings.EqualFold(spelling, "all") {
+		return errors.New("'all' is not one resource type — give the resource's own kind.")
+	}
+	return nil
+}
+
+// validateResolved holds a target resolved via a mark or an index — whose
+// kind, name and namespace came from the state file rather than from the
+// caller directly — to exactly the checks a typed target gets as it is
+// parsed: the flag-injection shapes, the 'all' refusal, and the core-group
+// dotted spelling reduced before the kind is normalised. It returns the
+// canonical kind, which is what reaches argv and every kind-keyed check
+// (Secret redaction above all). Without it either path was trusted outright.
+func validateResolved(kind, name, namespace string) (kinds.Kind, error) {
 	if err := validKind(kind); err != nil {
-		return err
+		return "", err
+	}
+	spelling := coreGroupSpelling(kind)
+	if err := refuseAll(spelling); err != nil {
+		return "", err
 	}
 	if err := validObjectName(name); err != nil {
-		return err
+		return "", err
 	}
 	if namespace != "" {
 		if err := validNamespace(namespace); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return nil
+	return kinds.Normalize(spelling), nil
 }

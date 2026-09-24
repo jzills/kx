@@ -949,3 +949,25 @@ func TestWriteListingsStampTheContextTheListingWasReadIn(t *testing.T) {
 		})
 	}
 }
+
+// list_resources refuses kx's Context pseudo-kind: kubectl cannot list it, and
+// with --write-listings a saved listing of it would overwrite the Context slot
+// that `kx ctx N` reads.
+func TestListResourcesRefusesTheContextPseudoKind(t *testing.T) {
+	for _, spelling := range []string{"Context", "context"} {
+		t.Run(spelling, func(t *testing.T) {
+			kube := &recordingKubectl{output: podsOutput, namespace: "prod"}
+			deps := writingDeps(t, kube)
+			result := callTool(t, connectMCP(t, deps), "list_resources", map[string]any{"kind": spelling})
+			if !result.IsError || !strings.Contains(toolText(result), "kx's name for kubeconfig contexts") {
+				t.Fatalf("result = %s, want the Context refusal", toolText(result))
+			}
+			if len(kube.runs) != 0 {
+				t.Errorf("kubectl ran %v, want nothing", kube.runs)
+			}
+			if _, err := deps.State.LoadHistory(); !errors.Is(err, state.ErrNoState) {
+				t.Errorf("LoadHistory = %v, want nothing saved", err)
+			}
+		})
+	}
+}

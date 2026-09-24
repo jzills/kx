@@ -256,6 +256,12 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, err
 	}
 	kind := kinds.Normalize(in.Kind)
+	// Context is kx's own pseudo-kind for kubeconfig contexts, not something
+	// kubectl lists — and a saved listing of it would overwrite the Context
+	// slot that `kx ctx N` reads.
+	if strings.EqualFold(string(kind), string(kinds.Context)) {
+		return nil, listOutput{}, errors.New("'Context' is kx's name for kubeconfig contexts, not a resource type — list a Kubernetes kind.")
+	}
 	isClusterScoped := clusterScoped(in.Kind)
 	if isClusterScoped && (in.Namespace != "" || in.AllNamespaces) {
 		flag := "namespace"

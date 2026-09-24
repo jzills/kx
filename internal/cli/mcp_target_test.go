@@ -447,3 +447,57 @@ func TestResolvedIndexTargetIsNotEchoedInOutput(t *testing.T) {
 		t.Errorf("output = %s, want no index key", raw)
 	}
 }
+
+// A resolved target is held to exactly the checks a typed one gets: a stored
+// core-group dotted kind is reduced and normalised before it reaches argv or
+// any kind-keyed check, and a stored 'all' is refused.
+func TestResolveTargetResolvedKindsGetTheTypedPathsChecks(t *testing.T) {
+	store := map[string]func(t *testing.T, deps mcpDeps, kind kinds.Kind) mcpTarget{
+		"index": func(t *testing.T, deps mcpDeps, kind kinds.Kind) mcpTarget {
+			if err := deps.State.Save(state.State{
+				Resources: state.NewResources([]string{"db-creds"}, kind), Namespace: "prod",
+			}); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			return mcpTarget{Index: 1}
+		},
+		"mark": func(t *testing.T, deps mcpDeps, kind kinds.Kind) mcpTarget {
+			if err := deps.State.SaveMark("creds", state.Mark{
+				Resource: state.Resource{Name: "db-creds", Kind: kind, Namespace: "prod"},
+			}); err != nil {
+				t.Fatalf("SaveMark: %v", err)
+			}
+			return mcpTarget{Mark: "creds"}
+		},
+	}
+	for via, save := range store {
+		t.Run(via+" core-group spelling", func(t *testing.T) {
+			kube := &recordingKubectl{output: "apiVersion: v1\nkind: Secret\ndata:\n  password: aHVudGVyMg==\n"}
+			deps := mcpTestDeps(t, kube)
+			target := save(t, deps, "secrets.")
+			result := callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{"target": target})
+			if result.IsError {
+				t.Fatalf("get_yaml refused: %s", toolText(result))
+			}
+			if len(kube.runs) != 1 || kube.runs[0][1] != string(kinds.Secret) {
+				t.Errorf("kubectl ran %v, want the canonical kind Secret in argv", kube.runs)
+			}
+			var out yamlOutput
+			decodeStructured(t, result, &out)
+			if out.Kind != string(kinds.Secret) || !out.Redacted {
+				t.Errorf("kind = %q, redacted = %v; want Secret, redacted", out.Kind, out.Redacted)
+			}
+		})
+		t.Run(via+" all", func(t *testing.T) {
+			kube := &recordingKubectl{}
+			deps := mcpTestDeps(t, kube)
+			_, err := deps.resolveTarget(save(t, deps, "all"))
+			if err == nil || !strings.Contains(err.Error(), "'all' is not one resource type") {
+				t.Fatalf("err = %v, want the 'all' refusal", err)
+			}
+			if len(kube.runs) != 0 || len(kube.probes) != 0 {
+				t.Errorf("kubectl ran %v / probed %v before validation refused it", kube.runs, kube.probes)
+			}
+		})
+	}
+}
