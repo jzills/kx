@@ -815,3 +815,29 @@ func TestRedactSecretNonMapDocument(t *testing.T) {
 		})
 	}
 }
+
+// The same for an index target whose resource has since gone: the agent never
+// gave a digit it can act on, and the resolved index is never echoed, so the
+// sentence names the resource and nothing like "index 0".
+func TestEventsToolStaleIndexTargetIsATranslatedError(t *testing.T) {
+	kube := &recordingKubectl{namespace: "prod", probeCode: 1}
+	deps := mcpDiagDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	result := callTool(t, connectMCP(t, deps), "events", map[string]any{
+		"target": map[string]any{"index": 1},
+	})
+	if !result.IsError {
+		t.Fatal("succeeded, want an error for a vanished resource")
+	}
+	text := toolText(result)
+	if strings.Contains(strings.ToLower(text), "index") {
+		t.Errorf("error mentions an index: %q", text)
+	}
+	if want := "Deployment/api no longer exists in prod."; text != want {
+		t.Errorf("error = %q, want %q", text, want)
+	}
+}
