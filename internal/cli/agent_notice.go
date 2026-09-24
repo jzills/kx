@@ -13,6 +13,11 @@ import (
 // a command reaching the tree without this annotation, or with the annotation
 // but not on the allowlist there, fails it — a new mutating command has to be
 // decided one way or the other rather than silently landing on either side.
+//
+// The annotation arms nothing itself: each command calls
+// installAgentIndexNotice from its own RunE, and some only on one path —
+// delete and drain only with --yes (without it, the confirm prompt names the
+// provenance instead), rollout only for an action that changes the workload.
 const mutatingAnnotation = "kx.mutating"
 
 // mutatingAnnotations is the cobra Command.Annotations value every mutating

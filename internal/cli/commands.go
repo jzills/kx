@@ -565,7 +565,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			command := DeleteCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
-				Confirm: render.Confirm,
+				Confirm: services.confirm(),
 				Status:  render.Status,
 			}
 			// Confirmed and reported one at a time, so declining one resource
@@ -678,7 +678,11 @@ func newRolloutCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
-			installAgentIndexNotice(services)
+			// Only for an action that changes the workload: status and
+			// history read, and a read-only command prints no notice.
+			if rolloutActionMutates(rest[0]) {
+				installAgentIndexNotice(services)
+			}
 			ref, err := parseRef("index", rest[1])
 			if err != nil {
 				return err

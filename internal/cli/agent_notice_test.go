@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"strings"
 	"testing"
 
@@ -226,23 +225,18 @@ func TestAgentIndexNoticeMultiIndexPrintsOnePerIndex(t *testing.T) {
 // no prompt. Drain is checked the same way.
 func TestAgentIndexNoticeDeleteAndDrainOnlyWithYes(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
-		// kx delete's RunE wires DeleteCommand.Confirm to the package-level
-		// render.Confirm directly rather than services.confirm() (unlike
-		// drain, below) — an existing quirk, not something this task
-		// changes — so the prompt is read from stdin (empty under go test,
-		// which aborts) and asserted on the printed prompt text in stdout
-		// rather than through a Services.Confirm override.
 		t.Run("without --yes: prompt suffix, no notice", func(t *testing.T) {
 			services := switchServices(t, &recordingKubectl{})
 			saveListing(t, services, kinds.Pod, "prod", true, "a", "b", "c")
+			var prompted string
+			services.Confirm = func(m string) error { prompted = m; return nil }
 
-			stdout, stderr, err := runCaptured(t, newDeleteCommand(services), []string{"3"})
-			var aborted render.ErrAborted
-			if !errors.As(err, &aborted) {
-				t.Fatalf("delete 3 (empty stdin): err = %v, want ErrAborted", err)
+			_, stderr, err := runCaptured(t, newDeleteCommand(services), []string{"3"})
+			if err != nil {
+				t.Fatalf("delete 3: %v", err)
 			}
-			if want := "Delete Pod/c in prod — from a kx mcp listing?"; !strings.Contains(stdout, want) {
-				t.Errorf("stdout = %q, want it to contain the prompt %q", stdout, want)
+			if want := "Delete Pod/c in prod — from a kx mcp listing?"; prompted != want {
+				t.Errorf("prompt = %q, want %q", prompted, want)
 			}
 			if strings.Contains(stderr, noticeSubstring) {
 				t.Errorf("stderr = %q, want no notice — the prompt already named the provenance", stderr)
@@ -395,5 +389,60 @@ func TestAgentIndexNoticeReprintsWhenTheResolutionChanges(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 		}
+	}
+}
+
+// kx delete 1 2 --yes over two tagged indexes prints a notice for each, the
+// way cordon does: --yes skips every prompt, so the notice is the only place
+// each index's provenance is named.
+func TestAgentIndexNoticeDeleteMultiIndexWithYes(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	saveListing(t, services, kinds.Pod, "prod", true, "a", "b")
+	services.Confirm = func(string) error { t.Error("prompted despite --yes"); return nil }
+
+	_, stderr, err := runCaptured(t, newDeleteCommand(services), []string{"1", "2", "--yes"})
+	if err != nil {
+		t.Fatalf("delete 1 2 --yes: %v", err)
+	}
+	if got := strings.Count(stderr, noticeSubstring); got != 2 {
+		t.Fatalf("notice printed %d times, want exactly 2:\n%s", got, stderr)
+	}
+	for _, want := range []string{
+		"Index 1 is from a kx mcp listing — Pod/a in prod. Run 'kx state' to see it.",
+		"Index 2 is from a kx mcp listing — Pod/b in prod. Run 'kx state' to see it.",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
+	}
+}
+
+// kx rollout arms the notice only for an action that changes the workload.
+// Every action in rolloutActions must be listed here on one side or the
+// other, so a new one forces the same decision the command pin does.
+func TestAgentIndexNoticeRolloutOnlyForMutatingActions(t *testing.T) {
+	mutates := map[string]bool{
+		"restart": true, "undo": true, "pause": true, "resume": true,
+		"status": false, "history": false,
+	}
+	for _, action := range rolloutActions {
+		want, decided := mutates[action.Name]
+		if !decided {
+			t.Errorf("rollout %s is on neither side — decide whether it warns", action.Name)
+			continue
+		}
+		t.Run(action.Name, func(t *testing.T) {
+			services := switchServices(t, &recordingKubectl{})
+			saveListing(t, services, kinds.Deployment, "prod", true, "api")
+
+			_, stderr, err := runCaptured(t, newRolloutCommand(services), []string{action.Name, "1"})
+			if err != nil {
+				t.Fatalf("rollout %s 1: %v", action.Name, err)
+			}
+			if got := strings.Count(stderr, noticeSubstring); got != map[bool]int{true: 1, false: 0}[want] {
+				t.Errorf("rollout %s printed the notice %d times, want mutating=%v:\n%s",
+					action.Name, got, want, stderr)
+			}
+		})
 	}
 }

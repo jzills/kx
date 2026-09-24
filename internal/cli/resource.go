@@ -156,13 +156,32 @@ var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSe
 // One ordered list rather than a set, because the same six names are the
 // command's validation, its help text and its shell completion, and three
 // copies of them drift.
-var rolloutActions = []struct{ Name, Doc string }{
-	{"status", "Show the rollout status"},
-	{"restart", "Restart the workload"},
-	{"pause", "Pause the rollout"},
-	{"resume", "Resume a paused rollout"},
-	{"history", "Show the revision history"},
-	{"undo", "Roll back to the previous revision"},
+//
+// Mutates says whether the action changes the workload, which is what arms
+// the agent-index notice (installAgentIndexNotice): status and history only
+// read, so spending an index from an agent's listing on them warns no more
+// than kx describe does.
+var rolloutActions = []struct {
+	Name, Doc string
+	Mutates   bool
+}{
+	{"status", "Show the rollout status", false},
+	{"restart", "Restart the workload", true},
+	{"pause", "Pause the rollout", true},
+	{"resume", "Resume a paused rollout", true},
+	{"history", "Show the revision history", false},
+	{"undo", "Roll back to the previous revision", true},
+}
+
+// rolloutActionMutates reports whether action changes the workload; false for
+// a read-only action and for an unknown one, which Execute refuses anyway.
+func rolloutActionMutates(action string) bool {
+	for _, candidate := range rolloutActions {
+		if candidate.Name == action {
+			return candidate.Mutates
+		}
+	}
+	return false
 }
 
 func isRolloutAction(action string) bool {
