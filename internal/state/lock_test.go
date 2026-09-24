@@ -2,7 +2,9 @@ package state
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -385,5 +387,53 @@ func TestSchemaResetByAReaderRereadsUnderTheLock(t *testing.T) {
 	marks, err := reader.Marks()
 	if err != nil || marks["keep"] != podMark("nginx") {
 		t.Errorf("marks = %+v (%v) — the reader reset over the newer file", marks, err)
+	}
+}
+
+// A lock file kx cannot open at all — neither for writing nor, on retry, for
+// reading — must not make every write fail. Before the lock existed kx wrote
+// state.json regardless of the lock file; it still does, unlocked, the way it
+// does on a filesystem that cannot lock.
+func TestUnopenableLockFileDegradesToAnUnlockedWrite(t *testing.T) {
+	original := openLockFile
+	var flags []int
+	openLockFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		flags = append(flags, flag)
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+	}
+	t.Cleanup(func() { openLockFile = original })
+
+	service := newTestService(t, 10)
+	if err := service.Save(State{Resources: pods("nginx"), Namespace: "prod"}); err != nil {
+		t.Fatalf("Save past an unopenable lock file = %v, want it to write unlocked", err)
+	}
+	if len(flags) != 2 || flags[1]&(os.O_WRONLY|os.O_RDWR) != 0 {
+		t.Errorf("open flags = %v, want a read-write open and then a read-only retry", flags)
+	}
+	loaded, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if names := loaded.Names(); len(names) != 1 || names[0] != "nginx" {
+		t.Errorf("Names() = %v, want [nginx] — the save did not write", names)
+	}
+}
+
+// Only a permission failure degrades. Any other failure to open the lock file
+// stays an error — it says nothing about whether the user merely lacks write
+// access to a file some other kx left behind.
+func TestOtherLockFileOpenErrorsStayHard(t *testing.T) {
+	original := openLockFile
+	openLockFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: errors.New("input/output error")}
+	}
+	t.Cleanup(func() { openLockFile = original })
+
+	service := newTestService(t, 10)
+	if err := service.Save(State{Resources: pods("nginx"), Namespace: "prod"}); err == nil {
+		t.Fatal("Save succeeded past a lock file that failed to open with an I/O error")
+	}
+	if _, err := os.Stat(service.Path); !os.IsNotExist(err) {
+		t.Errorf("state file exists (%v) — the save wrote without the lock", err)
 	}
 }
