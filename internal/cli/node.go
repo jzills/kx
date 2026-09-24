@@ -90,7 +90,7 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict all pods from Node/%s?", name)); err != nil {
+			"Evict all pods from Node/%s%s?", name, listingProvenance(c.State, ref))); err != nil {
 			return err
 		}
 	}

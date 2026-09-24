@@ -122,6 +122,70 @@ func TestStateNamesTheEntryContext(t *testing.T) {
 	}
 }
 
+// `kx state` captions a listing an agent made via kx mcp so the person reading
+// it knows they may not have seen it themselves, and leaves an ordinary
+// user-made listing's caption alone.
+func TestStateCaptionsAnAgentMadeListing(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+			Source:    state.SourceMCP,
+		})
+	})
+	if !strings.Contains(out, "via kx mcp") {
+		t.Errorf("output = %q, want the caption to say 'via kx mcp'", out)
+	}
+}
+
+func TestStateOmitsProvenanceForAUserMadeListing(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+		})
+	})
+	if strings.Contains(out, "via kx mcp") {
+		t.Errorf("output = %q, want no provenance note for a user-made listing", out)
+	}
+}
+
+// The VIA column only earns its place when some entry in the stack is tagged,
+// mirroring the CONTEXT column's spansContexts rule — and marks exactly those
+// rows, leaving the rest blank.
+func TestStateHistoryShowsViaColumnOnlyWhenSomeEntryIsTagged(t *testing.T) {
+	untagged := state.History{
+		States: []state.State{
+			{Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod"},
+		},
+		Cursor: 0,
+	}
+	out := capture(func(r *Renderer) { r.StateHistory(untagged) })
+	if strings.Contains(out, "VIA") {
+		t.Errorf("output = %q, want no VIA column when nothing is tagged", out)
+	}
+
+	tagged := state.History{
+		States: []state.State{
+			{Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod"},
+			{Resources: state.NewResources([]string{"redis"}, kinds.Pod), Namespace: "prod",
+				Source: state.SourceMCP},
+		},
+		Cursor: 1,
+	}
+	out = capture(func(r *Renderer) { r.StateHistory(tagged) })
+	if !strings.Contains(out, "VIA") {
+		t.Errorf("output = %q, want a VIA column once any entry is tagged", out)
+	}
+	if !strings.Contains(out, "kx mcp") {
+		t.Errorf("output = %q, want the tagged row to say 'kx mcp'", out)
+	}
+	// Exactly one row is tagged, so "kx mcp" appears once — not once per row.
+	if got := strings.Count(out, "kx mcp"); got != 1 {
+		t.Errorf("output contains %q %d times, want exactly 1 (the untagged row's cell is blank)", "kx mcp", got)
+	}
+}
+
 func slotHistory() state.History {
 	return state.History{
 		States: []state.State{{

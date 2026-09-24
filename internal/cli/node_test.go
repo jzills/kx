@@ -145,6 +145,37 @@ func TestDrainStreamsAndForwardsFlags(t *testing.T) {
 	}
 }
 
+// The drain confirm prompt carries the same provenance suffix delete's does.
+func TestDrainConfirmNamesAnMCPListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	var prompted string
+	command := DrainCommand{
+		Kubectl: kubectl, State: sourcedResolver{fakeResolver: node("node-a"), source: "mcp"},
+		Confirm: func(m string) error { prompted = m; return nil },
+	}
+	if err := command.Execute(state.Ref{Index: 1}, false, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Evict all pods from Node/node-a — from a kx mcp listing?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
+func TestDrainConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	var prompted string
+	command := DrainCommand{
+		Kubectl: kubectl, State: sourcedResolver{fakeResolver: node("node-a"), source: ""},
+		Confirm: func(m string) error { prompted = m; return nil },
+	}
+	if err := command.Execute(state.Ref{Index: 1}, false, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Evict all pods from Node/node-a?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
 func TestDrainRefusesANonNode(t *testing.T) {
 	command := DrainCommand{
 		Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment),

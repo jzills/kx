@@ -78,7 +78,8 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (str
 	// The prompt must stay outside the spinner: a prompt underneath a
 	// repainting status line cannot be read.
 	if !yes {
-		if err := c.Confirm(fmt.Sprintf("Delete %s/%s in %s?", kind, name, namespace)); err != nil {
+		if err := c.Confirm(fmt.Sprintf(
+			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(c.State, ref))); err != nil {
 			return "", err
 		}
 	}

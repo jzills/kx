@@ -194,7 +194,28 @@ type State struct {
 	// single-namespace — so an empty Namespace was "corrected" to "default" and
 	// every index resolved into the wrong namespace.
 	AllNamespaces bool `json:"allNamespaces,omitempty"`
+	// Source records what produced this listing: "" for a user's own kx get,
+	// tree, diagnose or scan, SourceMCP for one an MCP tool made on an agent's
+	// behalf. It exists so a confirm prompt on an index into an agent-made
+	// listing can say so — the human confirming a delete may not have seen
+	// that listing at all.
+	//
+	// Additive without a version bump, unlike Context: an absent Source reads
+	// as "" — user-made — which is the correct answer for every listing ever
+	// written before this field existed, not a stand-in that has to be
+	// reinterpreted once the real meaning is known. Context's absence had to
+	// mean something narrower ("unknown, waive the mismatch check") precisely
+	// because "no recorded context" is not the same claim as "this is the
+	// user's own" — there was no safe default for it to fall back to without
+	// weakening the check for every pre-upgrade entry. Source's default is
+	// exactly the fact old entries have: nobody had written the MCP server
+	// yet, so every one of them really was user-made.
+	Source string `json:"source,omitempty"`
 }
+
+// SourceMCP tags a listing an MCP tool saved on an agent's behalf, as opposed
+// to one the user made directly with kx get, tree, diagnose or scan.
+const SourceMCP = "mcp"
 
 // Names satisfies index.Resolver.
 func (s State) Names() []string { return s.Resources.Names() }
@@ -726,6 +747,19 @@ func (s *Service) Load() (State, error) {
 		return State{}, ErrNoState
 	}
 	return backfilled(history.States[history.Cursor]), nil
+}
+
+// CurrentSource reports the Source tag on the cursor entry — "" for a
+// user-made listing, SourceMCP for one an MCP tool made — so a caller that
+// only has an IndexResolver can ask the resolver rather than reaching into
+// State itself. ErrNoState passes through unchanged, the same failure Load
+// reports on an empty store.
+func (s *Service) CurrentSource() (string, error) {
+	entry, err := s.Load()
+	if err != nil {
+		return "", err
+	}
+	return entry.Source, nil
 }
 
 // LoadHistory returns the whole stack.

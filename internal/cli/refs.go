@@ -25,6 +25,35 @@ type IndexResolver interface {
 	Count() (int, error)
 }
 
+// listingProvenance reports the confirm-prompt suffix for a destructive
+// command's ref: " — from a kx mcp listing" when ref names a position in a
+// listing an MCP tool made, "" otherwise.
+//
+// Index refs only. A mark is pinned by a name the user chose, not read off
+// whatever listing happens to be current — resolving one tells you nothing
+// about the listing's provenance — so a mark ref always gets "".
+//
+// The resolver is checked via an optional interface, not added to
+// IndexResolver itself, so every existing fake that only implements Resolve/
+// ResolveExpecting/Fields/Count keeps compiling unchanged; only *state.Service
+// (and a test fake that opts in) answers CurrentSource. Any error from it —
+// including ErrNoState — is treated the same as "not from mcp": this is a
+// courtesy in a confirm prompt, never a reason to fail the command.
+func listingProvenance(resolver IndexResolver, ref state.Ref) string {
+	if ref.Mark != "" {
+		return ""
+	}
+	sourced, ok := resolver.(interface{ CurrentSource() (string, error) })
+	if !ok {
+		return ""
+	}
+	source, err := sourced.CurrentSource()
+	if err != nil || source != state.SourceMCP {
+		return ""
+	}
+	return " — from a kx mcp listing"
+}
+
 // Resolved is a reference together with what it resolved to, so a command that
 // has parsed its arguments does not have to ask again.
 type Resolved struct {

@@ -63,6 +63,20 @@ func workload(name string, kind kinds.Kind) fakeResolver {
 	return fakeResolver{name: name, namespace: "prod", kind: kind}
 }
 
+// sourcedResolver adds CurrentSource to fakeResolver, for tests that check the
+// "from a kx mcp listing" confirm-prompt suffix. Kept separate from
+// fakeResolver itself so every other test's fake keeps satisfying only
+// IndexResolver, the way listingProvenance's optional-interface check expects
+// existing fakes to.
+type sourcedResolver struct {
+	fakeResolver
+	source string
+}
+
+func (f sourcedResolver) CurrentSource() (string, error) {
+	return f.source, nil
+}
+
 // recordingKubectl captures every invocation so tests can assert on the exact
 // kubectl command line kx builds.
 type recordingKubectl struct {
@@ -473,6 +487,62 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 	}
 	if prompted {
 		t.Error("prompted despite --yes")
+	}
+}
+
+// The delete confirm prompt names the listing's provenance when the index came
+// from a kx mcp listing.
+func TestDeleteConfirmNamesAnMCPListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	var prompted string
+	_, err := DeleteCommand{
+		Kubectl: kubectl,
+		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
+		Confirm: func(m string) error { prompted = m; return nil },
+		Status:  noStatus,
+	}.Execute(state.Ref{Index: 1}, false, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Delete Pod/nginx in prod — from a kx mcp listing?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
+// An untagged listing gets no suffix at all.
+func TestDeleteConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	var prompted string
+	_, err := DeleteCommand{
+		Kubectl: kubectl,
+		State:   sourcedResolver{fakeResolver: pod("nginx"), source: ""},
+		Confirm: func(m string) error { prompted = m; return nil },
+		Status:  noStatus,
+	}.Execute(state.Ref{Index: 1}, false, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Delete Pod/nginx in prod?"; prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
+// A mark is not from a listing at all, so the suffix never applies to one —
+// even when the resolver's current listing happens to be tagged.
+func TestDeleteConfirmOmitsProvenanceForAMarkRef(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	var prompted string
+	_, err := DeleteCommand{
+		Kubectl: kubectl,
+		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
+		Confirm: func(m string) error { prompted = m; return nil },
+		Status:  noStatus,
+	}.Execute(state.Ref{Mark: "nginx"}, false, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Delete Pod/nginx in prod?"; prompted != want {
+		t.Errorf("prompt = %q, want %q — a mark is not from a listing", prompted, want)
 	}
 }
 

@@ -2650,3 +2650,168 @@ func TestDropMarksRemovesNothingWhenOneNameIsUnknown(t *testing.T) {
 		t.Errorf("marks = %+v, want both left — the batch removed nothing", marks)
 	}
 }
+
+// A user-made entry (Source unset) writes no "source" key at all — Source is
+// `json:"source,omitempty"` precisely so old installs and the on-disk schema
+// test don't grow a new key for every listing that isn't from kx mcp.
+func TestUserMadeEntryWritesNoSourceKey(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	data, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), `"source"`) {
+		t.Errorf("a user-made entry wrote a \"source\" key anyway:\n%s", data)
+	}
+}
+
+// A listing an MCP tool saved carries its tag through an ordinary save/load
+// round-trip, the same as every other field on State.
+func TestSourceRoundTripsThroughSaveAndLoad(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+
+	entry, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if entry.Source != SourceMCP {
+		t.Errorf("Source = %q, want %q", entry.Source, SourceMCP)
+	}
+}
+
+// A state file written before Source existed has no "source" key on its
+// entries. Source is additive, so it must decode as "" — user-made — without
+// tripping the schema-version reset every other incompatible shape gets.
+func TestEntryWithoutSourceKeyDecodesAsUserMade(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	entry, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if entry.Source != "" {
+		t.Errorf("Source = %q, want \"\" for a file written before Source existed", entry.Source)
+	}
+
+	// The file must not have been reset: a second read sees the same content,
+	// not a fresh, empty History the way an actual schema mismatch produces.
+	after, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != raw {
+		t.Errorf("state file was rewritten:\n got  %s\n want %s", after, raw)
+	}
+}
+
+// Navigate, Drop and a later user Save must never disturb the Source tag on
+// entries they don't touch — Save() once silently dropped Marks the same way.
+func TestSourceSurvivesNavigateDropAndSave(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "one"}}})
+	save(t, service, State{Resources: pods("two"), Namespace: "prod", Source: SourceMCP,
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "two"}}})
+	save(t, service, State{Resources: pods("three"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "three"}}})
+
+	assertMiddleTagged := func(step string) {
+		t.Helper()
+		history, err := service.LoadHistory()
+		if err != nil {
+			t.Fatalf("%s: LoadHistory: %v", step, err)
+		}
+		if len(history.States) != 3 {
+			t.Fatalf("%s: len(States) = %d, want 3", step, len(history.States))
+		}
+		for i, want := range []string{"", SourceMCP, ""} {
+			if got := history.States[i].Source; got != want {
+				t.Errorf("%s: States[%d].Source = %q, want %q", step, i, got, want)
+			}
+		}
+	}
+	assertMiddleTagged("after saving")
+
+	if _, err := service.Navigate(-1); err != nil {
+		t.Fatalf("Navigate(-1): %v", err)
+	}
+	assertMiddleTagged("after Navigate(-1)")
+
+	if _, err := service.Navigate(1); err != nil {
+		t.Fatalf("Navigate(1): %v", err)
+	}
+	assertMiddleTagged("after Navigate(1)")
+
+	// Drop the untagged first entry; the tagged one must keep its tag as it
+	// shifts down to position 1.
+	if _, err := service.Drop(1); err != nil {
+		t.Fatalf("Drop(1): %v", err)
+	}
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2 after Drop", len(history.States))
+	}
+	if history.States[0].Source != SourceMCP {
+		t.Errorf("States[0].Source = %q, want %q after dropping the entry ahead of it",
+			history.States[0].Source, SourceMCP)
+	}
+	if history.States[1].Source != "" {
+		t.Errorf("States[1].Source = %q, want \"\"", history.States[1].Source)
+	}
+
+	// A later user save (no Source set) must not retag the entries already there.
+	save(t, service, State{Resources: pods("four"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "four"}}})
+	history, err = service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Fatalf("len(States) = %d, want 3 after another user save", len(history.States))
+	}
+	if history.States[0].Source != SourceMCP {
+		t.Errorf("States[0].Source = %q, want %q — unrelated to the new save",
+			history.States[0].Source, SourceMCP)
+	}
+	if history.States[2].Source != "" {
+		t.Errorf("States[2].Source = %q, want \"\" — the new user-made entry", history.States[2].Source)
+	}
+}
+
+// CurrentSource answers with the cursor entry's tag, and ErrNoState when
+// there is nothing to read — the same failure Load reports.
+func TestCurrentSource(t *testing.T) {
+	service := newTestService(t, 10)
+	if _, err := service.CurrentSource(); !errors.Is(err, ErrNoState) {
+		t.Fatalf("CurrentSource on an empty store: err = %v, want ErrNoState", err)
+	}
+
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	source, err := service.CurrentSource()
+	if err != nil {
+		t.Fatalf("CurrentSource: %v", err)
+	}
+	if source != "" {
+		t.Errorf("CurrentSource = %q, want \"\" for a user-made listing", source)
+	}
+
+	save(t, service, State{Resources: pods("web"), Namespace: "prod", Source: SourceMCP,
+		Query: &Query{Resource: "pods", Args: []string{"web"}}})
+	source, err = service.CurrentSource()
+	if err != nil {
+		t.Fatalf("CurrentSource: %v", err)
+	}
+	if source != SourceMCP {
+		t.Errorf("CurrentSource = %q, want %q", source, SourceMCP)
+	}
+}
