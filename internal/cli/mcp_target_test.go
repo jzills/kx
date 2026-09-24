@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,5 +251,199 @@ func TestMarkToolAcceptsColonedRBACNames(t *testing.T) {
 	marks, _ := deps.State.Marks()
 	if marks["admin"].Name != "system:aggregate-to-admin" {
 		t.Errorf("marks = %+v, want admin on system:aggregate-to-admin", marks)
+	}
+}
+
+// An index target resolves through state.Service exactly as `kx describe 2`
+// would: the second row of whatever the user's terminal last listed, with the
+// kind, namespace and context that listing stamped.
+func TestResolveTargetResolvesAnIndex(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{})
+	if err := deps.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
+			{Name: "web", Kind: kinds.Deployment, Namespace: "staging"},
+		}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := deps.resolveTarget(mcpTarget{Index: 2})
+	if err != nil {
+		t.Fatalf("resolveTarget: %v", err)
+	}
+	if got.Kind != kinds.Deployment || got.Name != "web" || got.Namespace != "staging" {
+		t.Errorf("got %+v, want Deployment/web in staging (the second row)", got)
+	}
+}
+
+// Out of range, a literal zero (indistinguishable from an omitted index) and
+// no state at all each answer with kx's existing sentence for the failure,
+// rather than a new one invented for the server.
+func TestResolveTargetIndexFailuresGiveExistingSentences(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{})
+	if _, err := deps.resolveTarget(mcpTarget{Index: 1}); err == nil || !strings.Contains(err.Error(), "No state found") {
+		t.Errorf("no state: err = %v, want the no-state sentence", err)
+	}
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := deps.resolveTarget(mcpTarget{Index: 99}); err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("out of range: err = %v, want the out-of-range sentence", err)
+	}
+	// A literal 0 carries no kind, name or mark either, so it reads as an
+	// empty target — the same case "nothing" covers below — rather than as an
+	// index, since omitempty makes the two indistinguishable on the wire.
+	if _, err := deps.resolveTarget(mcpTarget{Index: 0}); err == nil {
+		t.Errorf("index 0: resolved, want a refusal")
+	}
+}
+
+// A listing taken in another context must never be spent here: the resource
+// it names may exist in this cluster too, under a different identity, so
+// resolving it would silently act on the wrong thing. Nothing may reach
+// kubectl before this is caught.
+func TestResolveTargetRefusesAnIndexFromAnotherContext(t *testing.T) {
+	kube := &recordingKubectl{}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod),
+		Namespace: "prod",
+		Context:   "a",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	_, err := deps.resolveTarget(mcpTarget{Index: 1})
+	if err == nil || !strings.Contains(err.Error(), "listed in context") {
+		t.Fatalf("err = %v, want a context-mismatch refusal", err)
+	}
+	if len(kube.runs) != 0 || len(kube.probes) != 0 {
+		t.Errorf("kubectl ran %v / probed %v, want none before a mismatch is caught", kube.runs, kube.probes)
+	}
+}
+
+// A target names exactly one of kind/name, a mark or an index — mixing any
+// two is refused with one sentence, before kubectl is ever asked anything.
+func TestResolveTargetRefusesMixingIndexWithMarkOrKindName(t *testing.T) {
+	kube := &recordingKubectl{}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	want := "A target is one of kind and name, a mark, or an index — give only one."
+	for name, target := range map[string]mcpTarget{
+		"index and mark":      {Index: 1, Mark: "api"},
+		"index and kind/name": {Index: 1, Kind: "pods", Name: "api"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := deps.resolveTarget(target)
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %v before the mix was refused", kube.runs)
+	}
+}
+
+// Every field a mark or an index hands back is held to the same shape a typed
+// target is: a stored name or kind that reads as a kubectl flag must be
+// refused before it reaches argv, exactly as a typed one is — closing the gap
+// where a mark or an index's fields were trusted outright.
+func TestResolveTargetValidatesResolvedFields(t *testing.T) {
+	t.Run("index", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		deps := mcpTestDeps(t, kube)
+		if err := deps.State.Save(state.State{
+			Resources: state.NewResources([]string{"-lapp=api"}, kinds.Pod), Namespace: "prod",
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		if _, err := deps.resolveTarget(mcpTarget{Index: 1}); err == nil {
+			t.Fatal("resolved a flag-shaped stored name, want a refusal")
+		}
+		if len(kube.runs) != 0 || len(kube.probes) != 0 {
+			t.Errorf("kubectl ran %v / probed %v before validation refused it", kube.runs, kube.probes)
+		}
+	})
+	t.Run("mark", func(t *testing.T) {
+		kube := &recordingKubectl{}
+		deps := mcpTestDeps(t, kube)
+		if err := deps.State.SaveMark("bad", state.Mark{
+			Resource: state.Resource{Name: "api", Kind: "--server=x", Namespace: "prod"},
+		}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		if _, err := deps.resolveTarget(mcpTarget{Mark: "bad"}); err == nil {
+			t.Fatal("resolved a flag-shaped stored kind, want a refusal")
+		}
+		if len(kube.runs) != 0 || len(kube.probes) != 0 {
+			t.Errorf("kubectl ran %v / probed %v before validation refused it", kube.runs, kube.probes)
+		}
+	})
+}
+
+// A CRD's own kind is stored dotted, not as a kubectl shorthand — validation
+// must not mistake that shape for something flag-like and refuse a
+// legitimate mark or index.
+func TestResolveTargetAcceptsAStoredCRDKind(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{})
+	if err := deps.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "web-tls", Kind: "certificates.cert-manager.io", Namespace: "prod"},
+		}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := deps.resolveTarget(mcpTarget{Index: 1})
+	if err != nil {
+		t.Fatalf("resolveTarget by index: %v", err)
+	}
+	if got.Kind != "certificates.cert-manager.io" || got.Name != "web-tls" {
+		t.Errorf("got %+v, want the stored CRD kind", got)
+	}
+
+	if err := deps.State.SaveMark("cert", state.Mark{
+		Resource: state.Resource{Name: "web-tls", Kind: "certificates.cert-manager.io", Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	got, err = deps.resolveTarget(mcpTarget{Mark: "cert"})
+	if err != nil {
+		t.Fatalf("resolveTarget by mark: %v", err)
+	}
+	if got.Kind != "certificates.cert-manager.io" {
+		t.Errorf("got %+v, want the stored CRD kind", got)
+	}
+}
+
+// The index itself is never echoed back: a client sees the kind, name and
+// namespace it resolved to and nothing that looks like a spendable number.
+func TestResolvedIndexTargetIsNotEchoedInOutput(t *testing.T) {
+	kube := &recordingKubectl{output: "deployment.apps/api\n"}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
+		"name": "culprit", "target": map[string]any{"index": 1},
+	})
+	if result.IsError {
+		t.Fatalf("mark refused an index target: %s", toolText(result))
+	}
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"index"`) {
+		t.Errorf("output = %s, want no index key", raw)
 	}
 }

@@ -28,9 +28,10 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "mark",
 		Description: "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand " +
-			"back the resource you found at fault. The target may itself be a mark, giving that resource a " +
-			"second name. Refuses a name that is already a mark, and a kind, name or namespace that is not " +
-			"shaped like one (a leading '-' reads as a kubectl flag). Writes kx's local state only, never the cluster.",
+			"back the resource you found at fault. The target may itself be a mark or an index from the " +
+			"user's listing, giving that resource a second name. Refuses a name that is already a mark, and " +
+			"a kind, name or namespace that is not shaped like one (a leading '-' reads as a kubectl flag). " +
+			"Writes kx's local state only, never the cluster.",
 		Annotations: &mcp.ToolAnnotations{Title: "Mark a resource", DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	}, serialized(deps, deps.mark))
 	mcp.AddTool(server, &mcp.Tool{

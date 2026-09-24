@@ -1,5 +1,5 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, or by a kx mark — a name the user pinned to a resource (list_marks shows them); mark pins one. Every tool is read-only against the cluster; mark alone writes anything, and only a name in kx's local state.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. Every tool is read-only against the cluster; mark alone writes anything, and only a name in kx's local state.",
   "tools": [
     {
       "name": "diagnose",
@@ -32,8 +32,12 @@
             "additionalProperties": false,
             "description": "One resource to diagnose. Omit to sweep a namespace.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -41,7 +45,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -194,8 +198,12 @@
             "additionalProperties": false,
             "description": "The resource whose events to show.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -203,7 +211,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -315,8 +323,12 @@
             "additionalProperties": false,
             "description": "The resource whose manifest to show.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -324,7 +336,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -549,8 +561,12 @@
             "additionalProperties": false,
             "description": "The Pod, or workload whose pods to aggregate, to show logs for.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -558,7 +574,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -614,7 +630,7 @@
     },
     {
       "name": "mark",
-      "description": "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand back the resource you found at fault. The target may itself be a mark, giving that resource a second name. Refuses a name that is already a mark, and a kind, name or namespace that is not shaped like one (a leading '-' reads as a kubectl flag). Writes kx's local state only, never the cluster.",
+      "description": "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand back the resource you found at fault. The target may itself be a mark or an index from the user's listing, giving that resource a second name. Refuses a name that is already a mark, and a kind, name or namespace that is not shaped like one (a leading '-' reads as a kubectl flag). Writes kx's local state only, never the cluster.",
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": false,
@@ -633,8 +649,12 @@
             "additionalProperties": false,
             "description": "The resource to mark.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -642,7 +662,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -739,8 +759,12 @@
             "additionalProperties": false,
             "description": "The workload whose images to scan: a Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job or CronJob. Omit to sweep a namespace.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -748,7 +772,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {
@@ -1017,8 +1041,12 @@
             "additionalProperties": false,
             "description": "The resource to graph. Omit to graph a namespace.",
             "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
               "kind": {
-                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given.",
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
                 "type": "string"
               },
               "mark": {
@@ -1026,7 +1054,7 @@
                 "type": "string"
               },
               "name": {
-                "description": "Resource name. Required unless mark is given.",
+                "description": "Resource name. Required unless mark or index is given.",
                 "type": "string"
               },
               "namespace": {

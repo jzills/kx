@@ -10,13 +10,17 @@ import (
 	"github.com/jzills/kx/internal/state"
 )
 
-// mcpTarget names one resource in a tool call: kind and name (and a namespace,
-// defaulting to the current one), or a mark. Never an index — see mcp.go.
+// mcpTarget names one resource in a tool call: kind and name (and a
+// namespace, defaulting to the current one), a mark, or an index — a row
+// number from the user's current kx listing, read live and resolved the same
+// way `kx describe 3` would be. See mcp.go for what an index reads and does
+// not do.
 type mcpTarget struct {
-	Kind      string `json:"kind,omitempty" jsonschema:"Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark is given."`
-	Name      string `json:"name,omitempty" jsonschema:"Resource name. Required unless mark is given."`
+	Kind      string `json:"kind,omitempty" jsonschema:"Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given."`
+	Name      string `json:"name,omitempty" jsonschema:"Resource name. Required unless mark or index is given."`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes."`
 	Mark      string `json:"mark,omitempty" jsonschema:"A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them."`
+	Index     int    `json:"index,omitempty" jsonschema:"A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it."`
 }
 
 // resolvedTarget is a target after normalisation. Mark is kept so a result can
@@ -28,22 +32,56 @@ type resolvedTarget struct {
 	Mark      string
 }
 
+// targetAmbiguous refuses a target that names more than one of its three
+// mutually exclusive shapes: kind/name(/namespace), a mark, or an index.
+func targetAmbiguous(target mcpTarget) error {
+	groups := 0
+	if target.Mark != "" {
+		groups++
+	}
+	if target.Index != 0 {
+		groups++
+	}
+	if target.Kind != "" || target.Name != "" || target.Namespace != "" {
+		groups++
+	}
+	if groups > 1 {
+		return errors.New("A target is one of kind and name, a mark, or an index — give only one.")
+	}
+	return nil
+}
+
 func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
-	if mark := strings.TrimPrefix(target.Mark, "@"); mark != "" {
-		if target.Kind != "" || target.Name != "" || target.Namespace != "" {
-			return resolvedTarget{}, errors.New(
-				"Give a target either a mark or kind and name, not both — a mark already records its kind, name and namespace.")
+	if err := targetAmbiguous(target); err != nil {
+		return resolvedTarget{}, err
+	}
+	if target.Index != 0 {
+		// The CLI's own resolution — index.Resolve's out-of-range refusal,
+		// checkContext's mismatch refusal, ErrNoState — is reused wholesale,
+		// so an agent's index is refused exactly as `kx describe 3` would be.
+		name, namespace, kind, err := d.State.Resolve(state.Ref{Index: target.Index})
+		if err != nil {
+			return resolvedTarget{}, err
 		}
+		if err := validateResolved(string(kind), name, namespace); err != nil {
+			return resolvedTarget{}, err
+		}
+		return resolvedTarget{Kind: kind, Name: name, Namespace: namespace}, nil
+	}
+	if mark := strings.TrimPrefix(target.Mark, "@"); mark != "" {
 		// state's own resolution, so a mark taken in another context is
 		// refused here exactly as `kx logs @api` refuses it.
 		name, namespace, kind, err := d.State.Resolve(state.Ref{Mark: mark})
 		if err != nil {
 			return resolvedTarget{}, err
 		}
+		if err := validateResolved(string(kind), name, namespace); err != nil {
+			return resolvedTarget{}, err
+		}
 		return resolvedTarget{Kind: kind, Name: name, Namespace: namespace, Mark: mark}, nil
 	}
 	if target.Kind == "" || target.Name == "" {
-		return resolvedTarget{}, errors.New("A target needs a kind and a name, or a mark.")
+		return resolvedTarget{}, errors.New("A target needs a kind and a name, a mark, or an index.")
 	}
 	if strings.ContainsAny(target.Kind, ",/") {
 		return resolvedTarget{}, fmt.Errorf(
@@ -153,6 +191,26 @@ func validNamespace(namespace string) error {
 		return fmt.Errorf(
 			"namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
 			namespace)
+	}
+	return nil
+}
+
+// validateResolved re-applies the flag-injection checks to a target resolved
+// via a mark or an index, whose kind, name and namespace came from the state
+// file rather than from the caller directly. A typed target is checked as it
+// is parsed; a mark or an index is checked here, once resolved, closing the
+// gap where either was trusted outright.
+func validateResolved(kind, name, namespace string) error {
+	if err := validKind(kind); err != nil {
+		return err
+	}
+	if err := validObjectName(name); err != nil {
+		return err
+	}
+	if namespace != "" {
+		if err := validNamespace(namespace); err != nil {
+			return err
+		}
 	}
 	return nil
 }

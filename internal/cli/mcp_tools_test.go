@@ -85,6 +85,29 @@ func TestMarkToolPinsAnExistingResourceWithTheLiveContext(t *testing.T) {
 	}
 }
 
+// mark {name, target:{index}} pins the resource the user's own listing put
+// at that row — the agent-side twin of `kx mark culprit 1`.
+func TestMarkToolAcceptsAnIndexTarget(t *testing.T) {
+	kube := &recordingKubectl{output: "deployment.apps/api\n"}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
+		"name": "culprit", "target": map[string]any{"index": 1},
+	})
+	if result.IsError {
+		t.Fatalf("mark refused an index target: %s", toolText(result))
+	}
+	marks, _ := deps.State.Marks()
+	mark, ok := marks["culprit"]
+	if !ok || mark.Kind != kinds.Deployment || mark.Name != "api" || mark.Namespace != "prod" {
+		t.Fatalf("marks = %+v, want culprit on Deployment/api in prod", marks)
+	}
+}
+
 // Marks belong to the user. An agent may add one, never move one.
 func TestMarkToolRefusesToOverwriteAMark(t *testing.T) {
 	deps := mcpTestDeps(t, &recordingKubectl{output: "pod/other\n"})
@@ -303,6 +326,27 @@ func TestDiagnoseOneTarget(t *testing.T) {
 	}
 	if out.Diagnosis.Resources[0].Index != 0 {
 		t.Errorf("index = %d, want none", out.Diagnosis.Resources[0].Index)
+	}
+}
+
+// diagnose works end to end through an index target: resolved against the
+// user's saved listing, the same way `kx diag 1` would.
+func TestDiagnoseAcceptsAnIndexTarget(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{}, brokenDeployment("api", "prod"))
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	var out diagnoseResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "diagnose", map[string]any{
+		"target": map[string]any{"index": 1},
+	}), &out)
+	if len(out.Diagnosis.Resources) != 1 || out.Diagnosis.Resources[0].Verdict != "critical" {
+		t.Fatalf("diagnosis = %+v", out.Diagnosis)
+	}
+	if out.Diagnosis.Resources[0].Index != 0 {
+		t.Errorf("index = %d, want none — the index is resolved, not echoed", out.Diagnosis.Resources[0].Index)
 	}
 }
 

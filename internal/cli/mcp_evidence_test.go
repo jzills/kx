@@ -492,6 +492,31 @@ func TestGetYamlToolReturnsTheManifest(t *testing.T) {
 	}
 }
 
+// get_yaml resolves an index target against the user's saved listing,
+// exactly as `kx yaml 1` would — the evidence tools' shared entry point into
+// resolveTarget.
+func TestGetYamlToolAcceptsAnIndexTarget(t *testing.T) {
+	kube := &recordingKubectl{output: "apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\n"}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	var out yamlOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "get_yaml", map[string]any{
+		"target": map[string]any{"index": 1},
+	}), &out)
+
+	want := []string{"get", "Deployment", "api", "-n", "prod", "-o", "yaml"}
+	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("kubectl args = %v, want %v", kube.runs, want)
+	}
+	if out.Kind != "Deployment" || out.Name != "api" || out.Namespace != "prod" {
+		t.Errorf("out = %+v", out)
+	}
+}
+
 func TestGetYamlToolFieldsNarrowsIt(t *testing.T) {
 	kube := &recordingKubectl{output: "apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\nstatus:\n  readyReplicas: 1\n"}
 	deps := mcpTestDeps(t, kube)

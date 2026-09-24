@@ -331,6 +331,28 @@ func TestMCPScanProgressTotalIsTheImagesScanned(t *testing.T) {
 
 // Like every other target-taking tool, scan echoes the mark a target was
 // given as, and leaves the field out otherwise.
+// scan resolves an index target against the user's saved listing, exactly as
+// `kx scan 1` would.
+func TestMCPScanAcceptsAnIndexTarget(t *testing.T) {
+	fake := &fakeScanner{captures: []captured{{image: "api:v1", stdout: "{}"}}}
+	deps, kube := scanDeps(t, fake, workloadJSON("api:v1"))
+	if err := deps.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	session := connectMCP(t, deps)
+	var out scanOutput
+	decodeStructured(t, callTool(t, session, "scan", map[string]any{"target": map[string]any{"index": 1}}), &out)
+	if out.Scan.Kind != kinds.Deployment || out.Scan.Name != "api" || out.Scan.Namespace != "prod" {
+		t.Errorf("subject = %s/%s in %s, want Deployment/api in prod", out.Scan.Kind, out.Scan.Name, out.Scan.Namespace)
+	}
+	want := []string{"get", "Deployment", "api", "-n", "prod", "-o", "json"}
+	if len(kube.runs) != 1 || !slices.Equal(kube.runs[0], want) {
+		t.Errorf("kubectl runs = %v, want [%v]", kube.runs, want)
+	}
+}
+
 func TestMCPScanEchoesTheMark(t *testing.T) {
 	fake := &fakeScanner{}
 	deps, _ := scanDeps(t, fake, workloadJSON("api:v1"), workloadJSON("api:v1"))

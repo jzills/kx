@@ -1,10 +1,11 @@
 // The MCP server: kx's analysis — ranked diagnostics, ownership trees, marks —
 // served to AI agents over the Model Context Protocol.
 //
-// Deliberately not the index workflow. Numbers save a person typing names; an
-// agent copies names perfectly, and an agent spending the user's indexes would
-// be acting on whatever listing the user has open. So nothing here takes or
-// returns an index, and nothing here writes the history stack.
+// A target names one resource by kind and name, by a mark, or by an index — a
+// row number from the user's current kx listing. An index read is always on:
+// it is read-only, resolved live against whatever the user's terminal has
+// open, and never echoed back as a number, so an agent copies the name
+// forward rather than the digit. Nothing here writes the history stack.
 package cli
 
 import (
@@ -151,9 +152,11 @@ func liveMCPDeps(services Services) mcpDeps {
 const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kubeconfig. " +
 	"Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, " +
 	"logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a " +
-	"kind by name. Resources are named by kind/name/namespace, or by a kx mark — a name the " +
-	"user pinned to a resource (list_marks shows them); mark pins one. Every tool is read-only " +
-	"against the cluster; mark alone writes anything, and only a name in kx's local state."
+	"kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the " +
+	"user pinned to a resource (list_marks shows them) — or by an index: a row number from the " +
+	"user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to " +
+	"the user before acting on an index. mark pins one. Every tool is read-only against the " +
+	"cluster; mark alone writes anything, and only a name in kx's local state."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	server := mcp.NewServer(
@@ -174,10 +177,10 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 			"diagnose and tree for a resource's health and ownership; events and logs for what " +
 			"happened; top for current usage; get_yaml for its manifest (Secrets redacted); and " +
 			"scan for image CVEs.\n\n" +
-			"Every tool is read-only against the cluster. Resources are named by kind and name " +
-			"or by a mark, never by index, and the server never touches the listing your " +
-			"terminal's indexes resolve against. The one thing it writes is a new mark, and it " +
-			"refuses to move one you already set.\n\n" +
+			"Every tool is read-only against the cluster. Resources are named by kind and name, " +
+			"by a mark, or by an index — a row number from your terminal's current listing, read " +
+			"live and never written back as a number. The one thing it writes is a new mark, and " +
+			"it refuses to move one you already set.\n\n" +
 			"The server follows your kubeconfig live: switch context and the next call reads " +
 			"the new cluster, and says so in its result.",
 		Example: "  claude mcp add kx -- kx mcp",
