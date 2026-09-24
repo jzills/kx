@@ -155,6 +155,10 @@ func TestLockTimeoutRefusesTheWrite(t *testing.T) {
 	select {
 	case err = <-result:
 	case <-time.After(time.Second):
+		// Let the writer finish before failing, so it cannot outlive the test
+		// and race its cleanup.
+		releaseHolder()
+		<-result
 		t.Fatal("Save waited past its 100ms LockTimeout — the deadline is ignored")
 	}
 	if err == nil || !strings.Contains(err.Error(), "Another kx is updating "+writer.Path+" — try again.") {
@@ -309,6 +313,7 @@ func TestSchemaResetByAReaderTakesTheLock(t *testing.T) {
 	case err = <-result:
 	case <-time.After(time.Second):
 		close(release)
+		<-result
 		t.Fatal("Load waited past its 100ms LockTimeout — the deadline is ignored")
 	}
 	close(release)
@@ -320,5 +325,65 @@ func TestSchemaResetByAReaderTakesTheLock(t *testing.T) {
 	}
 	if err := <-holderDone; err != nil {
 		t.Errorf("holder: %v", err)
+	}
+}
+
+// A reader that saw an old-version file waits for the lock to reset it, and by
+// the time it has the lock another kx may have rewritten the file at the
+// current version. The reader must read that file, not reset over it.
+func TestSchemaResetByAReaderRereadsUnderTheLock(t *testing.T) {
+	holder, reader := twoWriters(t, 10)
+	if err := os.WriteFile(holder.Path, []byte(`{"version": 0, "states": [], "cursor": 0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	held, release := make(chan struct{}), make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- holder.withLock(func() error {
+			close(held)
+			<-release
+			// The newer write, landing while the reader waits on the lock.
+			return holder.saveHistory(History{
+				States: []State{{Resources: pods("nginx"), Namespace: "prod"}},
+				Marks:  map[string]Mark{"keep": podMark("nginx")},
+			})
+		})
+	}()
+	<-held
+
+	// Learn when the reader has read the old file and gone for the lock.
+	original := tryLockFile
+	waiting := make(chan struct{})
+	var once sync.Once
+	tryLockFile = func(file *os.File) (bool, error) {
+		once.Do(func() { close(waiting) })
+		return original(file)
+	}
+	type loaded struct {
+		state State
+		err   error
+	}
+	result := make(chan loaded, 1)
+	go func() {
+		state, err := reader.Load()
+		result <- loaded{state, err}
+	}()
+	<-waiting
+	close(release)
+	got := <-result
+	tryLockFile = original
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+
+	if got.err != nil {
+		t.Fatalf("Load = %v, want the listing written while it waited", got.err)
+	}
+	if names := got.state.Names(); len(names) != 1 || names[0] != "nginx" {
+		t.Errorf("Load read %v, want [nginx]", names)
+	}
+	marks, err := reader.Marks()
+	if err != nil || marks["keep"] != podMark("nginx") {
+		t.Errorf("marks = %+v (%v) — the reader reset over the newer file", marks, err)
 	}
 }

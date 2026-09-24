@@ -26,3 +26,9 @@ func tryLock(file *os.File) (bool, error) {
 func unlock(file *os.File) error {
 	return unix.Flock(int(file.Fd()), unix.LOCK_UN)
 }
+
+// lockUnsupported reports an error meaning the filesystem cannot lock at all,
+// as opposed to the lock being held or the file being unusable.
+func lockUnsupported(err error) bool {
+	return errors.Is(err, unix.ENOLCK) || errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOTSUP)
+}

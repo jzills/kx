@@ -127,6 +127,25 @@ func TestMarkToolRefusesToOverwriteAMark(t *testing.T) {
 	}
 }
 
+// A taken name is refused before the target is even looked at: that refusal
+// wins over a target error, and it costs no kubectl round trip.
+func TestMarkToolRefusesATakenNameBeforeResolvingTheTarget(t *testing.T) {
+	kube := &recordingKubectl{output: "pod/other\n"}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.SaveMark("api", state.Mark{Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}}); err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
+		"name": "api", "target": map[string]any{"index": 99},
+	})
+	if !result.IsError || !strings.Contains(toolText(result), "@api already marks Pod/api-7d8f") {
+		t.Fatalf("result = %s, want the taken-name refusal", toolText(result))
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %v for a name that was already taken", kube.runs)
+	}
+}
+
 // A mark that points at nothing would resolve later into a NotFound the user
 // never caused; the resource has to exist when it is marked.
 func TestMarkToolRefusesAResourceThatDoesNotExist(t *testing.T) {

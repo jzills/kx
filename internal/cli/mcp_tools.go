@@ -181,6 +181,17 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 	if err := validMarkName(name); err != nil {
 		return nil, markOutput{}, err
 	}
+	// Advisory, and lock-free: a taken name is refused before the target is
+	// resolved, so that refusal wins over any target error and costs no
+	// kubectl round trip. SaveMarkIfAbsent below is what actually decides —
+	// the name can still be taken between here and there.
+	marks, err := d.State.Marks()
+	if err != nil {
+		return nil, markOutput{}, err
+	}
+	if existing, ok := marks[name]; ok {
+		return nil, markOutput{}, markTakenError(name, existing)
+	}
 	target, err := d.resolveTarget(in.Target)
 	if err != nil {
 		return nil, markOutput{}, err
@@ -202,11 +213,16 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 		return nil, markOutput{}, err
 	}
 	if existing != nil {
-		return nil, markOutput{}, fmt.Errorf(
-			"@%s already marks %s/%s — marks belong to the user, so this tool never moves one. Choose another name.",
-			name, existing.Kind, existing.Name)
+		return nil, markOutput{}, markTakenError(name, *existing)
 	}
 	return nil, markOutput{Context: mark.Context, Mark: mcpMarkOf(name, mark)}, nil
+}
+
+// markTakenError refuses a name that is already a mark.
+func markTakenError(name string, existing state.Mark) error {
+	return fmt.Errorf(
+		"@%s already marks %s/%s — marks belong to the user, so this tool never moves one. Choose another name.",
+		name, existing.Kind, existing.Name)
 }
 
 const (

@@ -30,3 +30,9 @@ func tryLock(file *os.File) (bool, error) {
 func unlock(file *os.File) error {
 	return windows.UnlockFileEx(windows.Handle(file.Fd()), 0, 1, 0, &windows.Overlapped{})
 }
+
+// lockUnsupported reports an error meaning the filesystem cannot lock at all,
+// as opposed to the lock being held or the file being unusable.
+func lockUnsupported(err error) bool {
+	return errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_FUNCTION)
+}

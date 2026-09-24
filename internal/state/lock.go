@@ -17,6 +17,10 @@ const defaultLockTimeout = 5 * time.Second
 // bounded: neither flock nor LockFileEx takes a timeout.
 const lockPollInterval = 25 * time.Millisecond
 
+// tryLockFile is tryLock behind a seam, so a test can stand in a filesystem
+// that does not support locking.
+var tryLockFile = tryLock
+
 // withLock runs fn while holding an exclusive lock on <path>.lock, so a
 // load-modify-save inside it is atomic against every other writer of the same
 // file — the CLI and a long-lived `kx mcp` server included.
@@ -34,6 +38,12 @@ const lockPollInterval = 25 * time.Millisecond
 // would let a third writer create and lock a fresh inode beside it, and both
 // would believe they were alone. A leftover file costs nothing: the OS drops
 // the lock itself when its holder exits, however it exits.
+//
+// A filesystem that cannot lock at all (flock over some NFS mounts, for one)
+// runs fn unlocked rather than failing. Refusing would make every kx write
+// fail for a user whose home lives there, over a race that needs two kx
+// writers overlapping; running unlocked is exactly what kx did before the
+// lock existed. Contention still waits, and any other error still fails.
 //
 // fn must not call withLock itself, on this or any Service for the same path:
 // the inner call opens a second descriptor and waits on the outer one.
@@ -57,7 +67,10 @@ func (s *Service) withLock(fn func() error) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		locked, err := tryLock(file)
+		locked, err := tryLockFile(file)
+		if err != nil && lockUnsupported(err) {
+			return fn()
+		}
 		if err != nil {
 			return fmt.Errorf("cannot lock %s: %w", file.Name(), err)
 		}
