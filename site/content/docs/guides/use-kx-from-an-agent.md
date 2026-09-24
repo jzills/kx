@@ -130,17 +130,30 @@ same as any new listing would.
 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes
 your *current* listing the moment it saves, so `kx delete 3` right after can
-mean the agent's row 3, not the one you last ran `kx get` for. Only `kx delete`
-and `kx drain` confirm and warn that an index came from an agent's listing.
-Every other command that spends an index — `kx scale`, `kx rollout`,
-`kx cordon`, `kx debug`, `kx edit`, `kx exec` and the rest — follows whatever
-listing is current, agent-made or not, with no warning. `kx state` shows which
-listing that is; `kx state back` is the way out if it isn't the one you
-meant. The same live-resolution rule that makes index reads useful also makes
-them relative: an index always
-resolves against whatever listing is current *at the moment of the call*, so
-relisting between speaking a number and the agent acting on it changes what
-that number means — in the terminal or from an agent, alike.
+mean the agent's row 3, not the one you last ran `kx get` for. Every command
+that spends an index now says so when the index it resolves came from an
+agent's listing. `kx delete` and `kx drain` fold that into their confirm
+prompt — the suffix appears before you answer it, and again, without a
+prompt, if you skip it with `--yes`/`-y`. Every other command that spends an
+index — `kx scale`, `kx rollout`, `kx cordon`, `kx debug`, `kx edit`,
+`kx exec`, `kx label`, `kx annotate`, `kx cp` and the rest — prints a muted
+line to stderr before it acts: `Index 3 is from a kx mcp listing —
+Pod/web-healthy-abc123. Run 'kx state' to see it.` It is a notice, not a
+prompt — nothing pauses, stdout is unchanged, and the exit code doesn't
+change either. `kx state` shows which listing is current; `kx state back` is
+the way out if it isn't the one you meant. The same live-resolution rule that
+makes index reads useful also makes them relative: an index always resolves
+against whatever listing is current *at the moment of the call*, so relisting
+between speaking a number and the agent acting on it changes what that number
+means — in the terminal or from an agent, alike.
+
+**Concurrent writers.** The CLI and a running `kx mcp` server can both be
+mid-write to `~/.kx/state.json` — a mark from your terminal while
+`--write-listings` saves a sweep, say. Every write takes a lock file beside
+the state file first, so one write finishes before the next one reads,
+instead of the two racing and one silently overwriting the other. A writer
+that can't get the lock within a few seconds fails rather than hanging or
+guessing.
 
 ## Secrets
 

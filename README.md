@@ -281,11 +281,11 @@ state. An index the agent is given is read against your current listing and
 never saved. Start it with `--write-listings` and the agent's own listings —
 `list_resources`, a diagnose sweep, `tree` and `top` — save to your history
 too, and become your current listing. They're tagged so `kx state` shows
-which listing is current and `kx delete`/`kx drain` warn before spending an
-agent's number; every other command that takes an index (`kx scale`,
-`kx rollout`, `kx exec`, …) follows the current listing with no warning. Agent
-listings also count toward `max_history`, so they can push your own off the
-stack.
+which listing is current and every command that spends an index warns before
+spending an agent's number — `kx delete`/`kx drain` fold it into their
+confirm prompt, and the rest (`kx scale`, `kx rollout`, `kx exec`, …) print a
+stderr notice. Agent listings also count toward `max_history`, so they can
+push your own off the stack.
 
 ```bash
 claude mcp add kx -- kx mcp --write-listings
