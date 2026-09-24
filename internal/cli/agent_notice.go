@@ -31,8 +31,15 @@ var mutatingAnnotations = map[string]string{mutatingAnnotation: "true"}
 // to act on it, and both reads reach the same *state.Service.OnAgentIndex.
 // Without the dedup, one spent index would print two identical lines. A
 // second, distinct tagged index in the same batch — kx cordon 1 2 — still
-// gets its own line, because the set is keyed by index, not by a single
-// "already printed" flag.
+// gets its own line, because the set is keyed by what was resolved, not by a
+// single "already printed" flag.
+//
+// The key is the whole resolution — index, kind, name and namespace — not the
+// index alone. The two reads are two loads of state.json, and a listing saved
+// between them (a `kx mcp --write-listings` server, say) can make the same
+// index resolve to a different resource the second time. Keyed by index, the
+// notice would name the first resource while the command acted on the second;
+// keyed by resolution, the changed read prints its own line.
 //
 // A no-op when services.State is nil: several existing tests build a
 // mutating command's cobra.Command over a literal Services{} to exercise pure
@@ -43,12 +50,18 @@ func installAgentIndexNotice(services Services) {
 	if services.State == nil {
 		return
 	}
-	seen := map[int]bool{}
+	type resolution struct {
+		index           int
+		kind            kinds.Kind
+		name, namespace string
+	}
+	seen := map[resolution]bool{}
 	services.State.OnAgentIndex = func(index int, kind kinds.Kind, name, namespace string) {
-		if seen[index] {
+		key := resolution{index, kind, name, namespace}
+		if seen[key] {
 			return
 		}
-		seen[index] = true
+		seen[key] = true
 		render.Notice(agentIndexNotice(index, kind, name, namespace))
 	}
 }

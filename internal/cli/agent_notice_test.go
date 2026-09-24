@@ -361,3 +361,39 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		}
 	}
 }
+
+// A command that resolves the same ref twice — once in RunE, again in the
+// Execute method that acts — can see two different resources if a listing is
+// saved between the reads (a `kx mcp` server with --write-listings, say). The
+// notice must then name both: one line describing Pod/a while the command acts
+// on Pod/b is worse than no notice. An identical double-read still collapses.
+func TestAgentIndexNoticeReprintsWhenTheResolutionChanges(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	var out, errOut bytes.Buffer
+	render.SetOutput(&out, &errOut, "github-dark")
+	installAgentIndexNotice(services)
+
+	saveListing(t, services, kinds.Pod, "prod", true, "a")
+	for range 2 {
+		if _, _, _, err := services.State.Fields(1); err != nil {
+			t.Fatalf("Fields(1): %v", err)
+		}
+	}
+	saveListing(t, services, kinds.Pod, "prod", true, "b")
+	if _, _, _, err := services.State.Fields(1); err != nil {
+		t.Fatalf("Fields(1): %v", err)
+	}
+
+	stderr := errOut.String()
+	if got := strings.Count(stderr, noticeSubstring); got != 2 {
+		t.Fatalf("notice printed %d times, want 2 — one per distinct resolution:\n%s", got, stderr)
+	}
+	for _, want := range []string{
+		"Index 1 is from a kx mcp listing — Pod/a in prod. Run 'kx state' to see it.",
+		"Index 1 is from a kx mcp listing — Pod/b in prod. Run 'kx state' to see it.",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
+	}
+}
