@@ -2863,3 +2863,119 @@ func TestResolveWithSourceMatchesResolveOnFailure(t *testing.T) {
 		t.Errorf("ResolveWithSource(99) err = %v, want the same as Fields(99): %v", gotErr, wantErr)
 	}
 }
+
+// hookCall is one OnAgentIndex invocation, recorded in call order.
+type hookCall struct {
+	index           int
+	kind            kinds.Kind
+	name, namespace string
+}
+
+// recordAgentIndexCalls wires a Service's OnAgentIndex hook to append every
+// call it receives to a slice, so a test can assert both whether it fired and
+// what it was told.
+func recordAgentIndexCalls(service *Service) *[]hookCall {
+	calls := &[]hookCall{}
+	service.OnAgentIndex = func(index int, kind kinds.Kind, name, namespace string) {
+		*calls = append(*calls, hookCall{index: index, kind: kind, name: name, namespace: namespace})
+	}
+	return calls
+}
+
+// Task 2, test (a): the hook fires only for an index ref resolved into a
+// tagged entry — never for an untagged one, never for a mark, and never for
+// FieldsNamed's slot lookup — and it fires with the resolved kind, name and
+// namespace, once per resolution.
+func TestOnAgentIndexFiresOnlyForIndexRefsIntoTaggedEntries(t *testing.T) {
+	t.Run("untagged entry: no call", func(t *testing.T) {
+		service := newTestService(t, 10)
+		calls := recordAgentIndexCalls(service)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none for an untagged entry", *calls)
+		}
+	})
+
+	t.Run("tagged entry: one call naming the resolved resource", func(t *testing.T) {
+		service := newTestService(t, 10)
+		calls := recordAgentIndexCalls(service)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields: %v", err)
+		}
+		if len(*calls) != 1 {
+			t.Fatalf("calls = %+v, want exactly 1", *calls)
+		}
+		got := (*calls)[0]
+		if got.index != 1 || got.kind != kinds.Pod || got.name != "api" || got.namespace != "prod" {
+			t.Errorf("call = %+v, want index 1, Pod/api in prod", got)
+		}
+	})
+
+	t.Run("mark ref: no call, even into a tagged entry", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		if err := service.SaveMark("db", Mark{Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"}}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, _, err := service.Resolve(Ref{Mark: "db"}); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none for a mark ref", *calls)
+		}
+	})
+
+	t.Run("FieldsNamed: no call, even into a tagged slot", func(t *testing.T) {
+		service := newTestService(t, 10)
+		if err := service.SaveNamed(State{
+			Resources: NewResources([]string{"default", "prod"}, kinds.Namespace),
+			Source:    SourceMCP,
+		}); err != nil {
+			t.Fatalf("SaveNamed: %v", err)
+		}
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, err := service.FieldsNamed(2, kinds.Namespace); err != nil {
+			t.Fatalf("FieldsNamed: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none — FieldsNamed reads a slot, not the current listing", *calls)
+		}
+	})
+
+	t.Run("ResolveWithSource and Resolve fire the hook the same way Fields does", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, _, _, err := service.ResolveWithSource(Ref{Index: 1}); err != nil {
+			t.Fatalf("ResolveWithSource: %v", err)
+		}
+		if len(*calls) != 1 {
+			t.Errorf("calls = %+v after ResolveWithSource, want exactly 1", *calls)
+		}
+
+		if _, _, _, err := service.Resolve(Ref{Index: 1}); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(*calls) != 2 {
+			t.Errorf("calls = %+v after Resolve, want exactly 2", *calls)
+		}
+	})
+
+	t.Run("nil hook is inert", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields with no hook installed: %v", err)
+		}
+	})
+}

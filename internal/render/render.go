@@ -119,6 +119,15 @@ func (r *Renderer) Error(msg string) {
 	fmt.Fprintln(r.err, r.style(theme.Error, "✗")+" "+r.emphasizeQuoted(msg, theme.Body))
 }
 
+// Notice reports a fact about a command's target that is neither a success
+// nor a failure — an index spent came from an agent's listing, say — so it
+// carries no glyph, unlike Success and Error. On stderr, so piped stdout
+// stays clean, and muted, so it reads as a caption rather than a result.
+// Quoted fragments are accented the same way Error's are, via emphasizeQuoted.
+func (r *Renderer) Notice(msg string) {
+	fmt.Fprintln(r.err, r.emphasizeQuoted(msg, theme.Muted))
+}
+
 // emphasizeQuoted accents 'single-quoted' fragments within an otherwise
 // uniformly styled message.
 func (r *Renderer) emphasizeQuoted(msg, base string) string {
@@ -208,6 +217,7 @@ func (r *Renderer) Raw(text string) { r.line(text) }
 
 func Success(msg string)                    { current.Success(msg) }
 func Error(msg string)                      { current.Error(msg) }
+func Notice(msg string)                     { current.Notice(msg) }
 func Caption(parts ...string)               { current.Caption(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }

@@ -318,6 +318,18 @@ type Service struct {
 	// state file's lock (see withLock). Zero means five seconds, which is
 	// what a Service built literally gets.
 	LockTimeout time.Duration
+	// OnAgentIndex, when set, is called after fieldsWithSource resolves an
+	// index into an entry whose Source is SourceMCP — the hook a mutating
+	// command arms to tell the user an index it is about to spend came from
+	// an agent's listing, before it acts.
+	//
+	// Nil means off, which is what a Service built literally has and what
+	// every read that does not go through fieldsWithSource leaves untouched:
+	// FieldsNamed resolves against a kind's slot, not the current listing,
+	// and resolveMark resolves a name the user pinned, not a position in one
+	// — neither is "which entry in the current listing", the one question
+	// this hook watches.
+	OnAgentIndex func(index int, kind kinds.Kind, name, namespace string)
 }
 
 // context reports the active context, or "" when no hook is wired.
@@ -1273,7 +1285,11 @@ func (s *Service) fieldsWithSource(idx int) (name, namespace string, kind kinds.
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	return name, namespaceAt(current, idx), kind, current.Source, nil
+	namespace = namespaceAt(current, idx)
+	if current.Source == SourceMCP && s.OnAgentIndex != nil {
+		s.OnAgentIndex(idx, kind, name, namespace)
+	}
+	return name, namespace, kind, current.Source, nil
 }
 
 // resolveMark looks a mark up and refuses one taken in another cluster.

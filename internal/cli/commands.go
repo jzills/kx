@@ -371,6 +371,7 @@ func newEditCommand(services Services) *cobra.Command {
 		Long:               "Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.",
 		Example:            "  kx edit 2",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -382,6 +383,7 @@ func newEditCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("edit requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -409,6 +411,7 @@ func newExecCommand(services Services) *cobra.Command {
 			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -419,6 +422,7 @@ func newExecCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("exec requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -463,6 +467,7 @@ func newDebugCommand(services Services) *cobra.Command {
 		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
 			"  kx debug 1 -- ls /proc/1/root\n  kx debug 1 -- ls /host/var/log",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -479,6 +484,7 @@ func newDebugCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("debug requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -526,6 +532,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -533,6 +540,13 @@ func newDeleteCommand(services Services) *cobra.Command {
 				return err
 			}
 			yes, rest := extractBool(rest, "--yes", "-y")
+			// Only with --yes: without it, the confirm prompt already names
+			// the listing's provenance (listingProvenance), and printing the
+			// notice too would say the same thing twice — once as a question
+			// the user must answer, once as a statement they didn't ask for.
+			if yes {
+				installAgentIndexNotice(services)
+			}
 			indexArgs, extra := splitLeadingIndexes(rest)
 			if len(indexArgs) == 0 {
 				if len(rest) > 0 {
@@ -589,6 +603,7 @@ func newScaleCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -598,6 +613,7 @@ func newScaleCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -652,6 +668,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -661,6 +678,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[1])
 			if err != nil {
 				return err
@@ -745,6 +763,7 @@ func newCopyCommand(services Services) *cobra.Command {
 		// MinimumNArgs(2) gate before RunE ever saw it. The real "need a
 		// source and a destination" check happens below, once passthrough
 		// has already resolved --help.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -754,6 +773,7 @@ func newCopyCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return fmt.Errorf("cp requires a source and a destination")
 			}
+			installAgentIndexNotice(services)
 			return CopyCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(rest[0], rest[1], rest[2:])
 		},
@@ -911,12 +931,14 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 		overwrite bool
 	)
 	cmd := &cobra.Command{
-		Use:     verb + " <index> [key=value...]",
-		Short:   short,
-		Long:    long,
-		Args:    minArgs(1),
-		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
+		Use:         verb + " <index> [key=value...]",
+		Short:       short,
+		Long:        long,
+		Args:        minArgs(1),
+		Example:     "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
+		Annotations: mutatingAnnotations,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", args[0])
 			if err != nil {
 				return err
