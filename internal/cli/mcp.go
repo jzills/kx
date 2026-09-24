@@ -212,7 +212,9 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"user pinned to a resource (list_marks shows them) — or by an index: a row number from the " +
 	"user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to " +
 	"the user before acting on an index. mark pins one. If results carry an index, that is the " +
-	"row's number in the user's kx history, and the user can spend it in kx. Every tool is " +
+	"row's number in the user's kx history, and the user can spend it in kx: that listing is now " +
+	"the user's current one, so an index given to you after it refers to your listing, not an " +
+	"earlier one of theirs. Every tool is " +
 	"read-only against the cluster; anything written goes only to kx's local state."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {

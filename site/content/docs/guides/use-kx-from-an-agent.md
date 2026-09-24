@@ -1,6 +1,6 @@
 ---
 title: Use kx from an agent
-description: kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only against the cluster, with index sharing opt-in.
+description: kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only against the cluster; it reads your indexes always, and saves its own listings only if you opt in.
 weight: 9
 ---
 
@@ -65,7 +65,7 @@ adds: it refuses any name that is already a mark, even one on the same
 resource, and there is no tool to remove one.
 
 By default, the server never touches the history your `kx get` builds. An
-agent's `list_resources`, `diagnose` or `tree` never saves a listing, so
+agent's `list_resources`, `diagnose`, `tree` or `top` never saves a listing, so
 `kx 3` in your terminal resolves the same resource before, during and after
 an agent session runs alongside it. That only changes if you start the server
 with `--write-listings` — see the next section.
@@ -90,6 +90,10 @@ from then on.
 Indexes cross the bridge between your terminal and the agent in both
 directions.
 
+The server uses the `KX_STATE` and `KUBECONFIG` its MCP client launched it
+with, not your shell's. If your terminal sets a different `KX_STATE`, the
+bridge looks at a different state file from yours, in both directions.
+
 **Terminal → agent.** You run `kx get pods`, then tell an agent "diagnose 3".
 Give the agent an `index` of `3` in place of a `kind`/`name` target — a mark
 also works the same way — and it resolves against whatever listing your
@@ -103,26 +107,37 @@ a `diagnose` sweep, `tree`, `top` — are never saved, so there's nothing in
 them for you to spend from your shell. Start the server with
 `--write-listings` and that changes: those four tools save what they list to
 your kx history exactly as the matching CLI command would, and return each
-row's index. `kx tree 3` counts as a listing tool for this too — a `tree`
-call with a target still saves the whole walk it returns, so a node it shows
-you keeps the index it was saved at.
+row's index. An agent's `tree` call with a target (the analogue of
+`kx tree 3`) still saves the whole walk it returns, so a node it shows you
+keeps the index it was saved at. Each listing is stamped with the context it
+was read in, so if you switch context while an agent's sweep is running, its
+numbers are refused in the new context rather than resolved there.
 
 ```bash
 claude mcp add kx -- kx mcp --write-listings
 ```
 
 An agent-made listing is tagged, so you can tell it apart from your own:
-`kx state` shows it with a `via kx mcp` caption, and `kx delete`/`kx drain`
+`kx state` shows it with a `via kx mcp` caption, `kx state --all` adds a VIA
+column naming `kx mcp` beside each agent entry, and `kx delete`/`kx drain`
 add "— from a kx mcp listing" to their confirm prompt when the index you're
 spending resolves against one. Past that tag, it's an ordinary entry on your
-history stack — `kx state back` steps behind it like any other listing.
+history stack — `kx state back` steps behind it like any other listing. That
+cuts both ways: agent listings count toward `max_history` (10 by default), so
+a busy agent can push your own listings off the stack, and an agent save while
+you've stepped back with `kx state back` drops the entries ahead of you, the
+same as any new listing would.
 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes
 your *current* listing the moment it saves, so `kx delete 3` right after can
-mean the agent's row 3, not the one you last ran `kx get` for. The tag and
-the confirm wording are there so you notice before you answer yes; `kx state
-back` is the way out if you didn't mean to act on it. The same live-resolution
-rule that makes index reads useful also makes them relative: an index always
+mean the agent's row 3, not the one you last ran `kx get` for. Only `kx delete`
+and `kx drain` confirm and warn that an index came from an agent's listing.
+Every other command that spends an index — `kx scale`, `kx rollout`,
+`kx cordon`, `kx debug`, `kx edit`, `kx exec` and the rest — follows whatever
+listing is current, agent-made or not, with no warning. `kx state` shows which
+listing that is; `kx state back` is the way out if it isn't the one you
+meant. The same live-resolution rule that makes index reads useful also makes
+them relative: an index always
 resolves against whatever listing is current *at the moment of the call*, so
 relisting between speaking a number and the agent acting on it changes what
 that number means — in the terminal or from an agent, alike.
