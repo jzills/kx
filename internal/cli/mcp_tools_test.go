@@ -127,6 +127,49 @@ func TestMarkToolRefusesToOverwriteAMark(t *testing.T) {
 	}
 }
 
+// racingKubectl runs onRun inside each Run call, before answering it — a hook
+// for something that happens while the tool waits on kubectl.
+type racingKubectl struct {
+	*recordingKubectl
+	onRun func()
+}
+
+func (k *racingKubectl) Run(args []string) (string, error) {
+	if k.onRun != nil {
+		k.onRun()
+	}
+	return k.recordingKubectl.Run(args)
+}
+
+// The advisory check sees a free name, then the user marks it from a terminal
+// while the tool is off asking kubectl whether the target exists. The write
+// that follows must refuse, not move the user's new mark: SaveMarkIfAbsent,
+// not SaveMark, is what decides.
+func TestMarkToolRefusesANameTakenWhileItChecked(t *testing.T) {
+	kube := &racingKubectl{recordingKubectl: &recordingKubectl{output: "pod/other\n"}}
+	deps := mcpTestDeps(t, kube)
+	users := state.Mark{Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}}
+	kube.onRun = func() {
+		if err := deps.State.SaveMark("api", users); err != nil {
+			t.Errorf("the user's SaveMark: %v", err)
+		}
+	}
+
+	result := callTool(t, connectMCP(t, deps), "mark", map[string]any{
+		"name": "api", "target": map[string]any{"kind": "pods", "name": "other", "namespace": "prod"},
+	})
+	if len(kube.runs) != 1 {
+		t.Fatalf("kubectl runs = %v, want the one existence check the race rides on", kube.runs)
+	}
+	if !result.IsError || !strings.Contains(toolText(result), "@api already marks Pod/api-7d8f") {
+		t.Fatalf("result = %s, want the taken-name refusal naming the user's mark", toolText(result))
+	}
+	marks, _ := deps.State.Marks()
+	if marks["api"] != users {
+		t.Errorf("@api = %+v, want the user's mark %+v untouched", marks["api"], users)
+	}
+}
+
 // A taken name is refused before the target is even looked at: that refusal
 // wins over a target error, and it costs no kubectl round trip.
 func TestMarkToolRefusesATakenNameBeforeResolvingTheTarget(t *testing.T) {
