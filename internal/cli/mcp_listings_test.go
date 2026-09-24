@@ -16,6 +16,12 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // These pin kx mcp --write-listings: each listing tool saves exactly the entry
@@ -477,6 +483,11 @@ func TestWriteListingsTopSavesLikeKxTop(t *testing.T) {
 			_, _, err := c.ExecuteNodes("", nil)
 			return err
 		}},
+		{"all namespaces", []string{topAllNamespacesOutput, allNamespacesPodsJSON},
+			map[string]any{"allNamespaces": true}, kinds.Pod, func(c TopCommand) error {
+				_, _, err := c.Execute("", []string{"-A"}, false)
+				return err
+			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps := writingDeps(t, &recordingKubectl{outputs: append([]string{}, tc.outputs...), namespace: "prod"})
@@ -661,5 +672,196 @@ func TestWriteListingsFlagIsRegisteredAndReachesTheDeps(t *testing.T) {
 	services := Services{State: &state.Service{}}
 	if liveMCPDeps(services, false).WriteListings || !liveMCPDeps(services, true).WriteListings {
 		t.Error("liveMCPDeps does not carry the flag")
+	}
+}
+
+// The top rows a limit keeps carry the positions they were saved at, and the
+// row it cut still resolves at its own.
+func TestWriteListingsTopLimitKeepsSavedPositions(t *testing.T) {
+	deps := writingDeps(t, &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}, namespace: "prod"})
+	var out indexedTopOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "top", map[string]any{"limit": 1}), &out)
+	if len(out.Top.Rows) != 1 || out.Top.Rows[0].Index != 1 {
+		t.Fatalf("rows = %+v, want one row at 1", out.Top.Rows)
+	}
+	assertResolves(t, deps.State, 1, kinds.Pod, out.Top.Rows[0].Name, "prod")
+	entry := onlyTaggedEntry(t, deps.State)
+	if entry.Resources.Len() != 2 {
+		t.Fatalf("saved %d rows, want both", entry.Resources.Len())
+	}
+	cut := entry.Resources.Entries()[1]
+	assertResolves(t, deps.State, 2, kinds.Pod, cut.Name, "prod")
+	if cut.Name == out.Top.Rows[0].Name {
+		t.Errorf("the cut row is the kept one: %s", cut.Name)
+	}
+}
+
+// twoNamespaceTreeDeps is two namespaces, each a Deployment → ReplicaSet →
+// three pods of one container: 1 + 1 + 3 + 3 = 8 nodes under each
+// Namespace root, 18 in all.
+func twoNamespaceTreeDeps(t *testing.T) mcpDeps {
+	t.Helper()
+	var objects []runtime.Object
+	for _, ns := range []string{"a", "b"} {
+		objects = append(objects,
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns, UID: types.UID(ns + "-d")}},
+			&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
+				Name: "web-abc", Namespace: ns, UID: types.UID(ns + "-rs"),
+				OwnerReferences: []metav1.OwnerReference{{UID: types.UID(ns + "-d")}},
+			}})
+		for i := range 3 {
+			objects = append(objects, &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("web-abc-%d", i), Namespace: ns, UID: types.UID(fmt.Sprintf("%s-p%d", ns, i)),
+					OwnerReferences: []metav1.OwnerReference{{UID: types.UID(ns + "-rs")}},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			})
+		}
+	}
+	deps := mcpDiagDeps(t, &recordingKubectl{namespace: "a"}, objects...)
+	deps.WriteListings = true
+	return deps
+}
+
+// collectTreeRows is collectTreeIndexes with each node's namespace: the
+// Namespace root a node sits under.
+func collectTreeRows(t *testing.T, roots []jsonTreeNode) map[int][2]string {
+	t.Helper()
+	rows := map[int][2]string{}
+	for _, root := range roots {
+		for _, node := range collectTreeIndexes(t, []jsonTreeNode{root}) {
+			rows[node.Index] = [2]string{node.Name, root.Name}
+		}
+	}
+	return rows
+}
+
+// An -A forest cut by a limit: the numbers kept run continuously across the
+// namespaces and are the saved positions, each resolving into its own
+// namespace — same-named resources in a and b included — and what the cut
+// dropped resolves too.
+func TestWriteListingsTreeAcrossNamespacesPrunedByLimitKeepsSavedPositions(t *testing.T) {
+	deps := twoNamespaceTreeDeps(t)
+	var out boundedTreeResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "tree",
+		map[string]any{"allNamespaces": true, "limit": 7}), &out)
+	if out.Truncated == 0 {
+		t.Fatal("the limit cut nothing; the test needs a pruned forest")
+	}
+	rows := collectTreeRows(t, out.Tree.Roots)
+	namespaces := map[string]bool{}
+	for index, row := range rows {
+		namespaces[row[1]] = true
+		name, namespace, _, err := deps.State.Fields(index)
+		if err != nil || name != row[0] || namespace != row[1] {
+			t.Errorf("index %d resolves to %s in %q, %v; the tool showed %s in %q",
+				index, name, namespace, err, row[0], row[1])
+		}
+	}
+	if !namespaces["a"] || !namespaces["b"] {
+		t.Fatalf("shown rows %v, want rows from both namespaces", rows)
+	}
+	entry := onlyTaggedEntry(t, deps.State)
+	if entry.Resources.Len() != 10 {
+		t.Fatalf("saved %d resources, want all 10 the walk indexed", entry.Resources.Len())
+	}
+	last := entry.Resources.Entries()[9]
+	if _, shown := rows[10]; shown {
+		t.Fatal("index 10 was shown; the test needs it pruned")
+	}
+	assertResolves(t, deps.State, 10, last.Kind, last.Name, "b")
+	if last.Name != "web-abc-2" || last.Namespace != "b" {
+		t.Errorf("saved position 10 = %+v, want b's last pod", last)
+	}
+}
+
+// The namespace walk (no target) cut by a limit keeps saved positions too.
+func TestWriteListingsNamespaceTreePrunedByLimitKeepsSavedPositions(t *testing.T) {
+	deps := wideTreeDeps(t)
+	deps.WriteListings = true
+	var cut boundedTreeResult
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "tree", map[string]any{"limit": 5}), &cut)
+	if cut.Truncated == 0 {
+		t.Fatal("the limit cut nothing; the test needs a pruned tree")
+	}
+	shown := collectTreeIndexes(t, cut.Tree.Roots)
+	if len(shown) == 0 {
+		t.Fatal("no node carries an index")
+	}
+	for _, node := range shown {
+		assertResolves(t, deps.State, node.Index, kinds.Kind(node.Kind), node.Name, "prod")
+	}
+	entry := onlyTaggedEntry(t, deps.State)
+	if entry.Resources.Len() != 8 || len(shown) >= 8 {
+		t.Fatalf("saved %d, shown %d; want 8 saved and fewer shown", entry.Resources.Len(), len(shown))
+	}
+	assertResolves(t, deps.State, 8, kinds.Pod, "web-abc-5", "prod")
+}
+
+// The user's own kx get, re-run over the agent's identical listing, replaces
+// it as any refresh does — and the replacement is the user's: kx drew it, so
+// it carries no tag and the confirm says nothing of an agent.
+func TestWriteListingsUsersRefreshOverATaggedEntryIsUntagged(t *testing.T) {
+	deps := writingDeps(t, &recordingKubectl{output: podsOutput, namespace: "prod"})
+	callTool(t, connectMCP(t, deps), "list_resources", map[string]any{"kind": "pods"})
+	onlyTaggedEntry(t, deps.State)
+
+	if _, _, err := (GetCommand{
+		Kubectl: &recordingKubectl{output: podsOutput, namespace: "prod"}, State: deps.State, Index: index.Service{},
+	}).Execute("pods", "", []string{"-n", "prod"}); err != nil {
+		t.Fatal(err)
+	}
+	history, err := deps.State.LoadHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.States) != 1 {
+		t.Fatalf("%d entries, want the refresh to replace the agent's", len(history.States))
+	}
+	if source := history.States[0].Source; source != "" {
+		t.Errorf("source = %q after the user's own kx get, want untagged", source)
+	}
+}
+
+// Annotations tell a client what a tool can change. With --write-listings the
+// four listing tools save to kx's local state, so they stop claiming to be
+// read-only — non-destructive and idempotent, said explicitly — while the
+// other six are exactly as they are without the flag.
+func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
+	annotations := func(writeListings bool) map[string]*mcp.ToolAnnotations {
+		deps := mcpTestDeps(t, &recordingKubectl{})
+		deps.WriteListings = writeListings
+		result, err := connectMCP(t, deps).ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byName := map[string]*mcp.ToolAnnotations{}
+		for _, tool := range result.Tools {
+			byName[tool.Name] = tool.Annotations
+		}
+		return byName
+	}
+	off, on := annotations(false), annotations(true)
+	if len(off) != 10 || len(on) != 10 {
+		t.Fatalf("%d and %d tools, want 10 each", len(off), len(on))
+	}
+	listing := map[string]bool{"list_resources": true, "diagnose": true, "tree": true, "top": true}
+	for name, before := range off {
+		after := on[name]
+		if !listing[name] {
+			if !reflect.DeepEqual(before, after) {
+				t.Errorf("%s: annotations %+v with the flag, %+v without — only listing tools change", name, after, before)
+			}
+			continue
+		}
+		if !before.ReadOnlyHint {
+			t.Errorf("%s claims to write without the flag: %+v", name, before)
+		}
+		if after.ReadOnlyHint || after.DestructiveHint == nil || *after.DestructiveHint ||
+			!after.IdempotentHint || after.Title != before.Title || after.OpenWorldHint != before.OpenWorldHint {
+			t.Errorf("%s with the flag = %+v, want not read-only, explicitly non-destructive, idempotent, title kept", name, after)
+		}
 	}
 }

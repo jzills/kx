@@ -190,12 +190,16 @@ func readOnlyFixture(t *testing.T) (mcpDeps, *recordingKubectl, *fake.Clientset,
 	return deps, kube, client, scans, calls
 }
 
-// seedUserListing saves the listing a user's own `kx get pods -n prod` would,
-// so a guard has something of the user's for a stray save to disturb.
+// seedUserListing saves the listing a user's own `kx get configmaps -n other`
+// would, so a guard has something of the user's for a stray save to disturb.
+// A query no fixture call repeats: seeded with one a call does repeat, a
+// leaked untagged save of that call deduped onto the seed and left the file
+// byte-identical.
 func seedUserListing(t *testing.T, deps mcpDeps) {
 	t.Helper()
-	if err := deps.State.Save(getListing("pods", "", []string{"-n", "prod"}, "prod",
-		index.Service{}.Add(podsOutput).Entries)); err != nil {
+	const configMaps = "NAME       DATA   AGE\nsettings   1      1d\n"
+	if err := deps.State.Save(getListing("configmaps", "", []string{"-n", "other"}, "other",
+		index.Service{}.Add(configMaps).Entries)); err != nil {
 		t.Fatal(err)
 	}
 }

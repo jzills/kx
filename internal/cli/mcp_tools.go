@@ -39,7 +39,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 		Description: "List resources of one kind by name and namespace — the names the other tools take. " +
 			"Defaults to the current namespace. When kx mcp runs with --write-listings, the listing is " +
 			"saved to the user's kx history, as kx get would save it, and each row carries its index there.",
-		Annotations: readOnlyTool("List resources"),
+		Annotations: listingTool("List resources", deps.WriteListings),
 	}, serialized(deps, deps.listResources))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "diagnose",
@@ -50,7 +50,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's " +
 			"kx history, every swept resource in the order returned, and each carries its index there — so " +
 			"without full, the numbers skip the healthy rows left out.",
-		Annotations: readOnlyTool("Diagnose"),
+		Annotations: listingTool("Diagnose", deps.WriteListings),
 	}, serialized(deps, deps.diagnose))
 	// Registered with an untyped output: a tree node's children are tree
 	// nodes, and the SDK's schema inference refuses a recursive type.
@@ -62,7 +62,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"with --write-listings, the whole walk is saved to the user's kx history, as kx tree would save " +
 			"it, and each node but a container or a namespace root carries its index there; a limit cuts " +
 			"what is returned, not what is saved.",
-		Annotations: readOnlyTool("Ownership tree"),
+		Annotations: listingTool("Ownership tree", deps.WriteListings),
 	}, serialized(deps, deps.tree))
 	registerEvidenceTools(server, deps)
 	mcp.AddTool(server, &mcp.Tool{
@@ -71,7 +71,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"(percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the " +
 			"listing is saved to the user's kx history, as kx top would save it, and each row carries " +
 			"its index there.",
-		Annotations: readOnlyTool("Top"),
+		Annotations: listingTool("Top", deps.WriteListings),
 	}, serialized(deps, deps.top))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_yaml",
@@ -96,6 +96,19 @@ func scopeConflict(namespace string, allNamespaces bool) error {
 		return errors.New("'allNamespaces' and 'namespace' cannot be combined.")
 	}
 	return nil
+}
+
+// listingTool annotates a tool that lists: read-only, like readOnlyTool,
+// unless kx mcp runs with --write-listings, when each call saves its listing
+// to kx's local state and so must not claim to change nothing. Not
+// destructive, said explicitly because the MCP default turns true once a tool
+// is not read-only: a save only pushes onto the history, as a kx get would.
+// Idempotent still — the same listing twice replaces rather than pushes.
+func listingTool(title string, writeListings bool) *mcp.ToolAnnotations {
+	if !writeListings {
+		return readOnlyTool(title)
+	}
+	return &mcp.ToolAnnotations{Title: title, DestructiveHint: boolPtr(false), IdempotentHint: true}
 }
 
 func boolPtr(value bool) *bool { return &value }
