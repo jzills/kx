@@ -184,7 +184,11 @@ func (c GetCommand) Execute(
 // resources of the one kind, the namespace it came from, and the query that
 // replays it. Shared with the MCP server's list_resources, which saves the same
 // listing when --write-listings is on, so the two can only ever record one
-// shape — and an agent's listing dedupes against the user's identical one.
+// shape. They dedupe against each other only when the queries match exactly:
+// list_resources always pins `-n <ns>` into the query and a plain `kx get
+// pods` saves no args, so the agent's listing usually pushes beside the
+// user's. When they do match (`kx get pods -n default`), the agent's entry
+// replaces the user's, Source and all.
 func getListing(
 	resource, filterTerm string, extraArgs []string, namespace string, entries []index.Entry,
 ) state.State {

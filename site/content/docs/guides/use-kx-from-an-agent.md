@@ -122,7 +122,12 @@ An agent-made listing is tagged, so you can tell it apart from your own:
 column naming `kx mcp` beside each agent entry, and `kx delete`/`kx drain`
 add "— from a kx mcp listing" to their confirm prompt when the index you're
 spending resolves against one. Past that tag, it's an ordinary entry on your
-history stack — `kx state back` steps behind it like any other listing. That
+history stack — `kx state back` steps behind it like any other listing. An
+agent listing the pods you just listed with a plain `kx get pods` pushes its
+own entry beside yours, because the agent always names the namespace and your
+query didn't, so `kx state back` steps from the agent's copy to yours. Had you
+typed the namespace too (`kx get pods -n default`), the two are the same query,
+and the agent's entry replaces yours, tag and all, as any re-run would. That
 cuts both ways: agent listings count toward `max_history` (10 by default), so
 a busy agent can push your own listings off the stack, and an agent save while
 you've stepped back with `kx state back` drops the entries ahead of you, the
