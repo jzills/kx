@@ -165,9 +165,17 @@ func (r Ref) String() string {
 // Context is recorded because names repeat across clusters: a mark taken in
 // staging must not resolve in prod. Unlike the context slot, which is exempt
 // because switching is what it does, a mark has no reason to be portable.
+//
+// Source is State.Source's twin, and additive for the same reason: "" is the
+// user's own mark, which every mark written before the field existed was.
+// SourceMCP is one the MCP server's mark tool took on an agent's behalf. It
+// is shown, not warned on — unlike an index, a mark is spent by the name the
+// user types, and the tool never moves one — so it only tells `kx mark` which
+// names the user did not choose.
 type Mark struct {
 	Resource
 	Context string `json:"context,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
 // State is one history entry: an indexed listing, the namespace it came from,

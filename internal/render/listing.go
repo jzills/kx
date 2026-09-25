@@ -536,6 +536,7 @@ func (r *Renderer) MarkList(marks map[string]state.Mark) {
 		ordered[i] = marks[name]
 	}
 	perRow := markContextsSpan(ordered)
+	tagged := anyMarkTagged(ordered)
 
 	r.Caption("Marks", sharedMarkContext(ordered), itemLabel(len(names)))
 	columns := []Column{
@@ -543,6 +544,9 @@ func (r *Renderer) MarkList(marks map[string]state.Mark) {
 	}
 	if perRow {
 		columns = append(columns, Column{Header: "CONTEXT"})
+	}
+	if tagged {
+		columns = append(columns, Column{Header: "VIA"})
 	}
 	rows := make([][]Cell, 0, len(names))
 	for i, name := range names {
@@ -556,7 +560,31 @@ func (r *Renderer) MarkList(marks map[string]state.Mark) {
 		if perRow {
 			row = append(row, Plain(mark.Context))
 		}
+		if tagged {
+			row = append(row, Plain(markViaCell(mark)))
+		}
 		rows = append(rows, row)
 	}
 	r.Table(columns, rows)
+}
+
+// anyMarkTagged reports whether an agent took any of the marks, the only shape
+// where MarkList's VIA column has anything to say — anyTagged's rule for the
+// history stack.
+func anyMarkTagged(marks []state.Mark) bool {
+	for _, mark := range marks {
+		if mark.Source == state.SourceMCP {
+			return true
+		}
+	}
+	return false
+}
+
+// markViaCell is viaCell for a mark: "kx mcp" for one the mark tool took,
+// empty for the user's own.
+func markViaCell(mark state.Mark) string {
+	if mark.Source == state.SourceMCP {
+		return "kx mcp"
+	}
+	return ""
 }

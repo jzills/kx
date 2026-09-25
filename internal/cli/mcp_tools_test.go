@@ -85,6 +85,41 @@ func TestMarkToolPinsAnExistingResourceWithTheLiveContext(t *testing.T) {
 	}
 }
 
+// A mark the tool takes is tagged as the agent's, on disk and in what
+// list_marks returns, while the user's own marks stay untagged.
+func TestMarkToolTagsItsMarkAsTheAgents(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{output: "deployment.apps/api\n"})
+	if err := deps.State.SaveMark("mine", state.Mark{
+		Resource: state.Resource{Name: "web", Kind: kinds.Deployment, Namespace: "prod"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := connectMCP(t, deps)
+	if result := callTool(t, session, "mark", map[string]any{
+		"name": "culprit", "target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+	}); result.IsError {
+		t.Fatalf("mark: %s", toolText(result))
+	}
+
+	marks, _ := deps.State.Marks()
+	if marks["culprit"].Source != state.SourceMCP {
+		t.Errorf("culprit Source = %q, want %q", marks["culprit"].Source, state.SourceMCP)
+	}
+	if marks["mine"].Source != "" {
+		t.Errorf("mine Source = %q, want the user's own", marks["mine"].Source)
+	}
+
+	var out listMarksOutput
+	decodeStructured(t, callTool(t, session, "list_marks", map[string]any{}), &out)
+	byAgent := map[string]bool{}
+	for _, mark := range out.Marks {
+		byAgent[mark.Name] = mark.ByAgent
+	}
+	if !byAgent["culprit"] || byAgent["mine"] {
+		t.Errorf("list_marks byAgent = %v, want culprit only", byAgent)
+	}
+}
+
 // mark {name, target:{index}} pins the resource the user's own listing put
 // at that row — the agent-side twin of `kx mark culprit 1`.
 func TestMarkToolAcceptsAnIndexTarget(t *testing.T) {

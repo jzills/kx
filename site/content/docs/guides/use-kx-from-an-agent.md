@@ -82,7 +82,9 @@ an error row and never reaches the scanner.
 Marks are shared with your terminal, not private to the agent. `kx mark api 3`
 at your prompt and an agent's `mark` tool write and read the same names, so a
 mark you hand an agent, or one it sets and tells you about, works either way
-from then on.
+from then on. The agent can add a mark but never move one, and `kx mark` lists
+the ones it added with `kx mcp` in a VIA column. Mark the same name yourself and
+it becomes yours.
 {{% /kx-note %}}
 
 ## Sharing indexes with the agent

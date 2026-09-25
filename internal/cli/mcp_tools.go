@@ -134,12 +134,14 @@ type mcpMark struct {
 	Resource  string `json:"resource"`
 	Namespace string `json:"namespace,omitempty"`
 	Context   string `json:"context,omitempty"`
+	ByAgent   bool   `json:"byAgent,omitempty" jsonschema:"True when an agent took this mark with the mark tool rather than the user with kx mark."`
 }
 
 func mcpMarkOf(name string, mark state.Mark) mcpMark {
 	return mcpMark{
 		Name: name, Kind: string(mark.Kind), Resource: mark.Name,
 		Namespace: mark.Namespace, Context: mark.Context,
+		ByAgent: mark.Source == state.SourceMCP,
 	}
 }
 
@@ -205,6 +207,7 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 	mark := state.Mark{
 		Resource: state.Resource{Name: target.Name, Kind: target.Kind, Namespace: target.Namespace},
 		Context:  d.Kubectl.CurrentContext(),
+		Source:   state.SourceMCP,
 	}
 	// One lock hold for the check and the write: a mark the user adds from a
 	// terminal between a separate check and SaveMark would otherwise be moved.

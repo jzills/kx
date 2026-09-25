@@ -408,6 +408,10 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "byAgent": {
+                  "description": "True when an agent took this mark with the mark tool rather than the user with kx mark.",
+                  "type": "boolean"
+                },
                 "context": {
                   "type": "string"
                 },
@@ -692,6 +696,10 @@
           "mark": {
             "additionalProperties": false,
             "properties": {
+              "byAgent": {
+                "description": "True when an agent took this mark with the mark tool rather than the user with kx mark.",
+                "type": "boolean"
+              },
               "context": {
                 "type": "string"
               },

@@ -235,6 +235,7 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 	if err := want.SaveMark("m", state.Mark{
 		Resource: state.Resource{Name: "api", Kind: kinds.Deployment, Namespace: "prod"},
 		Context:  kube.CurrentContext(),
+		Source:   state.SourceMCP,
 	}); err != nil {
 		t.Fatal(err)
 	}
