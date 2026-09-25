@@ -85,6 +85,50 @@ func TestMarkToolPinsAnExistingResourceWithTheLiveContext(t *testing.T) {
 	}
 }
 
+// switchOnRunKubectl is a kubectl whose context is "a" until the first Run and
+// "b" after it — the user switching context in their terminal while the mark
+// tool's existence check is in flight.
+type switchOnRunKubectl struct {
+	*recordingKubectl
+	switched bool
+}
+
+func (k *switchOnRunKubectl) Run(args []string) (string, error) {
+	k.switched = true
+	return k.recordingKubectl.Run(args)
+}
+
+func (k *switchOnRunKubectl) CurrentContext() string {
+	if k.switched {
+		return "b"
+	}
+	return "a"
+}
+
+// A mark is stamped with the context its target was checked in, read once at
+// call start as every listing handler does. Read after the existence check, a
+// switch mid-call would file cluster a's resource under b, the mark's context
+// check would pass in b, and `kx delete @culprit` would act on a same-named
+// resource in the wrong cluster.
+func TestMarkToolStampsTheContextTheTargetWasCheckedIn(t *testing.T) {
+	kube := &switchOnRunKubectl{recordingKubectl: &recordingKubectl{output: "deployment.apps/api\n"}}
+	deps := mcpTestDeps(t, kube)
+	session := connectMCP(t, deps)
+
+	var out markOutput
+	decodeStructured(t, callTool(t, session, "mark", map[string]any{
+		"name": "culprit", "target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+	}), &out)
+
+	marks, _ := deps.State.Marks()
+	if got := marks["culprit"].Context; got != "a" {
+		t.Errorf("mark context = %q, want %q, the context the target was checked in", got, "a")
+	}
+	if out.Context != "a" {
+		t.Errorf("output context = %q, want %q", out.Context, "a")
+	}
+}
+
 // A mark the tool takes is tagged as the agent's, on disk and in what
 // list_marks returns, while the user's own marks stay untagged.
 func TestMarkToolTagsItsMarkAsTheAgents(t *testing.T) {

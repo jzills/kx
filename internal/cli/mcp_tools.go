@@ -174,6 +174,9 @@ type markOutput struct {
 }
 
 func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (*mcp.CallToolResult, markOutput, error) {
+	// Read once, before the target is resolved or checked: a switch while
+	// that is in flight must not file this cluster's resource under the next.
+	kubeContext := d.Kubectl.CurrentContext()
 	name := strings.TrimPrefix(in.Name, "@")
 	// Before validMarkName, whose empty-name refusal is the CLI's and
 	// suggests an index.
@@ -206,7 +209,7 @@ func (d mcpDeps) mark(_ context.Context, _ *mcp.CallToolRequest, in markInput) (
 	}
 	mark := state.Mark{
 		Resource: state.Resource{Name: target.Name, Kind: target.Kind, Namespace: target.Namespace},
-		Context:  d.Kubectl.CurrentContext(),
+		Context:  kubeContext,
 		Source:   state.SourceMCP,
 	}
 	// One lock hold for the check and the write: a mark the user adds from a
