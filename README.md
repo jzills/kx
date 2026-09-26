@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/banner.svg" alt="kx — kubectl, indexed." width="800"/>
+  <img src="https://raw.githubusercontent.com/jzills/kx/docs/readme-polish/assets/banner.svg" alt="kx — kubectl, indexed." width="800"/>
 </div>
 
 <div align="center">
