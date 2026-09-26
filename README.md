@@ -18,7 +18,7 @@
 
 </div>
 
-`kx` is a kubectl wrapper that adds index-based resource selection. Run
+kx is a kubectl wrapper that adds index-based resource selection. Run
 `kx get <resource>` once, then reference any result by number instead of typing
 full resource names.
 
@@ -80,14 +80,14 @@ kx get pods -n prod -l app=api  # anything else passes through to kubectl
 ```
 
 - kubectl's own flags pass through — `kx delete 3 --force --grace-period=0`,
-  `kx logs 3 -f --tail=100`. `-n` beside an index is refused: the index already
-  carries the namespace it was listed from.
-- `-A` listings are indexed too, each row with its own namespace.
+  `kx logs 3 -f --tail=100`. A `-n` beside an index is refused: the index
+  already carries the namespace it was listed from.
+- Listings made with `-A` are indexed too, each row with its own namespace.
 - Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` —
   kubectl's shorthands and your CRDs included.
-- `--watch`/`-w` redraws the table in place rather than appending lines.
-- `kx completion <shell>` completes indexes with the resource behind them:
-  `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
+- The `--watch`/`-w` flag redraws the table in place rather than appending lines.
+- Tab completion, from `kx completion <shell>`, shows the resource behind each
+  index: `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
 
 ## Triage a namespace
 
@@ -100,15 +100,15 @@ flagged as an OOMKill risk before it dies.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
 </p>
 
-`kx diag <index>` diagnoses a single resource: a top level verdict, a findings
+With an index, `kx diag` diagnoses a single resource: a top level verdict, a findings
 summary, a per-pod status table, log tails from broken containers and warning
 events — one screen instead of four kubectl commands.
 See the [triage guide](https://jzills.github.io/kx/docs/guides/triage-a-namespace/) for more.
 
 ## Read a Secret in plaintext
 
-`kx secret <index> --decode` prints an indexed Secret's keys and values decoded.
-`--key`/`-k` prints a single value raw — no banner, no wrapping — so it drops
+The `kx secret <index> --decode` command prints an indexed Secret's keys and
+values decoded. With `--key`/`-k`, it prints a single value raw — no banner, no wrapping — so it drops
 straight into a shell.
 
 ```bash
@@ -125,7 +125,8 @@ See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) 
 
 ## Scan images for CVEs
 
-`kx scan <index>` scans the unique container images of an indexed workload.
+The `kx scan <index>` command scans the unique container images of an indexed
+workload.
 Bare `kx scan` sweeps every workload in the namespace. Results come back as a
 severity summary, or the full per-image CVE report with `--full`.
 
@@ -140,7 +141,7 @@ See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for m
 
 ## See what owns what
 
-`kx tree <index>` walks the ownership graph — Deployment to ReplicaSet to Pods —
+The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods —
 and indexes every node it draws, so anything in the tree is one number away.
 Bare `kx tree` graphs the whole namespace.
 See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree/) for more.
@@ -151,16 +152,16 @@ See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree
 
 ## Reports in the browser
 
-`--html` on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the same
-analysis as a page and opens it in your browser. It binds `127.0.0.1` only and
+The `--html` flag on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the
+same analysis as a page and opens it in your browser. It binds `127.0.0.1` only and
 writes nothing to disk.
 
 The page is drawn in your active theme. Sweep rows expand into that resource's
 full report, image rows into the CVEs behind their counts — detail the terminal
 has no room for.
 
-`--out <path>` writes the page to a file instead of serving it, which is what
-you want in CI — `kx diag --out report.html` is the whole command.
+Add `--out <path>` to write the page to a file instead of serving it — what you
+want in CI, where `kx diag --out report.html` is the whole command.
 See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-reports/) for more.
 
 <p align="center">
@@ -169,7 +170,7 @@ See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-
 
 ## Spend an index anywhere
 
-`kx` wraps two dozen of kubectl's verbs. `kx ref` covers the rest, and every
+kx wraps two dozen of kubectl's verbs. The `kx ref` command covers the rest, and every
 tool that isn't kubectl: it prints what an index refers to, as an argument
 fragment that drops straight into another command.
 
@@ -181,7 +182,7 @@ stern $(kx ref 3 --name) -n $(kx ref 3 --namespace)
 kx ref 1..9 --name | xargs -n1 some-tool
 ```
 
-`--name`, `--namespace` and `--kind` print one field alone, and nothing here
+The `--name`, `--namespace` and `--kind` flags print one field alone, and nothing here
 touches the cluster, so `kx ref` answers instantly even with nothing reachable.
 
 ## Marks
@@ -201,15 +202,15 @@ kx unmark --all
 
 A mark survives re-listing, which is what an index cannot do. It is pinned to
 the cluster it was taken in, and will not resolve in another — the same name
-means a different resource there, or none at all. `kx state drop --all`
-leaves marks alone; `kx unmark --all` is what removes them.
+means a different resource there, or none at all. Running
+`kx state drop --all` leaves marks alone; only `kx unmark --all` removes them.
 
-`kx ns` and `kx context` take an index but not a mark, because a slot is not
+The `kx ns` and `kx context` commands take an index but not a mark, because a slot is not
 a resource; `kx cp` parses its own `index:path` and takes one too.
 
 ## Use kx in CI
 
-`--fail-on <severity>` turns a sweep into a build gate, and `--json` prints the
+The `--fail-on <severity>` flag turns a sweep into a build gate, and `--json` prints the
 same analysis as a document for anything downstream.
 
 ```bash
@@ -226,7 +227,7 @@ See the [CI guide](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/) for mo
 
 ## MCP server
 
-`kx mcp` runs a Model Context Protocol server on stdio, so an agent — Claude
+The `kx mcp` command runs a Model Context Protocol server on stdio, so an agent — Claude
 Code, an IDE, an agent framework — reads a cluster the way you do: by kind and
 name, by a mark, or by an index from your current listing.
 
@@ -246,7 +247,7 @@ claude mcp add kx -- kx mcp --write-listings
 
 ## State and history
 
-`kx` keeps a history of `kx get` results — 10 by default, configurable — with a
+kx keeps a history of `kx get` results — 10 by default, configurable — with a
 cursor marking the entry indexes resolve against.
 
 ```bash
@@ -259,12 +260,12 @@ kx state drop --empty # drop the entries whose listing found nothing
 ```
 
 Each entry remembers the context it was listed in, so a staging index is never
-resolved against production — `kx` refuses and relists instead.
+resolved against production — kx refuses and relists instead.
 See the [state docs](https://jzills.github.io/kx/docs/concepts/state/) for more.
 
 ## Configuration
 
-`kx` reads `~/.kx/config.toml`, and every setting takes a `KX_*` environment
+kx reads `~/.kx/config.toml`, and every setting takes a `KX_*` environment
 override. The two worth changing have commands of their own — `kx theme` and
 `kx engine` both persist your choice.
 
@@ -274,8 +275,8 @@ See the [configuration docs](https://jzills.github.io/kx/docs/concepts/configura
 
 ## Themes
 
-`kx theme` lists the available themes with a preview of each. `kx theme <name>`
-persists your choice, by name or index.
+The `kx theme` command lists the available themes with a preview of each, and
+`kx theme <name>` persists your choice, by name or index.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
