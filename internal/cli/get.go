@@ -174,6 +174,24 @@ func (c GetCommand) Execute(
 	// `kx delete 1` deleted a pod in a — a namespace and two commands away
 	// from anything the screen had shown. The entry carries its query, so the
 	// refusal it produces can name what found nothing.
+	if err := c.State.Save(getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)); err != nil {
+		return index.Table{}, "", err
+	}
+	return indexed, namespace, nil
+}
+
+// getListing is the entry `kx get <resource>` saves for a listing: its rows as
+// resources of the one kind, the namespace it came from, and the query that
+// replays it. Shared with the MCP server's list_resources, which saves the same
+// listing when --write-listings is on, so the two can only ever record one
+// shape. They dedupe against each other only when the queries match exactly:
+// list_resources always pins `-n <ns>` into the query and a plain `kx get
+// pods` saves no args, so the agent's listing usually pushes beside the
+// user's. When they do match (`kx get pods -n default`), the agent's entry
+// replaces the user's, Source and all.
+func getListing(
+	resource, filterTerm string, extraArgs []string, namespace string, entries []index.Entry,
+) state.State {
 	var match *string
 	if filterTerm != "" {
 		match = &filterTerm
@@ -181,8 +199,8 @@ func (c GetCommand) Execute(
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
-	entry := state.State{
-		Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+	return state.State{
+		Resources:     resourcesFrom(entries, kinds.Normalize(resource)),
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces(extraArgs),
 		Query: &state.Query{
@@ -191,10 +209,6 @@ func (c GetCommand) Execute(
 			Match:    match,
 		},
 	}
-	if err := c.State.Save(entry); err != nil {
-		return index.Table{}, "", err
-	}
-	return indexed, namespace, nil
 }
 
 // ExecuteGroups fetches named resources that span namespaces — one kubectl call

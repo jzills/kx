@@ -2650,3 +2650,332 @@ func TestDropMarksRemovesNothingWhenOneNameIsUnknown(t *testing.T) {
 		t.Errorf("marks = %+v, want both left — the batch removed nothing", marks)
 	}
 }
+
+// A user-made entry (Source unset) writes no "source" key at all — Source is
+// `json:"source,omitempty"` precisely so old installs and the on-disk schema
+// test don't grow a new key for every listing that isn't from kx mcp.
+func TestUserMadeEntryWritesNoSourceKey(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("nginx"), Namespace: "prod"})
+
+	data, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), `"source"`) {
+		t.Errorf("a user-made entry wrote a \"source\" key anyway:\n%s", data)
+	}
+}
+
+// A listing an MCP tool saved carries its tag through an ordinary save/load
+// round-trip, the same as every other field on State.
+func TestSourceRoundTripsThroughSaveAndLoad(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+
+	entry, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if entry.Source != SourceMCP {
+		t.Errorf("Source = %q, want %q", entry.Source, SourceMCP)
+	}
+}
+
+// A state file written before Source existed has no "source" key on its
+// entries. Source is additive, so it must decode as "" — user-made — without
+// tripping the schema-version reset every other incompatible shape gets.
+func TestEntryWithoutSourceKeyDecodesAsUserMade(t *testing.T) {
+	service := newTestService(t, 10)
+	raw := `{"version":2,"states":[{"resources":[{"name":"nginx","kind":"Pod"}],"namespace":"prod","query":null}],"cursor":0}`
+	if err := os.WriteFile(service.Path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	entry, err := service.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if entry.Source != "" {
+		t.Errorf("Source = %q, want \"\" for a file written before Source existed", entry.Source)
+	}
+
+	// The file must not have been reset: a second read sees the same content,
+	// not a fresh, empty History the way an actual schema mismatch produces.
+	after, err := os.ReadFile(service.Path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != raw {
+		t.Errorf("state file was rewritten:\n got  %s\n want %s", after, raw)
+	}
+}
+
+// Navigate, Drop and a later user Save must never disturb the Source tag on
+// entries they don't touch — Save() once silently dropped Marks the same way.
+func TestSourceSurvivesNavigateDropAndSave(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("one"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "one"}}})
+	save(t, service, State{Resources: pods("two"), Namespace: "prod", Source: SourceMCP,
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "two"}}})
+	save(t, service, State{Resources: pods("three"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "three"}}})
+
+	assertMiddleTagged := func(step string) {
+		t.Helper()
+		history, err := service.LoadHistory()
+		if err != nil {
+			t.Fatalf("%s: LoadHistory: %v", step, err)
+		}
+		if len(history.States) != 3 {
+			t.Fatalf("%s: len(States) = %d, want 3", step, len(history.States))
+		}
+		for i, want := range []string{"", SourceMCP, ""} {
+			if got := history.States[i].Source; got != want {
+				t.Errorf("%s: States[%d].Source = %q, want %q", step, i, got, want)
+			}
+		}
+	}
+	assertMiddleTagged("after saving")
+
+	if _, err := service.Navigate(-1); err != nil {
+		t.Fatalf("Navigate(-1): %v", err)
+	}
+	assertMiddleTagged("after Navigate(-1)")
+
+	if _, err := service.Navigate(1); err != nil {
+		t.Fatalf("Navigate(1): %v", err)
+	}
+	assertMiddleTagged("after Navigate(1)")
+
+	// Drop the untagged first entry; the tagged one must keep its tag as it
+	// shifts down to position 1.
+	if _, err := service.Drop(1); err != nil {
+		t.Fatalf("Drop(1): %v", err)
+	}
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 2 {
+		t.Fatalf("len(States) = %d, want 2 after Drop", len(history.States))
+	}
+	if history.States[0].Source != SourceMCP {
+		t.Errorf("States[0].Source = %q, want %q after dropping the entry ahead of it",
+			history.States[0].Source, SourceMCP)
+	}
+	if history.States[1].Source != "" {
+		t.Errorf("States[1].Source = %q, want \"\"", history.States[1].Source)
+	}
+
+	// A later user save (no Source set) must not retag the entries already there.
+	save(t, service, State{Resources: pods("four"), Namespace: "prod",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "prod", "-m", "four"}}})
+	history, err = service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Fatalf("len(States) = %d, want 3 after another user save", len(history.States))
+	}
+	if history.States[0].Source != SourceMCP {
+		t.Errorf("States[0].Source = %q, want %q — unrelated to the new save",
+			history.States[0].Source, SourceMCP)
+	}
+	if history.States[2].Source != "" {
+		t.Errorf("States[2].Source = %q, want \"\" — the new user-made entry", history.States[2].Source)
+	}
+}
+
+// ResolveWithSource answers an index ref with the cursor entry's tag, and
+// ErrNoState when there is nothing to read — the same failure Load reports.
+// It replaced a separate CurrentSource method precisely because that method
+// was a second, independent Load(): a caller resolving a target and then
+// asking CurrentSource for "the current listing's Source" could have a save
+// land between the two, naming a different listing than the one the target
+// came from. ResolveWithSource reads both from the one Load its index
+// resolves against.
+func TestResolveWithSource(t *testing.T) {
+	service := newTestService(t, 10)
+	if _, _, _, _, err := service.ResolveWithSource(Ref{Index: 1}); !errors.Is(err, ErrNoState) {
+		t.Fatalf("ResolveWithSource on an empty store: err = %v, want ErrNoState", err)
+	}
+
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	name, namespace, kind, source, err := service.ResolveWithSource(Ref{Index: 1})
+	if err != nil {
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("ResolveWithSource = %q/%q/%q, want api/prod/Pod", name, namespace, kind)
+	}
+	if source != "" {
+		t.Errorf("source = %q, want \"\" for a user-made listing", source)
+	}
+
+	save(t, service, State{Resources: pods("web"), Namespace: "prod", Source: SourceMCP,
+		Query: &Query{Resource: "pods", Args: []string{"web"}}})
+	name, _, _, source, err = service.ResolveWithSource(Ref{Index: 1})
+	if err != nil {
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "web" {
+		t.Errorf("name = %q, want web", name)
+	}
+	if source != SourceMCP {
+		t.Errorf("source = %q, want %q", source, SourceMCP)
+	}
+}
+
+// A mark ref never carries a Source: it is pinned by a name the user chose,
+// not read off whatever listing happens to be current, so ResolveWithSource
+// answers "" for one even when the current listing is tagged.
+func TestResolveWithSourceAnswersEmptyForAMark(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+	if err := service.SaveMark("db", Mark{Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"}}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+
+	name, namespace, kind, source, err := service.ResolveWithSource(Ref{Mark: "db"})
+	if err != nil {
+		t.Fatalf("ResolveWithSource: %v", err)
+	}
+	if name != "api" || namespace != "prod" || kind != kinds.Pod {
+		t.Errorf("ResolveWithSource = %q/%q/%q, want api/prod/Pod", name, namespace, kind)
+	}
+	if source != "" {
+		t.Errorf("source = %q, want \"\" for a mark — it is not from a listing", source)
+	}
+}
+
+// ResolveWithSource shares Resolve's own failure modes — same context check,
+// same out-of-range message — because it shares Resolve's code
+// (fieldsWithSource/resolveMark), not a second copy of it.
+func TestResolveWithSourceMatchesResolveOnFailure(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+	_, _, _, wantErr := service.Fields(99)
+	_, _, _, _, gotErr := service.ResolveWithSource(Ref{Index: 99})
+	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() {
+		t.Errorf("ResolveWithSource(99) err = %v, want the same as Fields(99): %v", gotErr, wantErr)
+	}
+}
+
+// hookCall is one OnAgentIndex invocation, recorded in call order.
+type hookCall struct {
+	index           int
+	kind            kinds.Kind
+	name, namespace string
+}
+
+// recordAgentIndexCalls wires a Service's OnAgentIndex hook to append every
+// call it receives to a slice, so a test can assert both whether it fired and
+// what it was told.
+func recordAgentIndexCalls(service *Service) *[]hookCall {
+	calls := &[]hookCall{}
+	service.OnAgentIndex = func(index int, kind kinds.Kind, name, namespace string) {
+		*calls = append(*calls, hookCall{index: index, kind: kind, name: name, namespace: namespace})
+	}
+	return calls
+}
+
+// Task 2, test (a): the hook fires only for an index ref resolved into a
+// tagged entry — never for an untagged one, never for a mark, and never for
+// FieldsNamed's slot lookup — and it fires with the resolved kind, name and
+// namespace, once per resolution.
+func TestOnAgentIndexFiresOnlyForIndexRefsIntoTaggedEntries(t *testing.T) {
+	t.Run("untagged entry: no call", func(t *testing.T) {
+		service := newTestService(t, 10)
+		calls := recordAgentIndexCalls(service)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none for an untagged entry", *calls)
+		}
+	})
+
+	t.Run("tagged entry: one call naming the resolved resource", func(t *testing.T) {
+		service := newTestService(t, 10)
+		calls := recordAgentIndexCalls(service)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields: %v", err)
+		}
+		if len(*calls) != 1 {
+			t.Fatalf("calls = %+v, want exactly 1", *calls)
+		}
+		got := (*calls)[0]
+		if got.index != 1 || got.kind != kinds.Pod || got.name != "api" || got.namespace != "prod" {
+			t.Errorf("call = %+v, want index 1, Pod/api in prod", got)
+		}
+	})
+
+	t.Run("mark ref: no call, even into a tagged entry", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		if err := service.SaveMark("db", Mark{Resource: Resource{Name: "api", Kind: kinds.Pod, Namespace: "prod"}}); err != nil {
+			t.Fatalf("SaveMark: %v", err)
+		}
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, _, err := service.Resolve(Ref{Mark: "db"}); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none for a mark ref", *calls)
+		}
+	})
+
+	t.Run("FieldsNamed: no call, even into a tagged slot", func(t *testing.T) {
+		service := newTestService(t, 10)
+		if err := service.SaveNamed(State{
+			Resources: NewResources([]string{"default", "prod"}, kinds.Namespace),
+			Source:    SourceMCP,
+		}); err != nil {
+			t.Fatalf("SaveNamed: %v", err)
+		}
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, err := service.FieldsNamed(2, kinds.Namespace); err != nil {
+			t.Fatalf("FieldsNamed: %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("calls = %+v, want none — FieldsNamed reads a slot, not the current listing", *calls)
+		}
+	})
+
+	t.Run("ResolveWithSource and Resolve fire the hook the same way Fields does", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		calls := recordAgentIndexCalls(service)
+
+		if _, _, _, _, err := service.ResolveWithSource(Ref{Index: 1}); err != nil {
+			t.Fatalf("ResolveWithSource: %v", err)
+		}
+		if len(*calls) != 1 {
+			t.Errorf("calls = %+v after ResolveWithSource, want exactly 1", *calls)
+		}
+
+		if _, _, _, err := service.Resolve(Ref{Index: 1}); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(*calls) != 2 {
+			t.Errorf("calls = %+v after Resolve, want exactly 2", *calls)
+		}
+	})
+
+	t.Run("nil hook is inert", func(t *testing.T) {
+		service := newTestService(t, 10)
+		save(t, service, State{Resources: pods("api"), Namespace: "prod", Source: SourceMCP})
+		if _, _, _, err := service.Fields(1); err != nil {
+			t.Fatalf("Fields with no hook installed: %v", err)
+		}
+	})
+}

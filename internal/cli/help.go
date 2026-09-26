@@ -34,6 +34,7 @@ var helpSections = []struct {
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
+	{"Integrations", []string{"mcp"}},
 	{"Shell", []string{"completion"}},
 }
 

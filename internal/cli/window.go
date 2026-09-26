@@ -20,12 +20,19 @@ import (
 // type, so no Changed() check is needed to tell "unset" from "0", and
 // `--since 0` keeps its own meaning of no window at all.
 func resolveWindow(since string, configured time.Duration) (time.Duration, error) {
+	return resolveWindowAs("--since", since, configured)
+}
+
+// resolveWindowAs is resolveWindow with a refusal that names label rather than
+// the CLI flag — the MCP tools take the value as a field called since, and an
+// agent was never shown a --since.
+func resolveWindowAs(label, since string, configured time.Duration) (time.Duration, error) {
 	if since == "" {
 		return configured, nil
 	}
 	window, err := config.ParseDuration(since)
 	if err != nil {
-		return 0, fmt.Errorf("'--since': %w", err)
+		return 0, fmt.Errorf("'%s': %w", label, err)
 	}
 	return window, nil
 }

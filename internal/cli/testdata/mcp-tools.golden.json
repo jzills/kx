@@ -1,0 +1,1088 @@
+{
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state.",
+  "tools": [
+    {
+      "name": "diagnose",
+      "description": "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without full, the numbers skip the healthy rows left out.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Diagnose"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "description": "Sweep every namespace when there is no target.",
+            "type": "boolean"
+          },
+          "full": {
+            "description": "Include healthy resources in a sweep's results.",
+            "type": "boolean"
+          },
+          "namespace": {
+            "description": "Namespace to sweep when there is no target; defaults to the current namespace.",
+            "type": "string"
+          },
+          "since": {
+            "description": "Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting.",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "One resource to diagnose. Omit to sweep a namespace.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "diagnosis": {
+            "additionalProperties": false,
+            "properties": {
+              "allNamespaces": {
+                "type": "boolean"
+              },
+              "checked": {
+                "type": "integer"
+              },
+              "healthy": {
+                "type": "integer"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "resources": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "findings": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "at": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "since": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "severity",
+                          "summary"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "index": {
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "mark": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "verdict": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "verdict",
+                    "findings"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "window": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "checked",
+              "healthy",
+              "resources"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "context",
+          "diagnosis"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "events",
+      "description": "Warning and normal events recorded against exactly this object. Unlike logs, a Deployment's events are its own, not its pods' — use tree to find the pods.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Events"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Most events to return, newest first; default 100, at most 500.",
+            "type": "integer"
+          },
+          "since": {
+            "description": "Only events newer than this — 30m, 24h, 7d. Defaults to kx's events_max_age setting.",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The resource whose events to show.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "reason",
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "integer"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "name",
+          "total",
+          "events"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_yaml",
+      "description": "A resource's manifest as YAML, optionally narrowed to named top-level or nested keys (fields). Secret values and the last-applied annotation are redacted.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Get YAML"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "description": "Only these top-level or nested keys, shallowest match first — e.g. [\"spec\", \"status\"].",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The resource whose manifest to show.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "yaml": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "name",
+          "yaml"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_marks",
+      "description": "List the kx marks: names the user pinned to resources, usable as a target's mark.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "List marks"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "marks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "byAgent": {
+                  "description": "True when an agent took this mark with the mark tool rather than the user with kx mark.",
+                  "type": "boolean"
+                },
+                "context": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "resource": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "resource"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "marks"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_resources",
+      "description": "List resources of one kind by name and namespace — the names the other tools take. Defaults to the current namespace. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx get would save it, and each row carries its index there.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "List resources"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "description": "List across every namespace.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "Resource type as kubectl spells it: pods, deploy, svc, nodes, a CRD's name. One type.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Most rows to return; default 200, at most 1000. total always counts every row.",
+            "type": "integer"
+          },
+          "namespace": {
+            "description": "Namespace to list; defaults to the current namespace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "type": "boolean"
+          },
+          "context": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "index": {
+                  "description": "This row's number in the user's kx history, present only when kx mcp runs with --write-listings; the user can spend it in kx.",
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "total",
+          "resources"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "logs",
+      "description": "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/DaemonSet/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Logs"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "description": "Container name, for a Pod with more than one. Not valid with an aggregate target — pick one pod instead.",
+            "type": "string"
+          },
+          "previous": {
+            "description": "Show the previous (crashed) container's logs instead of the current one's.",
+            "type": "boolean"
+          },
+          "since": {
+            "description": "Only log lines from this far back — 30m, 24h, 7d.",
+            "type": "string"
+          },
+          "tail": {
+            "description": "Lines to keep per pod, most recent first; default 200, at most 2000.",
+            "type": "integer"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The Pod, or workload whose pods to aggregate, to show logs for.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "integer"
+          },
+          "logs": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "name",
+          "lines",
+          "logs"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "mark",
+      "description": "Pin a name to a resource so the user can reach it as @name in kx, e.g. to hand back the resource you found at fault. The target may itself be a mark or an index from the user's listing, giving that resource a second name. Refuses a name that is already a mark, and a kind, name or namespace that is not shaped like one (a leading '-' reads as a kubectl flag). Writes kx's local state only, never the cluster.",
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Mark a resource"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "The mark's name: letters, digits, '-', '_' and '.', not a bare number. A leading @ is dropped.",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The resource to mark.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "mark": {
+            "additionalProperties": false,
+            "properties": {
+              "byAgent": {
+                "description": "True when an agent took this mark with the mark tool rather than the user with kx mark.",
+                "type": "boolean"
+              },
+              "context": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "resource": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "kind",
+              "resource"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "context",
+          "mark"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "scan",
+      "description": "Scan container images for known CVEs with the configured engine (grype, trivy or scout). A namespace sweep can take minutes; progress is reported when the client asks for it. Counts cover every severity; findings list the worst first. At most imageLimit images are scanned, in the order they were found; truncatedImages counts the rest.",
+      "annotations": {
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "Scan images"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "description": "Sweep every namespace when there is no target.",
+            "type": "boolean"
+          },
+          "engine": {
+            "description": "Scanner to use: grype, trivy or scout. Defaults to kx's configured engine.",
+            "type": "string"
+          },
+          "imageLimit": {
+            "description": "Most images to scan, in the order they were found; default 50, at most 200. truncatedImages counts the images left unscanned.",
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out.",
+            "type": "integer"
+          },
+          "minSeverity": {
+            "description": "Least severe finding to list: critical, high, medium or low; default high. Counts always cover every severity.",
+            "type": "string"
+          },
+          "namespace": {
+            "description": "Namespace to sweep when there is no target; defaults to the current namespace.",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The workload whose images to scan: a Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job or CronJob. Omit to sweep a namespace.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "scan": {
+            "additionalProperties": false,
+            "properties": {
+              "allNamespaces": {
+                "type": "boolean"
+              },
+              "images": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "counts": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "fixedIn": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "installed": {
+                            "type": "string"
+                          },
+                          "package": {
+                            "type": "string"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "severity"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "truncated": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "image",
+                    "findings"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "kind": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "schemaVersion": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "images"
+            ],
+            "type": "object"
+          },
+          "truncatedImages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "context",
+          "scan"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "top",
+      "description": "Current CPU and memory usage of pods (percent of their limits) or nodes (percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx top would save it, and each row carries its index there.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Top"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "description": "Read across every namespace. Not valid with nodes.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Most rows to return; default 200, at most 1000.",
+            "type": "integer"
+          },
+          "namespace": {
+            "description": "Namespace to read; defaults to the current namespace. Not valid with nodes.",
+            "type": "string"
+          },
+          "nodes": {
+            "description": "Report node usage against capacity instead of pod usage against limits.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "top": {
+            "additionalProperties": false,
+            "properties": {
+              "allNamespaces": {
+                "type": "boolean"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "resource": {
+                "type": "string"
+              },
+              "rows": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "cpu": {
+                      "type": "string"
+                    },
+                    "cpuPercent": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "index": {
+                      "type": "integer"
+                    },
+                    "memory": {
+                      "type": "string"
+                    },
+                    "memoryPercent": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "cpu",
+                    "memory",
+                    "cpuPercent",
+                    "memoryPercent"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "schemaVersion": {
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schemaVersion",
+              "resource",
+              "rows"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "context",
+          "top"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "tree",
+      "description": "Show ownership: what a resource owns and is owned by (Deployment → ReplicaSet → Pod → containers), or the whole ownership forest of a namespace when there is no target. Large graphs are cut breadth-first at limit nodes; truncated says how many were left out. When kx mcp runs with --write-listings, the whole walk is saved to the user's kx history, as kx tree would save it, and each node but a container or a namespace root carries its index there; a limit cuts what is returned, not what is saved.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Ownership tree"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allNamespaces": {
+            "description": "Graph every namespace when there is no target.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Most nodes to return, containers included; default 500, at most 2000. The graph is cut breadth-first, and truncated counts what was left out.",
+            "type": "integer"
+          },
+          "namespace": {
+            "description": "Namespace to graph when there is no target; defaults to the current namespace.",
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The resource to graph. Omit to graph a namespace.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": null
+    }
+  ]
+}

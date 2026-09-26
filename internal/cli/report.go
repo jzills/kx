@@ -51,10 +51,10 @@ type jsonReport struct {
 	// Index is the number this resource was assigned in state, so a
 	// consumer that finds something worth acting on can name it — `kx diag
 	// 4` — without a second listing. The same convention kx tree --json
-	// already uses for jsonTreeNode.Index: present because a sweep indexes
-	// every resource it saves, so it is never the zero value in practice,
-	// but omitempty rather than required in case a future caller builds one
-	// from something that isn't state-backed.
+	// already uses for jsonTreeNode.Index: a CLI sweep indexes every resource
+	// it saves, so there it is always set, but omitempty because the MCP
+	// server's documents leave it out unless kx mcp runs with
+	// --write-listings, when a diagnose sweep indexes every row it saves.
 	Index int `json:"index,omitempty"`
 	// Mark is the name a mark-spent reference carried, for the same reason
 	// Index exists: so a consumer can name what was diagnosed. A mark has no
@@ -121,11 +121,17 @@ func rfc3339(timestamp time.Time) string {
 // indexed run is a sweep of one, and saying so costs a wrapper and buys a
 // pipeline that reads `.resources[]` for both.
 func diagnosticJSON(report diagnostics.Report, ref state.Ref) (string, error) {
+	return encode(diagnosticDocumentOf(report, ref))
+}
+
+// diagnosticDocumentOf is diagnosticJSON's document, unencoded, for the MCP
+// server to return as structured content.
+func diagnosticDocumentOf(report diagnostics.Report, ref state.Ref) diagnosticDocument {
 	healthy := 0
 	if report.Verdict == diagnostics.OK {
 		healthy = 1
 	}
-	return encode(diagnosticDocument{
+	return diagnosticDocument{
 		SchemaVersion: reportSchemaVersion,
 		Kind:          report.Kind,
 		Name:          report.Name,
@@ -134,7 +140,7 @@ func diagnosticJSON(report diagnostics.Report, ref state.Ref) (string, error) {
 		Checked:       1,
 		Healthy:       healthy,
 		Resources:     []jsonReport{reportOf(report, ref)},
-	})
+	}
 }
 
 // diagnosticDocument is the one shape kx diag --json emits, indexed or swept.
@@ -172,18 +178,29 @@ type diagnosticDocument struct {
 // governs how much of a table fits on a screen, and nothing is scrolling past
 // a machine. The HTML report takes the same view for the same reason.
 func triageJSON(result render.TriageResult) (string, error) {
+	return encode(triageDocument(result, true))
+}
+
+// triageDocument is triageJSON's document. indexed says whether each resource
+// carries the position TriageCommand saved it at; an MCP sweep saves nothing,
+// so a number there would name a row of whatever listing the user has open.
+func triageDocument(result render.TriageResult, indexed bool) diagnosticDocument {
 	resources := make([]jsonReport, 0, len(result.All))
 	// 1-based position in result.All, matching the index TriageCommand.Execute
 	// just saved to state in this same order — so a finding in the document
 	// and the number `kx diag <index>` would show it under are one figure.
 	for position, report := range result.All {
-		resources = append(resources, reportOf(report, state.Ref{Index: position + 1}))
+		ref := state.Ref{}
+		if indexed {
+			ref.Index = position + 1
+		}
+		resources = append(resources, reportOf(report, ref))
 	}
 
 	// Namespace is already empty for a cluster-wide sweep — TriageCommand.Execute
 	// blanks it before Sweep runs, since there is no single namespace the
 	// listing came from.
-	return encode(diagnosticDocument{
+	return diagnosticDocument{
 		SchemaVersion: reportSchemaVersion,
 		Namespace:     result.Namespace,
 		AllNamespaces: result.AllNamespaces,
@@ -191,7 +208,7 @@ func triageJSON(result render.TriageResult) (string, error) {
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Resources:     resources,
-	})
+	}
 }
 
 type jsonVulnerability struct {
@@ -208,6 +225,9 @@ type jsonImage struct {
 	Error    string              `json:"error,omitempty"`
 	Counts   map[string]int      `json:"counts,omitempty"`
 	Findings []jsonVulnerability `json:"findings"`
+	// Truncated is how many findings a limit left unlisted — always zero for
+	// kx scan --json, which lists every finding, so omitted there.
+	Truncated int `json:"truncated,omitempty"`
 }
 
 // scanSubject names what a scan covered: one indexed workload, or a sweep of
@@ -226,9 +246,20 @@ type scanSubject struct {
 	AllNamespaces bool
 }
 
-// scanJSON serialises a scan's rows, the same ones the summary table and the
-// HTML report are built from.
-func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
+// scanDocument is the one shape kx scan --json emits, and what the MCP
+// server's scan tool returns as structured content.
+type scanDocument struct {
+	SchemaVersion int         `json:"schemaVersion"`
+	Kind          kinds.Kind  `json:"kind,omitempty"`
+	Name          string      `json:"name,omitempty"`
+	Namespace     string      `json:"namespace,omitempty"`
+	AllNamespaces bool        `json:"allNamespaces,omitempty"`
+	Images        []jsonImage `json:"images"`
+}
+
+// scanDocumentOf converts a scan's rows into scanJSON's document, unencoded,
+// for the MCP server to return as structured content.
+func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument {
 	images := make([]jsonImage, 0, len(rows))
 	for _, row := range rows {
 		findings := make([]jsonVulnerability, 0, len(row.Findings))
@@ -247,17 +278,16 @@ func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
 			Counts: countTokens(row.Counts), Findings: findings,
 		})
 	}
-	return encode(struct {
-		SchemaVersion int         `json:"schemaVersion"`
-		Kind          kinds.Kind  `json:"kind,omitempty"`
-		Name          string      `json:"name,omitempty"`
-		Namespace     string      `json:"namespace,omitempty"`
-		AllNamespaces bool        `json:"allNamespaces,omitempty"`
-		Images        []jsonImage `json:"images"`
-	}{
-		reportSchemaVersion, subject.Kind, subject.Name,
-		subject.Namespace, subject.AllNamespaces, images,
-	})
+	return scanDocument{
+		SchemaVersion: reportSchemaVersion, Kind: subject.Kind, Name: subject.Name,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces, Images: images,
+	}
+}
+
+// scanJSON serialises a scan's rows, the same ones the summary table and the
+// HTML report are built from.
+func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
+	return encode(scanDocumentOf(subject, rows))
 }
 
 // severityToken is the document spelling of a scanner's severity label.
@@ -383,29 +413,46 @@ func treeNodeOf(node *tree.Node) jsonTreeNode {
 	return converted
 }
 
-// treeJSON serialises an ownership graph — one root for an indexed resource or
-// a single namespace, several for an -A forest.
+// treeDocument is the one shape kx tree --json emits, indexed or swept — and
+// what the MCP server's tree tool returns as structured content.
 //
-// Always a list, even for the one-root shapes, so a consumer parses every kx
-// tree document the same way. kx scan already takes that view of its images.
-func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
+// Always a list of Roots, even for the one-root shapes, so a consumer parses
+// every kx tree document the same way. kx scan already takes that view of its
+// images.
+type treeDocument struct {
+	SchemaVersion int            `json:"schemaVersion"`
+	Kind          string         `json:"kind,omitempty"`
+	Name          string         `json:"name,omitempty"`
+	Namespace     string         `json:"namespace,omitempty"`
+	AllNamespaces bool           `json:"allNamespaces,omitempty"`
+	Roots         []jsonTreeNode `json:"roots"`
+}
+
+// treeDocumentOf converts an ownership graph — one root for an indexed
+// resource or a single namespace, several for an -A forest — into
+// treeJSON's document, unencoded, for the MCP server to return as structured
+// content.
+func treeDocumentOf(subject scanSubject, roots []*tree.Node) treeDocument {
 	converted := make([]jsonTreeNode, 0, len(roots))
 	for _, root := range roots {
 		if root != nil {
 			converted = append(converted, treeNodeOf(root))
 		}
 	}
-	return encode(struct {
-		SchemaVersion int            `json:"schemaVersion"`
-		Kind          string         `json:"kind,omitempty"`
-		Name          string         `json:"name,omitempty"`
-		Namespace     string         `json:"namespace,omitempty"`
-		AllNamespaces bool           `json:"allNamespaces,omitempty"`
-		Roots         []jsonTreeNode `json:"roots"`
-	}{
-		reportSchemaVersion, string(subject.Kind), subject.Name,
-		subject.Namespace, subject.AllNamespaces, converted,
-	})
+	return treeDocument{
+		SchemaVersion: reportSchemaVersion,
+		Kind:          string(subject.Kind),
+		Name:          subject.Name,
+		Namespace:     subject.Namespace,
+		AllNamespaces: subject.AllNamespaces,
+		Roots:         converted,
+	}
+}
+
+// treeJSON serialises an ownership graph — one root for an indexed resource or
+// a single namespace, several for an -A forest.
+func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
+	return encode(treeDocumentOf(subject, roots))
 }
 
 // jsonTopRow is one pod's or node's usage.
@@ -423,13 +470,29 @@ type jsonTopRow struct {
 	MemoryPct *int   `json:"memoryPercent"`
 }
 
-// topJSON serialises a usage listing, built from the same rows the table and
-// the HTML page render.
+// topDocument is the one shape kx top --json emits, and what the MCP server's
+// top tool returns as structured content.
+//
+// Truncated is how many rows a limit left out — always zero for kx top
+// --json, which has no limit of its own and so never sets it — but present
+// here rather than as a second type, matching how treeDocument carries a
+// Truncated only tree's caller ever sets.
+type topDocument struct {
+	SchemaVersion int          `json:"schemaVersion"`
+	Resource      string       `json:"resource"`
+	Namespace     string       `json:"namespace,omitempty"`
+	AllNamespaces bool         `json:"allNamespaces,omitempty"`
+	Rows          []jsonTopRow `json:"rows"`
+	Truncated     int          `json:"truncated,omitempty"`
+}
+
+// topDocumentOf converts a usage listing's rows into topJSON's document,
+// unencoded, for the MCP server to return as structured content.
 //
 // Resource names what was listed — "pods" or "nodes" — because the two have
 // different percentage meanings: a pod's is against its limits, a node's
 // against its capacity, and nothing else in the document says which.
-func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
+func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topDocument {
 	converted := make([]jsonTopRow, 0, len(rows))
 	for _, row := range rows {
 		converted = append(converted, jsonTopRow{
@@ -438,16 +501,17 @@ func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, e
 			CPUPct: percentOf(row.CPUPct), MemoryPct: percentOf(row.MemPct),
 		})
 	}
-	return encode(struct {
-		SchemaVersion int          `json:"schemaVersion"`
-		Resource      string       `json:"resource"`
-		Namespace     string       `json:"namespace,omitempty"`
-		AllNamespaces bool         `json:"allNamespaces,omitempty"`
-		Rows          []jsonTopRow `json:"rows"`
-	}{
-		reportSchemaVersion, resource,
-		subject.Namespace, subject.AllNamespaces, converted,
-	})
+	return topDocument{
+		SchemaVersion: reportSchemaVersion, Resource: resource,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
+		Rows: converted,
+	}
+}
+
+// topJSON serialises a usage listing, built from the same rows the table and
+// the HTML page render.
+func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
+	return encode(topDocumentOf(subject, resource, rows))
 }
 
 func percentOf(usage web.Usage) *int {

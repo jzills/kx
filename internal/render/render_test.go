@@ -682,3 +682,41 @@ func TestMarkListPlainWhenNotStyled(t *testing.T) {
 		t.Errorf("mark list leaked color into unstyled output: %q", buf.String())
 	}
 }
+
+// A mark an agent took with kx mcp's mark tool is named as such, so the user
+// can tell the names they chose from the ones they didn't — the VIA column
+// kx state --all gives agent listings.
+func TestMarkListNamesTheMarksAnAgentTook(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}},
+			"culprit": {
+				Resource: state.Resource{Name: "db-0", Kind: kinds.StatefulSet, Namespace: "data"},
+				Source:   state.SourceMCP,
+			},
+		})
+	})
+	if !strings.Contains(out, "VIA") {
+		t.Fatalf("output = %q, want a VIA column", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, "@culprit") && !strings.Contains(line, "kx mcp"):
+			t.Errorf("agent's mark row = %q, want it to say kx mcp", line)
+		case strings.Contains(line, "@api") && strings.Contains(line, "kx mcp"):
+			t.Errorf("user's mark row = %q, want no kx mcp", line)
+		}
+	}
+}
+
+// With no agent marks the column has nothing to say, so it isn't there.
+func TestMarkListHasNoViaColumnWithoutAgentMarks(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}},
+		})
+	})
+	if strings.Contains(out, "VIA") || strings.Contains(out, "kx mcp") {
+		t.Errorf("output = %q, want no VIA column", out)
+	}
+}

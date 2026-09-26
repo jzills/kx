@@ -68,7 +68,11 @@ type DrainCommand struct {
 
 // Execute drains one indexed node, streaming kubectl's own progress.
 func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error {
-	name, _, kind, err := c.State.Resolve(ref)
+	// Resolved once, target and provenance together, and before the kubectl
+	// preflight below — a drain's round trip to the cluster is exactly the
+	// window a second, independent read of the listing's Source used to race
+	// a concurrent kx mcp save in. See resolveWithProvenance.
+	name, _, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
 		return err
 	}
@@ -90,7 +94,7 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict all pods from Node/%s?", name)); err != nil {
+			"Evict all pods from Node/%s%s?", name, listingProvenance(source))); err != nil {
 			return err
 		}
 	}
@@ -121,12 +125,14 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 		long = "Reverses kx cordon, letting the scheduler place pods on the node again."
 	}
 	return &cobra.Command{
-		Use:     verb + " <index>...",
-		Short:   short,
-		Long:    long,
-		Example: "  kx " + verb + " 1\n  kx " + verb + " 1 3\n  kx " + verb + " 1..3",
-		Args:    minArgs(1),
+		Use:         verb + " <index>...",
+		Short:       short,
+		Long:        long,
+		Example:     "  kx " + verb + " 1\n  kx " + verb + " 1 3\n  kx " + verb + " 1..3",
+		Args:        minArgs(1),
+		Annotations: mutatingAnnotations,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installAgentIndexNotice(services)
 			resolved, err := resolveRefs(services.State, "indexes", args)
 			if err != nil {
 				return err
@@ -165,6 +171,7 @@ func newDrainCommand(services Services) *cobra.Command {
 		// Flags are parsed by hand so kubectl's own reach it untouched. No Args
 		// validator: cobra checks arity against the unstripped argv, which
 		// would answer `kx drain --help` with an arity error instead of help.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -172,6 +179,11 @@ func newDrainCommand(services Services) *cobra.Command {
 				return err
 			}
 			yes, rest := extractBool(rest, "--yes", "-y")
+			// Only with --yes: without it, the confirm prompt already names the
+			// listing's provenance (listingProvenance).
+			if yes {
+				installAgentIndexNotice(services)
+			}
 			if len(rest) == 0 {
 				return fmt.Errorf("drain requires an index")
 			}

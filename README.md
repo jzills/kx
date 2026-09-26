@@ -264,6 +264,39 @@ so a pipeline can tell "the cluster is sick" from "the check never ran".
 
 [Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)
 
+## MCP server
+
+`kx mcp` runs a Model Context Protocol server on stdio, so an agent — Claude
+Code, an IDE, an agent framework — reads a cluster the way you do: by kind and
+name, by a mark, or by an index from your current listing.
+
+```bash
+claude mcp add kx -- kx mcp
+```
+
+Ten tools cover marks, listing, diagnostics, ownership, events, logs, usage,
+manifests (Secrets redacted) and image scanning. Every one is read-only
+against the cluster; `mark`, the one write, only ever adds a name to kx's own
+state. An index the agent is given is read against your current listing and
+never saved. Start it with `--write-listings` and the agent's own listings —
+`list_resources`, a diagnose sweep, `tree` and `top` — save to your history
+too, and become your current listing. They're tagged so `kx state` shows
+which listing is current and every mutating command warns before spending an
+agent's number — `kx delete`/`kx drain` fold it into their confirm prompt, and
+the rest (`kx scale`, `kx rollout restart`, `kx exec`, …) print a stderr
+notice. Commands that only read — `kx describe`, `kx logs`, `kx yaml`,
+`kx tree`, … — print nothing. Agent listings also count toward
+`max_history`, so they can push your own off the stack.
+
+```bash
+claude mcp add kx -- kx mcp --write-listings
+```
+
+The server follows your kubeconfig live, and every result names the context
+it read.
+
+[Full guide →](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/)
+
 ## State and history
 
 `kx` keeps up to 10 `kx get` results in `~/.kx/state.json`, with a cursor
@@ -353,6 +386,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
+| `kx mcp` | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 | `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 <!-- commands-table-end -->
 
