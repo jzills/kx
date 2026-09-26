@@ -26,12 +26,6 @@ full resource names.
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
 </p>
 
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/)**
-
-</div>
-
 ## Install
 
 Requires `kubectl` on your PATH. Every install path delivers the same prebuilt
@@ -61,12 +55,7 @@ pipx run --spec kx-cli kx get pods
 
 Standalone binaries for linux, macOS and Windows are attached to every
 [GitHub Release](https://github.com/jzills/kx/releases).
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/getting-started/install/)**
-
-</div>
+See the [install guide](https://jzills.github.io/kx/docs/getting-started/install/) for more.
 
 ## Usage
 
@@ -114,12 +103,7 @@ flagged as an OOMKill risk before it dies.
 `kx diag <index>` diagnoses a single resource: a top level verdict, a findings
 summary, a per-pod status table, log tails from broken containers and warning
 events — one screen instead of four kubectl commands.
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/triage-a-namespace/)**
-
-</div>
+See the [triage guide](https://jzills.github.io/kx/docs/guides/triage-a-namespace/) for more.
 
 ## Read a Secret in plaintext
 
@@ -133,16 +117,11 @@ export PGPASSWORD=$(kx secret 1 --decode -k password)
 
 Bare `kx secret --decode` decodes every Secret in the namespace in one call,
 confirming first — that prints every credential you have.
+See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
 </p>
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/read-a-secret/)**
-
-</div>
 
 ## Scan images for CVEs
 
@@ -153,32 +132,22 @@ severity summary, or the full per-image CVE report with `--full`.
 Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/)
 by default, or [Trivy](https://trivy.dev/) and
 [Grype](https://github.com/anchore/grype) via `kx engine`.
+See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for more.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </p>
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/scan-images/)**
-
-</div>
 
 ## See what owns what
 
 `kx tree <index>` walks the ownership graph — Deployment to ReplicaSet to Pods —
 and indexes every node it draws, so anything in the tree is one number away.
 Bare `kx tree` graphs the whole namespace.
+See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree/) for more.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>
 </p>
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/ownership-tree/)**
-
-</div>
 
 ## Reports in the browser
 
@@ -192,16 +161,11 @@ has no room for.
 
 `--out <path>` writes the page to a file instead of serving it, which is what
 you want in CI — `kx diag --out report.html` is the whole command.
+See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-reports/) for more.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
 </p>
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/browser-reports/)**
-
-</div>
 
 ## Spend an index anywhere
 
@@ -258,12 +222,7 @@ kx diag -A --fail-on warning --since 24h             # ignore what failed before
 
 Exit **2** means findings breached the threshold, **1** means kx itself failed —
 so a pipeline can tell "the cluster is sick" from "the check never ran".
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/)**
-
-</div>
+See the [CI guide](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/) for more.
 
 ## MCP server
 
@@ -279,16 +238,11 @@ Its ten tools are read-only against the cluster; `mark`, the one write, only
 adds a name to kx's own state. Start it with `--write-listings` and the
 agent's listings join your history, tagged as the agent's, so you can spend its
 numbers yourself — and kx warns before a mutating command does.
+See the [agent guide](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/) for more.
 
 ```bash
 claude mcp add kx -- kx mcp --write-listings
 ```
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/)**
-
-</div>
 
 ## State and history
 
@@ -306,12 +260,7 @@ kx state drop --empty # drop the entries whose listing found nothing
 
 Each entry remembers the context it was listed in, so a staging index is never
 resolved against production — `kx` refuses and relists instead.
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/concepts/state/)**
-
-</div>
+See the [state docs](https://jzills.github.io/kx/docs/concepts/state/) for more.
 
 ## Configuration
 
@@ -321,12 +270,7 @@ override. The two worth changing have commands of their own — `kx theme` and
 
 Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker`
 stays clean. [`NO_COLOR`](https://no-color.org/) is honored too.
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/concepts/configuration/)**
-
-</div>
+See the [configuration docs](https://jzills.github.io/kx/docs/concepts/configuration/) for more.
 
 ## Themes
 
@@ -340,12 +284,7 @@ persists your choice, by name or index.
 Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`,
 `mono`, `light` and `plain`.
-
-<div align="center">
-
-**[Full documentation →](https://jzills.github.io/kx/docs/concepts/themes/)**
-
-</div>
+See the [themes docs](https://jzills.github.io/kx/docs/concepts/themes/) for more.
 
 ## Commands
 
