@@ -2,9 +2,9 @@
      The kx mark as rectangles rather than text: drawn as <text> it only
      lines up where the reader has a monospace font carrying the box-drawing
      glyphs, and falls apart into offset blocks where they don't. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="250" viewBox="0 0 800 250"
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="240.5" viewBox="0 0 800 240.5"
      shape-rendering="crispEdges" role="img" aria-label="kx — kubectl, indexed.">
-  <g fill="#3fb950" transform="translate(256, 17)">
+  <g fill="#3fb950" transform="translate(259.25, 20)">
   <rect x="0" y="0" width="18" height="36"/>
   <rect x="18" y="0" width="18" height="36"/>
   <rect x="36" y="15.5" width="11.5" height="5"/>
