@@ -170,8 +170,8 @@ See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-
 
 ## Spend an index anywhere
 
-kx wraps two dozen of kubectl's verbs. The `kx ref` command covers the rest, and every
-tool that isn't kubectl: it prints what an index refers to, as an argument
+Beyond the two dozen kubectl verbs kx wraps, the `kx ref` command covers the
+rest, and every tool that isn't kubectl: it prints what an index refers to, as an argument
 fragment that drops straight into another command.
 
 ```bash
@@ -247,8 +247,8 @@ claude mcp add kx -- kx mcp --write-listings
 
 ## State and history
 
-kx keeps a history of `kx get` results — 10 by default, configurable — with a
-cursor marking the entry indexes resolve against.
+Recent `kx get` results are kept as a history — 10 by default, configurable —
+with a cursor marking the entry indexes resolve against.
 
 ```bash
 kx state              # the listing indexes currently resolve against
@@ -265,7 +265,7 @@ See the [state docs](https://jzills.github.io/kx/docs/concepts/state/) for more.
 
 ## Configuration
 
-kx reads `~/.kx/config.toml`, and every setting takes a `KX_*` environment
+Settings live in `~/.kx/config.toml`, and every one takes a `KX_*` environment
 override. The two worth changing have commands of their own — `kx theme` and
 `kx engine` both persist your choice.
 
