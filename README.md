@@ -291,8 +291,8 @@ claude mcp add kx -- kx mcp --write-listings
 
 ## State and history
 
-`kx` keeps up to 10 `kx get` results in `~/.kx/state.json`, with a cursor
-marking the entry indexes resolve against.
+`kx` keeps a history of `kx get` results — 10 by default, configurable — with a
+cursor marking the entry indexes resolve against.
 
 ```bash
 kx state              # the listing indexes currently resolve against
