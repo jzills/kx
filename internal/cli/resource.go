@@ -377,9 +377,12 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read
-// from a single pod.
+// from a single pod. Each one names its pods with a single selector. A
+// CronJob does not — its pods belong to the Jobs it created, a hop further —
+// so it is left out rather than aggregated through a selector that reaches
+// none of them.
 var aggregateLogKinds = kinds.Set{
-	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
+	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Job, kinds.Service,
 }
 
 // logKinds is every kind kx logs accepts: a Pod read directly, plus the
@@ -449,7 +452,8 @@ func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, 
 	var object struct {
 		Spec struct {
 			// A Service selects pods directly; a workload selects them through
-			// its template's matchLabels.
+			// matchLabels — for a Job, the controller-uid its controller sets,
+			// which every pod it creates carries, retries included.
 			Selector json.RawMessage `json:"selector"`
 		} `json:"spec"`
 	}

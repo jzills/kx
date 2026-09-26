@@ -540,7 +540,7 @@
     },
     {
       "name": "logs",
-      "description": "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/DaemonSet/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+      "description": "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/DaemonSet/Job/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
