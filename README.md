@@ -18,9 +18,9 @@
 
 </div>
 
-Stop copying resource names out of `kubectl get`. `kx get` numbers every row,
-and every command after it takes the number — `kx logs 3`, `kx diag 3`,
-`kx delete 3..5`.
+`kx` is a kubectl wrapper that adds index-based resource selection. Run
+`kx get <resource>` once, then reference any result by number instead of typing
+full resource names.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
@@ -70,7 +70,8 @@ Standalone binaries for linux, macOS and Windows are attached to every
 
 ## Usage
 
-A `kx` session at a glance — one listing, then everything after it by number.
+No more copying names out of `kubectl get` — one listing, then everything after
+it by number.
 
 ```bash
 kx get pods    # lists pods, numbering each row
