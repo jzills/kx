@@ -27,66 +27,83 @@ import (
 )
 
 // The README banner is embedded via <img width="800">, wide of the mark's own
-// 4:3 shape, so its canvas keeps the original text version's proportions —
-// the mark centred with letterbox padding — rather than cropping to it.
+// 4:3 shape, so its canvas keeps the original text version's width — the mark
+// centred with letterbox padding — rather than cropping to it. Its height is
+// the drawn mark's plus bannerPadding above and below.
 const (
-	bannerWidth  = 800.0
-	bannerHeight = 250.0
+	bannerWidth   = 800.0
+	bannerPadding = 20.0
 )
+
+// extent is the mark's size two ways: the grid it is laid out on, and the
+// box its rectangles actually cover. They differ because the grid's last row
+// is the shadow's bottom edge, a stroke drawn at mid-cell, so the grid runs
+// past the ink by nearly half a cell.
+type extent struct {
+	w, h                   float64
+	minX, minY, maxX, maxY float64
+}
 
 // outputs is every place the mark is drawn as a vector. Each gets the same
 // grid of rects, wrapped in the markup its own page expects.
 var outputs = []struct {
 	path string
-	// open renders everything before the rects, close everything after, for a
-	// mark w wide and h tall.
-	open, close func(w, h float64) string
+	// open renders everything before the rects, close everything after.
+	open, close func(e extent) string
 }{
 	{
 		// The site colours the mark from the active palette by inheriting
 		// fill from the SVG's own fill="currentColor", set through CSS.
 		path: "site/assets/kx-mark.svg",
-		open: func(w, h float64) string {
+		open: func(e extent) string {
 			return fmt.Sprintf(
 				"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %g %g\"\n"+
 					"     fill=\"currentColor\" shape-rendering=\"crispEdges\"\n"+
-					"     role=\"img\" aria-label=\"kx\">\n", w, h)
+					"     role=\"img\" aria-label=\"kx\">\n", e.w, e.h)
 		},
-		close: func(w, h float64) string { return "</svg>\n" },
+		close: func(extent) string { return "</svg>\n" },
 	},
 	{
 		// The --html report masthead colours the mark via .wordmark's own
 		// fill: var(--accent) in internal/web/style.css, so the rects here
 		// carry no fill of their own and just inherit it.
 		path: "internal/web/wordmark.svg",
-		open: func(w, h float64) string {
+		open: func(e extent) string {
 			return fmt.Sprintf(
 				"<svg class=\"wordmark\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %g %g\"\n"+
-					"     shape-rendering=\"crispEdges\" role=\"img\" aria-label=\"kx\">\n", w, h)
+					"     shape-rendering=\"crispEdges\" role=\"img\" aria-label=\"kx\">\n", e.w, e.h)
 		},
-		close: func(w, h float64) string { return "</svg>\n" },
+		close: func(extent) string { return "</svg>\n" },
 	},
 	{
 		// GitHub renders READMEs standalone, with no page palette to inherit
 		// from, so this one carries its own fixed fill rather than
-		// currentColor. The mark is centred in a canvas the size the <text>
-		// version used, so the banner keeps its wide, padded proportions
-		// instead of shrinking to the mark's own tighter 4:3 shape.
+		// currentColor. The mark is centred on the box its rectangles cover,
+		// not on its grid: centred on the grid, the grid's inkless lower half
+		// row left more space under the mark than over it.
 		path: "assets/banner.svg",
-		open: func(w, h float64) string {
+		open: func(e extent) string {
+			height := e.maxY - e.minY + 2*bannerPadding
 			return fmt.Sprintf(
 				"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%g\" height=\"%g\" viewBox=\"0 0 %g %g\"\n"+
 					"     shape-rendering=\"crispEdges\" role=\"img\" aria-label=\"kx — kubectl, indexed.\">\n"+
 					"  <g fill=\"#3fb950\" transform=\"translate(%g, %g)\">\n",
-				bannerWidth, bannerHeight, bannerWidth, bannerHeight,
-				(bannerWidth-w)/2, (bannerHeight-h)/2)
+				bannerWidth, height, bannerWidth, height,
+				(bannerWidth-(e.maxX-e.minX))/2-e.minX, bannerPadding-e.minY)
 		},
-		close: func(w, h float64) string { return "  </g>\n</svg>\n" },
+		close: func(extent) string { return "  </g>\n</svg>\n" },
 	},
 }
 
 func main() {
 	shapes, w, h := mark.Shapes()
+	e := extent{w: w, h: h, minX: w, minY: h}
+	for _, shape := range shapes {
+		e.minX = min(e.minX, shape.X)
+		e.minY = min(e.minY, shape.Y)
+		e.maxX = max(e.maxX, shape.X+shape.Width)
+		e.maxY = max(e.maxY, shape.Y+shape.Height)
+	}
 
 	var drawn strings.Builder
 	for _, shape := range shapes {
@@ -101,9 +118,9 @@ func main() {
 				"     The kx mark as rectangles rather than text: drawn as <text> it only\n" +
 				"     lines up where the reader has a monospace font carrying the box-drawing\n" +
 				"     glyphs, and falls apart into offset blocks where they don't. -->\n")
-		out.WriteString(output.open(w, h))
+		out.WriteString(output.open(e))
 		out.WriteString(drawn.String())
-		out.WriteString(output.close(w, h))
+		out.WriteString(output.close(e))
 
 		if err := write(output.path, []byte(out.String())); err != nil {
 			fmt.Fprintln(os.Stderr, "gen-marks:", err)
