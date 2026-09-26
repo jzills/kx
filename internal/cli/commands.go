@@ -255,8 +255,8 @@ func newLogsCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "logs <index>... [kubectl flags]",
 		SuggestFor: []string{"tail"},
-		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
-		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.\n\n" +
+		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
+		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
 		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:               minArgs(1),

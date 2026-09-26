@@ -209,6 +209,26 @@ func TestLogsToolOnADeploymentReadsSelectorThenAggregates(t *testing.T) {
 	}
 }
 
+// The logs tool shares the CLI's kind list, so #396's Job support reaches it
+// too — and its description, which an agent reads, says so.
+func TestLogsToolAggregatesAJob(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{
+		`{"spec":{"selector":{"matchLabels":{"batch.kubernetes.io/controller-uid":"8d1f"}}}}`,
+		"[migrate-x7k2] done\n",
+	}}
+	var out logsOutput
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "logs", map[string]any{
+		"target": map[string]any{"kind": "job", "name": "migrate", "namespace": "prod"},
+	}), &out)
+	wantLogs := "logs -l batch.kubernetes.io/controller-uid=8d1f --prefix=true -n prod --tail=200"
+	if len(kube.runs) != 2 || strings.Join(kube.runs[1], " ") != wantLogs {
+		t.Fatalf("kubectl runs = %v, want the selector read then %q", kube.runs, wantLogs)
+	}
+	if out.Logs != "[migrate-x7k2] done\n" {
+		t.Errorf("logs = %q", out.Logs)
+	}
+}
+
 func TestLogsToolRefusesContainerWithAnAggregateKind(t *testing.T) {
 	kube := &recordingKubectl{}
 	deps := mcpTestDeps(t, kube)

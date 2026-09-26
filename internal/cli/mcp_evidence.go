@@ -29,7 +29,7 @@ func registerEvidenceTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "logs",
 		Description: "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/" +
-			"DaemonSet/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+			"DaemonSet/Job/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
 		Annotations: readOnlyTool("Logs"),
 	}, serialized(deps, deps.logs))
 }

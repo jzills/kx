@@ -369,7 +369,7 @@ Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
 | `kx get <resource> [<index>...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx label <index> [<key=value>...]` | Set or remove labels on an indexed resource. |
 | `kx labels <index>...` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | `kx mark [<name>] [<index>]` | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |

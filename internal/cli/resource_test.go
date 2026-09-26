@@ -781,6 +781,42 @@ func TestLogsForDeploymentAggregatesBySelector(t *testing.T) {
 	}
 }
 
+// #396: a Job selects its pods through spec.selector.matchLabels like any
+// other workload — the controller-uid label its controller sets — so its
+// logs aggregate the same way, retries included.
+func TestLogsForJobAggregatesBySelector(t *testing.T) {
+	kubectl := &recordingKubectl{
+		output: `{"spec":{"selector":{"matchLabels":{"batch.kubernetes.io/controller-uid":"8d1f"}}}}`,
+	}
+	if err := (LogsCommand{
+		Kubectl: kubectl, State: workload("migrate", kinds.Job), Status: noStatus,
+	}).Execute(state.Ref{Index: 1}, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "get Job migrate -n prod -o json"; joinArgs(kubectl.runs[0]) != want {
+		t.Errorf("selector read = %q, want %q", joinArgs(kubectl.runs[0]), want)
+	}
+	want := "logs -l batch.kubernetes.io/controller-uid=8d1f --prefix=true -n prod"
+	if got := joinArgs(kubectl.interactive[0]); got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+}
+
+// A CronJob's pods are two hops away, through the Jobs it created, so no one
+// selector reaches them: it stays refused rather than aggregating nothing.
+func TestLogsRefusesACronJob(t *testing.T) {
+	kubectl := &recordingKubectl{}
+	err := LogsCommand{
+		Kubectl: kubectl, State: workload("nightly", kinds.CronJob), Status: noStatus,
+	}.Execute(state.Ref{Index: 1}, nil)
+	if err == nil || !strings.Contains(err.Error(), "'CronJob'") {
+		t.Fatalf("err = %v, want the unsupported-kind refusal", err)
+	}
+	if len(kubectl.runs)+len(kubectl.interactive) != 0 {
+		t.Errorf("made kubectl calls for a refused kind: %v %v", kubectl.runs, kubectl.interactive)
+	}
+}
+
 // A Service selects pods directly rather than through a template.
 func TestLogsForServiceUsesFlatSelector(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"spec":{"selector":{"app":"web"}}}`}
@@ -812,7 +848,7 @@ func TestLogsRejectsUnsupportedKind(t *testing.T) {
 		Kubectl: &recordingKubectl{}, State: workload("cm", kinds.ConfigMap), Status: noStatus,
 	}.Execute(state.Ref{Index: 1}, nil)
 	want := "kx logs does not support 'ConfigMap' — only Pods, Deployments, " +
-		"StatefulSets, DaemonSets and Services."
+		"StatefulSets, DaemonSets, Jobs and Services."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
