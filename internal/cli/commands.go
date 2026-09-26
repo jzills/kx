@@ -930,30 +930,57 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 }
 
 func newMetadataWriteCommand(services Services, verb, field, short, long string) *cobra.Command {
-	var (
-		removes   []string
-		overwrite bool
-	)
 	cmd := &cobra.Command{
-		Use:         verb + " <index> [key=value...]",
-		Short:       short,
-		Long:        long,
-		Args:        minArgs(1),
-		Example:     "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
-		Annotations: mutatingAnnotations,
+		Use:     verb + " <index> [key=value...] [kubectl flags]",
+		Short:   short,
+		Long:    long + "\n\nkey=value pairs go right after the index, before any kubectl flags.",
+		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env\n  kx " + verb + " 1 env=prod --dry-run=server",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		Annotations:        mutatingAnnotations,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			installAgentIndexNotice(services)
-			ref, err := parseRef("index", args[0])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			removes, rest, err := extractStrings(rest, "--remove", "")
 			if err != nil {
 				return err
 			}
-			keys, values, err := parsePairs(args[1:])
+			overwrite, rest := extractBool(rest, "--overwrite")
+			if len(rest) == 0 {
+				return requiredArgsError(cmd)
+			}
+			installAgentIndexNotice(services)
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
+				return err
+			}
+			// The pairs are the run of arguments before the first flag; the
+			// rest is kubectl's. Stopping at the first flag rather than
+			// picking pairs out of the whole argv is what keeps a flag's
+			// separate value — `-o jsonpath={.metadata}` — from being read
+			// as a pair.
+			pairs, extra := splitLeadingPositionals(rest[1:])
+			keys, values, err := parsePairs(pairs)
+			if err != nil {
+				return err
+			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			message, err := MetadataWriteCommand{
 				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
-			}.Execute(ref, keys, values, removes, overwrite)
+			}.Execute(ref, keys, values, removes, overwrite, extra)
 			if err != nil {
 				return err
 			}
@@ -961,9 +988,21 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&removes, "remove", nil, "Key to remove (repeatable)")
-	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Allow replacing an existing key")
+	// Parsed by hand, registered only so they appear in --help instead of
+	// vanishing.
+	cmd.Flags().StringArray("remove", nil, "Key to remove (repeatable)")
+	cmd.Flags().Bool("overwrite", false, "Allow replacing an existing key")
 	return cmd
+}
+
+// splitLeadingPositionals splits args at the first flag.
+func splitLeadingPositionals(args []string) (positionals, rest []string) {
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return args[:i], args[i:]
+		}
+	}
+	return args, nil
 }
 
 // newSwitchCommand builds the namespace and context commands, which share a

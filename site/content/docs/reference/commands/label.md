@@ -8,10 +8,14 @@ weight: 15
 
 Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key.
 
+key=value pairs go right after the index, before any kubectl flags.
+
+Unrecognized flags are passed through to kubectl.
+
 ## Usage
 
 ```text
-kx label [OPTIONS] <index> [key=value...]
+kx label [OPTIONS] <index> [key=value...] [kubectl flags]
 ```
 
 ## Arguments
@@ -40,4 +44,5 @@ kx label [OPTIONS] <index> [key=value...]
 ```bash
 kx label 1 env=prod
 kx label 1 --remove env
+kx label 1 env=prod --dry-run=server
 ```

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -238,13 +239,23 @@ type MetadataWriteCommand struct {
 	Field string
 }
 
+// Execute writes the change. extraArgs are kubectl's own flags, forwarded
+// after kx's.
 func (c MetadataWriteCommand) Execute(
 	ref state.Ref, setKeys []string, sets map[string]string, removes []string, overwrite bool,
+	extraArgs []string,
 ) (string, error) {
 	if len(sets) == 0 && len(removes) == 0 {
-		return "", fmt.Errorf(
+		message := fmt.Sprintf(
 			"kx %s needs key=value to set, or --remove to name a key to drop — neither was given.",
 			c.Verb)
+		// Pairs are read only from before the first kubectl flag, so one typed
+		// after them lands here, and "neither was given" alone would deny what
+		// the user can see they typed.
+		if len(extraArgs) > 0 {
+			message += " key=value pairs go right after the index, before kubectl's flags."
+		}
+		return "", errors.New(message)
 	}
 
 	name, namespace, kind, err := c.State.Resolve(ref)
@@ -282,6 +293,7 @@ func (c MetadataWriteCommand) Execute(
 	if overwrite {
 		args = append(args, "--overwrite")
 	}
+	args = append(args, extraArgs...)
 	if _, err := c.Kubectl.Run(args); err != nil {
 		return "", err
 	}
@@ -292,6 +304,11 @@ func (c MetadataWriteCommand) Execute(
 	}
 	if len(removes) > 0 {
 		parts = append(parts, fmt.Sprintf("removed %d", len(removes)))
+	}
+	// kx replaces kubectl's output with this line, so it has to say when
+	// nothing was changed — as kx delete's does.
+	if isDryRun(extraArgs) {
+		parts = append(parts, "dry run — nothing was changed")
 	}
 	return fmt.Sprintf("%s %s/%s (%s)",
 		metadataVerbText[c.Verb], kind, name, strings.Join(parts, ", ")), nil
