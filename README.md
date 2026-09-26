@@ -354,6 +354,7 @@ covers every argument and flag.
 
 <details>
 <summary><b>All commands</b></summary>
+<br>
 
 <!-- commands-table-start -->
 | Command | Description |
