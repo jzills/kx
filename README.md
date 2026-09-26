@@ -18,7 +18,7 @@
 
 </div>
 
-kx is a kubectl wrapper that adds index-based resource selection. Run
+A kubectl wrapper that adds index-based resource selection. Run
 `kx get <resource>` once, then reference any result by number instead of typing
 full resource names.
 
