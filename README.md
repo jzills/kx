@@ -123,7 +123,7 @@ export PGPASSWORD=$(kx secret 1 --decode -k password)
 </p>
 
 Bare `kx secret --decode` decodes every Secret in the namespace in one call, confirming first — that prints every credential you have.
-See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
+See the [secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
 
 ## Scan images for CVEs
 
