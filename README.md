@@ -29,12 +29,23 @@ full resource names.
 ## Install
 
 Requires `kubectl` on your PATH. Every install is the same prebuilt binary, with
-no Python runtime or dependencies. The recommended way is with
-[uv](https://docs.astral.sh/uv/):
+no Python runtime or dependencies.
+
+As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
+
+```bash
+kubectl krew install idx
+alias kx="kubectl idx"
+```
+
+Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv tool install kx-cli
 ```
+
+Standalone binaries for Linux, macOS and Windows are attached to every
+[GitHub Release](https://github.com/jzills/kx/releases).
 
 <details>
 <summary><b>Other ways to install</b></summary>
@@ -47,22 +58,12 @@ pipx install kx-cli
 pip install kx-cli
 ```
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
-
-```bash
-kubectl krew install idx
-alias kx="kubectl idx"
-```
-
 Or run it without installing — the package is `kx-cli`, the command is `kx`:
 
 ```bash
 uvx --from kx-cli kx get pods
 pipx run --spec kx-cli kx get pods
 ```
-
-Standalone binaries for Linux, macOS and Windows are attached to every
-[GitHub Release](https://github.com/jzills/kx/releases).
 
 </details>
 
