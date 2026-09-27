@@ -95,6 +95,8 @@ kx get pods -n prod -l app=api  # anything else passes through to kubectl
 - The `--watch`/`-w` flag redraws the table in place rather than appending lines.
 - Tab completion, from `kx completion <shell>`, shows the resource behind each index: `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
 
+See the [indexes docs](https://jzills.github.io/kx/docs/concepts/indexes/) for more.
+
 ## Triage a namespace
 
 Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
@@ -175,6 +177,7 @@ kx ref 1..9 --name | xargs -n1 some-tool
 ```
 
 The `--name`, `--namespace` and `--kind` flags print one field alone, and nothing here touches the cluster, so `kx ref` answers instantly even with nothing reachable.
+See the [`kx ref` reference](https://jzills.github.io/kx/docs/reference/commands/ref/) for more.
 
 ## Marks
 
@@ -193,6 +196,7 @@ kx unmark --all
 A mark survives re-listing, which is what an index cannot do.
 It is pinned to the cluster it was taken in, and will not resolve in another — the same name means a different resource there, or none at all.
 Running `kx state drop --all` leaves marks alone; only `kx unmark --all` removes them.
+See the [marks docs](https://jzills.github.io/kx/docs/concepts/marks/) for more.
 
 ## Use kx in CI
 
