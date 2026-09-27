@@ -83,6 +83,19 @@ jobs:
               echo "$archive has no kx/LICENSE"; exit 1; }
           done
 
+      # releases/latest/download/<asset> only resolves a name that is the same
+      # in every release, so each archive also ships under a version-free name.
+      # A copy, not a rebuild: the bytes, and so the checksum, must match.
+      - name: Verify the version-free archives
+        run: |
+          count=0
+          for archive in dist/kx_v${{ steps.version.outputs.value }}_*.tar.gz dist/kx_v${{ steps.version.outputs.value }}_*.zip; do
+            copy="dist/kx_${archive#dist/kx_v${{ steps.version.outputs.value }}_}"
+            cmp -s "$archive" "$copy" || { echo "$copy is missing or differs from $archive"; exit 1; }
+            count=$((count + 1))
+          done
+          test "$count" -eq 6 || { echo "expected 6 versioned archives, found $count"; exit 1; }
+
       - name: Check the bundled version matches the release
         run: |
           # First line only: --version also reports commit, build date and
@@ -115,8 +128,8 @@ jobs:
         with:
           name: release-archives
           path: |
-            dist/kx_v*.tar.gz
-            dist/kx_v*.zip
+            dist/kx_*.tar.gz
+            dist/kx_*.zip
           if-no-files-found: error
 
       # Carried across the gate rather than rebuilt after it, so what is
@@ -253,7 +266,7 @@ jobs:
       - name: Check nothing but the release is staged
         run: |
           cd "$RUNNER_TEMP/release-assets"
-          unexpected=$(ls | grep -vE '^(kx_v.*\.(tar\.gz|zip)|SHA256SUMS)$' || true)
+          unexpected=$(ls | grep -vE '^(kx_(v[^_]+_)?(linux|darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)|SHA256SUMS)$' || true)
           if [ -n "$unexpected" ]; then
             echo "::error::staging directory holds files that are not release artifacts:"
             echo "$unexpected"
