@@ -4,27 +4,21 @@ description: kx diag ranks what is unhealthy, and the rows are indexed so you ca
 weight: 1
 ---
 
-Something is wrong in a namespace and you don't yet know what. The kubectl
-version of this is four commands and a lot of scrolling: `get pods`, then
-`describe` the ones that look off, then `logs`, then `get events`.
+Something is wrong in a namespace and you don't yet know what.
+The kubectl version of this is four commands and a lot of scrolling: `get pods`, then `describe` the ones that look off, then `logs`, then `get events`.
 
 ```bash
 kx diag
 ```
 
-sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs,
-CronJobs, Services, PersistentVolumeClaims and Ingresses, plus pods nothing
-owns — and prints what's unhealthy, worst first.
+sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims and Ingresses, plus pods nothing owns — and prints what's unhealthy, worst first.
 
-Healthy resources are left out of the terminal table. `--full` puts them back.
+Healthy resources are left out of the terminal table.
+The `--full` flag puts them back.
 
-Each row shows one finding, so which of several equally severe findings sorts
-first decides what the whole sweep reads like. Rows are ordered by severity,
-and within a severity by how specific the finding is: a concrete cause — a
-container state, a scheduling refusal, an exceeded limit — outranks a rollup
-like "Only 0/3 replicas ready", which outranks a raw warning event. Without
-that, five differently-broken Deployments all headlined the same replica
-count and the actual cause sat one screen down.
+Each row shows one finding, so which of several equally severe findings sorts first decides what the whole sweep reads like.
+Rows are ordered by severity, and within a severity by how specific the finding is: a concrete cause — a container state, a scheduling refusal, an exceeded limit — outranks a rollup like "Only 0/3 replicas ready", which outranks a raw warning event.
+Without that, five differently-broken Deployments all headlined the same replica count and the actual cause sat one screen down.
 
 ## The rows are indexed
 
@@ -39,7 +33,7 @@ kx logs 2     # straight into the logs of row 2
 
 ## One resource
 
-`kx diag <index>` diagnoses a single resource and prints, on one screen:
+With an index, `kx diag` diagnoses a single resource and prints, on one screen:
 
 - a verdict banner
 - a `SUMMARY` of findings
@@ -47,26 +41,17 @@ kx logs 2     # straight into the logs of row 2
 - recent log tails from broken containers
 - warning events
 
-The findings it looks for include CrashLoopBackOff, image pull failures,
-OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints,
-Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that
-don't exist.
+The findings it looks for include CrashLoopBackOff, image pull failures, OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints, Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that don't exist.
 
 ## Now, not once
 
-Everything is reported by default, however old — and `--since` bounds it to
-what happened recently: a warning event, a restart or OOMKill a container
-recovered from, a pod or run that failed. What is still going wrong is always
-reported, window or not, however long it has been going wrong: a container in
-CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
+Everything is reported by default, however old — and `--since` bounds it to what happened recently: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed.
+What is still going wrong is always reported, window or not, however long it has been going wrong: a container in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
 
-The line is *finished* versus *ongoing*, not past versus present. A container
-that terminated with an error stopped at a moment and stays stopped, so it is
-dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that
-has never run, which is a problem now.
+The line is *finished* versus *ongoing*, not past versus present.
+A container that terminated with an error stopped at a moment and stays stopped, so it is dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that has never run, which is a problem now.
 
-Every finding says which it is, and the shape tells you whether a window can
-reach it:
+Every finding says which it is, and the shape tells you whether a window can reach it:
 
 ```
 ✗ Image pull failure (ImagePullBackOff) in pod api-badimage-… · for 25d
@@ -74,15 +59,12 @@ reach it:
 ! Failed ×46241 on Pod/api-badimage-… · 1m ago
 ```
 
-`· for 25d` is how long something has been true — no `--since` will hide it.
-`· 1m ago` is when something happened, and a narrow enough window will. A pod
-that flaps counts from its current episode, not its whole history: a
-crashlooping container is briefly ready on each restart, so `· for 46s` beside
-4675 restarts is the last crash, not the first.
+A `· for 25d` is how long something has been true — no `--since` will hide it.
+A `· 1m ago` is when something happened, and a narrow enough window will.
+A pod that flaps counts from its current episode, not its whole history: a crashlooping container is briefly ready on each restart, so `· for 46s` beside 4675 restarts is the last crash, not the first.
 
-That line matters because a finding drives the verdict and the verdict drives
-[`--fail-on`](../use-kx-in-ci/). Without it, one `FailedScheduling` from three
-weeks ago holds a healthy workload at `warnings` forever.
+That line matters because a finding drives the verdict and the verdict drives [`--fail-on`](../use-kx-in-ci/).
+Without it, one `FailedScheduling` from three weeks ago holds a healthy workload at `warnings` forever.
 
 ```bash
 kx diag --since 24h   # today's failures only
@@ -90,23 +72,17 @@ kx diag --since 7d    # a week of history
 kx diag               # everything, however old
 ```
 
-A schedule longer than the window wants `--since` widened: a weekly CronJob
-whose last run failed six days ago needs `--since 7d` to see it. Set the window
-once with `diag_max_age` in
-[config.toml](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the
-environment.
+A schedule longer than the window wants `--since` widened: a weekly CronJob whose last run failed six days ago needs `--since 7d` to see it.
+Set the window once with `diag_max_age` in [config.toml](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the environment.
 
 ## Usage as a signal, not just state
 
-Findings also draw on live resource usage, the same data
-[`kx top`](../../reference/commands/top/) reports. A pod running hot against
-its memory limit is flagged as an OOMKill risk *before* it gets killed, which
-is the one finding you cannot get from `describe`.
+Findings also draw on live resource usage, the same data [`kx top`](../../reference/commands/top/) reports.
+A pod running hot against its memory limit is flagged as an OOMKill risk *before* it gets killed, which is the one finding you cannot get from `describe`.
 
 ## Nodes
 
-A Node is diagnosed the same way, by index rather than by sweep — it is
-cluster-scoped, so it appears in neither a namespace sweep nor `-A`.
+A Node is diagnosed the same way, by index rather than by sweep — it is cluster-scoped, so it appears in neither a namespace sweep nor `-A`.
 
 ```bash
 kx get nodes
@@ -122,8 +98,7 @@ kx diag -n prod    # a namespace you aren't in
 kx diag -A         # every namespace
 ```
 
-`-A` indexes the sweep too, and adds a `NAMESPACE` column beside the numbers,
-so `kx logs 7` reaches whichever namespace row 7 came from.
+With `-A`, the sweep is indexed too, and adds a `NAMESPACE` column beside the numbers, so `kx logs 7` reaches whichever namespace row 7 came from.
 
 ## As a check
 
@@ -132,8 +107,8 @@ kx diag -A --json
 kx diag -A --fail-on critical
 ```
 
-`--json` prints the same sweep as a document, and `--fail-on` exits 2 when any
-resource reaches that verdict. See [using kx in CI](../use-kx-in-ci/).
+The `--json` flag prints the same sweep as a document, and `--fail-on` exits 2 when any resource reaches that verdict.
+See [using kx in CI](../use-kx-in-ci/).
 
 ## In a browser
 
@@ -141,8 +116,7 @@ resource reaches that verdict. See [using kx in CI](../use-kx-in-ci/).
 kx diag --html
 ```
 
-renders the same sweep as a filterable, sortable page and opens it — with a
-group-by for larger sweeps, and each row expanding into that resource's full
-report. See [browser reports](../browser-reports/).
+renders the same sweep as a filterable, sortable page and opens it — with a group-by for larger sweeps, and each row expanding into that resource's full report.
+See [browser reports](../browser-reports/).
 
 {{< kx-shot report="diag" alt="kx diag --html dashboard" >}}
