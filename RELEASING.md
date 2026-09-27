@@ -133,6 +133,9 @@ permanent. In the **Build** job's log:
   number you are releasing.
 - *Verify the archives are krew-installable* and *Verify the Windows
   archives* — six archives, each with its binary and its `LICENSE`.
+- *Verify the version-free archives* — each archive also ships as
+  `kx_<os>_<arch>`, byte-identical to its versioned twin, so
+  `releases/latest/download/…` always resolves to the newest release.
 - *Install a wheel and run the installed binary* — the last line is the
   installed `kx --version`.
 
@@ -154,8 +157,8 @@ Check the artifacts themselves:
 ```bash
 git fetch --tags && git tag -l v0.5.3
 
-# six archives plus SHA256SUMS
-gh release view v0.5.3 --json assets --jq '.assets|length'    # expect 7
+# six archives, their six version-free copies, and SHA256SUMS
+gh release view v0.5.3 --json assets --jq '.assets|length'    # expect 13
 
 curl -s https://pypi.org/pypi/kx-cli/json | jq -r .info.version    # expect 0.5.3
 gh run list --workflow=krew.yml --limit 1                          # expect success
@@ -163,6 +166,10 @@ gh run list --workflow=krew.yml --limit 1                          # expect succ
 # the strongest check: run what was actually published
 curl -sL -o kx.tgz https://github.com/jzills/kx/releases/download/v0.5.3/kx_v0.5.3_linux_amd64.tar.gz
 tar xzf kx.tgz && ./kx/kx --version && test -f kx/LICENSE && echo "LICENSE ok"
+
+# the version-free URL now points at this release
+curl -sL https://github.com/jzills/kx/releases/latest/download/kx_linux_amd64.tar.gz \
+  | tar xzO kx/kx > kx-latest && chmod +x kx-latest && ./kx-latest --version
 ```
 
 ## Why the pipeline is shaped the way it is
