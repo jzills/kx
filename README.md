@@ -28,13 +28,21 @@ full resource names.
 
 ## Install
 
-Requires `kubectl` on your PATH. Every install path delivers the same prebuilt
-binary — no Python runtime, no dependencies.
-
-With [uv](https://docs.astral.sh/uv/) (recommended), [pipx](https://pipx.pypa.io/), or pip:
+Requires `kubectl` on your PATH. Every install is the same prebuilt binary, with
+no Python runtime or dependencies. The recommended way is with
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv tool install kx-cli
+```
+
+<details>
+<summary><b>Other ways to install</b></summary>
+<br>
+
+With [pipx](https://pipx.pypa.io/) or pip:
+
+```bash
 pipx install kx-cli
 pip install kx-cli
 ```
@@ -53,8 +61,11 @@ uvx --from kx-cli kx get pods
 pipx run --spec kx-cli kx get pods
 ```
 
-Standalone binaries for linux, macOS and Windows are attached to every
+Standalone binaries for Linux, macOS and Windows are attached to every
 [GitHub Release](https://github.com/jzills/kx/releases).
+
+</details>
+
 See the [install guide](https://jzills.github.io/kx/docs/getting-started/install/) for more.
 
 ## Usage
