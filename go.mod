@@ -2,7 +2,7 @@ module github.com/jzills/kx
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.26.8
 
 require (
 	github.com/BurntSushi/toml v1.6.0
