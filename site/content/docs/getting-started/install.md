@@ -32,6 +32,16 @@ uv tool install kx-cli
 Builds for Linux, macOS and Windows on both amd64 and arm64 are attached to every [GitHub Release](https://github.com/jzills/kx/releases), with checksums in `SHA256SUMS`.
 Download, verify, and drop the binary somewhere on your `PATH`.
 
+The newest build is always at the same URL, so on Linux or macOS installing it is one command.
+Swap `linux_amd64` for `linux_arm64`, `darwin_arm64` or `darwin_amd64` to match your machine:
+
+```bash
+curl -sSL \
+  https://github.com/jzills/kx/releases/latest/download/kx_linux_amd64.tar.gz \
+  | tar xz
+sudo install kx/kx /usr/local/bin/kx
+```
+
 ## With pipx or pip
 
 The same PyPI package installs with either:
