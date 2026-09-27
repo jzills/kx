@@ -128,13 +128,13 @@ straight into a shell.
 export PGPASSWORD=$(kx secret 1 --decode -k password)
 ```
 
-Bare `kx secret --decode` decodes every Secret in the namespace in one call,
-confirming first — that prints every credential you have.
-See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
 </p>
+
+Bare `kx secret --decode` decodes every Secret in the namespace in one call,
+confirming first — that prints every credential you have.
+See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
 
 ## Scan images for CVEs
 
@@ -143,25 +143,26 @@ workload.
 Bare `kx scan` sweeps every workload in the namespace. Results come back as a
 severity summary, or the full per-image CVE report with `--full`.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
+</p>
+
 Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/)
 by default, or [Trivy](https://trivy.dev/) and
 [Grype](https://github.com/anchore/grype) via `kx engine`.
 See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for more.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
-</p>
-
 ## See what owns what
 
 The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods —
 and indexes every node it draws, so anything in the tree is one number away.
-Bare `kx tree` graphs the whole namespace.
-See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree/) for more.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>
 </p>
+
+Bare `kx tree` graphs the whole namespace.
+See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree/) for more.
 
 ## Reports in the browser
 
@@ -173,13 +174,13 @@ The page is drawn in your active theme. Sweep rows expand into that resource's
 full report, image rows into the CVEs behind their counts — detail the terminal
 has no room for.
 
-Add `--out <path>` to write the page to a file instead of serving it — what you
-want in CI, where `kx diag --out report.html` is the whole command.
-See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-reports/) for more.
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
 </p>
+
+Add `--out <path>` to write the page to a file instead of serving it — what you
+want in CI, where `kx diag --out report.html` is the whole command.
+See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-reports/) for more.
 
 ## Spend an index anywhere
 
@@ -218,9 +219,6 @@ the cluster it was taken in, and will not resolve in another — the same name
 means a different resource there, or none at all. Running
 `kx state drop --all` leaves marks alone; only `kx unmark --all` removes them.
 
-The `kx ns` and `kx context` commands take an index but not a mark, because a slot is not
-a resource; `kx cp` parses its own `index:path` and takes one too.
-
 ## Use kx in CI
 
 The `--fail-on <severity>` flag turns a sweep into a build gate, and `--json` prints the
@@ -252,11 +250,12 @@ The MCP tools are read-only against the cluster; `mark`, the one write, only
 adds a name to kx's own state. Start it with `--write-listings` and the
 agent's listings join your history, tagged as the agent's, so you can spend its
 numbers yourself — and kx warns before a mutating command does.
-See the [agent guide](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/) for more.
 
 ```bash
 claude mcp add kx -- kx mcp --write-listings
 ```
+
+See the [agent guide](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/) for more.
 
 ## State and history
 
@@ -268,7 +267,7 @@ kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
-kx state drop 2       # remove position 2 (--all clears everything, slots included, marks untouched)
+kx state drop 2       # remove position 2 (--all clears the history; marks stay)
 kx state drop --empty # drop the entries whose listing found nothing
 ```
 
@@ -354,3 +353,7 @@ covers every argument and flag.
 
 Building, testing and releasing kx are covered in
 [CONTRIBUTING.md](https://github.com/jzills/kx/blob/main/CONTRIBUTING.md).
+
+## License
+
+Released under the [MIT License](https://github.com/jzills/kx/blob/main/LICENSE).
