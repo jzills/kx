@@ -8,10 +8,14 @@ weight: 1
 
 Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key.
 
+key=value pairs go right after the index, before any kubectl flags.
+
+Unrecognized flags are passed through to kubectl.
+
 ## Usage
 
 ```text
-kx annotate [OPTIONS] <index> [key=value...]
+kx annotate [OPTIONS] <index> [key=value...] [kubectl flags]
 ```
 
 ## Arguments
@@ -40,4 +44,5 @@ kx annotate [OPTIONS] <index> [key=value...]
 ```bash
 kx annotate 1 env=prod
 kx annotate 1 --remove env
+kx annotate 1 env=prod --dry-run=server
 ```

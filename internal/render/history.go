@@ -121,6 +121,36 @@ func spansContexts(states []state.State) bool {
 	return false
 }
 
+// anyTagged reports whether any entry in the stack was made by an agent via
+// kx mcp, which is the only shape where a VIA column has anything to say —
+// the same rule spansContexts applies to the CONTEXT column.
+func anyTagged(states []state.State) bool {
+	for _, entry := range states {
+		if entry.Source == state.SourceMCP {
+			return true
+		}
+	}
+	return false
+}
+
+// viaCaption names the caption's provenance note for an entry an MCP tool
+// saved, and is empty for a user's own listing.
+func viaCaption(entry state.State) string {
+	if entry.Source == state.SourceMCP {
+		return "via kx mcp"
+	}
+	return ""
+}
+
+// viaCell is viaCaption's counterpart for the VIA column: the same fact,
+// spelled without "via" since the column header already says that.
+func viaCell(entry state.State) string {
+	if entry.Source == state.SourceMCP {
+		return "kx mcp"
+	}
+	return ""
+}
+
 // sharedContext returns the one context every entry was listed in, or "" when
 // they disagree — that stack gets the column instead — or when none recorded
 // one, which has nothing to say either way.
@@ -151,6 +181,7 @@ func (r *Renderer) StateHistory(history state.History) {
 	r.Caption("History", sharedContext(history.States), entryLabel(len(history.States)))
 
 	perRow := spansContexts(history.States)
+	tagged := anyTagged(history.States)
 	columns := []Column{
 		{Header: "X", Right: true},
 		{Header: ""},
@@ -159,6 +190,9 @@ func (r *Renderer) StateHistory(history state.History) {
 	}
 	if perRow {
 		columns = append(columns, Column{Header: "CONTEXT"})
+	}
+	if tagged {
+		columns = append(columns, Column{Header: "VIA"})
 	}
 	columns = append(columns, Column{Header: "ITEMS", Right: true})
 
@@ -178,6 +212,9 @@ func (r *Renderer) StateHistory(history state.History) {
 		}
 		if perRow {
 			row = append(row, Styled(entry.Context, rowStyle))
+		}
+		if tagged {
+			row = append(row, Styled(viaCell(entry), rowStyle))
 		}
 		rows = append(rows, append(row, Styled(strconv.Itoa(entry.Resources.Len()), rowStyle)))
 	}
@@ -285,7 +322,12 @@ func (r *Renderer) SwitchTargets(history state.History, live Live) {
 			r.Blank()
 		}
 		scope, context := slotCaption(kind, entry, live)
-		r.listing(entry, scope, context)
+		// "" rather than viaCaption(entry): a slot never shows a provenance
+		// note here, whatever Source the entry happens to carry. `kx state
+		// --targets` answers "where does this slot point, and where am I
+		// now" — a slot's own listing history isn't the question it's asking,
+		// so there is nothing for a tag to usefully say in this view.
+		r.listing(entry, scope, context, "")
 		rendered++
 	}
 	if rendered == 0 {
@@ -300,11 +342,11 @@ func (r *Renderer) SwitchTargets(history state.History, live Live) {
 // where the resources actually are rather than where the caller was standing,
 // so refreshing it would relabel a prod listing as dev the moment you switched.
 func (r *Renderer) State(entry state.State) {
-	r.listing(entry, scopeLabel(entry), entry.Context)
+	r.listing(entry, scopeLabel(entry), entry.Context, viaCaption(entry))
 }
 
-// listing draws an indexed name/kind table under a caption, taking the scope
-// and context already decided by the caller.
+// listing draws an indexed name/kind table under a caption, taking the scope,
+// context and provenance note already decided by the caller.
 //
 // A listing that spans namespaces gets a NAMESPACE column, because without one
 // its rows are not telling apart: `kx get sa -A` lists a "default"
@@ -313,10 +355,10 @@ func (r *Renderer) State(entry state.State) {
 // them is the whole reason each resource records a namespace; dropping it here
 // spent that on nothing. Single-namespace listings keep the narrower table —
 // the entry's caption already names the one namespace they are all in.
-func (r *Renderer) listing(entry state.State, scope, context string) {
+func (r *Renderer) listing(entry state.State, scope, context, via string) {
 	count := entry.Resources.Len()
 	// The context sits beside the scope, and Caption drops either when empty.
-	r.Caption(kindLabel(entry), scope, context, countLabel(count))
+	r.Caption(kindLabel(entry), scope, context, via, countLabel(count))
 	// A header row over no rows is noise: the caption has already said the
 	// listing found nothing, which is what emptyListing does for kx get.
 	if count == 0 {

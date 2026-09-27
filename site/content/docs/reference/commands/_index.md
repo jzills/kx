@@ -12,7 +12,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 
 | Command | Description |
 |---|---|
-| [`kx annotate <index> [<key=value>...] [--overwrite] [--remove str]`](annotate/) | Set or remove annotations on an indexed resource. |
+| [`kx annotate <index> [<key=value>...] [--overwrite] [--remove str] [kubectl flags...]`](annotate/) | Set or remove annotations on an indexed resource. |
 | [`kx annotations <index>...`](annotations/) | Show annotations for one or more indexed resources. |
 | [`kx context [<index>]`](context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | [`kx cordon <index>...`](cordon/) | Mark one or more indexed Nodes unschedulable. |
@@ -26,9 +26,9 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx events <index>... [--since str]`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
-| [`kx label <index> [<key=value>...] [--overwrite] [--remove str]`](label/) | Set or remove labels on an indexed resource. |
+| [`kx label <index> [<key=value>...] [--overwrite] [--remove str] [kubectl flags...]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services. |
+| [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | [`kx mark [<name>] [<index>]`](mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | [`kx namespace [<index>]`](namespace/) | List namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
@@ -55,6 +55,12 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 |---|---|
 | [`kx engine [<name>]`](engine/) | List available scan engines or persist a default choice by name or index. |
 | [`kx theme [<name>]`](theme/) | List available color themes or persist a choice by name or index. |
+
+## Integrations
+
+| Command | Description |
+|---|---|
+| [`kx mcp [--write-listings]`](mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 
 ## Shell
 

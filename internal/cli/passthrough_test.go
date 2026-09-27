@@ -499,10 +499,12 @@ func TestScaleRefusesAnExplicitReplicasFlag(t *testing.T) {
 // passthrough could resolve it.
 func TestNewlyForwardingCommandsHaveNoArgsValidator(t *testing.T) {
 	for name, cmd := range map[string]*cobra.Command{
-		"delete":  newDeleteCommand(Services{}),
-		"scale":   newScaleCommand(Services{}),
-		"rollout": newRolloutCommand(Services{}),
-		"yaml":    newYamlCommand(Services{}),
+		"delete":   newDeleteCommand(Services{}),
+		"scale":    newScaleCommand(Services{}),
+		"rollout":  newRolloutCommand(Services{}),
+		"yaml":     newYamlCommand(Services{}),
+		"label":    newMetadataWriteCommand(Services{}, "label", "labels", "", ""),
+		"annotate": newMetadataWriteCommand(Services{}, "annotate", "annotations", "", ""),
 	} {
 		if cmd.Args != nil {
 			t.Errorf("%s has an Args validator; cobra runs it against the raw argv, "+
@@ -525,6 +527,9 @@ func TestNewlyForwardingCommandsRejectAFlagsOnlyArgv(t *testing.T) {
 		"scale":   {newScaleCommand, []string{"--timeout=30s"}},
 		"rollout": {newRolloutCommand, []string{"--timeout=30s"}},
 		"yaml":    {newYamlCommand, []string{"--show", "metadata"}},
+		"label": {func(s Services) *cobra.Command {
+			return newMetadataWriteCommand(s, "label", "labels", "", "")
+		}, []string{"--overwrite", "--remove", "env"}},
 	} {
 		kube := &recordingKubectl{}
 		services := switchServices(t, kube)
@@ -549,6 +554,14 @@ func TestNewlyForwardingCommandsRegisterTheirOwnFlags(t *testing.T) {
 	}
 	if newYamlCommand(Services{}).Flags().Lookup("show") == nil {
 		t.Error("yaml --show is not registered, so it is absent from --help")
+	}
+	for _, verb := range []string{"label", "annotate"} {
+		cmd := newMetadataWriteCommand(Services{}, verb, "labels", "", "")
+		for _, flag := range []string{"remove", "overwrite"} {
+			if cmd.Flags().Lookup(flag) == nil {
+				t.Errorf("%s --%s is not registered, so it is absent from --help", verb, flag)
+			}
+		}
 	}
 }
 
@@ -714,5 +727,134 @@ func TestExpandRangeOpenEndStillEndsAtTheListing(t *testing.T) {
 	}
 	if _, _, err := expandRange(resolver, "indexes", "20.."); err == nil {
 		t.Error("expandRange(20..) = nil error, want the past-the-listing refusal")
+	}
+}
+
+// labelServices is a listing with one Pod, nginx in prod, for driving kx label
+// and kx annotate through their cobra commands.
+func labelServices(t *testing.T, kube *recordingKubectl) Services {
+	t.Helper()
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return services
+}
+
+// #398: label and annotate parsed flags with cobra, so every kubectl flag —
+// --dry-run first among them — was refused as unknown instead of forwarded.
+func TestLabelAndAnnotateForwardKubectlFlags(t *testing.T) {
+	for _, tc := range []struct{ verb, field string }{
+		{"label", "labels"}, {"annotate", "annotations"},
+	} {
+		kube := &recordingKubectl{output: `{"metadata":{}}`}
+		cmd := newMetadataWriteCommand(labelServices(t, kube), tc.verb, tc.field, "", "")
+		cmd.SetArgs([]string{"1", "team=web", "--dry-run=client", "--field-manager", "kx"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("kx %s 1 team=web --dry-run=client: %v", tc.verb, err)
+		}
+		want := tc.verb + " Pod nginx -n prod team=web --dry-run=client --field-manager kx"
+		if got := joined(kube.runs[len(kube.runs)-1]); got != want {
+			t.Errorf("argv = %q, want %q", got, want)
+		}
+	}
+}
+
+// kx's own flags are consumed, not forwarded: --remove becomes kubectl's
+// key- spelling, repeatably and in any of its spellings, and --overwrite
+// reaches kubectl once, from kx, however it was typed.
+func TestLabelConsumesItsOwnFlags(t *testing.T) {
+	kube := &recordingKubectl{}
+	cmd := newMetadataWriteCommand(labelServices(t, kube), "label", "labels", "", "")
+	cmd.SetArgs([]string{"1", "env=prod", "--remove", "old", "--remove=stale", "--overwrite=true", "--dry-run=server"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx label: %v", err)
+	}
+	// --overwrite skips the conflict read, so the write is the only call.
+	if len(kube.runs) != 1 {
+		t.Fatalf("kubectl calls = %v, want the write alone", kube.runs)
+	}
+	want := "label Pod nginx -n prod env=prod old- stale- --overwrite --dry-run=server"
+	if got := joined(kube.runs[0]); got != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+}
+
+// kubectl takes the last -n it is given and kx appends its own from the index,
+// so a -n beside an index is refused rather than left for kubectl to choose.
+func TestLabelRefusesANamespaceFlagBesideAnIndex(t *testing.T) {
+	kube := &recordingKubectl{}
+	cmd := newMetadataWriteCommand(labelServices(t, kube), "label", "labels", "", "")
+	cmd.SetArgs([]string{"1", "env=prod", "-n", "other"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with an index") {
+		t.Fatalf("err = %v, want the -n-beside-an-index refusal", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
+	}
+}
+
+// Pairs come before kubectl's flags. One typed after them would reach kubectl
+// unseen by kx; the refusal for "nothing to set" says where they go.
+func TestLabelSaysWherePairsGoWhenTheyFollowTheFlags(t *testing.T) {
+	kube := &recordingKubectl{}
+	cmd := newMetadataWriteCommand(labelServices(t, kube), "label", "labels", "", "")
+	cmd.SetArgs([]string{"1", "--dry-run=client", "team=web"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "before kubectl's flags") {
+		t.Fatalf("err = %v, want it to say pairs go before kubectl's flags", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
+	}
+}
+
+// Forwarding --dry-run makes kx's own success line reachable for a change
+// that did not happen, so the line has to say it was a dry run — and only for
+// the two values that mean one, as kx delete does.
+func TestMetadataWriteSaysWhenItWasADryRun(t *testing.T) {
+	for _, tc := range []struct {
+		extra []string
+		dry   bool
+	}{
+		{[]string{"--dry-run=client"}, true},
+		{[]string{"--dry-run=server"}, true},
+		{[]string{"--dry-run=none"}, false},
+		{nil, false},
+	} {
+		kube := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
+		message, err := MetadataWriteCommand{
+			Kubectl: kube, State: pod("nginx"), Verb: "label", Field: "labels",
+		}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, false, tc.extra)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", tc.extra, err)
+		}
+		if got := strings.Contains(message, "dry run"); got != tc.dry {
+			t.Errorf("message = %q for %v, want dry run labelled = %v", message, tc.extra, tc.dry)
+		}
+	}
+}
+
+func TestExtractStringsCollectsEveryOccurrence(t *testing.T) {
+	values, rest, err := extractStrings(
+		[]string{"1", "--remove", "a", "x=y", "--remove=b", "--dry-run=client"}, "--remove", "")
+	if err != nil {
+		t.Fatalf("extractStrings: %v", err)
+	}
+	if strings.Join(values, ",") != "a,b" {
+		t.Errorf("values = %v, want [a b] in the order given", values)
+	}
+	if strings.Join(rest, " ") != "1 x=y --dry-run=client" {
+		t.Errorf("rest = %v, want everything else untouched", rest)
+	}
+	if _, _, err := extractStrings([]string{"1", "--remove"}, "--remove", ""); err == nil {
+		t.Error("a trailing --remove with no key was accepted")
 	}
 }

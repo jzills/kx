@@ -8,9 +8,8 @@ weight: 6
 kx completion <bash|zsh|fish|powershell>
 ```
 
-prints a completion script for that shell. What makes it worth installing is
-what it completes: not just command names and flags, but the indexes from your
-saved listing, each labelled with the resource it points at.
+prints a completion script for that shell.
+What makes it worth installing is what it completes: not just command names and flags, but the indexes from your saved listing, each labeled with the resource it points at.
 
 ```
 $ kx describe <TAB>
@@ -34,9 +33,8 @@ Which is the difference between remembering a number and reading one.
 | `-n` | Namespace names |
 | `<src>` / `<dest>` for `kx cp` | Local paths, from the shell's own file completion |
 
-All of it is answered from `~/.kx/state.json` and registries compiled into the
-binary. Nothing shells out to kubectl or calls the API server, because a
-completion that waits on a cluster is a completion people turn off.
+All of it is answered from `~/.kx/state.json` and registries compiled into the binary.
+Nothing shells out to kubectl or calls the API server, because a completion that waits on a cluster is a completion people turn off.
 
 ## Installing it
 
@@ -46,8 +44,8 @@ completion that waits on a cluster is a completion people turn off.
 kx completion zsh > "${fpath[1]}/_kx"
 ```
 
-Then start a new shell. If completion isn't initialised yet, add
-`autoload -Uz compinit && compinit` to `~/.zshrc` first.
+Then start a new shell.
+If completion isn't initialized yet, add `autoload -Uz compinit && compinit` to `~/.zshrc` first.
 
 ### bash
 
@@ -77,8 +75,6 @@ kx completion powershell | Out-String | Invoke-Expression
 Append that to your profile to keep it.
 
 {{% kx-note %}}
-Installed as a krew plugin, the command is `kubectl idx`. Completion scripts
-are generated for a command called `kx`, so they work against the
-`alias kx="kubectl idx"` from the [install page](../../getting-started/install/)
-rather than against `kubectl idx` typed out.
+Installed as a krew plugin, the command is `kubectl idx`.
+Completion scripts are generated for a command called `kx`, so they work against the `alias kx="kubectl idx"` from the [install page](../../getting-started/install/) rather than against `kubectl idx` typed out.
 {{% /kx-note %}}

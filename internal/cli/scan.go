@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +69,13 @@ func (c ScanCommand) Execute(ref state.Ref, engine string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.ExecuteResource(kind, name, namespace, engine)
+}
+
+// ExecuteResource resolves the unique images of one workload named directly,
+// with no index or Ref to resolve — the MCP server's entry point, mirroring
+// DiagnosticCommand.ExecuteResource.
+func (c ScanCommand) ExecuteResource(kind kinds.Kind, name, namespace, engine string) ([]string, error) {
 	if !scannableKinds.Has(kind) {
 		return nil, unsupportedKindError("scan", kind, scannableKinds)
 	}
@@ -159,6 +167,9 @@ func (c ScanCommand) ScanImage(engineName, image string, extra []string) (int, e
 	if err != nil {
 		return 1, err
 	}
+	if err := imageReferenceError(engine.Name(), image); err != nil {
+		return 1, err
+	}
 	return c.Scanner.Scan(engine.PassthroughArgv(image, extra))
 }
 
@@ -206,6 +217,17 @@ const scanWorkers = 2
 func (c ScanCommand) Summarize(
 	engineName string, images []string, onScanned func(),
 ) ([]scanner.ImageScan, error) {
+	return c.SummarizeContext(context.Background(), engineName, images, onScanned)
+}
+
+// SummarizeContext is Summarize, stopped by ctx: once it is done no further
+// image is handed to a worker, the scans already running are waited for —
+// the scanner service has no way to kill one, and returning early would free
+// the caller to start more scans on top of them — and ctx's error is
+// returned in place of the rows.
+func (c ScanCommand) SummarizeContext(
+	ctx context.Context, engineName string, images []string, onScanned func(),
+) ([]scanner.ImageScan, error) {
 	engine, err := scanner.GetEngine(engineName)
 	if err != nil {
 		return nil, err
@@ -237,11 +259,24 @@ func (c ScanCommand) Summarize(
 			}
 		}()
 	}
+dispatch:
 	for position := range images {
-		positions <- position
+		// Checked first as well: when a worker is free and ctx is done, the
+		// select below would pick between them at random.
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case positions <- position:
+		case <-ctx.Done():
+			break dispatch
+		}
 	}
 	close(positions)
 	group.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// In order, so the reported failure is the same one a serial sweep would
 	// have stopped on rather than whichever goroutine happened to finish first.
@@ -256,7 +291,15 @@ func (c ScanCommand) Summarize(
 // scanImage is one image's scan. The error return is reserved for a failure
 // that is not the scanner's own verdict; anything the scanner reported lands on
 // the row.
+//
+// A flag-shaped image reference (see imageReferenceError) is refused on its
+// row rather than scanned: the API server only rejects whitespace, so an
+// image of "--output=/home/u/.bashrc" would otherwise reach the scanner as a
+// flag and write a file on the machine running kx. The sweep goes on.
 func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.ImageScan, error) {
+	if err := imageReferenceError(engine.Name(), image); err != nil {
+		return scanner.ImageScan{Image: image, Error: err.Error()}, nil
+	}
 	stdout, stderr, code, err := c.Scanner.Capture(engine.SummaryArgv(image))
 	if err != nil {
 		return scanner.ImageScan{}, err
@@ -273,6 +316,56 @@ func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.Ima
 		Counts:   scanner.CountBySeverity(findings),
 		Findings: findings,
 	}, nil
+}
+
+// grypeSources are the scheme prefixes grype reads as "scan this source"
+// rather than as part of an image name: its dir:, file:, sbom: and archive
+// sources, and its registry:, docker: and podman: selectors. dir:/ would have
+// grype catalogue the machine running kx.
+//
+// Grype's alone. Trivy and scout take registry:2 and docker:24-dind — both
+// official images — as the image references they are, so refusing these
+// names for every engine would stop them scanning real workloads. Scout's
+// own sources (fs://, archive://, local://…) all need "://", which is refused
+// for every engine.
+//
+// Matched against the text before the first ':', lowercased. A real
+// reference never has one of these there under grype: grype would read it as
+// a source selector and scan something other than the image the pod runs.
+var grypeSources = map[string]bool{
+	"dir": true, "file": true, "sbom": true, "docker-archive": true,
+	"oci-archive": true, "oci-dir": true, "singularity": true,
+	"registry": true, "docker": true, "podman": true,
+}
+
+// imageReferenceError refuses an image reference the named engine would read
+// as something other than an image: a flag, or a source scheme. Every engine
+// puts the image last in argv with no "--" before it (not every scanner
+// honours one), and the reference comes from a pod spec anyone who can create
+// a workload wrote — so it is checked here, on kx's side, before it goes near
+// a command line.
+//
+// A leading '-' and a "://" are refused for every engine: no real reference
+// has either. Grype's source-scheme prefixes are refused only for grype.
+func imageReferenceError(engineName, image string) error {
+	if strings.HasPrefix(image, "-") {
+		return fmt.Errorf(
+			"'%s' is not an image reference — it starts with '-', which a scanner would read as a flag.",
+			image)
+	}
+	source := ""
+	if scheme, _, found := strings.Cut(image, "://"); found {
+		source = scheme + "://"
+	} else if scheme, _, found := strings.Cut(image, ":"); found &&
+		engineName == (scanner.Grype{}).Name() && grypeSources[strings.ToLower(scheme)] {
+		source = scheme + ":"
+	}
+	if source != "" {
+		return fmt.Errorf(
+			"'%s' is not an image reference — it names the scanner source '%s', which would scan something other than an image.",
+			image, source)
+	}
+	return nil
 }
 
 // ansiEscape matches the CSI sequences a scanner uses to colour its own
@@ -604,6 +697,12 @@ func newScanCommand(services Services) *cobra.Command {
 						render.Raw("")
 					}
 					render.Section(image)
+					// Reported and skipped, as the summary gives it an error
+					// row: one hostile pod spec shouldn't end the sweep.
+					if err := imageReferenceError(engine, image); err != nil {
+						render.Error(err.Error())
+						continue
+					}
 					if _, err := command.ScanImage(engine, image, extra); err != nil {
 						return err
 					}

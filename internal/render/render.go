@@ -119,23 +119,44 @@ func (r *Renderer) Error(msg string) {
 	fmt.Fprintln(r.err, r.style(theme.Error, "✗")+" "+r.emphasizeQuoted(msg, theme.Body))
 }
 
+// Notice reports a fact about a command's target that is neither a success
+// nor a failure — an index spent came from an agent's listing, say — so it
+// carries no glyph, unlike Success and Error. On stderr, so piped stdout
+// stays clean, and muted, so it reads as a caption rather than a result.
+// Quoted fragments are accented the same way Error's are, via emphasizeQuoted.
+func (r *Renderer) Notice(msg string) {
+	fmt.Fprintln(r.err, r.emphasizeQuoted(msg, theme.Muted))
+}
+
 // emphasizeQuoted accents 'single-quoted' fragments within an otherwise
 // uniformly styled message.
 func (r *Renderer) emphasizeQuoted(msg, base string) string {
 	parts := splitOnQuoteMarks(msg)
 	if len(parts) < 3 {
-		return r.style(base, msg)
+		return r.styleLines(base, msg)
 	}
 	var out strings.Builder
 	for i, part := range parts {
 		// Odd indexes are the quoted fragments.
 		if i%2 == 1 {
-			out.WriteString(r.style(theme.Accent, "'"+part+"'"))
+			out.WriteString(r.styleLines(theme.Accent, "'"+part+"'"))
 			continue
 		}
-		out.WriteString(r.style(base, part))
+		out.WriteString(r.styleLines(base, part))
 	}
 	return out.String()
+}
+
+// styleLines styles each line of text on its own. A lipgloss style renders a
+// multi-line string as a block, padding every line to the widest one, so a
+// message carrying kubectl's two-line error came out with "See" followed by a
+// run of spaces — unstyled too, since the padding is layout rather than color.
+func (r *Renderer) styleLines(name, text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = r.style(name, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // splitOnQuoteMarks splits a message on the apostrophes that open or close a
@@ -208,6 +229,7 @@ func (r *Renderer) Raw(text string) { r.line(text) }
 
 func Success(msg string)                    { current.Success(msg) }
 func Error(msg string)                      { current.Error(msg) }
+func Notice(msg string)                     { current.Notice(msg) }
 func Caption(parts ...string)               { current.Caption(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }

@@ -193,7 +193,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 					Kubectl: &recordingKubectl{output: `{"metadata":{"name":"target"}}`},
 					State:   resolver, Verb: "label", Field: "labels",
 				}
-				_, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false)
+				_, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
 				return err
 			},
 		},

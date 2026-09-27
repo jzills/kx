@@ -72,6 +72,19 @@ jobs:
               echo "$archive has no kx/LICENSE"; exit 1; }
           done
 
+      # releases/latest/download/<asset> only resolves a name that is the same
+      # in every release, so each archive also ships under a version-free name.
+      # A copy, not a rebuild: the bytes, and so the checksum, must match.
+      - name: Verify the version-free archives
+        run: |
+          count=0
+          for archive in dist/kx_vdev_*.tar.gz dist/kx_vdev_*.zip; do
+            copy="dist/kx_${archive#dist/kx_vdev_}"
+            cmp -s "$archive" "$copy" || { echo "$copy is missing or differs from $archive"; exit 1; }
+            count=$((count + 1))
+          done
+          test "$count" -eq 6 || { echo "expected 6 versioned archives, found $count"; exit 1; }
+
       - name: Build wheels
         run: python3 scripts/build_wheels.py --version 0.0.0.dev0 --binaries dist/binaries
 

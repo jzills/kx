@@ -22,6 +22,7 @@ import (
 )
 
 func treeFixture() graph.Builder {
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
 		Name: "web", Namespace: "prod", UID: types.UID("d1"),
 	}}
@@ -33,7 +34,12 @@ func treeFixture() graph.Builder {
 		Name: "web-abc-1", Namespace: "prod", UID: types.UID("p1"),
 		OwnerReferences: []metav1.OwnerReference{{UID: types.UID("rs1")}},
 	}}
-	return graph.Builder{Client: fake.NewSimpleClientset(deployment, replicaSet, pod)}
+	// The Namespace object itself is registered too, not just resources that
+	// happen to carry "prod" in their metadata: graph.Builder.Namespaces lists
+	// actual Namespace objects, and the fake clientset does not synthesize one
+	// from a workload's namespace field. Without it, an -A sweep of this
+	// fixture would see no namespaces at all and walk nothing.
+	return graph.Builder{Client: fake.NewSimpleClientset(namespace, deployment, replicaSet, pod)}
 }
 
 func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {

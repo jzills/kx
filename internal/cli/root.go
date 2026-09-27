@@ -132,6 +132,9 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// resolves one, so it stays without the wrapper.
 	root.AddCommand(withRefresh(services, newMarkCommand(services)))
 	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
+	// withoutRefresh: the server resolves nothing from the listing, so there
+	// is no stale index for the wrapper to recover from.
+	root.AddCommand(withoutRefresh(newMCPCommand(services, info.Version)))
 
 	stateCmd := newStateCommand(services)
 	stateCmd.AddCommand(

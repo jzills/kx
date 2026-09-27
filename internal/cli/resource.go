@@ -71,14 +71,17 @@ type DeleteCommand struct {
 }
 
 func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
-	name, namespace, kind, err := c.State.Resolve(ref)
+	// Resolved once, target and provenance together — see resolveWithProvenance
+	// for why a second, independent read of the listing's Source is refused.
+	name, namespace, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
 		return "", err
 	}
 	// The prompt must stay outside the spinner: a prompt underneath a
 	// repainting status line cannot be read.
 	if !yes {
-		if err := c.Confirm(fmt.Sprintf("Delete %s/%s in %s?", kind, name, namespace)); err != nil {
+		if err := c.Confirm(fmt.Sprintf(
+			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
 			return "", err
 		}
 	}
@@ -153,13 +156,32 @@ var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSe
 // One ordered list rather than a set, because the same six names are the
 // command's validation, its help text and its shell completion, and three
 // copies of them drift.
-var rolloutActions = []struct{ Name, Doc string }{
-	{"status", "Show the rollout status"},
-	{"restart", "Restart the workload"},
-	{"pause", "Pause the rollout"},
-	{"resume", "Resume a paused rollout"},
-	{"history", "Show the revision history"},
-	{"undo", "Roll back to the previous revision"},
+//
+// Mutates says whether the action changes the workload, which is what arms
+// the agent-index notice (installAgentIndexNotice): status and history only
+// read, so spending an index from an agent's listing on them warns no more
+// than kx describe does.
+var rolloutActions = []struct {
+	Name, Doc string
+	Mutates   bool
+}{
+	{"status", "Show the rollout status", false},
+	{"restart", "Restart the workload", true},
+	{"pause", "Pause the rollout", true},
+	{"resume", "Resume a paused rollout", true},
+	{"history", "Show the revision history", false},
+	{"undo", "Roll back to the previous revision", true},
+}
+
+// rolloutActionMutates reports whether action changes the workload; false for
+// a read-only action and for an unknown one, which Execute refuses anyway.
+func rolloutActionMutates(action string) bool {
+	for _, candidate := range rolloutActions {
+		if candidate.Name == action {
+			return candidate.Mutates
+		}
+	}
+	return false
 }
 
 func isRolloutAction(action string) bool {
@@ -355,9 +377,12 @@ func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, er
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read
-// from a single pod.
+// from a single pod. Each one names its pods with a single selector. A
+// CronJob does not — its pods belong to the Jobs it created, a hop further —
+// so it is left out rather than aggregated through a selector that reaches
+// none of them.
 var aggregateLogKinds = kinds.Set{
-	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Service,
+	kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet, kinds.Job, kinds.Service,
 }
 
 // logKinds is every kind kx logs accepts: a Pod read directly, plus the
@@ -427,7 +452,8 @@ func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, 
 	var object struct {
 		Spec struct {
 			// A Service selects pods directly; a workload selects them through
-			// its template's matchLabels.
+			// matchLabels — for a Job, the controller-uid its controller sets,
+			// which every pod it creates carries, retries included.
 			Selector json.RawMessage `json:"selector"`
 		} `json:"spec"`
 	}

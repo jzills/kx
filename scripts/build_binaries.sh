@@ -12,6 +12,14 @@
 #   binaries/kx_<os>_<arch>/kx[.exe]   the executables, for the wheel builder
 #   kx_v<version>_<os>_<arch>.tar.gz   the release archives (linux, darwin)
 #   kx_v<version>_windows_<arch>.zip   the release archives (windows)
+#   kx_<os>_<arch>.tar.gz, kx_windows_<arch>.zip
+#                                      the same archives without the version
+#
+# The version-free copies exist for one URL: GitHub's
+# releases/latest/download/<asset> redirect only resolves a name that is the
+# same in every release, so a versioned name can never be "the latest". They
+# are byte-identical copies, not rebuilds, so SHA256SUMS lists each pair with
+# the same hash.
 #
 # Archive names and their internal layout (kx/kx) are unchanged from the
 # PyInstaller builds, so .krew.yaml needs no edit and existing krew installs
@@ -91,12 +99,14 @@ for target in "${targets[@]}"; do
     # python3, and zip is not installed everywhere this script runs.
     (cd "$archive_root" &&
       python3 -m zipfile -c "$outdir/kx_v${version}_${os}_${arch}.zip" kx)
+    cp "$outdir/kx_v${version}_${os}_${arch}.zip" "$outdir/kx_${os}_${arch}.zip"
   else
     tar -C "$archive_root" -czf "$outdir/kx_v${version}_${os}_${arch}.tar.gz" kx
+    cp "$outdir/kx_v${version}_${os}_${arch}.tar.gz" "$outdir/kx_${os}_${arch}.tar.gz"
   fi
   rm -rf "$archive_root"
 done
 
 echo
 echo "archives:"
-ls -1 "$outdir"/kx_v"${version}"_*.tar.gz "$outdir"/kx_v"${version}"_*.zip
+ls -1 "$outdir"/kx_*.tar.gz "$outdir"/kx_*.zip

@@ -25,6 +25,52 @@ type IndexResolver interface {
 	Count() (int, error)
 }
 
+// provenanceResolver is the optional half of IndexResolver: a resolver that
+// can report a ref's listing provenance alongside the target it resolves to,
+// in the same read.
+//
+// Not added to IndexResolver itself, so every existing fake that only
+// implements Resolve/ResolveExpecting/Fields/Count keeps compiling unchanged;
+// only *state.Service (and a test double that opts in) answers
+// ResolveWithSource.
+type provenanceResolver interface {
+	ResolveWithSource(ref state.Ref) (name, namespace string, kind kinds.Kind, source string, err error)
+}
+
+// resolveWithProvenance resolves ref exactly once, returning the listing's
+// Source alongside the target when the resolver can report it.
+//
+// This is the seam that closes a TOCTOU: a caller that resolved a target via
+// Resolve and then asked a second, independent call for "the current
+// listing's Source" was asking two different questions of two different
+// state reads, and a save landing between them — a concurrent kx mcp session
+// — could answer the second against a listing that has nothing to do with the
+// index just resolved. A resolver offering ResolveWithSource answers both
+// from the one read; a resolver that only offers Resolve (every existing
+// fake, and any future one that doesn't opt in) answers "" for source, so the
+// confirm prompt just carries no suffix rather than a stale or wrong one.
+func resolveWithProvenance(
+	resolver IndexResolver, ref state.Ref,
+) (name, namespace string, kind kinds.Kind, source string, err error) {
+	if sourced, ok := resolver.(provenanceResolver); ok {
+		return sourced.ResolveWithSource(ref)
+	}
+	name, namespace, kind, err = resolver.Resolve(ref)
+	return name, namespace, kind, "", err
+}
+
+// listingProvenance formats the confirm-prompt suffix for a source already
+// read from the same resolve that produced the target: " — from a kx mcp
+// listing" when it is state.SourceMCP, "" otherwise (including a mark's,
+// which resolveWithProvenance always reports as "" — a mark is pinned by a
+// name the user chose, not read off whatever listing happens to be current).
+func listingProvenance(source string) string {
+	if source != state.SourceMCP {
+		return ""
+	}
+	return " — from a kx mcp listing"
+}
+
 // Resolved is a reference together with what it resolved to, so a command that
 // has parsed its arguments does not have to ask again.
 type Resolved struct {

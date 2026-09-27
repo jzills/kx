@@ -31,7 +31,7 @@ func topServices(t *testing.T, kubectl kubectl.Service) Services {
 	}
 }
 
-const topOutput = "NAME             CPU(cores)   MEMORY(bytes)\n" +
+const topPodsFixture = "NAME             CPU(cores)   MEMORY(bytes)\n" +
 	"web-1            5m           64Mi\n" +
 	"web-2            250m         200Mi"
 
@@ -124,7 +124,7 @@ func TestTopEnsureAvailableReturnsAFriendlyErrorWhenMissing(t *testing.T) {
 // The pods path already existed before this preflight; it must gain the
 // check without changing its Run-call sequence for the success path.
 func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
-	kubectl := &scriptedKubectl{probeCode: 1, outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{probeCode: 1, outputs: []string{topPodsFixture, podsJSON}}
 	_, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", nil, false)
 	if err == nil {
@@ -225,7 +225,7 @@ func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 // must be provably unchanged: it stays the pods path with no token
 // stripped from what reaches TopCommand.Execute.
 func TestTopCommandDefaultsToPods(t *testing.T) {
-	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
 	if err := cmd.RunE(cmd, nil); err != nil {
@@ -276,7 +276,7 @@ func TestTopCommandRoutesNodesToken(t *testing.T) {
 // left in extraArgs, where it would reach kubectl as a pod-name filter
 // (`kubectl top pods pods`, which 404s) instead of a resource type.
 func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
-	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
 	if err := cmd.RunE(cmd, []string{"pods"}); err != nil {
@@ -397,7 +397,7 @@ func TestTopRegistersHTMLFlags(t *testing.T) {
 // Regression shape already pinned for diag/scan/tree: --html must add to
 // the terminal output, never replace it.
 func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
-	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	cmd.SetContext(stoppedContext())
 	sink := captureRender(t)
@@ -419,7 +419,7 @@ func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
 // the args before they reach kubectl, the same way --match/--no-limits
 // already are. If extraction is skipped, kubectl sees "--html" itself.
 func TestTopHTMLFlagsAreStrippedBeforeReachingKubectl(t *testing.T) {
-	kube := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	cmd.SetContext(stoppedContext())
 	captureRender(t)
@@ -435,7 +435,7 @@ func TestTopHTMLFlagsAreStrippedBeforeReachingKubectl(t *testing.T) {
 }
 
 func TestTopAppendsUsagePercentages(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	states := &fakeState{}
 	output, _, err := TopCommand{Kubectl: kubectl, State: states, Index: indexService()}.
 		Execute("", nil, false)
@@ -454,7 +454,7 @@ func TestTopAppendsUsagePercentages(t *testing.T) {
 // A container missing a limit makes that resource undefined for the whole pod:
 // a percentage against a partial denominator reads as headroom that isn't there.
 func TestTopMarksPartialLimitsUndefined(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", nil, false)
 	if err != nil {
@@ -478,7 +478,7 @@ func TestTopMarksPartialLimitsUndefined(t *testing.T) {
 
 // --no-limits skips the extra kubectl call entirely.
 func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture}}
 	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", nil, true)
 	if err != nil {
@@ -494,7 +494,7 @@ func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
 
 // --containers is a different table shape, so percentages don't apply.
 func TestTopContainersFlagSkipsPercentages(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture}}
 	output, _, err := TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}.
 		Execute("", []string{"--containers"}, false)
 	if err != nil {
@@ -600,7 +600,7 @@ func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
 // The saved query is a `get pods` listing, which is what the indexes were
 // assigned against, so a stale entry refreshes into something usable.
 func TestTopSavesPodsQuery(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	states := &fakeState{}
 	if _, _, err := (TopCommand{Kubectl: kubectl, State: states, Index: indexService()}).
 		Execute("", nil, false); err != nil {
@@ -654,7 +654,7 @@ func TestPercentCellKeepsSubCorePrecision(t *testing.T) {
 // Execute returns the namespace it listed from so the caller does not resolve
 // it a second time; each resolution is a `kubectl config view` subprocess.
 func TestTopReturnsTheNamespaceItUsed(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	_, namespace, err := TopCommand{
 		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
 	}.Execute("", nil, false)
@@ -671,7 +671,7 @@ func TestTopReturnsTheNamespaceItUsed(t *testing.T) {
 
 // An explicit -n needs no lookup at all, and is what the caption must show.
 func TestTopPrefersAnExplicitNamespace(t *testing.T) {
-	kubectl := &scriptedKubectl{outputs: []string{topOutput, podsJSON}}
+	kubectl := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	_, namespace, err := TopCommand{
 		Kubectl: kubectl, State: &fakeState{}, Index: indexService(),
 	}.Execute("", []string{"-n", "staging"}, false)

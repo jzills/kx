@@ -24,30 +24,40 @@ import (
 // "-nprod"). A flag given more than once keeps the last value, matching
 // pflag.
 func extractString(args []string, long, short string) (value string, rest []string, err error) {
+	values, rest, err := extractStrings(args, long, short)
+	if len(values) > 0 {
+		value = values[len(values)-1]
+	}
+	return value, rest, err
+}
+
+// extractStrings is extractString for a repeatable flag: it removes every
+// occurrence and returns each value in the order given.
+func extractStrings(args []string, long, short string) (values, rest []string, err error) {
 	rest = make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == long || (short != "" && arg == short):
 			if i+1 >= len(args) {
-				return "", nil, fmt.Errorf("flag needs an argument: %s", arg)
+				return nil, nil, fmt.Errorf("flag needs an argument: %s", arg)
 			}
-			value = args[i+1]
+			values = append(values, args[i+1])
 			i++
 		case strings.HasPrefix(arg, long+"="):
-			value = strings.TrimPrefix(arg, long+"=")
+			values = append(values, strings.TrimPrefix(arg, long+"="))
 		case short != "" && strings.HasPrefix(arg, short+"="):
-			value = strings.TrimPrefix(arg, short+"=")
+			values = append(values, strings.TrimPrefix(arg, short+"="))
 		// Attached shorthand, e.g. "-nprod". Checked last and guarded on
 		// length so a bare "-n" still falls into the exact-match case above
 		// and takes the following argument instead of being trimmed to "".
 		case short != "" && len(arg) > len(short) && strings.HasPrefix(arg, short):
-			value = strings.TrimPrefix(arg, short)
+			values = append(values, strings.TrimPrefix(arg, short))
 		default:
 			rest = append(rest, arg)
 		}
 	}
-	return value, rest, nil
+	return values, rest, nil
 }
 
 // hasFlag reports whether a flag appears in args, in any spelling extractString

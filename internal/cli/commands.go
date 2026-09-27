@@ -255,8 +255,8 @@ func newLogsCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "logs <index>... [kubectl flags]",
 		SuggestFor: []string{"tail"},
-		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, and Services.",
-		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets and Services aggregate logs across the pods they own.\n\n" +
+		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
+		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
 		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:               minArgs(1),
@@ -371,6 +371,7 @@ func newEditCommand(services Services) *cobra.Command {
 		Long:               "Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.",
 		Example:            "  kx edit 2",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -382,6 +383,7 @@ func newEditCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("edit requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -409,6 +411,7 @@ func newExecCommand(services Services) *cobra.Command {
 			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -419,6 +422,7 @@ func newExecCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("exec requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -463,6 +467,7 @@ func newDebugCommand(services Services) *cobra.Command {
 		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
 			"  kx debug 1 -- ls /proc/1/root\n  kx debug 1 -- ls /host/var/log",
 		Args:               minArgs(1),
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -479,6 +484,7 @@ func newDebugCommand(services Services) *cobra.Command {
 			if len(rest) == 0 {
 				return fmt.Errorf("debug requires an index")
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -526,6 +532,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -533,6 +540,13 @@ func newDeleteCommand(services Services) *cobra.Command {
 				return err
 			}
 			yes, rest := extractBool(rest, "--yes", "-y")
+			// Only with --yes: without it, the confirm prompt already names
+			// the listing's provenance (listingProvenance), and printing the
+			// notice too would say the same thing twice — once as a question
+			// the user must answer, once as a statement they didn't ask for.
+			if yes {
+				installAgentIndexNotice(services)
+			}
 			indexArgs, extra := splitLeadingIndexes(rest)
 			if len(indexArgs) == 0 {
 				if len(rest) > 0 {
@@ -551,7 +565,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			command := DeleteCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
-				Confirm: render.Confirm,
+				Confirm: services.confirm(),
 				Status:  render.Status,
 			}
 			// Confirmed and reported one at a time, so declining one resource
@@ -589,6 +603,7 @@ func newScaleCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -598,6 +613,7 @@ func newScaleCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
 			}
+			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
 				return err
@@ -652,6 +668,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 		// positional arguments — and `--help` is a single argument that a
 		// gate would reject before passthrough could resolve it. The real
 		// arity check happens below.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -660,6 +677,11 @@ func newRolloutCommand(services Services) *cobra.Command {
 			}
 			if len(rest) < 2 {
 				return requiredArgsError(cmd)
+			}
+			// Only for an action that changes the workload: status and
+			// history read, and a read-only command prints no notice.
+			if rolloutActionMutates(rest[0]) {
+				installAgentIndexNotice(services)
 			}
 			ref, err := parseRef("index", rest[1])
 			if err != nil {
@@ -745,6 +767,7 @@ func newCopyCommand(services Services) *cobra.Command {
 		// MinimumNArgs(2) gate before RunE ever saw it. The real "need a
 		// source and a destination" check happens below, once passthrough
 		// has already resolved --help.
+		Annotations:        mutatingAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -754,6 +777,7 @@ func newCopyCommand(services Services) *cobra.Command {
 			if len(rest) < 2 {
 				return fmt.Errorf("cp requires a source and a destination")
 			}
+			installAgentIndexNotice(services)
 			return CopyCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(rest[0], rest[1], rest[2:])
 		},
@@ -906,28 +930,57 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 }
 
 func newMetadataWriteCommand(services Services, verb, field, short, long string) *cobra.Command {
-	var (
-		removes   []string
-		overwrite bool
-	)
 	cmd := &cobra.Command{
-		Use:     verb + " <index> [key=value...]",
+		Use:     verb + " <index> [key=value...] [kubectl flags]",
 		Short:   short,
-		Long:    long,
-		Args:    minArgs(1),
-		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env",
+		Long:    long + "\n\nkey=value pairs go right after the index, before any kubectl flags.",
+		Example: "  kx " + verb + " 1 env=prod\n  kx " + verb + " 1 --remove env\n  kx " + verb + " 1 env=prod --dry-run=server",
+		// No Args validator: cobra's arity check runs against the
+		// unstripped argv, which counts forwarded kubectl flags as
+		// positional arguments — and `--help` is a single argument that a
+		// gate would reject before passthrough could resolve it. The real
+		// arity check happens below.
+		Annotations:        mutatingAnnotations,
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ref, err := parseRef("index", args[0])
+			rest, handled, err := passthrough(cmd, args, nil)
+			if err != nil || handled {
+				return err
+			}
+			removes, rest, err := extractStrings(rest, "--remove", "")
 			if err != nil {
 				return err
 			}
-			keys, values, err := parsePairs(args[1:])
+			overwrite, rest := extractBool(rest, "--overwrite")
+			if len(rest) == 0 {
+				return requiredArgsError(cmd)
+			}
+			installAgentIndexNotice(services)
+			ref, err := parseRef("index", rest[0])
 			if err != nil {
+				return err
+			}
+			// The pairs are the run of arguments before the first flag; the
+			// rest is kubectl's. Stopping at the first flag rather than
+			// picking pairs out of the whole argv is what keeps a flag's
+			// separate value — `-o jsonpath={.metadata}` — from being read
+			// as a pair.
+			pairs, extra := splitLeadingPositionals(rest[1:])
+			keys, values, err := parsePairs(pairs)
+			if err != nil {
+				return err
+			}
+			_, namespace, kind, err := services.State.Resolve(ref)
+			if err != nil {
+				return err
+			}
+			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
 			message, err := MetadataWriteCommand{
 				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
-			}.Execute(ref, keys, values, removes, overwrite)
+			}.Execute(ref, keys, values, removes, overwrite, extra)
 			if err != nil {
 				return err
 			}
@@ -935,9 +988,21 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&removes, "remove", nil, "Key to remove (repeatable)")
-	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Allow replacing an existing key")
+	// Parsed by hand, registered only so they appear in --help instead of
+	// vanishing.
+	cmd.Flags().StringArray("remove", nil, "Key to remove (repeatable)")
+	cmd.Flags().Bool("overwrite", false, "Allow replacing an existing key")
 	return cmd
+}
+
+// splitLeadingPositionals splits args at the first flag.
+func splitLeadingPositionals(args []string) (positionals, rest []string) {
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return args[:i], args[i:]
+		}
+	}
+	return args, nil
 }
 
 // newSwitchCommand builds the namespace and context commands, which share a

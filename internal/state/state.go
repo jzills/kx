@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
@@ -164,9 +165,17 @@ func (r Ref) String() string {
 // Context is recorded because names repeat across clusters: a mark taken in
 // staging must not resolve in prod. Unlike the context slot, which is exempt
 // because switching is what it does, a mark has no reason to be portable.
+//
+// Source is State.Source's twin, and additive for the same reason: "" is the
+// user's own mark, which every mark written before the field existed was.
+// SourceMCP is one the MCP server's mark tool took on an agent's behalf. It
+// is shown, not warned on — unlike an index, a mark is spent by the name the
+// user types, and the tool never moves one — so it only tells `kx mark` which
+// names the user did not choose.
 type Mark struct {
 	Resource
 	Context string `json:"context,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
 // State is one history entry: an indexed listing, the namespace it came from,
@@ -194,7 +203,28 @@ type State struct {
 	// single-namespace — so an empty Namespace was "corrected" to "default" and
 	// every index resolved into the wrong namespace.
 	AllNamespaces bool `json:"allNamespaces,omitempty"`
+	// Source records what produced this listing: "" for a user's own kx get,
+	// tree, diagnose or scan, SourceMCP for one an MCP tool made on an agent's
+	// behalf. It exists so a confirm prompt on an index into an agent-made
+	// listing can say so — the human confirming a delete may not have seen
+	// that listing at all.
+	//
+	// Additive without a version bump, unlike Context: an absent Source reads
+	// as "" — user-made — which is the correct answer for every listing ever
+	// written before this field existed, not a stand-in that has to be
+	// reinterpreted once the real meaning is known. Context's absence had to
+	// mean something narrower ("unknown, waive the mismatch check") precisely
+	// because "no recorded context" is not the same claim as "this is the
+	// user's own" — there was no safe default for it to fall back to without
+	// weakening the check for every pre-upgrade entry. Source's default is
+	// exactly the fact old entries have: nobody had written the MCP server
+	// yet, so every one of them really was user-made.
+	Source string `json:"source,omitempty"`
 }
+
+// SourceMCP tags a listing an MCP tool saved on an agent's behalf, as opposed
+// to one the user made directly with kx get, tree, diagnose or scan.
+const SourceMCP = "mcp"
 
 // Names satisfies index.Resolver.
 func (s State) Names() []string { return s.Resources.Names() }
@@ -292,6 +322,22 @@ type Service struct {
 	// Nil leaves entries unstamped, which reads as "unknown" everywhere it is
 	// consumed — the shape a Service built literally in a test has.
 	Context func() string
+	// LockTimeout bounds how long a write waits for another kx holding the
+	// state file's lock (see withLock). Zero means five seconds, which is
+	// what a Service built literally gets.
+	LockTimeout time.Duration
+	// OnAgentIndex, when set, is called after fieldsWithSource resolves an
+	// index into an entry whose Source is SourceMCP — the hook a mutating
+	// command arms to tell the user an index it is about to spend came from
+	// an agent's listing, before it acts.
+	//
+	// Nil means off, which is what a Service built literally has and what
+	// every read that does not go through fieldsWithSource leaves untouched:
+	// FieldsNamed resolves against a kind's slot, not the current listing,
+	// and resolveMark resolves a name the user pinned, not a position in one
+	// — neither is "which entry in the current listing", the one question
+	// this hook watches.
+	OnAgentIndex func(index int, kind kinds.Kind, name, namespace string)
 }
 
 // context reports the active context, or "" when no hook is wired.
@@ -345,7 +391,21 @@ func (s *Service) path() (string, error) {
 	return File()
 }
 
+// loadHistory reads the stack for a caller that does not hold the lock —
+// every reader.
 func (s *Service) loadHistory() (History, error) {
+	return s.readHistory(false)
+}
+
+// loadLocked reads the stack for a writer already inside withLock.
+func (s *Service) loadLocked() (History, error) {
+	return s.readHistory(true)
+}
+
+// readHistory loads the stack. locked says whether the caller already holds
+// the lock, which only matters for the one write a load can make: resetting a
+// file of another schema version.
+func (s *Service) readHistory(locked bool) (History, error) {
 	path, err := s.path()
 	if err != nil {
 		return History{}, err
@@ -379,6 +439,19 @@ func (s *Service) loadHistory() (History, error) {
 	// on-disk shape this build no longer promises to understand.
 	var version int
 	if raw, ok := probe["version"]; !ok || json.Unmarshal(raw, &version) != nil || version != currentSchemaVersion {
+		if !locked {
+			// A reader has to take the lock for this write, and then read
+			// again under it: another kx may have rewritten the file at the
+			// current version since this read, and resetting that would throw
+			// its write away.
+			var history History
+			err := s.withLock(func() error {
+				var err error
+				history, err = s.loadLocked()
+				return err
+			})
+			return history, err
+		}
 		if err := s.saveHistory(History{States: []State{}, Cursor: 0}); err != nil {
 			return History{}, err
 		}
@@ -603,8 +676,12 @@ func (s *Service) Save(state State) error {
 		maxHistory = 1
 	}
 	state = s.stamp(state)
+	return s.withLock(func() error { return s.save(state, maxHistory) })
+}
 
-	history, err := s.loadHistory()
+// save is Save's load-modify-write, run under the lock.
+func (s *Service) save(state State, maxHistory int) error {
+	history, err := s.loadLocked()
 	if err != nil {
 		// Every load error — ErrNoState, ErrSchemaChanged, a corrupt or unreadable
 		// file — heals here rather than failing the save: a listing the user just
@@ -747,15 +824,47 @@ func (s *Service) LoadHistory() (History, error) {
 // SaveMark stores a mark under name, replacing any mark already there — a
 // mark is a pointer, and moving it is the ordinary operation.
 func (s *Service) SaveMark(name string, mark Mark) error {
-	history, err := s.loadHistory()
-	if err != nil && !errors.Is(err, ErrNoState) {
-		return err
+	return s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil && !errors.Is(err, ErrNoState) {
+			return err
+		}
+		if history.Marks == nil {
+			history.Marks = map[string]Mark{}
+		}
+		history.Marks[name] = mark
+		return s.saveHistory(history)
+	})
+}
+
+// SaveMarkIfAbsent stores a mark under name only if no mark has that name,
+// returning the mark already there instead of writing when one does.
+//
+// The check and the write share one lock hold. Checking with Marks and then
+// calling SaveMark leaves a gap in which another kx can take the name, and
+// the SaveMark would then move a mark the caller had just been told was free
+// — the one thing a caller that refuses to move marks exists to prevent.
+func (s *Service) SaveMarkIfAbsent(name string, mark Mark) (*Mark, error) {
+	var existing *Mark
+	err := s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil && !errors.Is(err, ErrNoState) {
+			return err
+		}
+		if taken, ok := history.Marks[name]; ok {
+			existing = &taken
+			return nil
+		}
+		if history.Marks == nil {
+			history.Marks = map[string]Mark{}
+		}
+		history.Marks[name] = mark
+		return s.saveHistory(history)
+	})
+	if err != nil {
+		return nil, err
 	}
-	if history.Marks == nil {
-		history.Marks = map[string]Mark{}
-	}
-	history.Marks[name] = mark
-	return s.saveHistory(history)
+	return existing, nil
 }
 
 // Marks returns every mark, keyed by name. Absent state is no marks rather
@@ -790,34 +899,38 @@ func (s *Service) DropMark(name string) error {
 // one per name follows from the same guarantee; it also stops the file being
 // re-read and rewritten once per mark.
 func (s *Service) DropMarks(names []string) error {
-	history, err := s.loadHistory()
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		if _, ok := history.Marks[name]; !ok {
-			return unknownMarkError(name)
+	return s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil {
+			return err
 		}
-	}
-	for _, name := range names {
-		delete(history.Marks, name)
-	}
-	return s.saveHistory(history)
+		for _, name := range names {
+			if _, ok := history.Marks[name]; !ok {
+				return unknownMarkError(name)
+			}
+		}
+		for _, name := range names {
+			delete(history.Marks, name)
+		}
+		return s.saveHistory(history)
+	})
 }
 
 // DropAllMarks removes every mark and leaves the history stack alone. It is
 // the counterpart to DropAll, which leaves marks: a mark is something the user
 // deliberately created and named, where the stack accumulates by itself.
 func (s *Service) DropAllMarks() error {
-	history, err := s.loadHistory()
-	if err != nil {
-		if errors.Is(err, ErrNoState) {
-			return nil
+	return s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil {
+			if errors.Is(err, ErrNoState) {
+				return nil
+			}
+			return err
 		}
-		return err
-	}
-	history.Marks = nil
-	return s.saveHistory(history)
+		history.Marks = nil
+		return s.saveHistory(history)
+	})
 }
 
 // backfilled defaults an entry's namespace, for the entry being read.
@@ -920,18 +1033,26 @@ func outOfRange(idx int, entry State) error {
 
 // Navigate moves the cursor by delta, clamped to the stack.
 func (s *Service) Navigate(delta int) (State, error) {
-	history, err := s.loadHistory()
+	var current State
+	err := s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		if len(history.States) == 0 {
+			return ErrNoState
+		}
+		history.Cursor = clamp(history.Cursor+delta, len(history.States)-1)
+		if err := s.saveHistory(history); err != nil {
+			return err
+		}
+		current = history.States[history.Cursor]
+		return nil
+	})
 	if err != nil {
 		return State{}, err
 	}
-	if len(history.States) == 0 {
-		return State{}, ErrNoState
-	}
-	history.Cursor = clamp(history.Cursor+delta, len(history.States)-1)
-	if err := s.saveHistory(history); err != nil {
-		return State{}, err
-	}
-	return backfilled(history.States[history.Cursor]), nil
+	return backfilled(current), nil
 }
 
 // NavigateTo moves the cursor to a 1-based position.
@@ -943,21 +1064,29 @@ func (s *Service) Navigate(delta int) (State, error) {
 // clamping a wrong one to the nearest end would silently jump somewhere the
 // caller never asked for.
 func (s *Service) NavigateTo(position int) (State, error) {
-	history, err := s.loadHistory()
+	var current State
+	err := s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		if len(history.States) == 0 {
+			return ErrNoState
+		}
+		if position < 1 || position > len(history.States) {
+			return positionOutOfRange(position, len(history.States))
+		}
+		history.Cursor = position - 1
+		if err := s.saveHistory(history); err != nil {
+			return err
+		}
+		current = history.States[history.Cursor]
+		return nil
+	})
 	if err != nil {
 		return State{}, err
 	}
-	if len(history.States) == 0 {
-		return State{}, ErrNoState
-	}
-	if position < 1 || position > len(history.States) {
-		return State{}, positionOutOfRange(position, len(history.States))
-	}
-	history.Cursor = position - 1
-	if err := s.saveHistory(history); err != nil {
-		return State{}, err
-	}
-	return backfilled(history.States[history.Cursor]), nil
+	return backfilled(current), nil
 }
 
 // Drop removes the entry at a 1-based position, keeping the cursor pointing at
@@ -967,27 +1096,32 @@ func (s *Service) NavigateTo(position int) (State, error) {
 // NavigateTo refuses one: it is a number the caller typed, and clamping it to
 // the nearest end would drop a different entry than the one asked for.
 func (s *Service) Drop(position int) (History, error) {
-	history, err := s.loadHistory()
+	var history History
+	err := s.withLock(func() error {
+		var err error
+		history, err = s.loadLocked()
+		if err != nil {
+			return err
+		}
+		if len(history.States) == 0 {
+			return ErrNoState
+		}
+		if len(history.States) == 1 {
+			return errors.New("Cannot drop the only state entry.")
+		}
+		if position < 1 || position > len(history.States) {
+			return positionOutOfRange(position, len(history.States))
+		}
+		i := position - 1
+		history.States = append(history.States[:i], history.States[i+1:]...)
+		if i < history.Cursor {
+			history.Cursor--
+		} else {
+			history.Cursor = clamp(history.Cursor, len(history.States)-1)
+		}
+		return s.saveHistory(history)
+	})
 	if err != nil {
-		return History{}, err
-	}
-	if len(history.States) == 0 {
-		return History{}, ErrNoState
-	}
-	if len(history.States) == 1 {
-		return History{}, errors.New("Cannot drop the only state entry.")
-	}
-	if position < 1 || position > len(history.States) {
-		return History{}, positionOutOfRange(position, len(history.States))
-	}
-	i := position - 1
-	history.States = append(history.States[:i], history.States[i+1:]...)
-	if i < history.Cursor {
-		history.Cursor--
-	} else {
-		history.Cursor = clamp(history.Cursor, len(history.States)-1)
-	}
-	if err := s.saveHistory(history); err != nil {
 		return History{}, err
 	}
 	return history, nil
@@ -1009,7 +1143,22 @@ func (s *Service) Drop(position int) (History, error) {
 // Slots are left alone. They sit outside the stack by design, and --all is
 // what clears those.
 func (s *Service) DropEmpty() (History, int, error) {
-	history, err := s.loadHistory()
+	var history History
+	var dropped int
+	err := s.withLock(func() error {
+		var err error
+		history, dropped, err = s.dropEmpty()
+		return err
+	})
+	if err != nil {
+		return History{}, 0, err
+	}
+	return history, dropped, nil
+}
+
+// dropEmpty is DropEmpty's load-modify-write, run under the lock.
+func (s *Service) dropEmpty() (History, int, error) {
+	history, err := s.loadLocked()
 	if err != nil {
 		return History{}, 0, err
 	}
@@ -1054,8 +1203,15 @@ func (s *Service) DropEmpty() (History, int, error) {
 // named, where the stack and the slots accumulate on their own — `kx unmark
 // --all` is the command that removes marks, not this one.
 func (s *Service) DropAll() error {
-	marks, err := s.Marks()
+	return s.withLock(s.dropAll)
+}
+
+// dropAll is DropAll's load-modify-write, run under the lock.
+func (s *Service) dropAll() error {
+	history, err := s.loadLocked()
 	if err != nil {
+		// No state file (ErrNoState) means nothing marked, so nothing to keep.
+		//
 		// drop --all is reached precisely when state has gone wrong, so it must
 		// never be the command that fails on broken state. Any unreadable file
 		// takes this path, not only a corrupt one — an out-of-range cursor makes
@@ -1067,9 +1223,9 @@ func (s *Service) DropAll() error {
 		// not the usual one.
 		return s.saveHistory(History{})
 	}
-	// An empty map needs no special case: Marks is tagged omitempty, so it
+	// A nil map needs no special case: Marks is tagged omitempty, so it
 	// writes the same file a zero History would.
-	return s.saveHistory(History{Marks: marks})
+	return s.saveHistory(History{Marks: history.Marks})
 }
 
 // namespaceAt reports the namespace the resource at a 1-based index lives in.
@@ -1107,27 +1263,41 @@ func (s *Service) checkContext(entry State, idx int, relist string) error {
 	}
 }
 
-// Fields resolves an index to the resource it names, plus its namespace and kind.
+// Fields resolves an index to the resource it names, plus its namespace and
+// kind. It is fieldsWithSource with the entry's Source dropped, for the many
+// callers that have no use for it.
 func (s *Service) Fields(idx int) (name, namespace string, kind kinds.Kind, err error) {
+	name, namespace, kind, _, err = s.fieldsWithSource(idx)
+	return name, namespace, kind, err
+}
+
+// fieldsWithSource is Fields plus the Source of the one Load() it reads the
+// index against — the entry's provenance, not a second, independent read of
+// it. See ResolveWithSource for why that distinction is load-bearing.
+func (s *Service) fieldsWithSource(idx int) (name, namespace string, kind kinds.Kind, source string, err error) {
 	current, err := s.Load()
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if err := s.checkContext(current, idx, ""); err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if current.Resources.Len() == 0 {
-		return "", "", "", emptyListing(current,
+		return "", "", "", "", emptyListing(current,
 			"Run 'kx state back' for the previous listing.")
 	}
 	name, err = index.Resolve(current, idx)
 	if err != nil {
-		return "", "", "", outOfRange(idx, current)
+		return "", "", "", "", outOfRange(idx, current)
 	}
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	return name, namespaceAt(current, idx), kind, nil
+	namespace = namespaceAt(current, idx)
+	if current.Source == SourceMCP && s.OnAgentIndex != nil {
+		s.OnAgentIndex(idx, kind, name, namespace)
+	}
+	return name, namespace, kind, current.Source, nil
 }
 
 // resolveMark looks a mark up and refuses one taken in another cluster.
@@ -1188,6 +1358,29 @@ func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err
 		return s.resolveMark(ref)
 	}
 	return s.Fields(ref.Index)
+}
+
+// ResolveWithSource is Resolve plus the Source of the listing an index ref
+// resolved against, read from the same Load() that resolved it.
+//
+// This exists so a confirm prompt can name a listing's provenance without a
+// second, independent read: a caller that resolved the target via Resolve and
+// then asked a separate method for "the current listing's Source" was really
+// asking two different questions of two different Load()s, and a save landing
+// between them (kx mcp saves concurrently with the user's own session) could
+// answer the second against a listing that has nothing to do with the index
+// just resolved — the confirm prompt would name a "kx mcp listing" for a
+// target that came from the user's own, or vice versa. One Load, one Source,
+// naming the same entry the target came from, is what removes that window.
+//
+// A mark ref answers "": a mark is pinned by a name the user chose, not read
+// off whatever listing happens to be current, so it has no listing to name.
+func (s *Service) ResolveWithSource(ref Ref) (name, namespace string, kind kinds.Kind, source string, err error) {
+	if ref.Mark != "" {
+		name, namespace, kind, err = s.resolveMark(ref)
+		return name, namespace, kind, "", err
+	}
+	return s.fieldsWithSource(ref.Index)
 }
 
 // ResolveExpecting is Resolve for a command that has already named the kind it
@@ -1393,7 +1586,12 @@ func (s *Service) SaveNamed(entry State) error {
 		return fmt.Errorf("state: a slot needs a single-kind listing")
 	}
 	entry = s.stamp(entry)
-	history, err := s.loadHistory()
+	return s.withLock(func() error { return s.saveNamed(kind, entry) })
+}
+
+// saveNamed is SaveNamed's load-modify-write, run under the lock.
+func (s *Service) saveNamed(kind kinds.Kind, entry State) error {
+	history, err := s.loadLocked()
 	if err != nil {
 		// No usable stack yet. The slot is independent of it, so it is still
 		// worth writing — `kx ns` on a fresh install must leave something for

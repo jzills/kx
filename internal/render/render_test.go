@@ -100,6 +100,33 @@ func TestErrorWritesToStderr(t *testing.T) {
 	}
 }
 
+// kubectl's own errors run to two lines ("error: …" then "See 'kubectl … --help'
+// for usage."), and styling a multi-line string as one block pads every line to
+// the widest, so the second came out as "See" followed by a run of spaces. It
+// did so unstyled too: the padding is layout, not color.
+func TestMessagesKeepEachLineAsWritten(t *testing.T) {
+	const msg = "error: unknown flag: --bogus\nSee 'kubectl scale --help' for usage."
+	want := map[string]string{
+		"Error":   "✗ " + msg + "\n",
+		"Success": "✓ " + msg + "\n",
+		"Notice":  msg + "\n",
+	}
+	calls := map[string]func(*Renderer){
+		"Error":   func(r *Renderer) { r.Error(msg) },
+		"Success": func(r *Renderer) { r.Success(msg) },
+		"Notice":  func(r *Renderer) { r.Notice(msg) },
+	}
+	for name, call := range calls {
+		if got := capture(call); got != want[name] {
+			t.Errorf("%s unstyled = %q, want %q", name, got, want[name])
+		}
+		styled := sgrRE.ReplaceAllString(styledCapture(t, "github-dark", call), "")
+		if styled != want[name] {
+			t.Errorf("%s styled, colors stripped = %q, want %q", name, styled, want[name])
+		}
+	}
+}
+
 func TestSuccessMarker(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, &buf, "github-dark", false).Success("done")
@@ -680,5 +707,43 @@ func TestMarkListPlainWhenNotStyled(t *testing.T) {
 	})
 	if strings.Contains(buf.String(), esc) {
 		t.Errorf("mark list leaked color into unstyled output: %q", buf.String())
+	}
+}
+
+// A mark an agent took with kx mcp's mark tool is named as such, so the user
+// can tell the names they chose from the ones they didn't — the VIA column
+// kx state --all gives agent listings.
+func TestMarkListNamesTheMarksAnAgentTook(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}},
+			"culprit": {
+				Resource: state.Resource{Name: "db-0", Kind: kinds.StatefulSet, Namespace: "data"},
+				Source:   state.SourceMCP,
+			},
+		})
+	})
+	if !strings.Contains(out, "VIA") {
+		t.Fatalf("output = %q, want a VIA column", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, "@culprit") && !strings.Contains(line, "kx mcp"):
+			t.Errorf("agent's mark row = %q, want it to say kx mcp", line)
+		case strings.Contains(line, "@api") && strings.Contains(line, "kx mcp"):
+			t.Errorf("user's mark row = %q, want no kx mcp", line)
+		}
+	}
+}
+
+// With no agent marks the column has nothing to say, so it isn't there.
+func TestMarkListHasNoViaColumnWithoutAgentMarks(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.MarkList(map[string]state.Mark{
+			"api": {Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "prod"}},
+		})
+	})
+	if strings.Contains(out, "VIA") || strings.Contains(out, "kx mcp") {
+		t.Errorf("output = %q, want no VIA column", out)
 	}
 }

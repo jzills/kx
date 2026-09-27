@@ -43,6 +43,32 @@ func TestMarkPinsTheResolvedResource(t *testing.T) {
 	}
 }
 
+// A user who re-takes a name an agent chose owns it from then on: kx mark
+// writes its own mark in place of the agent's, tag and all.
+func TestMarkOverAnAgentsMarkMakesItTheUsers(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "old", Kind: kinds.Pod, Namespace: "prod"},
+		Source:   state.SourceMCP,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api-7d8f"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	cmd := newMarkCommand(services)
+	cmd.SetArgs([]string{"api", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx mark api 1: %v", err)
+	}
+	marks, _ := services.State.Marks()
+	if mark := marks["api"]; mark.Name != "api-7d8f" || mark.Source != "" {
+		t.Errorf("mark = %+v, want api-7d8f with no agent tag", mark)
+	}
+}
+
 // A bad index must refuse before anything is stored. TestMarkRefusesANumericName
 // cannot pin this: it fails on name validation before resolveRefs is ever
 // reached, so it would still pass if SaveMark ran ahead of resolveRefs. This
