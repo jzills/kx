@@ -5,7 +5,7 @@ weight: 2
 ---
 
 An index means nothing on its own — it is a position in a listing.
-`kx` keeps that listing in `~/.kx/state.json` so the next command can resolve against it.
+That listing is kept in `~/.kx/state.json` so the next command can resolve against it.
 
 ```bash
 kx state
@@ -29,7 +29,7 @@ kx state drop --empty  # drop the entries whose listing found nothing
 
 Jumping does not re-run anything: the entry already holds the listing, so the indexes it carries resolve immediately.
 
-`--all` only clears what accumulates on its own, one `kx get` at a time.
+The `--all` flag only clears what accumulates on its own, one `kx get` at a time.
 [A mark](../marks/) is named on purpose, not accumulated, so it takes a command that says so: `kx unmark --all`.
 
 Re-running the listing you are already on refreshes that entry instead of pushing another copy of it.
@@ -38,8 +38,8 @@ The same session now leaves three: pods, deployments, pods.
 
 ## Reading an index back out
 
-`kx state` shows what every index means.
-`kx ref` prints one of them in a form another command can take:
+The `kx state` command shows what every index means.
+The `kx ref` command prints one of them in a form another command can take:
 
 ```bash
 kx ref 3                          # pod/web-abc-xyz -n prod
@@ -48,14 +48,14 @@ kubectl get $(kx ref 1..3)        # one line per index
 ```
 
 That is what keeps the index model from being limited to the verbs kx wraps: anything that takes a resource — another kubectl subcommand, `stern`, `velero`, a script of your own — can be handed one.
-`--name`, `--namespace` and `--kind` print a single field for tools that want the pieces separately, and a cluster-scoped resource comes back without `-n`, since there is no namespace for it to be in.
+The `--name`, `--namespace` and `--kind` flags print a single field for tools that want the pieces separately, and a cluster-scoped resource comes back without `-n`, since there is no namespace for it to be in.
 
-`kx ref` never contacts the cluster.
+Nothing about `kx ref` contacts the cluster.
 It reports what the index means, not what still exists, so it answers instantly — and a stale index prints the name it was assigned, leaving the command you spend it on to discover the resource is gone.
 
 ## A listing that found nothing is still a listing
 
-`kx get pods -n empty-namespace` saves its result like any other listing, even though the result is nothing.
+A listing like `kx get pods -n empty-namespace` saves its result like any other, even though the result is nothing.
 It has to: an empty listing that saved no entry would leave the *previous* one resolving indexes, so `kx get pods -n a` followed by `kx get pods -n b` and then `kx delete 1` deleted a pod in `a` — a namespace and two commands away from anything on screen.
 
 So the numbers retire when a listing finds nothing, and kx says so on the spot:
@@ -73,10 +73,10 @@ Spending an index against it explains itself the same way, at the moment it matt
 ```
 
 Those entries cost a history slot each.
-`kx state drop --empty` removes all of them at once, and needs no confirmation the way `--all` does — an entry holding nothing is not work anyone can lose.
+Running `kx state drop --empty` removes all of them at once, and needs no confirmation the way `--all` does — an entry holding nothing is not work anyone can lose.
 
 Every entry records the context it was listed in, because a resource name means nothing without the cluster it was read from.
-`kx state` names it beside the namespace; `kx state --all` captions the table with it, or gives it a column when the history spans more than one.
+The `kx state` command names it beside the namespace; `kx state --all` captions the table with it, or gives it a column when the history spans more than one.
 
 ## Switching contexts retires your indexes
 
@@ -86,11 +86,11 @@ kx context 2         # switch to production
 kx delete 1          # refused
 ```
 
-`kx` will not resolve a staging index against production, where the same name is a different resource.
+A staging index is never resolved against production, where the same name is a different resource.
 It refuses, names both contexts, and re-runs the listing here so there are usable numbers on the screen.
 
-`kx ns <index>` is refused the same way, and tells you to run `kx ns` — a namespace listing is per-cluster too.
-`kx context <index>` is the one exception: contexts live in kubeconfig rather than in any cluster, so switching back always works.
+Switching with `kx ns <index>` is refused the same way, and tells you to run `kx ns` — a namespace listing is per-cluster too.
+Switching with `kx context <index>` is the one exception: contexts live in kubeconfig rather than in any cluster, so switching back always works.
 
 ## The namespace and context slots
 
@@ -111,7 +111,7 @@ kx state --all       # summarizes the slots under the history table
 kx state --targets   # expands them into the listings the switch commands read
 ```
 
-`--targets` is how you pick a number without listing again.
+The `--targets` flag is how you pick a number without listing again.
 
 ## Operating on a namespace, rather than switching to it
 
@@ -136,11 +136,11 @@ Run `kx ns` to go back to indexing all of them.
 
 ## The file
 
-`~/.kx/state.json` holds the stack, the cursor and the slots.
-It is versioned: if the schema changes under an existing install, `kx` resets the file rather than migrating it — the cost is re-running one listing, and the alternative is migration code for a cache.
+The file `~/.kx/state.json` holds the stack, the cursor and the slots.
+It is versioned: if the schema changes under an existing install, kx resets the file rather than migrating it — the cost is re-running one listing, and the alternative is migration code for a cache.
 
-`KX_STATE` points at a different file, for a terminal or CI job that wants its own history instead of sharing the one in `~/.kx`.
-`kx --version` prints the path actually in use, in case yours is somewhere else.
+The `KX_STATE` variable points at a different file, for a terminal or CI job that wants its own history instead of sharing the one in `~/.kx`.
+Running `kx --version` prints the path actually in use, in case yours is somewhere else.
 
 ```bash
 # terminal A

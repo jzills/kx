@@ -14,7 +14,7 @@ kx diag
 sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims and Ingresses, plus pods nothing owns — and prints what's unhealthy, worst first.
 
 Healthy resources are left out of the terminal table.
-`--full` puts them back.
+The `--full` flag puts them back.
 
 Each row shows one finding, so which of several equally severe findings sorts first decides what the whole sweep reads like.
 Rows are ordered by severity, and within a severity by how specific the finding is: a concrete cause — a container state, a scheduling refusal, an exceeded limit — outranks a rollup like "Only 0/3 replicas ready", which outranks a raw warning event.
@@ -33,7 +33,7 @@ kx logs 2     # straight into the logs of row 2
 
 ## One resource
 
-`kx diag <index>` diagnoses a single resource and prints, on one screen:
+With an index, `kx diag` diagnoses a single resource and prints, on one screen:
 
 - a verdict banner
 - a `SUMMARY` of findings
@@ -59,8 +59,8 @@ Every finding says which it is, and the shape tells you whether a window can rea
 ! Failed ×46241 on Pod/api-badimage-… · 1m ago
 ```
 
-`· for 25d` is how long something has been true — no `--since` will hide it.
-`· 1m ago` is when something happened, and a narrow enough window will.
+A `· for 25d` is how long something has been true — no `--since` will hide it.
+A `· 1m ago` is when something happened, and a narrow enough window will.
 A pod that flaps counts from its current episode, not its whole history: a crashlooping container is briefly ready on each restart, so `· for 46s` beside 4675 restarts is the last crash, not the first.
 
 That line matters because a finding drives the verdict and the verdict drives [`--fail-on`](../use-kx-in-ci/).
@@ -98,7 +98,7 @@ kx diag -n prod    # a namespace you aren't in
 kx diag -A         # every namespace
 ```
 
-`-A` indexes the sweep too, and adds a `NAMESPACE` column beside the numbers, so `kx logs 7` reaches whichever namespace row 7 came from.
+With `-A`, the sweep is indexed too, and adds a `NAMESPACE` column beside the numbers, so `kx logs 7` reaches whichever namespace row 7 came from.
 
 ## As a check
 
@@ -107,7 +107,7 @@ kx diag -A --json
 kx diag -A --fail-on critical
 ```
 
-`--json` prints the same sweep as a document, and `--fail-on` exits 2 when any resource reaches that verdict.
+The `--json` flag prints the same sweep as a document, and `--fail-on` exits 2 when any resource reaches that verdict.
 See [using kx in CI](../use-kx-in-ci/).
 
 ## In a browser

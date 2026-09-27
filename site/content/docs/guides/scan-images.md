@@ -5,7 +5,7 @@ weight: 2
 ---
 
 Scanning a workload means knowing which images it actually runs — including init containers, and the pod template inside a CronJob.
-`kx scan` works that out from the resource and scans each unique image once.
+The `kx scan` command works that out from the resource and scans each unique image once.
 
 ```bash
 kx scan 1        # the images of indexed row 1
@@ -25,7 +25,7 @@ Because that is the scanner's own formatting rather than something kx parses, `-
 
 ## Engines
 
-`kx scan` drives an external scanner, and needs its CLI installed.
+Scanning drives an external scanner, so its CLI must be installed.
 
 | Engine | Flag | CLI |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ kx scan -n prod --json
 kx scan -n prod --fail-on high
 ```
 
-`--json` prints the severity counts and every finding as a document, and `--fail-on` exits 2 when any image carries a vulnerability at that severity or worse.
+The `--json` flag prints the severity counts and every finding as a document, and `--fail-on` exits 2 when any image carries a vulnerability at that severity or worse.
 See [using kx in CI](../use-kx-in-ci/).
 
 ## In a browser

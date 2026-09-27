@@ -4,7 +4,7 @@ description: kx mcp serves diagnostics, ownership, evidence and marks to an AI a
 weight: 9
 ---
 
-`kx mcp` runs a Model Context Protocol server on stdin/stdout.
+The `kx mcp` command runs a Model Context Protocol server on stdin/stdout.
 An agent gets the same view of the cluster kx gives you — health, ownership, events, logs, usage, manifests, image scans — and can read the numbers from your terminal's own listing, without ever writing to it unless you ask it to.
 
 ## Setup
@@ -28,7 +28,7 @@ For any client that reads its MCP server list as JSON:
 }
 ```
 
-kx reads the same kubeconfig your shell does, so whatever `kubectl config current-context` reports is where the agent starts.
+The server reads the same kubeconfig your shell does, so whatever `kubectl config current-context` reports is where the agent starts.
 
 ## The tools
 
@@ -52,7 +52,7 @@ Your MCP client lists each tool's arguments itself, from the server's `tools/lis
 Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `logs` and `top`; client-go only ever `get`s, `list`s and `watch`es.
 Nothing an agent calls here deletes, patches, scales, execs, port-forwards or edits anything.
 
-`mark` is the one write, and it writes kx's own state, not the cluster — the same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit` resolves the same resource whether you or the agent set it.
+The `mark` tool is the one write, and it writes kx's own state, not the cluster — the same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit` resolves the same resource whether you or the agent set it.
 It only ever adds: it refuses any name that is already a mark, even one on the same resource, and there is no tool to remove one.
 
 By default, the server never touches the history your `kx get` builds.
@@ -64,7 +64,7 @@ Image references a `scan` reads out of pod specs get the same treatment: one tha
 
 {{% kx-note %}}
 Marks are shared with your terminal, not private to the agent.
-`kx mark api 3` at your prompt and an agent's `mark` tool write and read the same names, so a mark you hand an agent, or one it sets and tells you about, works either way from then on.
+Running `kx mark api 3` at your prompt and an agent's `mark` tool write and read the same names, so a mark you hand an agent, or one it sets and tells you about, works either way from then on.
 The agent can add a mark but never move one, and `kx mark` lists the ones it added with `kx mcp` in a VIA column.
 Mark the same name yourself and it becomes yours.
 {{% /kx-note %}}
@@ -97,10 +97,11 @@ That cuts both ways: agent listings count toward `max_history` (10 by default), 
 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes your *current* listing the moment it saves, so `kx delete 3` right after can mean the agent's row 3, not the one you last ran `kx get` for.
 Every mutating command now says so when the index it resolves came from an agent's listing.
-`kx delete` and `kx drain` fold that into their confirm prompt, so you see it before you answer; skip the prompt with `--yes`/`-y` and they print the stderr notice below in its place.
-`kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.` It is a notice, not a prompt — nothing pauses, stdout is unchanged, and the exit code doesn't change either.
+The `kx delete` and `kx drain` commands fold that into their confirm prompt, so you see it before you answer; skip the prompt with `--yes`/`-y` and they print the stderr notice below in its place.
+The `kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.`
+It is a notice, not a prompt — nothing pauses, stdout is unchanged, and the exit code doesn't change either.
 Commands that only read — `kx describe`, `kx logs`, `kx yaml`, `kx port-forward`, `kx events`, `kx tree`, `kx diag`, and `kx rollout status` and `history` — print nothing.
-`kx state` shows which listing is current; `kx state back` is the way out if it isn't the one you meant.
+The `kx state` command shows which listing is current; `kx state back` is the way out if it isn't the one you meant.
 The same live-resolution rule that makes index reads useful also makes them relative: an index always resolves against whatever listing is current *at the moment of the call*, so relisting between speaking a number and the agent acting on it changes what that number means — in the terminal or from an agent, alike.
 
 **Concurrent writers.** The CLI and a running `kx mcp` server can both be mid-write to `~/.kx/state.json` — a mark from your terminal while `--write-listings` saves a sweep, say.
@@ -110,7 +111,7 @@ Where no lock can be taken at all — a filesystem that doesn't support locking,
 
 ## Secrets
 
-`get_yaml` on a Secret redacts every value under `data` and `stringData`, and the `kubectl.kubernetes.io/last-applied-configuration` annotation, which carries a Secret's whole last-applied manifest, plaintext data included.
+On a Secret, the `get_yaml` tool redacts every value under `data` and `stringData`, and the `kubectl.kubernetes.io/last-applied-configuration` annotation, which carries a Secret's whole last-applied manifest, plaintext data included.
 Keys are kept; values become `<redacted>`.
 
 Redaction goes by what kubectl returns as well as by what was asked for: any manifest that comes back as a core `v1` Secret is redacted, however its kind was spelled (`secret`, `secrets.v1.`) and whether it was named directly or through a mark.

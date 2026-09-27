@@ -4,7 +4,7 @@ description: --json prints the analysis as a document, --fail-on turns it into a
 weight: 8
 ---
 
-`kx diag` and `kx scan` both sweep a namespace and print a table.
+The `kx diag` and `kx scan` commands both sweep a namespace and print a table.
 In a pipeline nothing reads the table, and both would exit 0 whatever they found.
 Two flags change that.
 (`kx tree` and `kx top` take `--json` too, for the ownership graph and the usage listing; only the two that produce findings take `--fail-on`.)
@@ -19,14 +19,14 @@ kx scan -n prod --fail-on high --json
 The same analysis as a machine-readable document — every resource swept, healthy ones included, and every CVE behind the severity counts.
 
 ```bash
-kx diag -n prod --json | jq '.resources[] | select(.verdict == "critical") | .name'
-kx scan -n prod --json | jq '.images[] | select(.counts.critical > 0)'
+kx diag --json | jq '.resources[] | select(.verdict == "critical") | .name'
+kx scan --json | jq '.images[] | select(.counts.critical > 0)'
 ```
 
-`kx diag` emits one shape whether it was pointed at an index or a namespace, so that first expression reads `kx diag 1 --json` too — an indexed run is a sweep of one, and counts itself that way.
+The `kx diag --json` document has one shape whether the command was pointed at an index or a namespace, so that first expression reads `kx diag 1 --json` too — an indexed run is a sweep of one, and counts itself that way.
 
 It is built from the same values the terminal and `--html` render, so the three views cannot disagree about what is wrong.
-A sweep serialises every resource regardless of `--full`: that flag governs how much of a table fits on a screen, and nothing is scrolling past a machine.
+A sweep serializes every resource regardless of `--full`: that flag governs how much of a table fits on a screen, and nothing is scrolling past a machine.
 
 The document carries a `schemaVersion`, because this is a public surface the moment it ships — something will parse it in a pipeline, and a field moving underneath that is worse than one it can check for.
 
@@ -41,7 +41,7 @@ The document carries a `schemaVersion`, because this is a public surface the mom
 }
 ```
 
-`window` is how far back that run was allowed to look, spelled the way `--since` reads it.
+The `window` field is how far back that run was allowed to look, spelled the way `--since` reads it.
 A run with no window carries no such field.
 It is what tells two runs of the same job apart when the second one is quieter — the cluster got better, or the window got narrower — which a document that only counted what it found could not say.
 
@@ -61,10 +61,10 @@ A sweep carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run c
 A resource that was named by index carries that `index`, so a consumer finding something worth acting on can name it — `kx diag 4` — without listing again.
 A resource named by a mark carries `mark` instead, because a mark has no position in a listing; the two never appear together, and a document built from neither carries neither.
 
-`kx tree --json` names every node with `kind` and `name` rather than the `rs/web-7d8f` label the terminal draws, carries the same `index` the tree printed, and always returns a `roots` list — one entry for an indexed resource or a single namespace, one per namespace for `-A`.
+The `kx tree --json` document names every node with `kind` and `name` rather than the `rs/web-7d8f` label the terminal draws, carries the same `index` the tree printed, and always returns a `roots` list — one entry for an indexed resource or a single namespace, one per namespace for `-A`.
 A pod's containers appear as children with a name and no kind, because a container is part of a pod rather than a resource of its own.
 
-`kx top --json` reports percentages as numbers, and as `null` where there is none — a pod with no limit set has no percentage, and `0` would read as idle.
+The `kx top --json` document reports percentages as numbers, and as `null` where there is none — a pod with no limit set has no percentage, and `0` would read as idle.
 Its `resource` field says whether the listing was pods or nodes, since a pod's percentage is against its limits and a node's against its capacity.
 
 Severities are lower case throughout — `critical`, `high`, `medium`, `low` for image findings, `critical`, `warning`, `healthy` for verdicts — which is exactly what `--fail-on` accepts, so a value read out of a document can be typed straight back at the gate.
@@ -86,7 +86,7 @@ An image whose scan failed breaches every threshold, for the same reason a missi
 ### Old news doesn't hold the gate red
 
 Evidence drives a finding, a finding drives the verdict, and the verdict drives the gate — so by default one `FailedScheduling` from three weeks ago, or one OOMKill a container recovered from last month, fails the job forever on a cluster with nothing currently wrong with it.
-`--since` bounds what the report is allowed to look at, and only ever hides what *finished* — what is still going wrong is always reported, however long it has been going wrong:
+The `--since` flag bounds what the report is allowed to look at, and only ever hides what *finished* — what is still going wrong is always reported, however long it has been going wrong:
 
 ```bash
 kx diag -A --fail-on warning --since 24h   # today's failures only
@@ -115,20 +115,20 @@ A pipeline that treated any non-zero as "unhealthy" could not tell a sick cluste
 
 ## Publishing a report and failing on it
 
-`--fail-on` is independent of how the findings are presented.
+The `--fail-on` flag is independent of how the findings are presented.
 It applies alongside `--json` and [`--html`](../browser-reports/) alike, so a job can publish a report and still fail on what is in it:
 
 ```bash
 kx diag -A --fail-on critical --out diag.html
 ```
 
-`--out` writes the page and returns, so the gate runs and the file is there for an artifact step to pick up — and it implies `--html` on its own, so there is no need to pass both.
+The `--out` flag writes the page and returns, so the gate runs and the file is there for an artifact step to pick up — and it implies `--html` on its own, so there is no need to pass both.
 Plain `--html` without `--out` serves the report and blocks until Ctrl-C, which is right at a terminal and wrong in a pipeline — nothing sends Ctrl-C to a CI job, so it would hang until the runner killed it.
 
 {{% kx-note kind="warn" %}}
-`kx scan --full --fail-on` is refused rather than ignored.
-`--full` streams the scanner's own report, which kx never parses, so the gate would have nothing to read.
-`--json` and `--full` are refused together for the same reason, and `kx diag --json --full` is refused because a document already carries every resource swept — `--full` has nothing to add to one.
+Combining `kx scan --full --fail-on` is refused rather than ignored.
+The `--full` flag streams the scanner's own report, which kx never parses, so the gate would have nothing to read.
+The `--json` and `--full` flags are refused together for the same reason, and `kx diag --json --full` is refused because a document already carries every resource swept — `--full` has nothing to add to one.
 {{% /kx-note %}}
 
 ## A whole cluster
@@ -138,5 +138,5 @@ kx diag -A --fail-on critical
 kx scan -A --fail-on high
 ```
 
-`kx scan -A` resolves every unique image in the cluster and scans each once, two at a time.
+With `-A`, `kx scan` resolves every unique image in the cluster and scans each once, two at a time.
 The bound is memory rather than cores — a scanner unpacks an image and walks every package in it — so a wide sweep is steady rather than fast, and does not thrash a small runner.

@@ -46,11 +46,11 @@ kx svc -m api
 ```
 
 An integer after a kind relists just that row — `kx po 3`.
-Anything `kx` doesn't recognise as a kind falls back to `kx get <resource>`, so a CRD you have installed works the same way.
+Anything kx doesn't recognize as a kind falls back to `kx get <resource>`, so a CRD you have installed works the same way.
 
 ## Narrow the listing
 
-`--match`/`-m` filters rows by name substring, and any flag `kx` doesn't recognise goes through to kubectl untouched:
+The `--match`/`-m` flag filters rows by name substring, and any flag kx doesn't recognize goes through to kubectl untouched:
 
 ```bash
 kx pods -m api
@@ -58,7 +58,7 @@ kx pods -n prod -l app=web
 kx pods -A
 ```
 
-`-A` is indexed like everything else: each row remembers the namespace it came from, so `kx logs 7` reaches into a namespace you aren't in.
+A listing made with `-A` is indexed like everything else: each row remembers the namespace it came from, so `kx logs 7` reaches into a namespace you aren't in.
 
 ## See where you are
 
@@ -67,7 +67,7 @@ kx state
 ```
 
 That prints the listing your indexes currently resolve against, and the namespace and context it was read in.
-`kx` keeps the last ten listings — see [state and history](../../concepts/state/) for moving between them.
+Recent listings are kept as a history, ten by default — see [state and history](../../concepts/state/) for moving between them.
 
 ## Where next
 

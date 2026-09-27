@@ -14,21 +14,21 @@ The choice is written to [`~/.kx/config.toml`](../configuration/), and `KX_THEME
 
 ## The palettes
 
-`github-dark` (the default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light`, and `plain`.
+Eleven palettes ship with kx: `github-dark` (the default), `dracula`, `nord`, `gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`, `mono`, `light`, and `plain`.
 
-`light` is for light terminal backgrounds.
-`mono` drops colour but keeps bold and dim, for terminals or captures where hue is noise.
-`plain` disables styling altogether, the same as `--no-color`.
+The `light` palette is for light terminal backgrounds.
+The `mono` palette drops color but keeps bold and dim, for terminals or captures where hue is noise.
+The `plain` palette disables styling altogether, the same as `--no-color`.
 
 {{% kx-note %}}
-A palette is a set of colours, not a background.
+A palette is a set of colors, not a background.
 On a terminal whose own background disagrees with the one a palette assumes, the palette will look wrong — that is the terminal and the palette disagreeing, not a bug in either.
-`light` exists for exactly this reason.
+The `light` palette exists for exactly this reason.
 {{% /kx-note %}}
 
 ## One registry, three surfaces
 
-The palettes are defined once, in the `kx` binary.
+The palettes are defined once, in the kx binary.
 Three things read them:
 
 - **the terminal**, for every command's output

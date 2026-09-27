@@ -55,7 +55,7 @@ Spending a mark from another context is refused, naming both:
 ✗ @web was marked in context 'staging'; you are in 'production'.
 ```
 
-There's no relist that fixes this the way a stale index gets one: switching context is what you'd do next, not a mistake to recover from, so `kx` just says which context the mark is waiting for.
+There's no relist that fixes this the way a stale index gets one: switching context is what you'd do next, not a mistake to recover from, so kx just says which context the mark is waiting for.
 
 ## What outlives a re-list
 
@@ -68,13 +68,13 @@ kx unmark --all        # this is what removes marks
 ```
 
 That asymmetry is deliberate.
-`kx state drop --all` clears things that accumulate on their own, one `kx get` at a time; a mark is something you named on purpose, and clearing it takes a command that says so.
+Running `kx state drop --all` clears things that accumulate on their own, one `kx get` at a time; a mark is something you named on purpose, and clearing it takes a command that says so.
 
 ## A mark kx cannot read is dropped
 
 Marks live in `~/.kx/state.json` alongside the listings, and kx reads that file on every command.
 An entry it cannot make sense of — one missing the resource name, or the kind it has to ask kubectl for — is dropped as the file loads, and the rest of the file is used as normal.
-`kx mark` simply stops listing it, and spending that name reports it as unknown:
+The mark simply stops appearing in `kx mark`, and spending that name reports it as unknown:
 
 ```
 ✗ No mark named 'web' — run 'kx mark web <index>' to create one, or 'kx mark' to list them.

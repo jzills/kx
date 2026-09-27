@@ -5,7 +5,7 @@ description: Install kx, learn the index workflow, and look up any command.
 weight: 1
 ---
 
-`kx` wraps kubectl and gives every row of a listing a number.
+A kubectl wrapper that gives every row of a listing a number.
 Run `kx get pods` once and the pods are 1, 2, 3; from then on every other command takes those numbers instead of a name you have to read off the screen and retype.
 
 ```bash

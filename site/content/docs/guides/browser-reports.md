@@ -37,16 +37,16 @@ Both only mean anything alongside `--html` — they configure the server it star
 kx diag --out diag.html   # write the page instead of serving it
 ```
 
-`--out` already says "HTML" in its own name, so it implies `--html` on its own — `kx diag --html --out diag.html` still works, but the `--html` there is redundant.
-`--out` replaces the server rather than configuring it: the page is written, the command returns, and no browser opens.
+The `--out` flag already says "HTML" in its own name, so it implies `--html` on its own — `kx diag --html --out diag.html` still works, but the `--html` there is redundant.
+It replaces the server rather than configuring it: the page is written, the command returns, and no browser opens.
 That is what you want in CI, where nothing is there to press Ctrl-C — see [Use kx in CI](../use-kx-in-ci/).
 Because there is then no server, `--port` and `--no-open` are refused alongside it.
 
-`--no-open` is what you want over SSH with a forwarded port, or in a terminal that would open the wrong browser.
+The `--no-open` flag is what you want over SSH with a forwarded port, or in a terminal that would open the wrong browser.
 
 ## Serving a report and failing on it
 
-`--html` says where the findings go; it does not say what they mean.
+The `--html` flag says where the findings go; it does not say what they mean.
 On `kx diag` and `kx scan` it composes with `--fail-on`, so a job can publish a report and still fail the build on what is in it:
 
 ```bash

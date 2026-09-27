@@ -19,7 +19,7 @@ The reference table.
 | `theme_disable` | `KX_THEME_DISABLE` | boolean | `false` |
 
 Environment variables win over the file.
-`shells` is a TOML array in the file and a comma-separated string in the environment:
+The `shells` key is a TOML array in the file and a comma-separated string in the environment:
 
 ```bash
 KX_SHELLS=zsh,bash,sh kx exec 1
@@ -38,11 +38,11 @@ events_max_age = "1h"
 theme_disable = false
 ```
 
-`diag_max_age` is a duration in `s`, `m`, `h` or `d`: `90s`, `30m`, `12h`, `7d`.
+The `diag_max_age` key is a duration in `s`, `m`, `h` or `d`: `90s`, `30m`, `12h`, `7d`.
 A fraction or a mixture works too — `1.5h`, `1h30m` — except with `d`, which takes a fraction but not a mixture: `1.5d`, never `1d12h`.
 It bounds how far back [`kx diag`](../commands/diagnostic/) looks for evidence; unset — or `"0"` — reports everything however old.
 
-`events_max_age` is the same for [`kx events`](../commands/events/), and separate from `diag_max_age`: neither falls back to the other.
+The `events_max_age` key is the same for [`kx events`](../commands/events/), and separate from `diag_max_age`: neither falls back to the other.
 Both are overridden per run by `--since`.
 
 Nothing here is required — kx runs on the defaults with no config file at all.
@@ -54,12 +54,12 @@ Nothing here is required — kx runs on the defaults with no config file at all.
 | `~/.kx/config.toml` | `KX_CONFIG` | The keys above. |
 | `~/.kx/state.json` | `KX_STATE` | Saved listings and the history cursor; see [state](../../concepts/state/). |
 
-`KX_CONFIG` and `KX_STATE` point kx at a different file entirely, rather than overriding one key the way the settings table above does — useful for a terminal or CI job that wants its own config or history instead of sharing the one in `~/.kx`.
+The `KX_CONFIG` and `KX_STATE` variables point kx at a different file entirely, rather than overriding one key the way the settings table above does — useful for a terminal or CI job that wants its own config or history instead of sharing the one in `~/.kx`.
 Neither can be set from inside the file it names, so there's no `config.toml` equivalent for them.
 
-`kx --version` prints both paths, resolved, along with the version and build.
+Running `kx --version` prints both paths, resolved, along with the version and build.
 
-## Also honoured
+## Also honored
 
 | | |
 | --- | --- |

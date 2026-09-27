@@ -4,7 +4,7 @@ description: ~/.kx/config.toml, the KX_* overrides, and when output is styled.
 weight: 4
 ---
 
-`kx` reads `~/.kx/config.toml`.
+Settings live in `~/.kx/config.toml`.
 Every key has an environment variable that overrides it, so a shell can differ from the file without editing anything.
 
 ```toml
@@ -17,7 +17,7 @@ diag_max_age = "7d"
 events_max_age = "1h"
 ```
 
-`kx --version` prints the path it resolved, which is the quickest way to find out whether the file you are editing is the file it reads.
+Running `kx --version` prints the path it resolved, which is the quickest way to find out whether the file you are editing is the file it reads.
 
 ## Keys
 
@@ -32,12 +32,12 @@ events_max_age = "1h"
 | `events_max_age` | `KX_EVENTS_MAX_AGE` | unset | How far back [`kx events`](../../reference/commands/events/) lists events; unset lists everything the cluster still holds, `--since` overrides it per run. |
 | `theme_disable` | `KX_THEME_DISABLE` | `false` | Turn off styling entirely — the same as `--no-color`. |
 
-`shells` is a list in the file and a comma-separated string in the environment: `KX_SHELLS=zsh,bash,sh`.
+The `shells` key is a list in the file and a comma-separated string in the environment: `KX_SHELLS=zsh,bash,sh`.
 
-`diag_max_age` is a duration in `s`, `m`, `h` or `d` — `90s`, `30m`, `12h`, `7d` — and `0` means no limit, which is also what you get by leaving it out.
+The `diag_max_age` key is a duration in `s`, `m`, `h` or `d` — `90s`, `30m`, `12h`, `7d` — and `0` means no limit, which is also what you get by leaving it out.
 Setting it is worth it because evidence drives a finding, a finding drives the verdict, and a verdict drives `--fail-on`: unbounded, one `FailedScheduling` from three weeks ago holds a resource at `warnings`, and a CI gate red, forever.
 
-`events_max_age` is the same kind of duration for `kx events`, and a separate key on purpose: narrowing the evidence behind a verdict is not a request for a shorter event listing.
+The `events_max_age` key is the same kind of duration for `kx events`, and a separate key on purpose: narrowing the evidence behind a verdict is not a request for a shorter event listing.
 Neither key falls back to the other.
 
 Two commands write to the file rather than making you edit it:
@@ -57,8 +57,8 @@ kx get pods | grep worker
 kx get pods > pods.txt
 ```
 
-The [`NO_COLOR`](https://no-color.org/) convention is honoured too.
-It is a terminal-wide convention rather than a `kx` setting, which is why it isn't in the table above — `theme_disable` and `--no-color` are the `kx` ways to say the same thing.
+The [`NO_COLOR`](https://no-color.org/) convention is honored too.
+It is a terminal-wide convention rather than a kx setting, which is why it isn't in the table above — `theme_disable` and `--no-color` are kx's ways to say the same thing.
 
 ## The files kx owns
 
@@ -67,7 +67,7 @@ It is a terminal-wide convention rather than a `kx` setting, which is why it isn
 | `~/.kx/config.toml` | `KX_CONFIG` | The settings above. |
 | `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor, plus the marks that outlive them; see [state](../state/) and [marks](../marks/). |
 
-`KX_CONFIG` and `KX_STATE` point kx at a different file entirely, for a terminal or CI job that wants its own config or history rather than sharing the one in `~/.kx` — unlike the settings table above, neither can be set from inside the file it names.
+The `KX_CONFIG` and `KX_STATE` variables point kx at a different file entirely, for a terminal or CI job that wants its own config or history rather than sharing the one in `~/.kx` — unlike the settings table above, neither can be set from inside the file it names.
 
 Both paths are printed by `kx --version` and on the root `kx --help` screen.
-Neither is required to exist — `kx` runs on defaults without them.
+Neither is required to exist — kx runs on defaults without them.

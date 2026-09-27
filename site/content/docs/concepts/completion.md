@@ -9,7 +9,7 @@ kx completion <bash|zsh|fish|powershell>
 ```
 
 prints a completion script for that shell.
-What makes it worth installing is what it completes: not just command names and flags, but the indexes from your saved listing, each labelled with the resource it points at.
+What makes it worth installing is what it completes: not just command names and flags, but the indexes from your saved listing, each labeled with the resource it points at.
 
 ```
 $ kx describe <TAB>
@@ -45,7 +45,7 @@ kx completion zsh > "${fpath[1]}/_kx"
 ```
 
 Then start a new shell.
-If completion isn't initialised yet, add `autoload -Uz compinit && compinit` to `~/.zshrc` first.
+If completion isn't initialized yet, add `autoload -Uz compinit && compinit` to `~/.zshrc` first.
 
 ### bash
 

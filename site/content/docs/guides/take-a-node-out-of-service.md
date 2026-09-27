@@ -17,11 +17,11 @@ kx uncordon 1    # put it back
 
 ## Diagnosing a node
 
-`kx diag <index>` on a Node reports its conditions, whether it is cordoned, and a tally of what is scheduled on it.
+On a Node, `kx diag <index>` reports its conditions, whether it is cordoned, and a tally of what is scheduled on it.
 
 The Ready condition is tri-state, and the two bad states are worded apart.
-`False` is the kubelet saying the node is not ready.
-`Unknown` is the kubelet not saying anything — the node may be running everything on it perfectly behind a kubelet that has stopped talking, and calling that "not ready" would assert something kx cannot see.
+A `False` is the kubelet saying the node is not ready.
+An `Unknown` is the kubelet not saying anything — the node may be running everything on it perfectly behind a kubelet that has stopped talking, and calling that "not ready" would assert something kx cannot see.
 Both are critical.
 MemoryPressure, DiskPressure, PIDPressure and NetworkUnavailable are inverted relative to Ready, and `True` on any of them is critical too.
 
@@ -43,7 +43,7 @@ kx uncordon 1..3
 
 Cordon and uncordon take several indexes and ranges, like [`kx delete`](../../reference/commands/delete/), and validate the whole batch before acting on any of it — if one index in the range is not a Node, nothing is cordoned.
 
-`kx drain` takes one index, deliberately.
+The `kx drain` command takes one index, deliberately.
 It evicts running workloads and blocks until they are gone, so applying it to a range in one command is a way to take a cluster down by typo.
 
 ```bash
@@ -62,7 +62,7 @@ Nodes also stay out of a namespace sweep and out of `-A`; you reach one by index
 
 ## Getting onto the node
 
-`kx debug` takes a Node index too, and does something different from what it does to a pod: kubectl creates a privileged pod on that node, with the host's filesystem mounted at `/host` and the host namespaces joined.
+The `kx debug` command takes a Node index too, and does something different from what it does to a pod: kubectl creates a privileged pod on that node, with the host's filesystem mounted at `/host` and the host namespaces joined.
 
 ```bash
 kx get nodes

@@ -12,7 +12,7 @@ kx tree
 ```
 
 graphs every workload in the current namespace, from controllers down to containers.
-`kx tree <index>` graphs one.
+Given an index, `kx tree` graphs one.
 
 ```bash
 kx tree 1
@@ -35,7 +35,7 @@ kx logs 3
 
 With `-A`, nodes are indexed continuously across the whole forest.
 
-`--no-index` skips the numbering and leaves your existing listing alone — useful when you want to look at the structure without losing the indexes you were working with.
+The `--no-index` flag skips the numbering and leaves your existing listing alone — useful when you want to look at the structure without losing the indexes you were working with.
 
 ## In a browser
 

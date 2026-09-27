@@ -5,7 +5,7 @@ weight: 6
 ---
 
 Running a command inside something usually means finding a pod first: list them, read a generated name off the table, then type it.
-`kx exec` takes the index of the workload itself.
+The `kx exec` command takes the index of the workload itself.
 
 ```bash
 kx get deploy
@@ -21,10 +21,10 @@ That matters for distroless and Alpine images, where the shell you assume is not
 Pods, Deployments, ReplicaSets, StatefulSets and DaemonSets.
 
 Services are refused.
-`kubectl exec` does not accept one, and kx says so itself rather than letting kubectl produce a worse message about it.
+Since `kubectl exec` does not accept one, kx says so itself rather than letting kubectl produce a worse message about it.
 
 {{% kx-note %}}
-kx does not pick the pod — `kubectl exec` resolves the workload, the same way [`kx port-forward`](../../reference/commands/port-forward/) leaves that choice to kubectl.
+The pod is not kx's choice — `kubectl exec` resolves the workload, the same way [`kx port-forward`](../../reference/commands/port-forward/) leaves that choice to kubectl.
 Which pod you get is therefore not guaranteed to be the same one across the shell probe and the session that follows.
 For a Deployment whose replicas are interchangeable that is what you want; when it isn't, address a pod directly.
 {{% /kx-note %}}
