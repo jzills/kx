@@ -68,6 +68,6 @@ The command reference table in `README.md` is generated from the command tree by
 
 ## Release
 
-Releases are triggered by pushing a `release/vX.Y.Z` branch. One runner cross-compiles six targets (linux/darwin/windows × amd64/arm64), packages them as tar.gz — plus zip for Windows — builds eight PyPI wheels around those binaries, publishes to PyPI, creates the GitHub Release, and dispatches the krew-index update.
+Releases are triggered by pushing a `release/vX.Y.Z` branch. One runner cross-compiles six targets (linux/darwin/windows × amd64/arm64), packages them as tar.gz — plus zip for Windows, each also attached under a version-free name so `releases/latest/download/` resolves — builds eight PyPI wheels around those binaries, publishes to PyPI, creates the GitHub Release, and dispatches the krew-index update.
 
 The published wheels carry a static binary and declare no dependencies; `pyproject.toml` exists only to supply their name/description/readme and to record the released version. See `scripts/build_binaries.sh` and `scripts/build_wheels.py`.
