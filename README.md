@@ -282,9 +282,7 @@ The `kx theme` command lists the available themes with a preview of each, and
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
 </p>
 
-Eleven prefabs ship with it: `github-dark` (default), `dracula`, `nord`,
-`gruvbox`, `solarized-dark`, `catppuccin-mocha`, `tokyo-night`, `rose-pine`,
-`mono`, `light` and `plain`.
+Eleven themes ship with it, `github-dark` by default.
 See the [themes docs](https://jzills.github.io/kx/docs/concepts/themes/) for more.
 
 ## Commands
