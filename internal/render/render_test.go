@@ -100,6 +100,33 @@ func TestErrorWritesToStderr(t *testing.T) {
 	}
 }
 
+// kubectl's own errors run to two lines ("error: …" then "See 'kubectl … --help'
+// for usage."), and styling a multi-line string as one block pads every line to
+// the widest, so the second came out as "See" followed by a run of spaces. It
+// did so unstyled too: the padding is layout, not color.
+func TestMessagesKeepEachLineAsWritten(t *testing.T) {
+	const msg = "error: unknown flag: --bogus\nSee 'kubectl scale --help' for usage."
+	want := map[string]string{
+		"Error":   "✗ " + msg + "\n",
+		"Success": "✓ " + msg + "\n",
+		"Notice":  msg + "\n",
+	}
+	calls := map[string]func(*Renderer){
+		"Error":   func(r *Renderer) { r.Error(msg) },
+		"Success": func(r *Renderer) { r.Success(msg) },
+		"Notice":  func(r *Renderer) { r.Notice(msg) },
+	}
+	for name, call := range calls {
+		if got := capture(call); got != want[name] {
+			t.Errorf("%s unstyled = %q, want %q", name, got, want[name])
+		}
+		styled := sgrRE.ReplaceAllString(styledCapture(t, "github-dark", call), "")
+		if styled != want[name] {
+			t.Errorf("%s styled, colors stripped = %q, want %q", name, styled, want[name])
+		}
+	}
+}
+
 func TestSuccessMarker(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, &buf, "github-dark", false).Success("done")

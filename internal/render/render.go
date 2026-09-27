@@ -133,18 +133,30 @@ func (r *Renderer) Notice(msg string) {
 func (r *Renderer) emphasizeQuoted(msg, base string) string {
 	parts := splitOnQuoteMarks(msg)
 	if len(parts) < 3 {
-		return r.style(base, msg)
+		return r.styleLines(base, msg)
 	}
 	var out strings.Builder
 	for i, part := range parts {
 		// Odd indexes are the quoted fragments.
 		if i%2 == 1 {
-			out.WriteString(r.style(theme.Accent, "'"+part+"'"))
+			out.WriteString(r.styleLines(theme.Accent, "'"+part+"'"))
 			continue
 		}
-		out.WriteString(r.style(base, part))
+		out.WriteString(r.styleLines(base, part))
 	}
 	return out.String()
+}
+
+// styleLines styles each line of text on its own. A lipgloss style renders a
+// multi-line string as a block, padding every line to the widest one, so a
+// message carrying kubectl's two-line error came out with "See" followed by a
+// run of spaces — unstyled too, since the padding is layout rather than color.
+func (r *Renderer) styleLines(name, text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = r.style(name, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // splitOnQuoteMarks splits a message on the apostrophes that open or close a
