@@ -135,6 +135,123 @@ body {
   color: var(--kx-accent);
 }
 
+/* The label and its copy button share a row. The button, like the platform
+   chips below, ships with the hidden attribute and is revealed by
+   assets/js/kx-install.js, so a reader without JavaScript never sees a control
+   that does nothing. The theme's base styles hide [hidden] with !important, so
+   the display rules here cannot override it. */
+.kx-install__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.kx-install__head .kx-install__label {
+  margin-bottom: 0;
+}
+
+.kx-install__copy {
+  display: inline-flex;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: none;
+  color: var(--kx-muted);
+  cursor: pointer;
+}
+
+.kx-install__copy:hover,
+.kx-install__copy:focus-visible {
+  color: var(--kx-accent);
+  border-color: var(--kx-border);
+}
+
+.kx-install__copy.is-done {
+  color: var(--kx-status-ok);
+}
+
+.kx-install__icon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kx-install__icon--done,
+.kx-install__copy.is-done .kx-install__icon--copy {
+  display: none;
+}
+
+.kx-install__copy.is-done .kx-install__icon--done {
+  display: block;
+}
+
+/* Announced to screen readers, never shown. */
+.kx-install__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The binary card takes a full row: its command carries the whole release URL,
+   which no other card comes close to, and wraps rather than scrolls so the
+   platform in it stays visible as the chips change it. The markup puts a <wbr>
+   after each slash, so a narrow screen breaks the URL at a slash rather than
+   mid-word; <wbr> adds no text, so the copy is unaffected. */
+.kx-install__card--binary {
+  grid-column: 1 / -1;
+}
+
+.kx-install__card--binary .kx-install__command {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.kx-install__platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+
+.kx-install__platforms button {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--kx-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.kx-install__platforms button:hover,
+.kx-install__platforms button:focus-visible {
+  color: var(--kx-body);
+}
+
+.kx-install__platforms button[aria-pressed="true"] {
+  border-color: var(--kx-accent);
+  color: var(--kx-accent);
+}
+
+.kx-install__note {
+  margin: 0.6rem 0 0;
+  color: var(--kx-muted);
+  font-size: 0.8rem;
+}
+
+.kx-install__note a {
+  color: var(--kx-accent);
+}
+
 /* Feature cards
  * ------------------------------------------------------------------ */
 
