@@ -27,6 +27,8 @@ published — nothing is even committed — until you approve.
    open-ended index ranges, v0.3.3 brought shell completion. Bump the minor
    when a release changes what an existing command *does*, not merely when it
    adds something.
+   v0.7.0 is the deliberate exception: nothing existing changed, but it added
+   an MCP server for agents, and the minor marks that.
 
 3. **Write the summary.** `release-notes/vX.Y.Z.md` is a short paragraph or
    two, in your own words, that opens the release notes. See below.
