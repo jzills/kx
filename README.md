@@ -28,8 +28,8 @@ full resource names.
 
 ## Install
 
-Requires `kubectl` on your PATH. Every install is the same prebuilt binary, with
-no Python runtime or dependencies.
+Requires `kubectl` on your PATH. Every install method delivers the same prebuilt
+binary.
 
 As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
@@ -38,7 +38,8 @@ kubectl krew install idx
 alias kx="kubectl idx"
 ```
 
-Or with [uv](https://docs.astral.sh/uv/):
+Or from PyPI with [uv](https://docs.astral.sh/uv/) — no Python runtime or
+dependencies required:
 
 ```bash
 uv tool install kx-cli
