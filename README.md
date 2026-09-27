@@ -18,9 +18,8 @@
 
 </div>
 
-A kubectl wrapper that adds index-based resource selection. Run
-`kx get <resource>` once, then reference any result by number instead of typing
-full resource names.
+A kubectl wrapper that adds index-based resource selection.
+Run `kx get <resource>` once, then reference any result by number instead of typing full resource names.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/demo.gif" alt="kx demo" width="800"/>
@@ -28,8 +27,8 @@ full resource names.
 
 ## Install
 
-Requires `kubectl` on your PATH. Every install method delivers the same prebuilt
-binary.
+Requires `kubectl` on your PATH.
+Every install method delivers the same prebuilt binary.
 
 As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
@@ -38,15 +37,13 @@ kubectl krew install idx
 alias kx="kubectl idx"
 ```
 
-Or from PyPI with [uv](https://docs.astral.sh/uv/) — no Python runtime or
-dependencies required:
+Or from PyPI with [uv](https://docs.astral.sh/uv/) — no Python runtime or dependencies required:
 
 ```bash
 uv tool install kx-cli
 ```
 
-Standalone binaries for Linux, macOS and Windows are attached to every
-[GitHub Release](https://github.com/jzills/kx/releases).
+Standalone binaries for Linux, macOS and Windows are attached to every [GitHub Release](https://github.com/jzills/kx/releases).
 
 <details>
 <summary><b>Other ways to install</b></summary>
@@ -72,8 +69,7 @@ See the [install guide](https://jzills.github.io/kx/docs/getting-started/install
 
 ## Usage
 
-No more copying names out of `kubectl get` — one listing, then everything after
-it by number.
+No more copying names out of `kubectl get` — one listing, then everything after it by number.
 
 ```bash
 kx get pods    # lists pods, numbering each row
@@ -85,44 +81,36 @@ Indexes come several at a time, as ranges, or narrowed.
 
 ```bash
 kx delete 3 5                   # several at once
-kx delete 3..7                  # an inclusive range, walking either direction, trimmed to the listing
+kx delete 3..7                  # an inclusive range, either direction
 kx delete ..5                   # open at the start
 kx delete 5..                   # open to the end of the listing
 kx get pods -m api              # --match/-m filters rows by name substring
 kx get pods -n prod -l app=api  # anything else passes through to kubectl
 ```
 
-- kubectl's own flags pass through — `kx delete 3 --force --grace-period=0`,
-  `kx logs 3 -f --tail=100`. Passing `-n` with an index is refused, since
-  the index already carries the namespace it was listed from.
+- kubectl's own flags pass through — `kx delete 3 --force --grace-period=0`, `kx logs 3 -f --tail=100`.
+  Passing `-n` with an index is refused, since the index already carries the namespace it was listed from.
 - Listings made with `-A` are indexed too, each row with its own namespace.
-- Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` —
-  kubectl's shorthands and your CRDs included.
+- Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` — kubectl's shorthands and your CRDs included.
 - The `--watch`/`-w` flag redraws the table in place rather than appending lines.
-- Tab completion, from `kx completion <shell>`, shows the resource behind each
-  index: `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
+- Tab completion, from `kx completion <shell>`, shows the resource behind each index: `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
 
 ## Triage a namespace
 
-Bare `kx diag` sweeps the current namespace — every workload kind, plus
-Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
-It reads live usage too, so a pod running hot against its memory limit is
-flagged as an OOMKill risk before it dies.
+Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
+It reads live usage too, so a pod running hot against its memory limit is flagged as an OOMKill risk before it dies.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
 </p>
 
-With an index, `kx diag` diagnoses a single resource: a top level verdict, a findings
-summary, a per-pod status table, log tails from broken containers and warning
-events — one screen instead of four kubectl commands.
+With an index, `kx diag` diagnoses a single resource: a top level verdict, a findings summary, a per-pod status table, log tails from broken containers and warning events — one screen instead of four kubectl commands.
 See the [triage guide](https://jzills.github.io/kx/docs/guides/triage-a-namespace/) for more.
 
 ## Read a Secret in plaintext
 
-The `kx secret <index> --decode` command prints an indexed Secret's keys and
-values decoded. With `--key`/`-k`, it prints a single value raw — no banner, no wrapping — so it drops
-straight into a shell.
+The `kx secret <index> --decode` command prints an indexed Secret's keys and values decoded.
+With `--key`/`-k`, it prints a single value raw — no banner, no wrapping — so it drops straight into a shell.
 
 ```bash
 export PGPASSWORD=$(kx secret 1 --decode -k password)
@@ -132,30 +120,25 @@ export PGPASSWORD=$(kx secret 1 --decode -k password)
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/secret.gif" alt="kx secret --decode demo" width="800"/>
 </p>
 
-Bare `kx secret --decode` decodes every Secret in the namespace in one call,
-confirming first — that prints every credential you have.
+Bare `kx secret --decode` decodes every Secret in the namespace in one call, confirming first — that prints every credential you have.
 See the [Secrets guide](https://jzills.github.io/kx/docs/guides/read-a-secret/) for more.
 
 ## Scan images for CVEs
 
-The `kx scan <index>` command scans the unique container images of an indexed
-workload.
-Bare `kx scan` sweeps every workload in the namespace. Results come back as a
-severity summary, or the full per-image CVE report with `--full`.
+The `kx scan <index>` command scans the unique container images of an indexed workload.
+Bare `kx scan` sweeps every workload in the namespace.
+Results come back as a severity summary, or the full per-image CVE report with `--full`.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/scan.gif" alt="kx scan demo" width="800"/>
 </p>
 
-Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/)
-by default, or [Trivy](https://trivy.dev/) and
-[Grype](https://github.com/anchore/grype) via `kx engine`.
+Requires the CLI for the selected engine — [Docker Scout](https://docs.docker.com/scout/) by default, or [Trivy](https://trivy.dev/) and [Grype](https://github.com/anchore/grype) via `kx engine`.
 See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for more.
 
 ## See what owns what
 
-The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods —
-and indexes every node it draws, so anything in the tree is one number away.
+The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods — and indexes every node it draws, so anything in the tree is one number away.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>
@@ -166,27 +149,22 @@ See the [ownership guide](https://jzills.github.io/kx/docs/guides/ownership-tree
 
 ## Reports in the browser
 
-The `--html` flag on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the
-same analysis as a page and opens it in your browser. It binds `127.0.0.1` only and
-writes nothing to disk.
+The `--html` flag on `kx diag`, `kx scan`, `kx tree`, and `kx top` renders the same analysis as a page and opens it in your browser.
+It binds `127.0.0.1` only and writes nothing to disk.
 
-The page is drawn in your active theme. Sweep rows expand into that resource's
-full report, image rows into the CVEs behind their counts — detail the terminal
-has no room for.
+The page is drawn in your active theme.
+Sweep rows expand into that resource's full report, image rows into the CVEs behind their counts — detail the terminal has no room for.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/diag-html.png" alt="kx diag --html dashboard" width="800"/>
 </p>
 
-Add `--out <path>` to write the page to a file instead of serving it — what you
-want in CI, where `kx diag --out report.html` is the whole command.
+Add `--out <path>` to write the page to a file instead of serving it — what you want in CI, where `kx diag --out report.html` is the whole command.
 See the [browser reports guide](https://jzills.github.io/kx/docs/guides/browser-reports/) for more.
 
 ## Spend an index anywhere
 
-Beyond the two dozen kubectl verbs kx wraps, the `kx ref` command covers the
-rest, and every tool that isn't kubectl: it prints what an index refers to, as an argument
-fragment that drops straight into another command.
+Beyond the two dozen kubectl verbs kx wraps, the `kx ref` command covers the rest, and every tool that isn't kubectl: it prints what an index refers to, as an argument fragment that drops straight into another command.
 
 ```bash
 kx ref 3                                     # pod/web-abc-xyz -n prod
@@ -196,14 +174,12 @@ stern $(kx ref 3 --name) -n $(kx ref 3 --namespace)
 kx ref 1..9 --name | xargs -n1 some-tool
 ```
 
-The `--name`, `--namespace` and `--kind` flags print one field alone, and nothing here
-touches the cluster, so `kx ref` answers instantly even with nothing reachable.
+The `--name`, `--namespace` and `--kind` flags print one field alone, and nothing here touches the cluster, so `kx ref` answers instantly even with nothing reachable.
 
 ## Marks
 
-An index is a position, and positions move — the next `kx get` renumbers
-everything out from under it. A mark is a name you choose instead, pinned to
-one resource, so it keeps working across every listing that comes after it.
+An index is a position, and positions move — the next `kx get` renumbers everything out from under it.
+A mark is a name you choose instead, pinned to one resource, so it keeps working across every listing that comes after it.
 
 ```bash
 kx mark api 3          # pin what index 3 is right now
@@ -214,42 +190,35 @@ kx unmark api
 kx unmark --all
 ```
 
-A mark survives re-listing, which is what an index cannot do. It is pinned to
-the cluster it was taken in, and will not resolve in another — the same name
-means a different resource there, or none at all. Running
-`kx state drop --all` leaves marks alone; only `kx unmark --all` removes them.
+A mark survives re-listing, which is what an index cannot do.
+It is pinned to the cluster it was taken in, and will not resolve in another — the same name means a different resource there, or none at all.
+Running `kx state drop --all` leaves marks alone; only `kx unmark --all` removes them.
 
 ## Use kx in CI
 
-The `--fail-on <severity>` flag turns a sweep into a build gate, and `--json` prints the
-same analysis as a document for anything downstream.
+The `--fail-on <severity>` flag turns a sweep into a build gate, and `--json` prints the same analysis as a document for anything downstream.
 
 ```bash
-kx diag -A --fail-on critical                        # 0 if the cluster is healthy, 2 if not
-kx scan -A --fail-on high                            # the same, for image vulnerabilities
-kx scan -n prod --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
-kx diag -A --fail-on critical --out report.html      # publishes the report *and* fails the build
-kx diag -A --fail-on warning --since 24h             # ignore what failed before today
+kx diag -A --fail-on critical                    # 0 if healthy, 2 if not
+kx scan -A --fail-on high                        # the same, for image CVEs
+kx diag -A --fail-on critical --out report.html  # publish the report, then gate
+kx diag -A --fail-on warning --since 24h         # ignore failures before today
+kx scan --fail-on high --json | jq '.images[] | select(.counts.critical > 0)'
 ```
 
-Exit **2** means findings breached the threshold, **1** means kx itself failed —
-so a pipeline can tell "the cluster is sick" from "the check never ran".
+Exit **2** means findings breached the threshold, **1** means kx itself failed — so a pipeline can tell "the cluster is sick" from "the check never ran".
 See the [CI guide](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/) for more.
 
 ## MCP server
 
-The `kx mcp` command runs a Model Context Protocol server on stdio, so an agent — Claude
-Code, an IDE, an agent framework — reads a cluster the way you do: by kind and
-name, by a mark, or by an index from your current listing.
+The `kx mcp` command runs a Model Context Protocol server on stdio, so an agent — Claude Code, an IDE, an agent framework — reads a cluster the way you do: by kind and name, by a mark, or by an index from your current listing.
 
 ```bash
 claude mcp add kx -- kx mcp
 ```
 
-The MCP tools are read-only against the cluster; `mark`, the one write, only
-adds a name to kx's own state. Start it with `--write-listings` and the
-agent's listings join your history, tagged as the agent's, so you can spend its
-numbers yourself — and kx warns before a mutating command does.
+The MCP tools are read-only against the cluster; `mark`, the one write, only adds a name to kx's own state.
+Start it with `--write-listings` and the agent's listings join your history, tagged as the agent's, so you can spend its numbers yourself — and kx warns before a mutating command does.
 
 ```bash
 claude mcp add kx -- kx mcp --write-listings
@@ -259,8 +228,7 @@ See the [agent guide](https://jzills.github.io/kx/docs/guides/use-kx-from-an-age
 
 ## State and history
 
-Recent `kx get` results are kept as a history — 10 by default, configurable —
-with a cursor marking the entry indexes resolve against.
+Recent `kx get` results are kept as a history — 10 by default, configurable — with a cursor marking the entry indexes resolve against.
 
 ```bash
 kx state              # the listing indexes currently resolve against
@@ -271,24 +239,21 @@ kx state drop 2       # remove position 2 (--all clears the history; marks stay)
 kx state drop --empty # drop the entries whose listing found nothing
 ```
 
-Each entry remembers the context it was listed in, so a staging index is never
-resolved against production — kx refuses and relists instead.
+Each entry remembers the context it was listed in, so a staging index is never resolved against production — kx refuses and relists instead.
 See the [state docs](https://jzills.github.io/kx/docs/concepts/state/) for more.
 
 ## Configuration
 
-Settings live in `~/.kx/config.toml`, and every one takes a `KX_*` environment
-override. The two worth changing have commands of their own — `kx theme` and
-`kx engine` both persist your choice.
+Settings live in `~/.kx/config.toml`, and every one takes a `KX_*` environment override.
+The two worth changing have commands of their own — `kx theme` and `kx engine` both persist your choice.
 
-Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker`
-stays clean. [`NO_COLOR`](https://no-color.org/) is honored too.
+Styling is dropped when stdout isn't a terminal, so `kx get pods | grep worker` stays clean.
+[`NO_COLOR`](https://no-color.org/) is honored too.
 See the [configuration docs](https://jzills.github.io/kx/docs/concepts/configuration/) for more.
 
 ## Themes
 
-The `kx theme` command lists the available themes with a preview of each, and
-`kx theme <name>` persists your choice, by name or index.
+The `kx theme` command lists the available themes with a preview of each, and `kx theme <name>` persists your choice, by name or index.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/theme.gif" alt="kx theme demo" width="800"/>
@@ -299,9 +264,8 @@ See the [themes docs](https://jzills.github.io/kx/docs/concepts/themes/) for mor
 
 ## Commands
 
-Every command takes indexes from the listing `kx get` last produced. The
-[command reference](https://jzills.github.io/kx/docs/reference/commands/)
-covers every argument and flag.
+Every command takes indexes from the listing `kx get` last produced.
+The [command reference](https://jzills.github.io/kx/docs/reference/commands/) covers every argument and flag.
 
 <details>
 <summary><b>All commands</b></summary>
@@ -351,8 +315,7 @@ covers every argument and flag.
 
 ## Contributing
 
-Building, testing and releasing kx are covered in
-[CONTRIBUTING.md](https://github.com/jzills/kx/blob/main/CONTRIBUTING.md).
+Building, testing and releasing kx are covered in [CONTRIBUTING.md](https://github.com/jzills/kx/blob/main/CONTRIBUTING.md).
 
 ## License
 
