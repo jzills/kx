@@ -235,7 +235,7 @@ name, by a mark, or by an index from your current listing.
 claude mcp add kx -- kx mcp
 ```
 
-Its ten tools are read-only against the cluster; `mark`, the one write, only
+The server's tools are read-only against the cluster; `mark`, the one write, only
 adds a name to kx's own state. Start it with `--write-listings` and the
 agent's listings join your history, tagged as the agent's, so you can spend its
 numbers yourself — and kx warns before a mutating command does.
