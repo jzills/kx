@@ -63,6 +63,9 @@ curl -sSL \
 sudo install kx/kx /usr/local/bin/kx
 ```
 
+That one-liner skips the checksum check.
+The [install script](#with-the-install-script) runs it for you, or you can check the archive against `SHA256SUMS` by hand before installing.
+
 ## With pipx or pip
 
 The same PyPI package installs with either:
