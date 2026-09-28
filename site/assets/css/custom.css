@@ -110,6 +110,20 @@ body {
   padding: 0.9rem 1rem;
 }
 
+/* The install script leads: one command for every Linux and macOS machine, so
+   it takes the first row on its own, above the per-tool cards. */
+.kx-install__card--lead {
+  grid-column: 1 / -1;
+}
+
+/* On a phone the command would otherwise scroll inside its card, hiding the
+   half that matters. It wraps at its spaces instead, and the <wbr> after each
+   slash in the URL is a last resort; neither adds text to the copy. */
+.kx-install__card--lead .kx-install__command {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 .kx-install__label {
   font-size: 0.78rem;
   text-transform: uppercase;
