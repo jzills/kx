@@ -198,6 +198,11 @@ func runScriptIn(t *testing.T, cwd, script string, r *release, env map[string]st
 		"PATH=" + strings.Join(pathDirs, string(os.PathListSeparator)),
 		"KX_INSTALL_BASE_URL=" + r.URL,
 	}
+	// A shell exports PWD, and pwd reports the directory as it was reached
+	// (/var/..., not /private/var/... on macOS), so the harness does too.
+	if cwd != "" {
+		cmd.Env = append(cmd.Env, "PWD="+cwd)
+	}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+strings.ReplaceAll(v, "$HOME", home))
 	}
