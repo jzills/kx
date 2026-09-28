@@ -1,11 +1,8 @@
-// The landing page's install cards: a copy button on each, and the Binary
-// card's platform choice.
+// The landing page's install cards: a copy button on each.
 //
-// Everything here is an enhancement over markup that already works without
-// it. The copy buttons and the platform chips ship `hidden` and are revealed
-// only once this runs, so a reader without JavaScript never meets a control
-// that does nothing, and the Binary card's command defaults to linux_amd64,
-// which is correct as written for the most common case.
+// An enhancement over markup that already works without it. The buttons ship
+// `hidden` and are revealed only once this runs, so a reader without
+// JavaScript never meets a control that does nothing.
 (function () {
   "use strict";
 
@@ -63,45 +60,8 @@
     });
   }
 
-  // A browser reports the operating system reliably and the CPU hardly at
-  // all: Safari on an Apple silicon Mac still says "Intel". So the default is
-  // the likely case for each OS, and the chips correct it in one click.
-  function guessPlatform() {
-    var ua = navigator.userAgent || "";
-    var platform = (navigator.userAgentData && navigator.userAgentData.platform) ||
-      navigator.platform || "";
-    if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) return "darwin_arm64";
-    if (/Linux/i.test(platform) && /aarch64|arm64|armv8/i.test(platform + " " + ua)) {
-      return "linux_arm64";
-    }
-    return "linux_amd64";
-  }
-
-  function wirePlatforms(card) {
-    var group = card.querySelector(".kx-install__platforms");
-    var asset = card.querySelector("[data-kx-asset]");
-    if (!group || !asset) return;
-    var chips = group.querySelectorAll("[data-kx-platform]");
-
-    function choose(name) {
-      asset.textContent = "kx_" + name;
-      chips.forEach(function (chip) {
-        chip.setAttribute("aria-pressed", String(chip.dataset.kxPlatform === name));
-      });
-    }
-
-    chips.forEach(function (chip) {
-      chip.addEventListener("click", function () { choose(chip.dataset.kxPlatform); });
-    });
-    group.hidden = false;
-    choose(guessPlatform());
-  }
-
   function init() {
-    document.querySelectorAll("[data-kx-copy]").forEach(function (card) {
-      wireCopy(card);
-      wirePlatforms(card);
-    });
+    document.querySelectorAll("[data-kx-copy]").forEach(wireCopy);
   }
 
   if (document.readyState === "loading") {
