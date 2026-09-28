@@ -33,6 +33,7 @@ type release struct {
 type releaseOptions struct {
 	tamper   bool // serve archives whose bytes differ from the listed hash
 	unlisted bool // omit archive lines from SHA256SUMS
+	broken   bool // ship a kx that cannot start, like a pre-Go v0.0.x build
 }
 
 var platforms = []string{"linux_amd64", "linux_arm64", "darwin_amd64", "darwin_arm64"}
@@ -42,7 +43,7 @@ func newRelease(t *testing.T, version string, opts releaseOptions) *release {
 	files := map[string][]byte{}
 	var sums strings.Builder
 	for _, p := range platforms {
-		archive := stubArchive(t, version)
+		archive := stubArchive(t, version, opts.broken)
 		sum := sha256.Sum256(archive)
 		for _, name := range []string{"kx_" + p + ".tar.gz", "kx_" + version + "_" + p + ".tar.gz"} {
 			if !opts.unlisted {
@@ -86,9 +87,23 @@ func (r *release) paths() []string {
 	return append([]string(nil), r.requests...)
 }
 
-// stubArchive builds kx/kx (a shell script printing its version) and
-// kx/LICENSE, gzipped, in the layout scripts/build_binaries.sh produces.
-func stubArchive(t *testing.T, version string) []byte {
+// stubKx stands in for the kx binary. Like the real one, it refuses to start
+// when the user's settings are invalid — an env override kx rejects, or a
+// config file it cannot load — so a test can show the installer's own check
+// is not at the mercy of the user's configuration.
+const stubKx = `#!/bin/sh
+if [ "${KX_THEME:-}" = nope ]; then echo "kx: unknown theme nope" >&2; exit 1; fi
+if [ -n "${KX_CONFIG:-}" ] && [ -f "$KX_CONFIG" ]; then
+	while read -r line; do
+		case "$line" in *kx-test-invalid*) echo "kx: invalid config" >&2; exit 1 ;; esac
+	done <"$KX_CONFIG"
+fi
+echo 'kx VERSION'
+`
+
+// stubArchive builds kx/kx and kx/LICENSE, gzipped, in the layout
+// scripts/build_binaries.sh produces. A broken archive's kx exits 1.
+func stubArchive(t *testing.T, version string, broken bool) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -101,7 +116,11 @@ func stubArchive(t *testing.T, version string) []byte {
 			t.Fatal(err)
 		}
 	}
-	add("kx/kx", 0o755, "#!/bin/sh\necho 'kx "+version+"'\n")
+	body := strings.ReplaceAll(stubKx, "VERSION", version)
+	if broken {
+		body = "#!/bin/sh\necho 'kx: cannot start' >&2\nexit 1\n"
+	}
+	add("kx/kx", 0o755, body)
 	add("kx/LICENSE", 0o644, "MIT\n")
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
@@ -117,7 +136,7 @@ func stubArchive(t *testing.T, version string) []byte {
 // fails here rather than on a machine without it. gzip is on the list because
 // GNU tar execs it for -z.
 var declaredTools = []string{"curl", "wget", "tar", "gzip", "uname", "mktemp", "mkdir", "cp", "chmod", "mv", "rm",
-	"sha256sum", "shasum", "sysctl"}
+	"env", "sha256sum", "shasum", "sysctl"}
 
 // toolbox returns a directory of symlinks to the declared tools that exist on
 // this machine, minus any named in omit.
@@ -161,8 +180,19 @@ type result struct {
 // fresh temp dir, PATH is exactly pathDirs, and env adds to both.
 func runScript(t *testing.T, script string, r *release, env map[string]string, pathDirs ...string) result {
 	t.Helper()
+	return runScriptIn(t, "", script, r, env, pathDirs...)
+}
+
+// runScriptIn is runScript from the working directory cwd.
+func runScriptIn(t *testing.T, cwd, script string, r *release, env map[string]string, pathDirs ...string) result {
+	t.Helper()
 	home := t.TempDir()
-	cmd := exec.Command("/bin/sh", script)
+	abs, err := filepath.Abs(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", abs)
+	cmd.Dir = cwd
 	cmd.Env = []string{
 		"HOME=" + home,
 		"PATH=" + strings.Join(pathDirs, string(os.PathListSeparator)),
@@ -173,7 +203,7 @@ func runScript(t *testing.T, script string, r *release, env map[string]string, p
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	code := 0
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		code = exitErr.ExitCode()
@@ -350,6 +380,91 @@ func TestReplacesARunningKx(t *testing.T) {
 	out, _ := exec.Command(filepath.Join(dir, "kx"), "--version").Output()
 	if strings.TrimSpace(string(out)) != "kx v0.7.0" {
 		t.Errorf("after install kx --version = %q, want kx v0.7.0", out)
+	}
+}
+
+// A kx that cannot start must not replace one that can. The check that the
+// new binary runs happens before it is moved into place, so a pinned pre-Go
+// release (whose kx needs files the archive keeps beside it) or a misdetected
+// architecture leaves the working install alone.
+func TestRefusesABinaryThatDoesNotRun(t *testing.T) {
+	hostPlatform(t)
+	dir := t.TempDir()
+	fakeCommand(t, dir, "kx", "echo 'kx v0.6.0'")
+	r := newRelease(t, "v0.7.0", releaseOptions{broken: true})
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t))
+	if res.code == 0 || !strings.Contains(res.stderr, "cannot start") {
+		t.Fatalf("exit %d, stderr %q: want a refusal carrying kx's own error", res.code, res.stderr)
+	}
+	out, _ := exec.Command(filepath.Join(dir, "kx"), "--version").Output()
+	if strings.TrimSpace(string(out)) != "kx v0.6.0" {
+		t.Errorf("existing kx now reports %q, want the working v0.6.0 left in place", out)
+	}
+}
+
+// The installer proves the binary runs, not that the user's settings are
+// valid: a theme or config key kx rejects must not turn a good install into
+// a reported failure.
+func TestUserSettingsDoNotFailTheInstall(t *testing.T) {
+	hostPlatform(t)
+	bad := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(bad, []byte("# kx-test-invalid\ntheme = \"nope\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string]map[string]string{
+		"env override": {"KX_THEME": "nope"},
+		"config file":  {"KX_CONFIG": bad},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRelease(t, "v0.7.0", releaseOptions{})
+			res := runScript(t, scriptPath, r, env, toolbox(t))
+			if res.code != 0 || !strings.Contains(res.stdout, "✓ Installed kx v0.7.0") {
+				t.Fatalf("exit %d, stdout %q, stderr %q: want a successful install", res.code, res.stdout, res.stderr)
+			}
+		})
+	}
+}
+
+// A relative KX_INSTALL_DIR is resolved against where the script ran, and the
+// PATH hint names the absolute directory: a relative PATH entry would run
+// whatever sits in ./bin of the current directory. A trailing slash on a
+// directory already on PATH is still recognized as on PATH.
+func TestResolvesTheInstallDir(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	cwd := t.TempDir()
+	res := runScriptIn(t, cwd, scriptPath, r, map[string]string{"KX_INSTALL_DIR": "bin"}, toolbox(t))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	abs := filepath.Join(cwd, "bin")
+	if _, err := os.Stat(filepath.Join(abs, "kx")); err != nil {
+		t.Errorf("want kx in %s: %v", abs, err)
+	}
+	if want := `export PATH="` + abs + `:$PATH"`; !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want the absolute hint %q", res.stdout, want)
+	}
+	if !strings.Contains(res.stdout, "Installed kx v0.7.0 to "+abs+"/kx") {
+		t.Errorf("stdout = %q, want the absolute install path", res.stdout)
+	}
+
+	dir := t.TempDir()
+	on := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir + "/"}, toolbox(t), dir)
+	if on.code != 0 || strings.Contains(on.stdout, "not on your PATH") {
+		t.Errorf("trailing slash, dir on PATH: exit %d, stdout %q, want no hint", on.code, on.stdout)
+	}
+}
+
+// env(1) reads any argument containing "=" as a NAME=value assignment, so a
+// path like that can't be handed to it as the command to run. An install
+// directory is the user's to name.
+func TestInstallDirWithAnEqualsSign(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := filepath.Join(t.TempDir(), "a=b")
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t))
+	if res.code != 0 || !strings.Contains(res.stdout, "✓ Installed kx v0.7.0 to "+dir+"/kx") {
+		t.Fatalf("exit %d, stdout %q, stderr %q: want a successful install into %s", res.code, res.stdout, res.stderr, dir)
 	}
 }
 

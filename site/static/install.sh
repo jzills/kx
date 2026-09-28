@@ -45,7 +45,7 @@ need_tools() {
 	else
 		fail "needs sha256sum or shasum to verify the download; install one and rerun"
 	fi
-	for tool in tar uname mktemp mkdir cp chmod mv rm; do
+	for tool in tar uname mktemp mkdir cp chmod mv rm env; do
 		has "$tool" || fail "needs $tool; install it and rerun"
 	done
 }
@@ -114,12 +114,37 @@ verify() {
 	[ "${actual%% *}" = "$expected" ] || fail "checksum mismatch for $ARCHIVE; refusing to install it"
 }
 
+# Prints the first line of "kx --version" for the kx in directory $1, or on
+# failure everything it said. It runs in a clean environment: the check is
+# whether the binary starts on this machine, and a KX_* setting or config file
+# kx would reject is the user's to fix, not a reason to call a good install a
+# failure. It runs as ./kx from inside $1 because env(1) reads any argument
+# containing "=" as an assignment, and $1 is a path the user may have named.
+kx_version() {
+	out=$(cd "$1" && env -i HOME="$tmp" ./kx --version 2>&1) || {
+		printf '%s' "$out"
+		return 1
+	}
+	printf '%s\n' "$out" | {
+		first=""
+		read -r first || true
+		printf '%s' "$first"
+	}
+}
+
 install_kx() {
 	DIR=${KX_INSTALL_DIR:-$HOME/.local/bin}
 	hint="set KX_INSTALL_DIR to a directory you can write, or rerun with sudo for a system directory"
 	mkdir -p "$DIR" 2>/dev/null || fail "cannot create $DIR; $hint"
+	# Absolute from here on: the PATH hint must never suggest a relative entry,
+	# and a trailing slash must not hide a directory that is already on PATH.
+	DIR=$(cd "$DIR" && pwd) || fail "cannot use $DIR; $hint"
 	[ -w "$DIR" ] || fail "cannot write to $DIR; $hint"
 	tar -xzf "$1/$ARCHIVE" -C "$1" kx/kx || fail "could not unpack $ARCHIVE"
+	# Before anything is replaced: a kx that cannot start here — a pre-Go
+	# release, a misdetected architecture — must not take the place of one
+	# that can.
+	NEW=$(kx_version "$1/kx") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
 	# Through a temp file and mv: overwriting a kx that is running fails with
 	# "text file busy" on Linux, and a rename does not.
 	cp "$1/kx/kx" "$DIR/.kx.$$" || fail "cannot write to $DIR; $hint"
@@ -145,12 +170,7 @@ path_hint() {
 }
 
 report() {
-	line=$("$DIR/kx" --version 2>/dev/null | {
-		first=""
-		read -r first || true
-		printf '%s' "$first"
-	})
-	[ -n "$line" ] || fail "installed $DIR/kx, but it did not run"
+	line=$(kx_version "$DIR") || fail "installed $DIR/kx, but it did not run: $line"
 	say "✓ Installed $line to $DIR/kx"
 	case ":$PATH:" in
 	*":$DIR:"*) ;;
