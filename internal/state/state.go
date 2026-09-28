@@ -1228,18 +1228,18 @@ func (s *Service) dropAll() error {
 	return s.saveHistory(History{Marks: history.Marks})
 }
 
-// namespaceAt reports the namespace the resource at a 1-based index lives in.
+// NamespaceAt reports the namespace the resource at a 1-based index lives in.
 //
 // The resource's own namespace wins, falling back to the entry's. Both shapes
 // are legitimate and neither can be dropped: a listing that spans namespaces
 // (`kx get -A`) has no single entry namespace to fall back to, and an ordinary
 // single-namespace listing records nothing per resource, so a lookup that only
 // consulted the resource would resolve every index to the empty namespace.
-func namespaceAt(entry State, idx int) string {
-	if resource, ok := entry.Resources.At(idx); ok && resource.Namespace != "" {
+func (s State) NamespaceAt(idx int) string {
+	if resource, ok := s.Resources.At(idx); ok && resource.Namespace != "" {
 		return resource.Namespace
 	}
-	return entry.Namespace
+	return s.Namespace
 }
 
 // checkContext refuses an index counted against a listing from another cluster.
@@ -1293,7 +1293,7 @@ func (s *Service) fieldsWithSource(idx int) (name, namespace string, kind kinds.
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	namespace = namespaceAt(current, idx)
+	namespace = current.NamespaceAt(idx)
 	if current.Source == SourceMCP && s.OnAgentIndex != nil {
 		s.OnAgentIndex(idx, kind, name, namespace)
 	}
@@ -1513,7 +1513,7 @@ func (s *Service) FieldsExpecting(
 	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
 		return "", "", err
 	}
-	return name, namespaceAt(current, idx), nil
+	return name, current.NamespaceAt(idx), nil
 }
 
 // backHint offers `kx state back` when the entry one step back lists the kind asked
@@ -1647,7 +1647,7 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)
 	}
-	return name, namespaceAt(entry, idx), nil
+	return name, entry.NamespaceAt(idx), nil
 }
 
 // compile-time checks that the service satisfies the interfaces its consumers

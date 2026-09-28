@@ -1129,7 +1129,7 @@ func listSwitchTargets(services Services, isContext bool) error {
 }
 
 func newStateCommand(services Services) *cobra.Command {
-	var all, targets bool
+	var all, targets, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "state [position]",
 		Short: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets.",
@@ -1146,12 +1146,16 @@ func newStateCommand(services Services) *cobra.Command {
 			"however much you have listed since, and switching namespace never " +
 			"pushes work off the stack. `--targets` expands both slots, so you " +
 			"can pick a number without listing again.\n\n" +
+			"`--json` prints the current entry, or the stack with --all, as a " +
+			"document for a script: each row's index, kind, name and namespace, " +
+			"and each entry's context, query and provenance. Like `kx ref`, it " +
+			"never contacts the cluster.\n\n" +
 			"To act on a namespace rather than switch to it, list it with " +
 			"`kx get ns`. That stacks it like any other listing — `kx describe 2`, " +
 			"`kx label 2` — and refreshes the slot too, so the two spellings never " +
 			"disagree about what 2 means.",
 		Example: "  kx state\n  kx state --all\n  kx state --targets\n" +
-			"  kx state 2",
+			"  kx state 2\n  kx state --all --json",
 		// back/forward/drop were top-level commands once. Removed, cobra
 		// suggested by edit distance alone and answered `kx drop` with "did
 		// you mean top?" — listing them here points the old spellings at the
@@ -1160,6 +1164,9 @@ func newStateCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"history", "stack", "cursor", "back", "forward", "drop"},
 		Args:       cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if asJSON {
+				return printStateJSON(services, all, targets, args)
+			}
 			// Both read the whole file, and the slots live outside the stack, so
 			// --targets works on a history that is empty — the shape a fresh
 			// install has after `kx ns`.
@@ -1213,7 +1220,55 @@ func newStateCommand(services Services) *cobra.Command {
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show the full history stack")
 	cmd.Flags().BoolVarP(&targets, "targets", "t", false,
 		"Show the namespace and context listings the switch commands index into")
+	cmd.Flags().BoolVar(&asJSON, "json", false,
+		"Print the current entry, or the stack with --all, as JSON instead of a table")
 	return cmd
+}
+
+// printStateJSON is kx state --json: the same views as the tables, for a
+// script or an agent to read rather than scrape.
+//
+// Nothing listed yet is a document with nothing in it rather than an error,
+// so a caller tells "no listing" from "kx failed" by the output alone. A
+// position moves the cursor first, as kx state N does, and then the entry it
+// landed on is reported like any current one.
+func printStateJSON(services Services, all, targets bool, args []string) error {
+	if targets {
+		// The slots are switch screens: a number off one is spent by kx ns
+		// or kx context, never by a script, so there is no document to give.
+		return fmt.Errorf("--json covers the history stack, not --targets; drop one of them.")
+	}
+	if len(args) == 1 {
+		if all {
+			return fmt.Errorf("--all shows every entry; a position picks one. Drop one of them.")
+		}
+		position, err := parseIndex("position", args[0])
+		if err != nil {
+			return err
+		}
+		if _, err := services.State.NavigateTo(position); err != nil {
+			return err
+		}
+	}
+	history, err := services.State.LoadHistory()
+	if errors.Is(err, state.ErrNoState) {
+		history, err = state.History{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	context := services.Kubectl.CurrentContext()
+	var document string
+	if all {
+		document, err = stateHistoryJSON(history, context)
+	} else {
+		document, err = stateEntryJSON(history, context)
+	}
+	if err != nil {
+		return err
+	}
+	render.Raw(document)
+	return nil
 }
 
 func newNavigateCommand(services Services, use, short, long string, delta int) *cobra.Command {
