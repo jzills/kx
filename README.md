@@ -30,7 +30,13 @@ Run `kx get <resource>` once, then reference any result by number instead of typ
 Requires `kubectl` on your PATH.
 Every install method delivers the same prebuilt binary.
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
+On Linux or macOS, the install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | sh
+```
+
+Or as a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
 ```bash
 kubectl krew install idx
