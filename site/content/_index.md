@@ -25,22 +25,38 @@ toc: false
     same prebuilt binary — from PyPI too, with no Python runtime.
   </p>
   <div class="kx-install">
-    <div class="kx-install__card">
-      <div class="kx-install__label">krew</div>
+    <div class="kx-install__card" data-kx-copy>
+      <div class="kx-install__head">
+        <div class="kx-install__label">krew</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the krew install commands" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+      </div>
       <div class="kx-install__command">kubectl krew install idx</div>
       <div class="kx-install__command">alias kx="kubectl idx"</div>
+      <span class="kx-install__status" role="status"></span>
     </div>
-    <div class="kx-install__card">
-      <div class="kx-install__label">uv</div>
+    <div class="kx-install__card" data-kx-copy>
+      <div class="kx-install__head">
+        <div class="kx-install__label">uv</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the uv install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+      </div>
       <div class="kx-install__command">uv tool install kx-cli</div>
+      <span class="kx-install__status" role="status"></span>
     </div>
-    <div class="kx-install__card">
-      <div class="kx-install__label">pipx</div>
+    <div class="kx-install__card" data-kx-copy>
+      <div class="kx-install__head">
+        <div class="kx-install__label">pipx</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the pipx install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+      </div>
       <div class="kx-install__command">pipx install kx-cli</div>
+      <span class="kx-install__status" role="status"></span>
     </div>
-    <div class="kx-install__card">
-      <div class="kx-install__label">Try it without installing</div>
+    <div class="kx-install__card" data-kx-copy>
+      <div class="kx-install__head">
+        <div class="kx-install__label">Try it without installing</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the command to try kx without installing" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+      </div>
       <div class="kx-install__command">uvx --from kx-cli kx get pods</div>
+      <span class="kx-install__status" role="status"></span>
     </div>
   </div>
 </div>

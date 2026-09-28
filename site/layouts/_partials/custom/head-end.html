@@ -34,3 +34,16 @@
   {{- $runtime := . | resources.ExecuteAsTemplate "js/kx-theme.js" $ }}
   <script>{{ $runtime.Content | safeJS }}</script>
 {{- end }}
+
+{{- /*
+  The install cards' copy buttons and platform chips, on the landing page
+  only — nothing else has them. Deferred: unlike the palette runtime above,
+  nothing here has to beat the first paint, because the controls it reveals
+  ship hidden and the cards read correctly without them.
+*/ -}}
+{{- if .IsHome }}
+  {{- with resources.Get "js/kx-install.js" }}
+    {{- $install := . | minify | fingerprint }}
+    <script defer src="{{ $install.RelPermalink }}" integrity="{{ $install.Data.Integrity }}"></script>
+  {{- end }}
+{{- end }}
