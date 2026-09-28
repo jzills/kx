@@ -18,7 +18,10 @@ Given an index, `kx tree` graphs one.
 kx tree 1
 kx tree -n prod
 kx tree -A         # every namespace, as a forest
+kx tree -A -m api  # only the workloads called api
 ```
+
+The `-m` flag keeps the top-level workloads whose name matches, each with everything it owns, and with `-A` it leaves out the namespaces with none.
 
 A Namespace index graphs that namespace — so `kx get ns` then `kx tree 3` works.
 

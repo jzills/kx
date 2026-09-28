@@ -45,7 +45,10 @@ The default is stored in [`~/.kx/config.toml`](../../concepts/configuration/); `
 ```bash
 kx scan -n prod
 kx scan -A
+kx scan -A -m payments   # only workloads called payments
 ```
+
+The `-m` flag narrows the sweep by workload name before any image is resolved, so a workload it leaves out never costs a scan.
 
 Images are scanned two at a time.
 The bound is memory rather than cores — a scanner unpacks an image and walks every package in it — so a wide sweep stays steady on a small machine instead of thrashing it.

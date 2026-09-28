@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -38,6 +39,9 @@ const namespaceScanKinds = "deployments,statefulsets,daemonsets,cronjobs,jobs,po
 type scanScope struct {
 	Namespace string
 	All       bool
+	// Match narrows the sweep to the workloads whose name contains it,
+	// case-insensitively — kx scan -m. Empty sweeps everything.
+	Match string
 }
 
 func (s scanScope) selector() []string {
@@ -132,9 +136,23 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	}
 	var images []string
 	for _, item := range list.Items {
+		// Before the images are read, so a workload the term leaves out
+		// never costs a scanner run.
+		if !index.MatchesName(itemName(item), scope.Match) {
+			continue
+		}
 		images = append(images, imagesOf(item)...)
 	}
 	return dedupe(images), nil
+}
+
+// itemName reads metadata.name off one item of a kubectl -o json list.
+func itemName(item map[string]json.RawMessage) string {
+	var metadata struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(item["metadata"], &metadata)
+	return metadata.Name
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so
@@ -504,11 +522,12 @@ func newScanCommand(services Services) *cobra.Command {
 			"selected scan engine (Docker Scout by default; Trivy or Grype via " +
 			"--engine — see kx engine).",
 		Long: "Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.\n\n" +
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows the sweep to the workloads whose name matches.\n\n" +
 			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
 			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
 			"Run 'kx engine' to see or change the default.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan 1 --full\n" +
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
@@ -595,6 +614,10 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			all, rest := extractBool(rest, "--all-namespaces", "-A")
+			match, rest, err := extractString(rest, "--match", "-m")
+			if err != nil {
+				return err
+			}
 			if hasNamespace && all {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
@@ -630,6 +653,9 @@ func newScanCommand(services Services) *cobra.Command {
 			if len(indexArgs) > 0 && scopeFlag != "" {
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
+			if len(indexArgs) > 0 && match != "" {
+				return errMatchBesideIndex
+			}
 			// pageScope captions the HTML page. Captured in each branch
 			// because an indexed scan is scoped by the workload it resolved
 			// rather than by the namespace being swept.
@@ -646,7 +672,7 @@ func newScanCommand(services Services) *cobra.Command {
 			var subject scanSubject
 			var images []string
 			if len(indexArgs) == 0 {
-				scope := scanScope{Namespace: namespace, All: all}
+				scope := scanScope{Namespace: namespace, All: all, Match: match}
 				if !scope.All && scope.Namespace == "" {
 					scope.Namespace = services.Kubectl.CurrentNamespace()
 				}
@@ -662,11 +688,18 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				if !asJSON {
-					render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+					// A term that matched nothing says so, rather than
+					// "0 images" — which reads as a namespace with nothing
+					// running in it.
+					count := imagesNoun(len(images))
+					if match != "" && len(images) == 0 {
+						count = render.NothingMatches(match)
+					}
+					render.ScopeBanner("Mixed", scope.label(), count)
 				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()
-				subject = scanSubject{AllNamespaces: scope.All}
+				subject = scanSubject{AllNamespaces: scope.All, Match: match}
 				if !scope.All {
 					subject.Namespace = scope.Namespace
 				}
@@ -740,7 +773,8 @@ func newScanCommand(services Services) *cobra.Command {
 					indexArg = indexArgs[0]
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-					invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
+					invocation("scan", indexArg, scopeArgs(namespace, all),
+						matchFlag(match), portFlag(port)))
 				if err != nil {
 					return err
 				}
@@ -766,6 +800,7 @@ func newScanCommand(services Services) *cobra.Command {
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("html", false,
 		"Render the report as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,

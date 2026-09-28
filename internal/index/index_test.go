@@ -755,3 +755,22 @@ func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
 		t.Errorf("kept %q, want none", kept)
 	}
 }
+
+// MatchesName is the one definition of --match: a case-insensitive substring,
+// with an empty term matching everything.
+func TestMatchesName(t *testing.T) {
+	for _, tc := range []struct {
+		name, term string
+		want       bool
+	}{
+		{"api-7f9", "API", true},
+		{"API-7f9", "api", true},
+		{"api-7f9", "7f", true},
+		{"worker", "api", false},
+		{"worker", "", true},
+	} {
+		if got := MatchesName(tc.name, tc.term); got != tc.want {
+			t.Errorf("MatchesName(%q, %q) = %v, want %v", tc.name, tc.term, got, tc.want)
+		}
+	}
+}

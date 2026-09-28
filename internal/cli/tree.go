@@ -23,6 +23,11 @@ type TreeCommand struct {
 	// Save records an indexed tree as the current listing, so the numbers
 	// shown can be used by later commands.
 	Save func(state.State) error
+	// Match narrows a namespace walk to the roots whose name contains it,
+	// case-insensitively, each with everything it owns — kx tree -m. Empty
+	// walks everything. An indexed walk has no roots to choose between and
+	// ignores it; the command refuses the pair before it gets here.
+	Match string
 }
 
 // Execute graphs the resource an index names. A Namespace row graphs that
@@ -55,7 +60,7 @@ func (c TreeCommand) ExecuteResource(
 
 // ExecuteNamespace graphs the whole ownership forest for a namespace.
 func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*tree.Node, error) {
-	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, indexed, 0)
+	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, c.Match, indexed, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -82,9 +87,17 @@ func (c TreeCommand) ExecuteAllNamespaces(
 	roots := make([]*tree.Node, 0, len(namespaces))
 	var resources []graph.Resource
 	for _, namespace := range namespaces {
-		node, walked, err := c.Builder.BuildNamespace(ctx, namespace, indexed, len(resources))
+		node, walked, err := c.Builder.BuildNamespace(
+			ctx, namespace, c.Match, indexed, len(resources))
 		if err != nil {
 			return nil, nil, err
+		}
+		// A narrowed forest shows only the namespaces the term hit: across a
+		// whole cluster, a stub for every one it missed would bury the few it
+		// found. walked is empty for a dropped namespace, so the numbering
+		// is unaffected.
+		if c.Match != "" && !graph.HasWorkloads(node) {
+			continue
 		}
 		roots = append(roots, node)
 		resources = append(resources, walked...)
@@ -143,8 +156,8 @@ func indexFlag(indexed bool) string {
 // indexFlag out, so `kx tree -A --no-index --html` published a page claiming it
 // was produced by `kx tree -A`, and re-running that prints a numbered tree the
 // page does not have.
-func treeInvocation(scope string, indexed bool, port int) string {
-	return invocation("tree", scope, indexFlag(indexed), portFlag(port))
+func treeInvocation(scope, match string, indexed bool, port int) string {
+	return invocation("tree", scope, matchFlag(match), indexFlag(indexed), portFlag(port))
 }
 
 // scopeCaption joins non-empty parts with " · " for the page's muted caption
@@ -166,8 +179,8 @@ func newTreeCommand(services Services) *cobra.Command {
 		Use:        "tree [index]",
 		SuggestFor: []string{"graph", "owners", "children"},
 		Short:      "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace.",
-		Long:       "Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.",
-		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -A\n" +
+		Long:       "Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. -m keeps only the top-level workloads whose name matches, each with everything it owns. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.",
+		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -A\n  kx tree -m api\n" +
 			"  kx tree -n prod --html\n  kx tree --json\n  kx tree --out tree.html",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -188,6 +201,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			namespaceFlag, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
 			asJSON, _ := cmd.Flags().GetBool("json")
+			match, _ := cmd.Flags().GetString("match")
 
 			if asJSON && wantsHTML {
 				return fmt.Errorf(
@@ -211,6 +225,9 @@ func newTreeCommand(services Services) *cobra.Command {
 			if len(args) > 0 && scopeFlag != "" {
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
+			if len(args) > 0 && match != "" {
+				return errMatchBesideIndex
+			}
 
 			client, err := services.Kubernetes()
 			if err != nil {
@@ -220,6 +237,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				Builder: graph.Builder{Client: client},
 				State:   services.State,
 				Save:    services.State.Save,
+				Match:   match,
 			}
 			ctx := cmd.Context()
 
@@ -237,14 +255,21 @@ func newTreeCommand(services Services) *cobra.Command {
 						return err
 					}
 					if asJSON {
-						document, err := treeJSON(scanSubject{AllNamespaces: true}, roots)
+						document, err := treeJSON(
+							scanSubject{AllNamespaces: true, Match: match}, roots)
 						if err != nil {
 							return err
 						}
 						render.Raw(document)
 						return nil
 					}
-					render.ScopeBanner("Namespace", render.AllNamespaces, "")
+					// Every namespace dropped is the one case with nothing
+					// under the banner, so the banner says why.
+					note := ""
+					if match != "" && len(roots) == 0 {
+						note = render.NothingMatches(match)
+					}
+					render.ScopeBanner("Namespace", render.AllNamespaces, note)
 					for i, root := range roots {
 						if i > 0 {
 							render.Blank()
@@ -255,7 +280,7 @@ func newTreeCommand(services Services) *cobra.Command {
 						return nil
 					}
 					meta, err := pageMeta(services.Config.Theme, "tree · "+render.AllNamespaces,
-						treeInvocation(scopeArgs("", true), indexed, port))
+						treeInvocation(scopeArgs("", true), match, indexed, port))
 					if err != nil {
 						return err
 					}
@@ -284,7 +309,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				}
 				if asJSON {
 					document, err := treeJSON(
-						scanSubject{Namespace: namespace}, []*tree.Node{node})
+						scanSubject{Namespace: namespace, Match: match}, []*tree.Node{node})
 					if err != nil {
 						return err
 					}
@@ -296,7 +321,7 @@ func newTreeCommand(services Services) *cobra.Command {
 					return nil
 				}
 				meta, err := pageMeta(services.Config.Theme, "tree · "+namespace,
-					treeInvocation(scopeArgs(namespace, false), indexed, port))
+					treeInvocation(scopeArgs(namespace, false), match, indexed, port))
 				if err != nil {
 					return err
 				}
@@ -358,7 +383,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
 			meta, err := pageMeta(services.Config.Theme, "tree · "+node.Label,
-				treeInvocation(args[0], indexed, port))
+				treeInvocation(args[0], "", indexed, port))
 			if err != nil {
 				return err
 			}
@@ -371,6 +396,7 @@ func newTreeCommand(services Services) *cobra.Command {
 	}
 	cmd.Flags().Bool("json", false,
 		"Print the ownership graph as JSON instead of a tree")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("no-index", false,
 		"Skip assigning indexes to tree nodes and don't update state")
 	cmd.Flags().StringP("namespace", "n", "",

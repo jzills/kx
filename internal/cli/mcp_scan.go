@@ -52,6 +52,7 @@ type scanInput struct {
 	MinSeverity   string     `json:"minSeverity,omitempty" jsonschema:"Least severe finding to list: critical, high, medium or low; default high. Counts always cover every severity."`
 	Limit         int        `json:"limit,omitempty" jsonschema:"Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out."`
 	ImageLimit    int        `json:"imageLimit,omitempty" jsonschema:"Most images to scan, in the order they were found; default 50, at most 200. truncatedImages counts the images left unscanned."`
+	Match         string     `json:"match,omitempty" jsonschema:"Scan only the images of workloads whose name contains this, case-insensitively, as kx scan -m does. Only without a target."`
 }
 
 type scanOutput struct {
@@ -136,6 +137,9 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 			return errors.New(
 				"'namespace' and 'allNamespaces' apply without a target — a target already names its namespace.")
 		}
+		if in.Target != nil && in.Match != "" {
+			return errMCPMatchBesideTarget
+		}
 		var err error
 		if minRank, err = parseMinSeverity(in.MinSeverity); err != nil {
 			return err
@@ -162,12 +166,12 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 			out.Mark = target.Mark
 			return err
 		}
-		scope := scanScope{Namespace: in.Namespace, All: in.AllNamespaces}
+		scope := scanScope{Namespace: in.Namespace, All: in.AllNamespaces, Match: in.Match}
 		if !scope.All && scope.Namespace == "" {
 			scope.Namespace = d.Kubectl.CurrentNamespace()
 		}
 		images, err = command.Collect(scope, engine)
-		subject = scanSubject{Namespace: scope.Namespace, AllNamespaces: scope.All}
+		subject = scanSubject{Namespace: scope.Namespace, AllNamespaces: scope.All, Match: in.Match}
 		return err
 	})
 	if err != nil {

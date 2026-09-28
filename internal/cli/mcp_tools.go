@@ -358,6 +358,7 @@ type diagnoseInput struct {
 	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Sweep every namespace when there is no target."`
 	Since         string     `json:"since,omitempty" jsonschema:"Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting."`
 	Full          bool       `json:"full,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
+	Match         string     `json:"match,omitempty" jsonschema:"Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target."`
 }
 
 type diagnoseOutput struct {
@@ -379,6 +380,9 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.Full) {
 		return nil, diagnoseOutput{}, errors.New(
 			"'namespace', 'allNamespaces' and 'full' apply to a sweep — a target already names its namespace. Drop them, or drop the target to sweep.")
+	}
+	if in.Target != nil && in.Match != "" {
+		return nil, diagnoseOutput{}, errMCPMatchBesideTarget
 	}
 	window, err := resolveWindowAs("since", in.Since, d.Config.DiagMaxAge)
 	if err != nil {
@@ -416,8 +420,9 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// Saved whole, healthy rows included, as kx diag saves it: the filter
 	// below narrows only what is returned, so each index it keeps is still
 	// the row's position in the saved sweep.
-	result, err := TriageCommand{Diagnostics: service, Save: d.listingSave(out.Context), Window: window}.
-		Execute(ctx, namespace, in.AllNamespaces, true)
+	result, err := TriageCommand{
+		Diagnostics: service, Save: d.listingSave(out.Context), Window: window, Match: in.Match,
+	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
 	}
@@ -447,6 +452,7 @@ type treeInput struct {
 	Namespace     string     `json:"namespace,omitempty" jsonschema:"Namespace to graph when there is no target; defaults to the current namespace."`
 	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Graph every namespace when there is no target."`
 	Limit         int        `json:"limit,omitempty" jsonschema:"Most nodes to return, containers included; default 500, at most 2000. The graph is cut breadth-first, and truncated counts what was left out."`
+	Match         string     `json:"match,omitempty" jsonschema:"Graph only the top-level workloads whose name contains this, case-insensitively, each with everything it owns, as kx tree -m does; with allNamespaces, namespaces with no match are left out. Only without a target."`
 }
 
 type treeOutput struct {
@@ -510,6 +516,9 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		return nil, nil, errors.New(
 			"'namespace' and 'allNamespaces' apply without a target — a target already names its namespace.")
 	}
+	if in.Target != nil && in.Match != "" {
+		return nil, nil, errMCPMatchBesideTarget
+	}
 	// The context before the client, as in diagnose; it stamps the saved walk.
 	out := treeOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
@@ -521,7 +530,9 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 	// whole before pruneTree cuts what is returned, so a pruned node keeps
 	// the index it was saved at and every number kept is a saved position.
 	indexed := d.indexed()
-	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: d.listingSave(out.Context)}
+	command := TreeCommand{
+		Builder: graph.Builder{Client: client}, Save: d.listingSave(out.Context), Match: in.Match,
+	}
 
 	switch {
 	case in.Target != nil:
@@ -551,7 +562,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		if err := command.save(resources, "", indexed, true); err != nil {
 			return nil, nil, err
 		}
-		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true}, roots)
+		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true, Match: in.Match}, roots)
 	default:
 		namespace := in.Namespace
 		if namespace == "" {
@@ -561,7 +572,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		if err != nil {
 			return nil, nil, err
 		}
-		out.Tree = treeDocumentOf(scanSubject{Namespace: namespace}, []*tree.Node{node})
+		out.Tree = treeDocumentOf(scanSubject{Namespace: namespace, Match: in.Match}, []*tree.Node{node})
 	}
 	out.Tree.Roots, out.Truncated = pruneTree(out.Tree.Roots, treeLimit(in.Limit))
 	return nil, out, nil

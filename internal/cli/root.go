@@ -253,7 +253,7 @@ func newGetCommand(services Services) *cobra.Command {
 			return runGet(services, rest[0], rest[1:], options)
 		},
 	}
-	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")

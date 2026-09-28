@@ -15,7 +15,7 @@ import (
 
 func namespaceTree(t *testing.T, b Builder, indexed bool) (string, []Resource) {
 	t.Helper()
-	node, resources, err := b.BuildNamespace(context.Background(), ns, indexed, 0)
+	node, resources, err := b.BuildNamespace(context.Background(), ns, "", indexed, 0)
 	if err != nil {
 		t.Fatalf("BuildNamespace: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestNamespaceForestNumbersFromOne(t *testing.T) {
 		&appsv1.ReplicaSet{ObjectMeta: meta("web-abc", "rs1", owner("d1"))},
 		podWith("web-abc-1", "p1", nil, owner("rs1")),
 	)
-	node, resources, err := b.BuildNamespace(context.Background(), ns, true, 0)
+	node, resources, err := b.BuildNamespace(context.Background(), ns, "", true, 0)
 	if err != nil {
 		t.Fatalf("BuildNamespace: %v", err)
 	}
