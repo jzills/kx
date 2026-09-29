@@ -183,7 +183,7 @@ func newSetCommand(services Services) *cobra.Command {
 		Long: "Changes a field of an indexed workload in place, the way kubectl set does. " +
 			"Only image is wrapped: 'kubectl set env' and the rest can take an index " +
 			"through kx ref.\n\n" +
-			"kx set image <index> <image>... changes a Pod, Deployment, StatefulSet, " +
+			"`kx set image <index> <image>...` changes a Pod, Deployment, StatefulSet, " +
 			"DaemonSet, ReplicaSet or CronJob's container images and prints each one " +
 			"before and after, so the line says what to type to put it back. A bare " +
 			"image sets the workload's only container; with more than one, init " +
