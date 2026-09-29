@@ -53,6 +53,11 @@ The `--name`, `--namespace` and `--kind` flags print a single field for tools th
 Nothing about `kx ref` contacts the cluster.
 It reports what the index means, not what still exists, so it answers instantly — and a stale index prints the name it was assigned, leaving the command you spend it on to discover the resource is gone.
 
+For the whole listing at once, `kx state --json` prints the current entry as a document, and `kx state --all --json` prints the stack.
+Each row carries its index, kind, name and namespace — the fields `kx ref` would give it — and each entry carries the context it was listed in, the query that produced it, and `byAgent` when `kx mcp` saved it for an agent.
+The document also names the context you are in now, so a script can tell an entry from another cluster, whose indexes kx will refuse.
+Like `kx ref`, it never contacts the cluster, and with nothing listed yet it prints an empty document rather than failing.
+
 ## A listing that found nothing is still a listing
 
 A listing like `kx get pods -n empty-namespace` saves its result like any other, even though the result is nothing.

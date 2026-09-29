@@ -47,7 +47,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 
 | Command | Description |
 |---|---|
-| [`kx state [<position>] [--all/-a] [--targets/-t]`](state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
+| [`kx state [<position>] [--all/-a] [--json] [--targets/-t]`](state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 
 ## Configuration
 

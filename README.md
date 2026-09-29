@@ -243,6 +243,7 @@ Recent `kx get` results are kept as a history â€” 10 by default, configurable â€
 ```bash
 kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
+kx state --all --json # the same, as JSON for a script
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
 kx state drop 2       # remove position 2 (--all clears the history; marks stay)
