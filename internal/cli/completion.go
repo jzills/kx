@@ -45,6 +45,7 @@ var argCompleters = map[string]completer{
 	"engine.name":     completeEngine,
 	"unmark.name":     completeMarkNames,
 	"replicas":        nil, // A number kx cannot guess.
+	"image":           nil, // A registry reference kx has no list of.
 	"port":            nil, // Likewise, and it is a mapping, not a port.
 	"key=value":       nil,
 	"command":         nil, // Runs in the pod; local paths would be wrong.

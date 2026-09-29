@@ -3,7 +3,7 @@
 title: "kx unmark"
 linkTitle: "unmark"
 description: "Remove marks by name; --all removes every mark."
-weight: 29
+weight: 30
 ---
 
 Removes one or more marks by name, or every mark at once with --all — the marks 'kx state drop --all' deliberately leaves behind.

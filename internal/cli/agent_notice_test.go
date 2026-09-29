@@ -320,6 +320,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"scale": true, "rollout": true, "cordon": true, "uncordon": true,
 		"debug": true, "edit": true, "exec": true, "label": true,
 		"annotate": true, "cp": true, "delete": true, "drain": true,
+		"set": true,
 	}
 	nonMutating := map[string]bool{
 		"annotations": true, "completion": true, "context": true, "describe": true,
