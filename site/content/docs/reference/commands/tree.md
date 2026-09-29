@@ -6,7 +6,7 @@ description: "Show the ownership graph for an indexed resource, or the whole cur
 weight: 27
 ---
 
-Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.
+Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. -m keeps only the top-level workloads whose name matches, each with everything it owns. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.
 
 ## Usage
 
@@ -27,6 +27,7 @@ kx tree [OPTIONS] [index]
 | `-A, --all-namespaces` | Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it |
 | `--html` | Render the tree as HTML and serve it in a browser |
 | `--json` | Print the ownership graph as JSON instead of a tree |
+| `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-index` | Skip assigning indexes to tree nodes and don't update state |
 | `--no-open` | Serve the HTML report without opening a browser |
@@ -47,6 +48,7 @@ kx tree
 kx tree 1
 kx tree --no-index
 kx tree -A
+kx tree -m api
 kx tree -n prod --html
 kx tree --json
 kx tree --out tree.html

@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/theme"
 	"github.com/jzills/kx/internal/tree"
@@ -345,8 +346,14 @@ type ownerRef struct {
 // continuously: restarting at 1 per namespace would put several rows under the
 // same number, which is the one thing an index may never do. Pass 0 for a
 // single-namespace walk.
+//
+// match keeps only the roots whose name contains it, case-insensitively —
+// kx tree -m — each with everything it owns. Roots, not every node, so a
+// matched tree is always whole ownership: a term that happened to hit one
+// pod's hash would otherwise prune its siblings out from under their
+// ReplicaSet. Empty keeps every root.
 func (b Builder) BuildNamespace(
-	ctx context.Context, namespace string, indexed bool, startAt int,
+	ctx context.Context, namespace, match string, indexed bool, startAt int,
 ) (*tree.Node, []Resource, error) {
 	deployments, err := b.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -457,6 +464,18 @@ func (b Builder) BuildNamespace(
 		order[kind] = position
 	}
 	sortRoots(roots, order)
+	// After the forest is assembled, so a matched root still finds every
+	// child the namespace holds, and before the collector numbers anything,
+	// so the indexes run 1..n over what is shown.
+	if match != "" {
+		kept := roots[:0]
+		for _, entry := range roots {
+			if index.MatchesName(entry.object.GetName(), match) {
+				kept = append(kept, entry)
+			}
+		}
+		roots = kept
+	}
 
 	c := &collector{indexed: indexed, namespace: namespace, offset: startAt}
 	root := &tree.Node{
@@ -464,7 +483,11 @@ func (b Builder) BuildNamespace(
 		Kind: string(kinds.Namespace), Name: namespace,
 	}
 	if len(roots) == 0 {
-		root.Add("(no workloads)", theme.Muted)
+		if match != "" {
+			root.Add("(no workloads matching '"+match+"')", theme.Muted)
+		} else {
+			root.Add("(no workloads)", theme.Muted)
+		}
 		return root, c.resources, nil
 	}
 	for _, entry := range roots {
@@ -501,4 +524,18 @@ func renderNode(entry ownerRef, parent *tree.Node, childrenByOwner map[types.UID
 	for _, child := range childrenByOwner[entry.object.GetUID()] {
 		renderNode(child, node, childrenByOwner, c)
 	}
+}
+
+// HasWorkloads reports whether a BuildNamespace root graphed anything, as
+// opposed to holding only its "(no workloads)" placeholder — a resource node
+// carries a kind, and the placeholder does not. An -A forest narrowed by a
+// term drops the namespaces this is false for, rather than printing a stub
+// for every namespace the term didn't hit.
+func HasWorkloads(root *tree.Node) bool {
+	for _, child := range root.Children {
+		if child.Kind != "" {
+			return true
+		}
+	}
+	return false
 }

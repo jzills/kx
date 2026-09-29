@@ -20,6 +20,10 @@
             "description": "Include healthy resources in a sweep's results.",
             "type": "boolean"
           },
+          "match": {
+            "description": "Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target.",
+            "type": "string"
+          },
           "namespace": {
             "description": "Namespace to sweep when there is no target; defaults to the current namespace.",
             "type": "string"
@@ -80,6 +84,9 @@
                 "type": "integer"
               },
               "kind": {
+                "type": "string"
+              },
+              "match": {
                 "type": "string"
               },
               "name": {
@@ -759,6 +766,10 @@
             "description": "Most findings to list per image, worst first; default 20, at most 200. Each image's truncated counts the findings at minSeverity or worse that were left out.",
             "type": "integer"
           },
+          "match": {
+            "description": "Scan only the images of workloads whose name contains this, case-insensitively, as kx scan -m does. Only without a target.",
+            "type": "string"
+          },
           "minSeverity": {
             "description": "Least severe finding to list: critical, high, medium or low; default high. Counts always cover every severity.",
             "type": "string"
@@ -881,6 +892,9 @@
                 ]
               },
               "kind": {
+                "type": "string"
+              },
+              "match": {
                 "type": "string"
               },
               "name": {
@@ -1044,6 +1058,10 @@
           "limit": {
             "description": "Most nodes to return, containers included; default 500, at most 2000. The graph is cut breadth-first, and truncated counts what was left out.",
             "type": "integer"
+          },
+          "match": {
+            "description": "Graph only the top-level workloads whose name contains this, case-insensitively, each with everything it owns, as kx tree -m does; with allNamespaces, namespaces with no match are left out. Only without a target.",
+            "type": "string"
           },
           "namespace": {
             "description": "Namespace to graph when there is no target; defaults to the current namespace.",

@@ -589,7 +589,7 @@ func TestTreeAllNamespacesCommandSavesTheWalk(t *testing.T) {
 // all three of tree's invocation lines, so they cannot drift again.
 func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
 	for _, scope := range []string{scopeArgs("", true), scopeArgs("prod", false), "1"} {
-		line := treeInvocation(scope, false, 0)
+		line := treeInvocation(scope, "", false, 0)
 		if !strings.Contains(line, "--no-index") {
 			t.Errorf("invocation for scope %q = %q, want it to name --no-index", scope, line)
 		}
@@ -598,7 +598,7 @@ func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
 
 // Indexing is the default, so the common case renders no flag at all.
 func TestTreeInvocationOmitsTheFlagWhenIndexing(t *testing.T) {
-	if line := treeInvocation(scopeArgs("", true), true, 0); strings.Contains(line, "--no-index") {
+	if line := treeInvocation(scopeArgs("", true), "", true, 0); strings.Contains(line, "--no-index") {
 		t.Errorf("invocation = %q, want no --no-index when indexing", line)
 	}
 }

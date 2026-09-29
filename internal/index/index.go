@@ -447,16 +447,25 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	}
 }
 
+// MatchesName reports whether name contains term, case-insensitively — what
+// --match means everywhere it is accepted. An empty term matches everything,
+// so a caller with no term can pass it straight through.
+//
+// One definition, so kx get -m and the sweeps' -m can never disagree about
+// which names a term selects.
+func MatchesName(name, term string) bool {
+	return strings.Contains(strings.ToLower(name), strings.ToLower(term))
+}
+
 // FilterRows keeps the rows whose NAME contains term, case-insensitively.
 func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	shape, ok := shapeOf(headers)
 	if !ok {
 		return rows
 	}
-	lower := strings.ToLower(term)
 	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row[shape.NameIdx]), lower) {
+		if MatchesName(row[shape.NameIdx], term) {
 			kept = append(kept, row)
 		}
 	}

@@ -166,7 +166,11 @@ type diagnosticDocument struct {
 	// gate the same window governs. Two runs of the same command differ
 	// otherwise with nothing to say whether the cluster got better or the
 	// window got narrower.
-	Window    string       `json:"window,omitempty"`
+	Window string `json:"window,omitempty"`
+	// Match is the --match term the sweep was narrowed by, absent for none —
+	// for the same reason Window is here: without it, a narrowed sweep and a
+	// quiet namespace are two documents a consumer cannot tell apart.
+	Match     string       `json:"match,omitempty"`
 	Checked   int          `json:"checked"`
 	Healthy   int          `json:"healthy"`
 	Resources []jsonReport `json:"resources"`
@@ -205,6 +209,7 @@ func triageDocument(result render.TriageResult, indexed bool) diagnosticDocument
 		Namespace:     result.Namespace,
 		AllNamespaces: result.AllNamespaces,
 		Window:        windowLabel(result.Window),
+		Match:         result.Match,
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Resources:     resources,
@@ -244,6 +249,8 @@ type scanSubject struct {
 	Name          string
 	Namespace     string
 	AllNamespaces bool
+	// Match is the --match term a sweep was narrowed by, empty for none.
+	Match string
 }
 
 // scanDocument is the one shape kx scan --json emits, and what the MCP
@@ -254,6 +261,7 @@ type scanDocument struct {
 	Name          string      `json:"name,omitempty"`
 	Namespace     string      `json:"namespace,omitempty"`
 	AllNamespaces bool        `json:"allNamespaces,omitempty"`
+	Match         string      `json:"match,omitempty"`
 	Images        []jsonImage `json:"images"`
 }
 
@@ -280,7 +288,8 @@ func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument 
 	}
 	return scanDocument{
 		SchemaVersion: reportSchemaVersion, Kind: subject.Kind, Name: subject.Name,
-		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces, Images: images,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
+		Match: subject.Match, Images: images,
 	}
 }
 
@@ -425,6 +434,7 @@ type treeDocument struct {
 	Name          string         `json:"name,omitempty"`
 	Namespace     string         `json:"namespace,omitempty"`
 	AllNamespaces bool           `json:"allNamespaces,omitempty"`
+	Match         string         `json:"match,omitempty"`
 	Roots         []jsonTreeNode `json:"roots"`
 }
 
@@ -445,6 +455,7 @@ func treeDocumentOf(subject scanSubject, roots []*tree.Node) treeDocument {
 		Name:          subject.Name,
 		Namespace:     subject.Namespace,
 		AllNamespaces: subject.AllNamespaces,
+		Match:         subject.Match,
 		Roots:         converted,
 	}
 }

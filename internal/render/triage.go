@@ -36,6 +36,17 @@ type TriageResult struct {
 	// is the only line the table has to qualify them on. Zero means no
 	// window was applied, and the caption says nothing.
 	Window time.Duration
+	// Match is the term the sweep was narrowed by, empty for none. Only the
+	// empty sweep names it: there, "nothing to check" would claim the
+	// namespace is empty when it may be full of resources that didn't match.
+	Match string
+}
+
+// NothingMatches is the caption for a sweep a --match term narrowed to
+// nothing — kx diag, kx scan and kx tree alike. Named for the term so the
+// screen can't be mistaken for an empty namespace, which it may well not be.
+func NothingMatches(term string) string {
+	return "nothing matches '" + term + "'"
 }
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
@@ -53,6 +64,10 @@ func (r *Renderer) Triage(result TriageResult) {
 		scope = AllNamespaces
 	}
 	if result.Checked == 0 {
+		if result.Match != "" {
+			r.Caption("Mixed", scope, NothingMatches(result.Match))
+			return
+		}
 		r.Caption("Mixed", scope, "nothing to check")
 		return
 	}
