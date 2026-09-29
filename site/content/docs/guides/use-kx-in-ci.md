@@ -140,3 +140,17 @@ kx scan -A --fail-on high
 
 With `-A`, `kx scan` resolves every unique image in the cluster and scans each once, two at a time.
 The bound is memory rather than cores — a scanner unpacks an image and walks every package in it — so a wide sweep is steady rather than fast, and does not thrash a small runner.
+
+## Waiting before the next step
+
+The `kx wait` command blocks until a resource is ready, which is the step between applying a change and checking it:
+
+```bash
+kx get jobs -m migrate
+kx wait 1 --timeout=5m      # exits 0 on Complete, 1 the moment it fails
+kx diag --fail-on critical
+```
+
+Without `--for`, the condition comes from the kind: a Pod or Node Ready, a PersistentVolumeClaim Bound, a Job Complete, a LoadBalancer Service given an address.
+A failed Job ends the wait at once with its reason, where `kubectl wait --for=condition=Complete` would run to the timeout.
+For a Deployment, StatefulSet or DaemonSet, `kx rollout status` is the wait.

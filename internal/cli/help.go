@@ -30,7 +30,7 @@ var helpSections = []struct {
 		"annotate", "annotations", "context", "cordon", "cp", "debug", "delete",
 		"describe", "diagnostic", "drain", "edit", "events", "exec", "get",
 		"label", "labels", "logs", "mark", "namespace", "port-forward", "ref", "rollout",
-		"scale", "scan", "secret", "top", "tree", "uncordon", "unmark", "yaml",
+		"scale", "scan", "secret", "top", "tree", "uncordon", "unmark", "wait", "yaml",
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},

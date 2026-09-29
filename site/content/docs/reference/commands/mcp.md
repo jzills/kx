@@ -3,7 +3,7 @@
 title: "kx mcp"
 linkTitle: "mcp"
 description: "Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio)."
-weight: 34
+weight: 35
 ---
 
 Runs a Model Context Protocol server on stdin/stdout, for an MCP client — Claude Code, an IDE, an agent framework — to start as a subprocess.

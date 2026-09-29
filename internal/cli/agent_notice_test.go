@@ -327,7 +327,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"labels": true, "logs": true, "mark": true, "mcp": true,
 		"namespace": true, "port-forward": true, "ref": true, "scan": true,
 		"secret": true, "state": true, "theme": true, "top": true,
-		"tree": true, "unmark": true, "yaml": true,
+		"tree": true, "unmark": true, "wait": true, "yaml": true,
 	}
 
 	root := NewRoot(NewServices(config.Default()), "test")
