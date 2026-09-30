@@ -12,7 +12,7 @@ A Deployment, StatefulSet or DaemonSet is waited for with kx rollout status, whi
 
 --for replaces the default and goes to kubectl wait as written: --for=condition=Ready, --for=delete, --for=jsonpath=... . --timeout is 30s unless given, as it is for kubectl.
 
-Several indexes are all resolved before anything waits, then waited for in order; the first that fails or times out ends the command.
+Several indexes are all resolved before anything waits, then waited for in order; the first that fails or times out ends the command. --timeout covers them together, as it does for kubectl: each waits for what the ones before it left, not a timeout of its own.
 
 Unrecognized flags are passed through to kubectl.
 

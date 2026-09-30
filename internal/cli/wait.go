@@ -45,6 +45,56 @@ type WaitCommand struct {
 	Kubectl    kubectl.Service
 	Kubernetes func() (kubernetes.Interface, error)
 	Status     func(string) func()
+	// Now is the clock the shared deadline is kept on; nil is time.Now.
+	Now func() time.Time
+}
+
+// ExecuteAll waits for each target in turn and reports each as it is met,
+// stopping at the first that fails or times out.
+//
+// timeout is one deadline for the whole set, as kubectl wait keeps one: the
+// first target gets the flags as typed, and each after it the time left, as a
+// --timeout of its own. A target reached with none left times out without
+// kubectl being asked. A zero timeout has no deadline to share — it means
+// check once — so every target is checked once.
+func (c WaitCommand) ExecuteAll(
+	ctx context.Context, targets []Resolved, timeout time.Duration, extraArgs []string,
+	report func(target Resolved, met string),
+) error {
+	now := c.Now
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	for i, target := range targets {
+		remaining, args := timeout, extraArgs
+		if i > 0 {
+			remaining = 0
+			if timeout > 0 {
+				remaining = (timeout - now().Sub(start)).Truncate(time.Millisecond)
+				if remaining <= 0 {
+					return timedOut(target, timeout)
+				}
+			}
+			args = withWaitTimeout(extraArgs, remaining)
+		}
+		met, err := c.Execute(ctx, target, remaining, args)
+		if err != nil {
+			return err
+		}
+		report(target, met)
+	}
+	return nil
+}
+
+// withWaitTimeout replaces any --timeout in extraArgs with timeout, for the
+// kubectl wait of a target reached part-way through the shared deadline.
+func withWaitTimeout(extraArgs []string, timeout time.Duration) []string {
+	_, rest, err := extractStrings(extraArgs, "--timeout", "")
+	if err != nil {
+		rest = extraArgs
+	}
+	return append(append([]string{}, rest...), "--timeout="+timeout.String())
 }
 
 // Execute waits for one resource and returns what was met, for the success
@@ -272,7 +322,9 @@ func newWaitCommand(services Services) *cobra.Command {
 			"--for=condition=Ready, --for=delete, --for=jsonpath=... . --timeout is 30s " +
 			"unless given, as it is for kubectl.\n\n" +
 			"Several indexes are all resolved before anything waits, then waited for in " +
-			"order; the first that fails or times out ends the command.\n\n" +
+			"order; the first that fails or times out ends the command. --timeout covers " +
+			"them together, as it does for kubectl: each waits for what the ones before " +
+			"it left, not a timeout of its own.\n\n" +
 			"Unrecognized flags are passed through to kubectl.",
 		Example: "  kx wait 2\n  kx wait 1..4 --timeout=2m\n  kx wait @db-claim\n" +
 			"  kx wait 3 --for=delete\n  kx wait 5 --for=condition=Ready=false",
@@ -304,15 +356,11 @@ func newWaitCommand(services Services) *cobra.Command {
 			command := WaitCommand{
 				Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
 			}
-			for _, target := range resolved {
-				met, err := command.Execute(cmd.Context(), target, timeout, extra)
-				if err != nil {
-					return err
-				}
-				render.Success(strings.Join(captionPartsOf(
-					string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
-			}
-			return nil
+			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
+				func(target Resolved, met string) {
+					render.Success(strings.Join(captionPartsOf(
+						string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
+				})
 		},
 	}
 }
