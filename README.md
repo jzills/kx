@@ -315,6 +315,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
 | `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |
+| `kx wait <index>...` | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
 | `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
