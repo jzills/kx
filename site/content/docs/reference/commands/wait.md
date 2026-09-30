@@ -3,7 +3,7 @@
 title: "kx wait"
 linkTitle: "wait"
 description: "Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address."
-weight: 30
+weight: 31
 ---
 
 Blocks until each indexed resource reaches its condition, then prints it. With no --for, the condition comes from the kind: a Pod or Node is Ready, a PersistentVolumeClaim Bound, a Job Complete — and a Job that fails ends the wait at once, with its reason, rather than running to the timeout — and a LoadBalancer Service has an address.

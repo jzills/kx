@@ -145,6 +145,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newDropCommand(services),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
+	root.AddCommand(withoutRefresh(newSetCommand(services)))
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),
