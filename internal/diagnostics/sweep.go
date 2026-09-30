@@ -38,7 +38,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	if err != nil {
 		return nil, err
 	}
-	allEvents, err := s.Events.Get(ctx, namespace)
+	allEvents, err := s.Events.Warnings(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}

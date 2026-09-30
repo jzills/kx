@@ -90,7 +90,7 @@ func (s Service) Gather(ctx context.Context, kind kinds.Kind, name, namespace st
 
 	// Events are the exception: a Node's own warning events are the point of
 	// diagnosing one, so this read stays.
-	all, err := s.Events.Get(ctx, namespace)
+	all, err := s.Events.Warnings(ctx, namespace)
 	if err != nil {
 		return Data{}, err
 	}
