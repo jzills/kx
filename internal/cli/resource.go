@@ -103,18 +103,41 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (str
 // kubectl's output ("pod \"x\" deleted (dry run)") with its own, so the
 // distinction is only there if kx puts it there.
 //
-// Deliberately narrow: only the two values that mean a dry run are recognised.
-// --dry-run=none is a real delete, and a spelling kubectl adds later is
-// unlabelled rather than guessed at — a missing "(dry run)" on a dry run is a
-// smaller failure than the label on a real one. This is the only place kx
+// Deliberately narrow: only the spellings kubectl itself runs as a dry run are
+// recognised — client and server, plus the deprecated ones it still accepts
+// and warns about, a bare --dry-run and a boolean true, both client dry runs.
+// --dry-run=none (or false) is a real delete, and a spelling kubectl adds later
+// is unlabelled rather than guessed at — a missing "(dry run)" on a dry run is
+// a smaller failure than the label on a real one. This is the only place kx
 // reads a forwarded flag's meaning; the confirmation prompt deliberately does
 // not, since getting that wrong skips a safety step rather than a label.
+//
+// Read by hand rather than through extractString: the flag has an optional
+// value, so a bare --dry-run never takes the argument after it, and the last
+// occurrence wins, as it does for kubectl.
 func isDryRun(extraArgs []string) bool {
-	value, _, err := extractString(extraArgs, "--dry-run", "")
-	if err != nil {
-		return false
+	dryRun := false
+	for _, arg := range extraArgs {
+		switch {
+		case arg == "--dry-run":
+			dryRun = true
+		case strings.HasPrefix(arg, "--dry-run="):
+			dryRun = dryRunValue(strings.TrimPrefix(arg, "--dry-run="))
+		}
 	}
-	return value == "client" || value == "server"
+	return dryRun
+}
+
+// dryRunValue reports whether kubectl runs --dry-run=value as a dry run.
+// "unchanged" is the value kubectl gives a bare --dry-run, so spelling it out
+// means the same thing.
+func dryRunValue(value string) bool {
+	switch value {
+	case "client", "server", "unchanged":
+		return true
+	}
+	enabled, err := strconv.ParseBool(value)
+	return err == nil && enabled
 }
 
 var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}

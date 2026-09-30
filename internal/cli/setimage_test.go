@@ -167,21 +167,25 @@ func TestSetImageOnACronJob(t *testing.T) {
 }
 
 // kubectl's flags pass through after the images, and a dry run says nothing
-// changed and points at no rollout, since none began.
+// changed and points at no rollout, since none began. Every spelling kubectl
+// reads as a dry run counts: a bare --dry-run is a client one, and it printed
+// "api:v1 → api:v2" and a rollout to follow for a Deployment left untouched.
 func TestSetImageDryRun(t *testing.T) {
-	stdout, _, kube, err := setImage(t, kinds.Deployment, oneContainerDeploy, false,
-		"1", "api:v2", "--dry-run=server")
-	if err != nil {
-		t.Fatalf("kx set image --dry-run=server: %v", err)
-	}
-	if got := setCalls(kube); len(got) != 1 || !strings.HasSuffix(got[0], "-n prod --dry-run=server") {
-		t.Errorf("kubectl set calls = %q, want --dry-run=server forwarded", got)
-	}
-	if !strings.Contains(stdout, "(dry run — nothing was changed)") {
-		t.Errorf("stdout = %q, want the dry-run label", stdout)
-	}
-	if strings.Contains(stdout, "rollout status") {
-		t.Errorf("stdout = %q, want no rollout hint on a dry run", stdout)
+	for _, flag := range []string{"--dry-run=server", "--dry-run", "--dry-run=true"} {
+		stdout, _, kube, err := setImage(t, kinds.Deployment, oneContainerDeploy, false,
+			"1", "api:v2", flag)
+		if err != nil {
+			t.Fatalf("kx set image %s: %v", flag, err)
+		}
+		if got := setCalls(kube); len(got) != 1 || !strings.HasSuffix(got[0], "-n prod "+flag) {
+			t.Errorf("kubectl set calls = %q, want %s forwarded", got, flag)
+		}
+		if !strings.Contains(stdout, "(dry run — nothing was changed)") {
+			t.Errorf("stdout = %q for %s, want the dry-run label", stdout, flag)
+		}
+		if strings.Contains(stdout, "rollout status") {
+			t.Errorf("stdout = %q for %s, want no rollout hint on a dry run", stdout, flag)
+		}
 	}
 }
 

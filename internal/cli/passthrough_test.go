@@ -569,18 +569,25 @@ func TestNewlyForwardingCommandsRegisterTheirOwnFlags(t *testing.T) {
 // that did not happen: "✓ Deleted Pod/web-healthy-…" for a client-side dry
 // run. kx replaces kubectl's output with its own line, so the line has to say
 // which it was.
+//
+// kubectl's older spellings count too: a bare --dry-run is a client dry run
+// (kubectl warns it is deprecated, then does one), as is a boolean true, and a
+// bare one never takes the next argument as its value.
 func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
-	for _, value := range []string{"--dry-run=client", "--dry-run=server"} {
+	for _, args := range [][]string{
+		{"--dry-run=client"}, {"--dry-run=server"},
+		{"--dry-run"}, {"--dry-run", "--force"}, {"--dry-run=true"}, {"--dry-run=unchanged"},
+	} {
 		kube := &recordingKubectl{output: ""}
 		message, err := DeleteCommand{
 			Kubectl: kube, State: pod("nginx"), Confirm: func(string) error { return nil },
 			Status: noStatus,
-		}.Execute(state.Ref{Index: 1}, true, []string{value})
+		}.Execute(state.Ref{Index: 1}, true, args)
 		if err != nil {
-			t.Fatalf("Execute(%s): %v", value, err)
+			t.Fatalf("Execute(%v): %v", args, err)
 		}
 		if !strings.Contains(message, "dry run") {
-			t.Errorf("message = %q for %s, want it to say nothing was deleted", message, value)
+			t.Errorf("message = %q for %v, want it to say nothing was deleted", message, args)
 		}
 	}
 }
@@ -590,7 +597,10 @@ func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
 // than guessed at: a wrong "(dry run)" on a real delete is the worse failure,
 // and kx does not otherwise read kubectl's flag semantics.
 func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
-	for _, args := range [][]string{{"--dry-run=none"}, {"--force"}, nil} {
+	for _, args := range [][]string{
+		{"--dry-run=none"}, {"--dry-run=false"}, {"--dry-run=client", "--dry-run=none"},
+		{"--force"}, nil,
+	} {
 		message, err := DeleteCommand{
 			Kubectl: &recordingKubectl{}, State: pod("nginx"),
 			Confirm: func(string) error { return nil }, Status: noStatus,
