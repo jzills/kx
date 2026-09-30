@@ -2,8 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -250,5 +255,67 @@ func TestWaitForAVanishedJobIsStale(t *testing.T) {
 	var stale StaleResourceError
 	if !errors.As(err, &stale) || !isStale(err) {
 		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
+// jobServer serves one Job to a real client-go client, and counts the
+// requests that are anything but a read of it.
+//
+// A real client rather than the fake, because the fake ignores its context:
+// the bug this guards was a context already past its deadline, which a real
+// request refuses before it is sent, and the fake answers regardless.
+func jobServer(t *testing.T, served *batchv1.Job) (kubernetes.Interface, *atomic.Int32) {
+	t.Helper()
+	var others atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/apis/batch/v1/namespaces/prod/jobs/migrate" {
+			others.Add(1)
+			http.NotFound(w, r)
+			return
+		}
+		served.APIVersion, served.Kind = "batch/v1", "Job"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(served)
+	}))
+	t.Cleanup(server.Close)
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("client for %s: %v", server.URL, err)
+	}
+	return client, &others
+}
+
+// kubectl reads --timeout=0 as "check once" and a negative one as a week. kx's
+// own Job wait handed either straight to context.WithTimeout, whose deadline
+// had then already passed, so the Job's first read failed before it was sent:
+// `kx wait 1 --timeout=0` on a Job that had finished said "Timed out after 0s".
+func TestWaitForAFinishedJobWithAZeroOrNegativeTimeout(t *testing.T) {
+	for _, value := range []string{"0", "0s", "-1s"} {
+		client, _ := jobServer(t, job(jobCondition(batchv1.JobComplete, "", "")))
+		timeout, err := waitTimeout([]string{"--timeout=" + value})
+		if err != nil {
+			t.Fatalf("waitTimeout(%s): %v", value, err)
+		}
+		met, err := WaitCommand{
+			Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+		}.Execute(context.Background(), jobTarget, timeout, nil)
+		if err != nil || met != "Complete" {
+			t.Errorf("--timeout=%s on a complete Job: met=%q err=%v, want Complete", value, met, err)
+		}
+	}
+}
+
+// Checking once means exactly that: a Job still running is reported as not
+// finished at once, without a watch being opened for it.
+func TestWaitForARunningJobWithAZeroTimeoutChecksOnce(t *testing.T) {
+	client, others := jobServer(t, job())
+	_, err := WaitCommand{
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+	}.Execute(context.Background(), jobTarget, 0, nil)
+	if err == nil || err.Error() != "Timed out after 0s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout message", err)
+	}
+	if n := others.Load(); n != 0 {
+		t.Errorf("made %d requests besides the one read, want none", n)
 	}
 }

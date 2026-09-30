@@ -128,9 +128,22 @@ func (c WaitCommand) waitJob(ctx context.Context, target Resolved, timeout time.
 	if err != nil {
 		return "", err
 	}
+	jobs := client.BatchV1().Jobs(target.Namespace)
+	// kubectl's --timeout=0: read once, and a Job not finished by then has
+	// timed out. Before the deadline is set, since a zero one has already
+	// passed, and a read made under it fails without being sent.
+	if timeout == 0 {
+		job, err := jobs.Get(ctx, target.Name, metav1.GetOptions{})
+		if err != nil {
+			return "", c.apiError(ctx, target, timeout, err)
+		}
+		if label, err, done := jobOutcome(target, job); done {
+			return label, err
+		}
+		return "", timedOut(target, timeout)
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	jobs := client.BatchV1().Jobs(target.Namespace)
 	for {
 		job, err := jobs.Get(ctx, target.Name, metav1.GetOptions{})
 		if err != nil {
@@ -220,9 +233,12 @@ func timedOut(target Resolved, timeout time.Duration) error {
 	return fmt.Errorf("Timed out after %s waiting for %s/%s.", timeout, target.Kind, target.Name)
 }
 
+// negativeWaitTimeout is what kubectl waits for given a negative --timeout.
+const negativeWaitTimeout = 7 * 24 * time.Hour
+
 // waitTimeout reads --timeout for the waits kx carries out itself, leaving it
-// in the arguments for the ones kubectl does. kubectl's spelling: a Go
-// duration, where 0 means check once.
+// in the arguments for the ones kubectl does. kubectl's spelling and meaning:
+// a Go duration, where 0 means check once and a negative one means a week.
 func waitTimeout(extraArgs []string) (time.Duration, error) {
 	value, _, err := extractString(extraArgs, "--timeout", "")
 	if err != nil || value == "" {
@@ -231,6 +247,9 @@ func waitTimeout(extraArgs []string) (time.Duration, error) {
 	timeout, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("Invalid value for '--timeout': '%s' is not a duration like 30s or 5m.", value)
+	}
+	if timeout < 0 {
+		return negativeWaitTimeout, nil
 	}
 	return timeout, nil
 }
