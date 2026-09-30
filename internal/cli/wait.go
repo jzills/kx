@@ -216,13 +216,19 @@ func (c WaitCommand) waitService(ctx context.Context, target Resolved, extraArgs
 func (c WaitCommand) apiError(ctx context.Context, target Resolved, timeout time.Duration, err error) error {
 	switch {
 	case apierrors.IsNotFound(err):
-		return StaleResourceError{
-			Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
-		}
+		return staleTarget(target)
 	case ctx.Err() != nil && errors.Is(err, ctx.Err()):
 		return timedOut(target, timeout)
 	}
 	return err
+}
+
+// staleTarget is the stale-index error for a resource found gone, which
+// withRefresh answers by relisting.
+func staleTarget(target Resolved) error {
+	return StaleResourceError{
+		Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+	}
 }
 
 func timedOut(target Resolved, timeout time.Duration) error {
@@ -323,9 +329,9 @@ func captionPartsOf(parts ...string) []string {
 	return kept
 }
 
-// watchJob reads events until the Job finishes, the channel closes, or ctx
-// ends — the deadline is selected on directly rather than left to close the
-// channel, which a watch is not obliged to do promptly.
+// watchJob reads events until the Job finishes or is deleted, the channel
+// closes, or ctx ends — the deadline is selected on directly rather than left
+// to close the channel, which a watch is not obliged to do promptly.
 func watchJob(ctx context.Context, target Resolved, watcher watch.Interface) (string, error, bool) {
 	for {
 		select {
@@ -334,6 +340,12 @@ func watchJob(ctx context.Context, target Resolved, watcher watch.Interface) (st
 		case event, open := <-watcher.ResultChan():
 			if !open {
 				return "", nil, false
+			}
+			// Gone mid-wait is gone: the stale-index error a Job already
+			// missing when the wait began gets, rather than the rest of the
+			// timeout spent watching for an outcome it can no longer have.
+			if event.Type == watch.Deleted {
+				return "", staleTarget(target), true
 			}
 			if updated, ok := event.Object.(*batchv1.Job); ok {
 				if label, err, done := jobOutcome(target, updated); done {

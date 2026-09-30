@@ -255,6 +255,20 @@ func TestWaitForAJobTimesOut(t *testing.T) {
 	}
 }
 
+// A Job deleted while it is watched is gone now, not later: the wait ends on
+// the delete with the stale-index error, as it does for a Job already gone
+// when the wait began. It ran out the whole timeout instead, then said it had
+// timed out on a Job that no longer existed.
+func TestWaitForAJobDeletedMidWaitIsStale(t *testing.T) {
+	watcher := watch.NewFake()
+	go watcher.Delete(job())
+	_, err := waitForJob(t, fake.NewSimpleClientset(job()), watcher, 5*time.Second)
+	var stale StaleResourceError
+	if !errors.As(err, &stale) || !isStale(err) {
+		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
 // A Job that is gone is the stale-index error withRefresh relists on.
 func TestWaitForAVanishedJobIsStale(t *testing.T) {
 	_, err := waitForJob(t, fake.NewSimpleClientset(), nil, time.Second)
