@@ -798,6 +798,31 @@ func TestRenderScanCaptionRendersScopeVerbatim(t *testing.T) {
 	}
 }
 
+// A --match term is named only when it left nothing to scan. A sweep it
+// narrowed to some images counts them like any other, since there is no empty
+// namespace for the count to be mistaken for.
+func TestRenderScanNamesATermOnlyWhenItLeftNoImages(t *testing.T) {
+	page := scanPage(t)
+	page.Match = "api"
+	page.Images = page.Images[:1]
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if html := string(out); !strings.Contains(html, "· 1 image</p>") || strings.Contains(html, "nothing matches") {
+		t.Error("a sweep the term matched did not caption its image count")
+	}
+
+	page.Images = nil
+	out, err = RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if !strings.Contains(string(out), "· nothing matches &#39;api&#39;</p>") {
+		t.Error("a sweep the term emptied did not say nothing matched")
+	}
+}
+
 func TestRenderScanListsImagesAndCVEs(t *testing.T) {
 	out, err := RenderScan(scanPage(t))
 	if err != nil {

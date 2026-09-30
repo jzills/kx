@@ -264,7 +264,8 @@ func newTreeCommand(services Services) *cobra.Command {
 						return nil
 					}
 					// Every namespace dropped is the one case with nothing
-					// under the banner, so the banner says why.
+					// under the banner, so the banner says why — and the
+					// page's caption, which reads the same, says it too.
 					note := ""
 					if match != "" && len(roots) == 0 {
 						note = render.NothingMatches(match)
@@ -285,7 +286,7 @@ func newTreeCommand(services Services) *cobra.Command {
 						return err
 					}
 					page, err := web.RenderTree(web.TreePage{
-						Meta: meta, Scope: scopeCaption("Namespace", render.AllNamespaces),
+						Meta: meta, Scope: scopeCaption("Namespace", render.AllNamespaces, note),
 						AllNamespaces: true, Roots: roots,
 					})
 					if err != nil {

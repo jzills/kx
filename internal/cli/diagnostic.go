@@ -182,6 +182,7 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 		AllNamespaces: result.AllNamespaces,
 		Checked:       result.Checked,
 		Window:        render.WindowLabel(result.Window),
+		Match:         result.Match,
 		Reports:       result.All,
 	}
 }
