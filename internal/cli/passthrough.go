@@ -145,8 +145,43 @@ func scopeFlagBesideIndexError(flag, hint string) error {
 	return errors.New(message)
 }
 
+// clusterFlags are kubectl's flags that choose the cluster a command reaches,
+// as long and short spellings. --user, --token and --as are not among them:
+// they change who acts, not where, and an index says nothing about that.
+var clusterFlags = [][2]string{
+	{"--context", ""}, {"--kubeconfig", ""}, {"--cluster", ""}, {"--server", "-s"},
+}
+
+// clusterFlagIn reports the cluster-selecting flag present in argv, spelled the
+// way it was typed, or "" for none.
+func clusterFlagIn(args []string) string {
+	for _, flag := range clusterFlags {
+		long, short := flag[0], flag[1]
+		if !hasFlag(args, long, short) {
+			continue
+		}
+		if short == "" {
+			return long
+		}
+		return firstSpelling(args, long, short)
+	}
+	return ""
+}
+
+// clusterFlagBesideIndexError reports a cluster-selecting flag given beside an
+// index. An index is counted in one cluster, and kx refuses to spend it in
+// another (state's ContextMismatchError); the flag would have spent it there
+// anyway, on whatever the other cluster has under the same name.
+func clusterFlagBesideIndexError(flag string) error {
+	return fmt.Errorf(
+		"'%s' cannot be combined with an index — an index already carries the "+
+			"cluster it was listed from. To act on another cluster, switch to it "+
+			"with kx context and list it there.", flag)
+}
+
 // refuseScopeFlag rejects a namespace-scope flag in args that would contradict
-// a resolved index, given the namespace that index resolved to.
+// a resolved index, given the namespace that index resolved to. A
+// cluster-selecting flag is refused beside any index, cluster-scoped or not.
 //
 // kubectl takes the last -n it is given, and kx appends its own from the index
 // — so a second one silently won. For `kx delete` that meant a confirmation
@@ -159,6 +194,9 @@ func scopeFlagBesideIndexError(flag, hint string) error {
 // exactly what -n chooses (see DebugCommand.Execute). -A is refused either
 // way — there is no listing here for it to widen.
 func refuseScopeFlag(args []string, namespace string) error {
+	if flag := clusterFlagIn(args); flag != "" {
+		return clusterFlagBesideIndexError(flag)
+	}
 	flag := scopeFlagIn(args)
 	switch flag {
 	case "":
@@ -178,6 +216,9 @@ func refuseScopeFlag(args []string, namespace string) error {
 // namespace it needs is on each Resolved, and asking for it again cost a state
 // load per index on a path that had the answer in hand.
 func refuseScopeFlagResolved(resolved []Resolved, args []string) error {
+	if flag := clusterFlagIn(args); flag != "" {
+		return clusterFlagBesideIndexError(flag)
+	}
 	if scopeFlagIn(args) == "" {
 		return nil
 	}

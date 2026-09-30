@@ -99,6 +99,12 @@ func runGet(services Services, resource string, args []string, options getOption
 	if flag := scopeFlagIn(extra); flag != "" && clusterScoped(resource) {
 		return clusterScopedScopeError(flag, resource)
 	}
+	// An index carries its cluster as every index command's does, so a flag
+	// choosing another one is refused here too — --decode included, which
+	// would otherwise print a same-named Secret from the other cluster.
+	if flag := clusterFlagIn(extra); flag != "" && len(refs) > 0 {
+		return clusterFlagBesideIndexError(flag)
+	}
 
 	if options.Decode || options.HasKey {
 		// Resolved only when the command already names a Secret-shaped

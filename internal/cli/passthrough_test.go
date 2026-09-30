@@ -347,6 +347,107 @@ func TestPassthroughCommandsRefuseAScopeFlagBesideAnIndex(t *testing.T) {
 	}
 }
 
+// An index carries the cluster it was listed from as surely as its namespace:
+// kx refuses one counted in another context. A cluster-selecting flag beside
+// it went straight to kubectl, though, and retargeted the command at a
+// same-named resource in another cluster — `kx delete 1 -y --context=b`
+// deleted in b whatever 1 was called in a. Every command that resolves an
+// index and forwards flags refuses each spelling before kubectl runs.
+func TestIndexCommandsRefuseAClusterFlag(t *testing.T) {
+	commands := map[string]struct {
+		build func(Services) *cobra.Command
+		args  []string
+	}{
+		"describe":     {newDescribeCommand, []string{"1"}},
+		"logs":         {newLogsCommand, []string{"1"}},
+		"edit":         {newEditCommand, []string{"1"}},
+		"exec":         {newExecCommand, []string{"1"}},
+		"debug":        {newDebugCommand, []string{"1"}},
+		"port-forward": {newPortForwardCommand, []string{"1", "8080:80"}},
+		"cp":           {newCopyCommand, []string{"1:/tmp/x", "./y"}},
+		"drain":        {newDrainCommand, []string{"1"}},
+		"delete":       {newDeleteCommand, []string{"1", "-y"}},
+		"scale":        {newScaleCommand, []string{"1", "3"}},
+		"rollout":      {newRolloutCommand, []string{"status", "1"}},
+		"yaml":         {newYamlCommand, []string{"1"}},
+		"wait":         {newWaitCommand, []string{"1"}},
+		"set image":    {newSetCommand, []string{"image", "1", "nginx:2"}},
+		"get":          {newGetCommand, []string{"pods", "1"}},
+		"label": {func(services Services) *cobra.Command {
+			return newMetadataWriteCommand(services, "label", "labels", "", "")
+		}, []string{"1", "team=web"}},
+		"annotate": {func(services Services) *cobra.Command {
+			return newMetadataWriteCommand(services, "annotate", "annotations", "", "")
+		}, []string{"1", "team=web"}},
+	}
+	flags := [][]string{
+		{"--context=b"}, {"--context", "b"}, {"--kubeconfig=/tmp/b"},
+		{"--cluster=b"}, {"--server=https://b:6443"}, {"-s", "https://b:6443"},
+	}
+	for name, spec := range commands {
+		for _, flag := range flags {
+			t.Run(name+" "+flag[0], func(t *testing.T) {
+				kube := &recordingKubectl{output: "ok"}
+				services := switchServices(t, kube)
+				services.Confirm = func(string) error { return nil }
+				if err := services.State.Save(state.State{
+					Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+					Namespace: "prod",
+				}); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+				args := append(append([]string{}, spec.args...), flag...)
+				cmd := spec.build(services)
+				cmd.SetArgs(args)
+				cmd.SetOut(io.Discard)
+				cmd.SetErr(io.Discard)
+				err := cmd.Execute()
+				if err == nil || !strings.Contains(err.Error(),
+					"cannot be combined with an index — an index already carries the cluster") {
+					t.Errorf("kx %s %v: err = %v, want the cluster-flag refusal", name, args, err)
+				}
+				if calls := len(kube.runs) + len(kube.interactive); calls != 0 {
+					t.Errorf("kx %s %v made %d kubectl calls, want 0", name, args, calls)
+				}
+			})
+		}
+	}
+}
+
+// The refusal is about an index, not the flag: with no index there is nothing
+// for another cluster to contradict, and kubectl gets the flag as typed. And
+// --as, --user and --token choose who acts rather than where, so they still
+// pass beside one.
+func TestClusterFlagsPassWhereNoIndexIsSpent(t *testing.T) {
+	kube := &recordingKubectl{output: ""}
+	services := labelServices(t, kube)
+	services.Confirm = func(string) error { return nil }
+
+	cmd := newGetCommand(services)
+	cmd.SetArgs([]string{"pods", "--context=b"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx get pods --context=b: %v", err)
+	}
+	if len(kube.runs) == 0 || !strings.Contains(joined(kube.runs[0]), "--context=b") {
+		t.Errorf("kubectl calls = %q, want --context=b forwarded", kube.runs)
+	}
+
+	// Fresh state: the empty listing just saved retired index 1.
+	kube = &recordingKubectl{output: ""}
+	services = labelServices(t, kube)
+	services.Confirm = func(string) error { return nil }
+	cmd = newDeleteCommand(services)
+	cmd.SetArgs([]string{"1", "-y", "--as=admin"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx delete 1 -y --as=admin: %v", err)
+	}
+	if len(kube.runs) != 1 || joined(kube.runs[0]) != "delete Pod nginx -n prod --as=admin" {
+		t.Errorf("kubectl calls = %q, want --as forwarded", kube.runs)
+	}
+}
+
 // The four commands that swallowed kubectl's flags now forward them. Asserted
 // on the exact argv, because "no error" is what the old behaviour looked like
 // from the outside too — it just dropped the flag.
