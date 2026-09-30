@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -104,7 +105,7 @@ func registerFixtureGroupVersion(t *testing.T, perHostCacheDir, groupVersion str
 }
 
 // writeFixtureKubeconfig writes the minimal valid kubeconfig
-// genericclioptions.ConfigFlags needs to resolve a Host without touching a
+// newDiscoveryClient needs to resolve a Host without touching a
 // real cluster.
 func writeFixtureKubeconfig(t *testing.T, path, host string) {
 	t.Helper()
@@ -170,11 +171,8 @@ func writeFixtureKubeconfigWithExecPlugin(t *testing.T, path, host, markerPath s
 
 // setupFixtureEnv points KUBECONFIG and KUBECACHEDIR at a throwaway
 // kubeconfig and cache root, so these tests never touch the machine's real
-// ~/.kube. Returns the per-host cache directory ConfigFlags will actually
-// read from, computed the same way it does internally
-// (<KUBECACHEDIR>/discovery/<sanitized-host>) — tests need this to know
-// where to write fixture files, without this package having its own copy
-// of that computation (it doesn't; only cli-runtime does).
+// ~/.kube. Returns the per-host cache directory newDiscoveryClient will read
+// from, so a fixture written there is one the real code path finds.
 func setupFixtureEnv(t *testing.T, host string) (perHostCacheDir string) {
 	t.Helper()
 	cacheRoot := t.TempDir()
@@ -183,29 +181,46 @@ func setupFixtureEnv(t *testing.T, host string) (perHostCacheDir string) {
 	kubeconfigPath := filepath.Join(t.TempDir(), "kubeconfig")
 	writeFixtureKubeconfig(t, kubeconfigPath, host)
 	t.Setenv("KUBECONFIG", kubeconfigPath)
+	return discoveryCacheDir(cacheRoot, host)
+}
 
-	// Mirrors cli-runtime's own (unexported) computeDiscoverCacheDir:
-	// strip the scheme, replace anything outside [\w/.] with "_". Written
-	// here only because the test needs to place a fixture file at the same
-	// path the real, non-test code will independently arrive at — this is
-	// not production logic and must not be promoted into discovery.go.
-	schemeless := host
-	for _, prefix := range []string{"https://", "http://"} {
-		if len(schemeless) >= len(prefix) && schemeless[:len(prefix)] == prefix {
-			schemeless = schemeless[len(prefix):]
-			break
+// The directory kx reads has to be the one kubectl writes, or every lookup
+// misses. These are the directories kubectl's own code (cli-runtime v0.37.0's
+// computeDiscoverCacheDir) picks for each host — checked against it directly,
+// through its ConfigFlags, before the dependency was removed — so a change here
+// is a change kubectl did not make.
+func TestDiscoveryCacheDirMatchesKubectl(t *testing.T) {
+	for host, want := range map[string]string{
+		"https://127.0.0.1:6443":                        "127.0.0.1_6443",
+		"https://kubernetes.docker.internal:6443":       "kubernetes.docker.internal_6443",
+		"https://api.prod.example.com":                  "api.prod.example.com",
+		"https://example.com:8443/k8s/clusters/c-abc12": "example.com_8443/k8s/clusters/c_abc12",
+		"https://[::1]:6443":                            "___1__6443",
+		"http://localhost:8080":                         "localhost_8080",
+		// kubectl's character class admits parentheses, a quirk kept so the
+		// two never disagree.
+		"https://proxy.example.com/clusters/(prod)": "proxy.example.com/clusters/(prod)",
+	} {
+		if got := discoveryCacheDir("root", host); got != filepath.Join("root", "discovery", want) {
+			t.Errorf("discoveryCacheDir(%q) = %q, want root/discovery/%s", host, got, want)
 		}
 	}
-	safeHost := ""
-	for _, r := range schemeless {
-		if r == '_' || r == '.' || r == '/' || (r >= 'a' && r <= 'z') ||
-			(r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			safeHost += string(r)
-		} else {
-			safeHost += "_"
-		}
+}
+
+// $KUBECACHEDIR moves the cache for kubectl, so it moves it for kx.
+func TestCacheRootFollowsKubectl(t *testing.T) {
+	t.Setenv("KUBECACHEDIR", "/elsewhere")
+	if got := cacheRoot(); got != "/elsewhere" {
+		t.Errorf("cacheRoot() with KUBECACHEDIR = %q, want /elsewhere", got)
 	}
-	return filepath.Join(cacheRoot, "discovery", safeHost)
+	if goruntime.GOOS == "windows" {
+		return // homedir.HomeDir reads USERPROFILE there, not HOME.
+	}
+	t.Setenv("KUBECACHEDIR", "")
+	t.Setenv("HOME", "/home/someone")
+	if got := cacheRoot(); got != filepath.Join("/home/someone", ".kube", "cache") {
+		t.Errorf("cacheRoot() = %q, want ~/.kube/cache", got)
+	}
 }
 
 func TestNewDiscoveryClientServesFreshFileWithoutTouchingTheNetwork(t *testing.T) {
