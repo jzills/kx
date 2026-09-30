@@ -83,6 +83,12 @@ func TestWaitForOverridesTheDefault(t *testing.T) {
 			"wait Deployment/api -n prod --for=condition=Available", "· condition=Available"},
 		{kinds.Pod, []string{"1", "--for=delete", "--timeout=2m"},
 			"wait Pod/api -n prod --for=delete --timeout=2m", "· deleted"},
+		// kubectl requires every --for, so the line names each one, in either
+		// spelling. It named only the last: the flag was read with the
+		// helper that keeps the final occurrence.
+		{kinds.Pod, []string{"1", "--for=condition=Ready", "--for", "condition=Initialized"},
+			"wait Pod/api -n prod --for=condition=Ready --for condition=Initialized",
+			"· condition=Ready, condition=Initialized"},
 	} {
 		kube := &recordingKubectl{}
 		stdout, err := runWait(t, kube, tc.kind, "prod", []string{"api"}, nil, tc.args...)

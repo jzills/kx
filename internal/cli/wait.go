@@ -100,18 +100,14 @@ func (c WaitCommand) kubectlWait(target Resolved, forArgs, extraArgs []string, l
 // the value itself otherwise, and every value joined when there are several
 // (kubectl requires all of them).
 func forLabel(extraArgs []string) string {
-	var values []string
-	rest := extraArgs
-	for hasFlag(rest, "--for", "") {
-		value, remaining, err := extractString(rest, "--for", "")
-		if err != nil {
-			break
-		}
-		rest = remaining
+	values, _, err := extractStrings(extraArgs, "--for", "")
+	if err != nil {
+		return ""
+	}
+	for i, value := range values {
 		if value == "delete" {
-			value = "deleted"
+			values[i] = "deleted"
 		}
-		values = append(values, value)
 	}
 	return strings.Join(values, ", ")
 }
