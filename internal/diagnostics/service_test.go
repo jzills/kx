@@ -872,3 +872,33 @@ func groupWarnings(t *testing.T, scripted []corev1.Event) []EventSummary {
 		time.Time{}, kinds.Pod, "web", "prod", nil, scripted,
 	)
 }
+
+// Every event listing a diagnosis makes asks the API server for Warning events
+// only — the one type it reads. Checked on the request, because the fake
+// clientset ignores field selectors and would answer an unfiltered list the
+// same way.
+func TestDiagnosticsListWarningEventsOnly(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: meta("api", "prod")},
+	)
+	var selectors []string
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		selectors = append(selectors, action.(k8stesting.ListActionImpl).ListOptions.FieldSelector)
+		return true, &corev1.EventList{}, nil
+	})
+	s := New(client)
+	if _, err := s.Sweep(context.Background(), "prod"); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if _, err := s.Gather(context.Background(), kinds.Deployment, "api", "prod"); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(selectors) == 0 {
+		t.Fatal("no event listing was made")
+	}
+	for i, selector := range selectors {
+		if selector != "type=Warning" {
+			t.Errorf("event listing %d selected %q, want type=Warning", i, selector)
+		}
+	}
+}

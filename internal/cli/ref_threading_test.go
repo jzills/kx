@@ -21,6 +21,9 @@ import (
 type noEventsService struct{}
 
 func (noEventsService) Get(context.Context, string) ([]corev1.Event, error) { return nil, nil }
+func (noEventsService) Warnings(context.Context, string) ([]corev1.Event, error) {
+	return nil, nil
+}
 func (noEventsService) Filter([]corev1.Event, string, kinds.Kind) []corev1.Event {
 	return nil
 }

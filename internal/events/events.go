@@ -28,8 +28,14 @@ type Row struct {
 }
 
 // Service reads events from the API server.
+//
+// Get is every event, for kx events, which shows Normal ones too. Warnings is
+// the Warning events alone, for the diagnostics, which read nothing else — the
+// narrowing done by the API server, so a cluster-wide sweep no longer pulls
+// every event in the cluster to throw nine in ten of them away.
 type Service interface {
 	Get(ctx context.Context, namespace string) ([]corev1.Event, error)
+	Warnings(ctx context.Context, namespace string) ([]corev1.Event, error)
 	Filter(events []corev1.Event, name string, kind kinds.Kind) []corev1.Event
 }
 
@@ -38,12 +44,39 @@ type APIService struct {
 	Client kubernetes.Interface
 }
 
+// eventPageSize bounds each list request. Paged so a large cluster's events
+// arrive as a series of modest responses rather than one the API server has to
+// assemble, and a client has to receive, before its request times out.
+const eventPageSize = 500
+
+// warningSelector is the server-side filter for Warning events. type is one of
+// the few fields core/v1 Events can be selected on.
+const warningSelector = "type=Warning"
+
 func (s APIService) Get(ctx context.Context, namespace string) ([]corev1.Event, error) {
-	list, err := s.Client.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
+	return s.list(ctx, namespace, "")
+}
+
+func (s APIService) Warnings(ctx context.Context, namespace string) ([]corev1.Event, error) {
+	return s.list(ctx, namespace, warningSelector)
+}
+
+// list reads every page of a namespace's events (every namespace's, for an
+// empty one) matching selector.
+func (s APIService) list(ctx context.Context, namespace, selector string) ([]corev1.Event, error) {
+	var events []corev1.Event
+	options := metav1.ListOptions{FieldSelector: selector, Limit: eventPageSize}
+	for {
+		page, err := s.Client.CoreV1().Events(namespace).List(ctx, options)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, page.Items...)
+		if page.Continue == "" {
+			return events, nil
+		}
+		options.Continue = page.Continue
 	}
-	return list.Items, nil
 }
 
 // Filter narrows events to one object, matched on the involved object's name
