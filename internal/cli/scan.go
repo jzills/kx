@@ -496,9 +496,10 @@ func imagesNoun(count int) string {
 }
 
 // scanPage builds the HTML page from the same rows the terminal summary
-// renders, so the two views cannot drift apart.
-func scanPage(scope string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
-	return web.ScanPage{Meta: meta, Scope: scope, Images: rows}
+// renders, so the two views cannot drift apart. match is the sweep's --match
+// term, empty for none, so a sweep it emptied says so as the terminal does.
+func scanPage(scope, match string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
+	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Images: rows}
 }
 
 // sweepPageScope captions a namespace sweep's page with the same "Mixed · "
@@ -778,7 +779,7 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderScan(scanPage(pageScope, rows, meta))
+				page, err := web.RenderScan(scanPage(pageScope, match, rows, meta))
 				if err != nil {
 					return err
 				}

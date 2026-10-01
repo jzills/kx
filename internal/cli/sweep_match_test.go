@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -316,5 +317,61 @@ func TestTreeMatchThroughTheCommand(t *testing.T) {
 	}
 	if got := sink.String(); !strings.Contains(got, "nothing matches 'absent'") {
 		t.Errorf("output = %q, want the banner to say nothing matches 'absent'", got)
+	}
+}
+
+// A term that matched nothing says so on the HTML page too, not only in the
+// terminal: the page said "0 checked" or "0 images", the reading of an empty
+// namespace the terminal caption was changed to avoid, while the scope may be
+// full of resources that didn't match. Driven through each command to its
+// --out file, since the page is built from what the command hands it.
+//
+// Anchored to the closing tag, and to html/template's escaping of the quotes,
+// so the assertion is on the caption's markup and nothing else on the page.
+func TestSweepPagesNameATermThatMatchedNothing(t *testing.T) {
+	const want = "nothing matches &#39;absent&#39;</p>"
+	for _, tc := range []struct {
+		name  string
+		empty string
+		run   func(t *testing.T, out string) error
+	}{
+		{"diag", "0 checked", func(t *testing.T, out string) error {
+			cmd := newDiagnosticCommand(diagnosticHTMLServices(t), "diagnostic", []string{"diag"})
+			cmd.SetContext(context.Background())
+			cmd.SetArgs([]string{"-n", "prod", "-m", "absent", "--out", out})
+			return cmd.Execute()
+		}},
+		{"scan", "0 images</p>", func(t *testing.T, out string) error {
+			services, _ := scanMatchServices(t, matchScanItems)
+			cmd := newScanCommand(services)
+			cmd.SetArgs([]string{"-m", "absent", "--out", out})
+			return cmd.Execute()
+		}},
+		{"tree -A", "all namespaces</p>", func(t *testing.T, out string) error {
+			services := diagnosticHTMLServices(t)
+			services.Kubernetes = func() (kubernetes.Interface, error) { return matchForest(), nil }
+			cmd := newTreeCommand(services)
+			cmd.SetContext(context.Background())
+			cmd.SetArgs([]string{"-A", "-m", "absent", "--out", out})
+			return cmd.Execute()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quietRender(t)
+			out := filepath.Join(t.TempDir(), "report.html")
+			if err := tc.run(t, out); err != nil {
+				t.Fatalf("kx %s -m absent --out: %v", tc.name, err)
+			}
+			page, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatalf("reading the page: %v", err)
+			}
+			if !strings.Contains(string(page), want) {
+				t.Errorf("page has no %q caption", want)
+			}
+			if strings.Contains(string(page), tc.empty) {
+				t.Errorf("page still says %q, the empty-scope reading", tc.empty)
+			}
+		})
 	}
 }

@@ -128,7 +128,7 @@
 {{else}}
   <div class="block">
     {{if eq .Checked 0}}
-      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{with .Window}} · {{.}}{{end}}</p>
+      <p class="caption">Mixed · {{.Scope}} · {{if .Match}}{{nothingMatches .Match}}{{else}}{{.Checked}} checked{{end}}{{with .Window}} · {{.}}{{end}}</p>
     {{else}}
       <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{with .Window}} · {{.}}{{end}}</p>
       <div class="grid-mount" data-kx-grid="diag" data-all-namespaces="{{.AllNamespaces}}"></div>

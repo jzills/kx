@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -196,9 +197,22 @@ func newSetCommand(services Services) *cobra.Command {
 		// pinning test sees as mutating. Like the annotation everywhere else it
 		// arms nothing — image's RunE arms the agent notice itself.
 		Annotations: mutatingAnnotations,
+		// cobra defaults this for the root alone; 2 is its default.
+		SuggestionsMinimumDistance: 2,
+		// Without a RunE, cobra answers a subcommand it can't find with this
+		// group's help and a nil error — its unknown-command check runs for
+		// the root alone — so `kx set env 1 FOO=bar` exited 0 having changed
+		// nothing. Reaching here with arguments means none matched.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return unknownSetCommand(cmd, args[0])
+		},
 	}
-	// Wrapped here rather than at the root: withRefresh wraps a RunE, and
-	// the group has none. A stale index then relists as it does for scale.
+	// Wrapped here rather than at the root: withRefresh wraps the RunE that
+	// resolves an index, and the group's own only refuses. A stale index then
+	// relists as it does for scale.
 	cmd.AddCommand(withRefresh(services, newSetImageCommand(services)))
 	return cmd
 }
@@ -274,4 +288,25 @@ func newSetImageCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// kubectlSetVerbs are kubectl set's subcommands kx doesn't wrap.
+var kubectlSetVerbs = map[string]bool{
+	"env": true, "resources": true, "selector": true, "serviceaccount": true, "subject": true,
+}
+
+// unknownSetCommand refuses a set subcommand kx doesn't have, in cobra's own
+// wording for the root's unknown commands. One of kubectl's is pointed at
+// kx ref, which spends an index on any verb; anything else gets cobra's
+// suggestions, so a typo of image is offered image.
+func unknownSetCommand(cmd *cobra.Command, name string) error {
+	message := fmt.Sprintf("unknown command %q for %q", name, cmd.CommandPath())
+	if kubectlSetVerbs[name] {
+		return fmt.Errorf("%s — only set image is wrapped. For kubectl set %s, pass the "+
+			"index through kx ref: 'kubectl set %s $(kx ref <index>) ...'.", message, name, name)
+	}
+	if suggestions := cmd.SuggestionsFor(name); len(suggestions) > 0 {
+		message += "\n\nDid you mean this?\n\t" + strings.Join(suggestions, "\n\t")
+	}
+	return errors.New(message)
 }

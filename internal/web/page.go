@@ -61,6 +61,10 @@ type DiagPage struct {
 	// place that decides how a window reads, and a page that spelled it
 	// differently from the terminal caption beside it would be its own bug.
 	Window string
+	// Match is the --match term the sweep was narrowed by, empty for none.
+	// Only a sweep it emptied shows it: there, "0 checked" would read as an
+	// empty namespace, which it may well not be.
+	Match string
 	// Reports are every swept resource, most severe first, healthy included —
 	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
@@ -69,7 +73,10 @@ type DiagPage struct {
 // ScanPage is one image-scan sweep.
 type ScanPage struct {
 	Meta
-	Scope  string
+	Scope string
+	// Match is the --match term the sweep was narrowed by, empty for none —
+	// named on the page when it left no images, as DiagPage's is.
+	Match  string
 	Images []scanner.ImageScan
 }
 
@@ -454,6 +461,9 @@ var funcs = template.FuncMap{
 	// window spells a report's own window — "last 24h" — so the page says
 	// what it was allowed to see, the way the terminal banner does.
 	"window": render.WindowLabel,
+	// nothingMatches captions a sweep a --match term emptied, in the words
+	// the terminal uses for it.
+	"nothingMatches": render.NothingMatches,
 	"cpuUsage": func(c diagnostics.ContainerDiagnostic) Usage {
 		return usageOf(c.CPUUsage, c.CPULimit, "cpu")
 	},

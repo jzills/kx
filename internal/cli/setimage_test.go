@@ -167,21 +167,25 @@ func TestSetImageOnACronJob(t *testing.T) {
 }
 
 // kubectl's flags pass through after the images, and a dry run says nothing
-// changed and points at no rollout, since none began.
+// changed and points at no rollout, since none began. Every spelling kubectl
+// reads as a dry run counts: a bare --dry-run is a client one, and it printed
+// "api:v1 → api:v2" and a rollout to follow for a Deployment left untouched.
 func TestSetImageDryRun(t *testing.T) {
-	stdout, _, kube, err := setImage(t, kinds.Deployment, oneContainerDeploy, false,
-		"1", "api:v2", "--dry-run=server")
-	if err != nil {
-		t.Fatalf("kx set image --dry-run=server: %v", err)
-	}
-	if got := setCalls(kube); len(got) != 1 || !strings.HasSuffix(got[0], "-n prod --dry-run=server") {
-		t.Errorf("kubectl set calls = %q, want --dry-run=server forwarded", got)
-	}
-	if !strings.Contains(stdout, "(dry run — nothing was changed)") {
-		t.Errorf("stdout = %q, want the dry-run label", stdout)
-	}
-	if strings.Contains(stdout, "rollout status") {
-		t.Errorf("stdout = %q, want no rollout hint on a dry run", stdout)
+	for _, flag := range []string{"--dry-run=server", "--dry-run", "--dry-run=true"} {
+		stdout, _, kube, err := setImage(t, kinds.Deployment, oneContainerDeploy, false,
+			"1", "api:v2", flag)
+		if err != nil {
+			t.Fatalf("kx set image %s: %v", flag, err)
+		}
+		if got := setCalls(kube); len(got) != 1 || !strings.HasSuffix(got[0], "-n prod "+flag) {
+			t.Errorf("kubectl set calls = %q, want %s forwarded", got, flag)
+		}
+		if !strings.Contains(stdout, "(dry run — nothing was changed)") {
+			t.Errorf("stdout = %q for %s, want the dry-run label", stdout, flag)
+		}
+		if strings.Contains(stdout, "rollout status") {
+			t.Errorf("stdout = %q for %s, want no rollout hint on a dry run", stdout, flag)
+		}
 	}
 }
 
@@ -226,5 +230,46 @@ func TestSetImageToTheSameImageHintsAtNoRollout(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "api: already api:v1") || strings.Contains(stdout, "rollout status") {
 		t.Errorf("stdout = %q, want the unchanged line and no rollout hint", stdout)
+	}
+}
+
+// kx set is a group with no RunE of its own, and cobra answers a non-root
+// group's unknown subcommand with the group's help and a nil error — so
+// `kx set env 1 FOO=bar` exited 0 having changed nothing, and a script took it
+// for success. Driven through the root, because run on its own the group is a
+// root, and cobra already refuses an unknown subcommand there.
+func TestSetRefusesAnUnknownSubcommand(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		// One of kubectl's own set verbs is pointed at kx ref, the way to
+		// spend an index on a verb kx doesn't wrap.
+		{[]string{"set", "env", "1", "FOO=bar"}, "kx ref"},
+		// A typo is offered the command it was probably meant to be.
+		{[]string{"set", "imgae", "1", "nginx:2"}, "image"},
+	} {
+		quietRender(t)
+		err := Execute(NewRoot(argvServices(t), "test"), tc.argv)
+		if err == nil {
+			t.Errorf("kx %v returned no error", tc.argv)
+			continue
+		}
+		if !strings.Contains(err.Error(), `unknown command "`+tc.argv[1]+`" for "kx set"`) ||
+			!strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx %v: err = %q, want it refused as unknown, mentioning %q",
+				tc.argv, err, tc.want)
+		}
+	}
+}
+
+// The group alone is still a request for its help, not a mistake.
+func TestSetAloneShowsHelp(t *testing.T) {
+	sink := captureRender(t)
+	if err := Execute(NewRoot(argvServices(t), "test"), []string{"set"}); err != nil {
+		t.Fatalf("kx set: %v", err)
+	}
+	if !strings.Contains(sink.String(), "kx set image") {
+		t.Errorf("kx set printed %q, want its help", sink.String())
 	}
 }

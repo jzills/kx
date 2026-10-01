@@ -45,6 +45,56 @@ type WaitCommand struct {
 	Kubectl    kubectl.Service
 	Kubernetes func() (kubernetes.Interface, error)
 	Status     func(string) func()
+	// Now is the clock the shared deadline is kept on; nil is time.Now.
+	Now func() time.Time
+}
+
+// ExecuteAll waits for each target in turn and reports each as it is met,
+// stopping at the first that fails or times out.
+//
+// timeout is one deadline for the whole set, as kubectl wait keeps one: the
+// first target gets the flags as typed, and each after it the time left, as a
+// --timeout of its own. A target reached with none left times out without
+// kubectl being asked. A zero timeout has no deadline to share — it means
+// check once — so every target is checked once.
+func (c WaitCommand) ExecuteAll(
+	ctx context.Context, targets []Resolved, timeout time.Duration, extraArgs []string,
+	report func(target Resolved, met string),
+) error {
+	now := c.Now
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	for i, target := range targets {
+		remaining, args := timeout, extraArgs
+		if i > 0 {
+			remaining = 0
+			if timeout > 0 {
+				remaining = (timeout - now().Sub(start)).Truncate(time.Millisecond)
+				if remaining <= 0 {
+					return timedOut(target, timeout)
+				}
+			}
+			args = withWaitTimeout(extraArgs, remaining)
+		}
+		met, err := c.Execute(ctx, target, remaining, args)
+		if err != nil {
+			return err
+		}
+		report(target, met)
+	}
+	return nil
+}
+
+// withWaitTimeout replaces any --timeout in extraArgs with timeout, for the
+// kubectl wait of a target reached part-way through the shared deadline.
+func withWaitTimeout(extraArgs []string, timeout time.Duration) []string {
+	_, rest, err := extractStrings(extraArgs, "--timeout", "")
+	if err != nil {
+		rest = extraArgs
+	}
+	return append(append([]string{}, rest...), "--timeout="+timeout.String())
 }
 
 // Execute waits for one resource and returns what was met, for the success
@@ -100,18 +150,14 @@ func (c WaitCommand) kubectlWait(target Resolved, forArgs, extraArgs []string, l
 // the value itself otherwise, and every value joined when there are several
 // (kubectl requires all of them).
 func forLabel(extraArgs []string) string {
-	var values []string
-	rest := extraArgs
-	for hasFlag(rest, "--for", "") {
-		value, remaining, err := extractString(rest, "--for", "")
-		if err != nil {
-			break
-		}
-		rest = remaining
+	values, _, err := extractStrings(extraArgs, "--for", "")
+	if err != nil {
+		return ""
+	}
+	for i, value := range values {
 		if value == "delete" {
-			value = "deleted"
+			values[i] = "deleted"
 		}
-		values = append(values, value)
 	}
 	return strings.Join(values, ", ")
 }
@@ -128,9 +174,22 @@ func (c WaitCommand) waitJob(ctx context.Context, target Resolved, timeout time.
 	if err != nil {
 		return "", err
 	}
+	jobs := client.BatchV1().Jobs(target.Namespace)
+	// kubectl's --timeout=0: read once, and a Job not finished by then has
+	// timed out. Before the deadline is set, since a zero one has already
+	// passed, and a read made under it fails without being sent.
+	if timeout == 0 {
+		job, err := jobs.Get(ctx, target.Name, metav1.GetOptions{})
+		if err != nil {
+			return "", c.apiError(ctx, target, timeout, err)
+		}
+		if label, err, done := jobOutcome(target, job); done {
+			return label, err
+		}
+		return "", timedOut(target, timeout)
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	jobs := client.BatchV1().Jobs(target.Namespace)
 	for {
 		job, err := jobs.Get(ctx, target.Name, metav1.GetOptions{})
 		if err != nil {
@@ -207,22 +266,31 @@ func (c WaitCommand) waitService(ctx context.Context, target Resolved, extraArgs
 func (c WaitCommand) apiError(ctx context.Context, target Resolved, timeout time.Duration, err error) error {
 	switch {
 	case apierrors.IsNotFound(err):
-		return StaleResourceError{
-			Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
-		}
+		return staleTarget(target)
 	case ctx.Err() != nil && errors.Is(err, ctx.Err()):
 		return timedOut(target, timeout)
 	}
 	return err
 }
 
+// staleTarget is the stale-index error for a resource found gone, which
+// withRefresh answers by relisting.
+func staleTarget(target Resolved) error {
+	return StaleResourceError{
+		Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+	}
+}
+
 func timedOut(target Resolved, timeout time.Duration) error {
 	return fmt.Errorf("Timed out after %s waiting for %s/%s.", timeout, target.Kind, target.Name)
 }
 
+// negativeWaitTimeout is what kubectl waits for given a negative --timeout.
+const negativeWaitTimeout = 7 * 24 * time.Hour
+
 // waitTimeout reads --timeout for the waits kx carries out itself, leaving it
-// in the arguments for the ones kubectl does. kubectl's spelling: a Go
-// duration, where 0 means check once.
+// in the arguments for the ones kubectl does. kubectl's spelling and meaning:
+// a Go duration, where 0 means check once and a negative one means a week.
 func waitTimeout(extraArgs []string) (time.Duration, error) {
 	value, _, err := extractString(extraArgs, "--timeout", "")
 	if err != nil || value == "" {
@@ -231,6 +299,9 @@ func waitTimeout(extraArgs []string) (time.Duration, error) {
 	timeout, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("Invalid value for '--timeout': '%s' is not a duration like 30s or 5m.", value)
+	}
+	if timeout < 0 {
+		return negativeWaitTimeout, nil
 	}
 	return timeout, nil
 }
@@ -251,7 +322,9 @@ func newWaitCommand(services Services) *cobra.Command {
 			"--for=condition=Ready, --for=delete, --for=jsonpath=... . --timeout is 30s " +
 			"unless given, as it is for kubectl.\n\n" +
 			"Several indexes are all resolved before anything waits, then waited for in " +
-			"order; the first that fails or times out ends the command.\n\n" +
+			"order; the first that fails or times out ends the command. --timeout covers " +
+			"them together, as it does for kubectl: each waits for what the ones before " +
+			"it left, not a timeout of its own.\n\n" +
 			"Unrecognized flags are passed through to kubectl.",
 		Example: "  kx wait 2\n  kx wait 1..4 --timeout=2m\n  kx wait @db-claim\n" +
 			"  kx wait 3 --for=delete\n  kx wait 5 --for=condition=Ready=false",
@@ -283,15 +356,11 @@ func newWaitCommand(services Services) *cobra.Command {
 			command := WaitCommand{
 				Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
 			}
-			for _, target := range resolved {
-				met, err := command.Execute(cmd.Context(), target, timeout, extra)
-				if err != nil {
-					return err
-				}
-				render.Success(strings.Join(captionPartsOf(
-					string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
-			}
-			return nil
+			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
+				func(target Resolved, met string) {
+					render.Success(strings.Join(captionPartsOf(
+						string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
+				})
 		},
 	}
 }
@@ -308,9 +377,9 @@ func captionPartsOf(parts ...string) []string {
 	return kept
 }
 
-// watchJob reads events until the Job finishes, the channel closes, or ctx
-// ends — the deadline is selected on directly rather than left to close the
-// channel, which a watch is not obliged to do promptly.
+// watchJob reads events until the Job finishes or is deleted, the channel
+// closes, or ctx ends — the deadline is selected on directly rather than left
+// to close the channel, which a watch is not obliged to do promptly.
 func watchJob(ctx context.Context, target Resolved, watcher watch.Interface) (string, error, bool) {
 	for {
 		select {
@@ -319,6 +388,12 @@ func watchJob(ctx context.Context, target Resolved, watcher watch.Interface) (st
 		case event, open := <-watcher.ResultChan():
 			if !open {
 				return "", nil, false
+			}
+			// Gone mid-wait is gone: the stale-index error a Job already
+			// missing when the wait began gets, rather than the rest of the
+			// timeout spent watching for an outcome it can no longer have.
+			if event.Type == watch.Deleted {
+				return "", staleTarget(target), true
 			}
 			if updated, ok := event.Object.(*batchv1.Job); ok {
 				if label, err, done := jobOutcome(target, updated); done {

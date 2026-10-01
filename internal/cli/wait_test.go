@@ -2,8 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -78,6 +83,12 @@ func TestWaitForOverridesTheDefault(t *testing.T) {
 			"wait Deployment/api -n prod --for=condition=Available", "· condition=Available"},
 		{kinds.Pod, []string{"1", "--for=delete", "--timeout=2m"},
 			"wait Pod/api -n prod --for=delete --timeout=2m", "· deleted"},
+		// kubectl requires every --for, so the line names each one, in either
+		// spelling. It named only the last: the flag was read with the
+		// helper that keeps the final occurrence.
+		{kinds.Pod, []string{"1", "--for=condition=Ready", "--for", "condition=Initialized"},
+			"wait Pod/api -n prod --for=condition=Ready --for condition=Initialized",
+			"· condition=Ready, condition=Initialized"},
 	} {
 		kube := &recordingKubectl{}
 		stdout, err := runWait(t, kube, tc.kind, "prod", []string{"api"}, nil, tc.args...)
@@ -244,11 +255,199 @@ func TestWaitForAJobTimesOut(t *testing.T) {
 	}
 }
 
+// A Job deleted while it is watched is gone now, not later: the wait ends on
+// the delete with the stale-index error, as it does for a Job already gone
+// when the wait began. It ran out the whole timeout instead, then said it had
+// timed out on a Job that no longer existed.
+func TestWaitForAJobDeletedMidWaitIsStale(t *testing.T) {
+	watcher := watch.NewFake()
+	go watcher.Delete(job())
+	_, err := waitForJob(t, fake.NewSimpleClientset(job()), watcher, 5*time.Second)
+	var stale StaleResourceError
+	if !errors.As(err, &stale) || !isStale(err) {
+		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
 // A Job that is gone is the stale-index error withRefresh relists on.
 func TestWaitForAVanishedJobIsStale(t *testing.T) {
 	_, err := waitForJob(t, fake.NewSimpleClientset(), nil, time.Second)
 	var stale StaleResourceError
 	if !errors.As(err, &stale) || !isStale(err) {
 		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
+// jobServer serves one Job to a real client-go client, and counts the
+// requests that are anything but a read of it.
+//
+// A real client rather than the fake, because the fake ignores its context:
+// the bug this guards was a context already past its deadline, which a real
+// request refuses before it is sent, and the fake answers regardless.
+func jobServer(t *testing.T, served *batchv1.Job) (kubernetes.Interface, *atomic.Int32) {
+	t.Helper()
+	var others atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/apis/batch/v1/namespaces/prod/jobs/migrate" {
+			others.Add(1)
+			http.NotFound(w, r)
+			return
+		}
+		served.APIVersion, served.Kind = "batch/v1", "Job"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(served)
+	}))
+	t.Cleanup(server.Close)
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("client for %s: %v", server.URL, err)
+	}
+	return client, &others
+}
+
+// kubectl reads --timeout=0 as "check once" and a negative one as a week. kx's
+// own Job wait handed either straight to context.WithTimeout, whose deadline
+// had then already passed, so the Job's first read failed before it was sent:
+// `kx wait 1 --timeout=0` on a Job that had finished said "Timed out after 0s".
+func TestWaitForAFinishedJobWithAZeroOrNegativeTimeout(t *testing.T) {
+	for _, value := range []string{"0", "0s", "-1s"} {
+		client, _ := jobServer(t, job(jobCondition(batchv1.JobComplete, "", "")))
+		timeout, err := waitTimeout([]string{"--timeout=" + value})
+		if err != nil {
+			t.Fatalf("waitTimeout(%s): %v", value, err)
+		}
+		met, err := WaitCommand{
+			Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+		}.Execute(context.Background(), jobTarget, timeout, nil)
+		if err != nil || met != "Complete" {
+			t.Errorf("--timeout=%s on a complete Job: met=%q err=%v, want Complete", value, met, err)
+		}
+	}
+}
+
+// Checking once means exactly that: a Job still running is reported as not
+// finished at once, without a watch being opened for it.
+func TestWaitForARunningJobWithAZeroTimeoutChecksOnce(t *testing.T) {
+	client, others := jobServer(t, job())
+	_, err := WaitCommand{
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+	}.Execute(context.Background(), jobTarget, 0, nil)
+	if err == nil || err.Error() != "Timed out after 0s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout message", err)
+	}
+	if n := others.Load(); n != 0 {
+		t.Errorf("made %d requests besides the one read, want none", n)
+	}
+}
+
+// clockKubectl is recordingKubectl on a fake clock that each kubectl call
+// moves forward by the next of steps, standing in for how long that wait took.
+type clockKubectl struct {
+	*recordingKubectl
+	now   time.Time
+	steps []time.Duration
+}
+
+func (k *clockKubectl) Run(args []string) (string, error) {
+	if len(k.steps) > 0 {
+		k.now = k.now.Add(k.steps[0])
+		k.steps = k.steps[1:]
+	}
+	return k.recordingKubectl.Run(args)
+}
+
+func podTarget(index int, name string) Resolved {
+	return Resolved{Ref: state.Ref{Index: index}, Kind: kinds.Pod, Name: name, Namespace: "prod"}
+}
+
+// waitAll runs ExecuteAll over targets on kube's clock and returns the lines
+// it reported.
+func waitAll(
+	t *testing.T, kube *clockKubectl, client kubernetes.Interface, targets []Resolved,
+	extra ...string,
+) ([]string, error) {
+	t.Helper()
+	timeout, err := waitTimeout(extra)
+	if err != nil {
+		t.Fatalf("waitTimeout(%v): %v", extra, err)
+	}
+	var met []string
+	err = WaitCommand{
+		Kubectl: kube, Status: noStatus, Now: func() time.Time { return kube.now },
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil },
+	}.ExecuteAll(context.Background(), targets, timeout, extra, func(target Resolved, what string) {
+		met = append(met, target.Name+" "+what)
+	})
+	return met, err
+}
+
+// kubectl wait keeps one deadline for everything it waits on; kx waited on
+// each index with the whole --timeout, so three pods that each came up just
+// before their own could take three times as long as the caller allowed. The
+// first wait gets the flags as typed, and each after it what is left.
+func TestWaitSharesOneDeadlineAcrossIndexes(t *testing.T) {
+	for _, tc := range []struct {
+		extra      []string
+		wantFirst  string
+		wantSecond string
+	}{
+		{[]string{"--timeout=1m"},
+			"wait Pod/a -n prod --for=condition=Ready --timeout=1m",
+			"wait Pod/b -n prod --for=condition=Ready --timeout=15s"},
+		// No --timeout is kubectl's 30s, which is kx's too.
+		{nil,
+			"wait Pod/a -n prod --for=condition=Ready",
+			"wait Pod/b -n prod --for=condition=Ready --timeout=0s"},
+	} {
+		kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{45 * time.Second}}
+		if tc.extra == nil {
+			kube.steps = []time.Duration{30 * time.Second}
+		}
+		_, err := waitAll(t, kube, nil, []Resolved{podTarget(1, "a"), podTarget(2, "b")}, tc.extra...)
+		if tc.extra == nil {
+			// All 30s spent on the first: the second is out of time before
+			// it starts, and kubectl is not asked.
+			if err == nil || err.Error() != "Timed out after 30s waiting for Pod/b." {
+				t.Errorf("err = %v, want the second to time out unasked", err)
+			}
+			if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != tc.wantFirst {
+				t.Errorf("kubectl = %q, want only %q", kube.runs, tc.wantFirst)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ExecuteAll(%v): %v", tc.extra, err)
+		}
+		if len(kube.runs) != 2 || joinArgs(kube.runs[0]) != tc.wantFirst ||
+			joinArgs(kube.runs[1]) != tc.wantSecond {
+			t.Errorf("kubectl = %q, want %q then %q", kube.runs, tc.wantFirst, tc.wantSecond)
+		}
+	}
+}
+
+// --timeout=0 checks each index once, however long the checks take: there is
+// no deadline to run out, so every one is asked.
+func TestWaitWithAZeroTimeoutChecksEveryIndexOnce(t *testing.T) {
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{time.Second}}
+	met, err := waitAll(t, kube, nil,
+		[]Resolved{podTarget(1, "a"), podTarget(2, "b")}, "--timeout=0")
+	if err != nil || len(met) != 2 {
+		t.Fatalf("met=%q err=%v, want both checked", met, err)
+	}
+	if got := joinArgs(kube.runs[1]); got != "wait Pod/b -n prod --for=condition=Ready --timeout=0s" {
+		t.Errorf("second kubectl = %q, want --timeout=0s", got)
+	}
+}
+
+// A Job kx waits on itself gets what is left too, not the whole timeout.
+func TestWaitGivesALaterJobWhatIsLeft(t *testing.T) {
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{2*time.Second - 50*time.Millisecond}}
+	client := fake.NewSimpleClientset(job())
+	client.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, watch.NewFake(), nil
+	})
+	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=2s")
+	if err == nil || err.Error() != "Timed out after 50ms waiting for Job/migrate." {
+		t.Errorf("err = %v, want the Job to time out on the 50ms left", err)
 	}
 }

@@ -1,6 +1,6 @@
 {{define "body"}}
 <div class="block">
-  <p class="caption">{{.Scope}} · {{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}</p>
+  <p class="caption">{{.Scope}} · {{if and .Match (not .Images)}}{{nothingMatches .Match}}{{else}}{{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}{{end}}</p>
 
   <p class="label">Images</p>
   <div class="grid-mount" data-kx-grid="scan-images"></div>
