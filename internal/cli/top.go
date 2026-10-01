@@ -44,12 +44,22 @@ func (c TopCommand) EnsureAvailable() error {
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table index.Table, namespace string, err error) {
-	if err := c.EnsureAvailable(); err != nil {
-		return index.Table{}, "", err
+	// Another cluster's usage is printed as kubectl gives it and never saved,
+	// as kx get prints another cluster's listing. The metrics probe and the
+	// pod limits the percentages come from both read the current cluster, so
+	// neither runs: kubectl's own error says if b has no metrics-server.
+	crossCluster := clusterFlagIn(extraArgs) != ""
+	if !crossCluster {
+		if err := c.EnsureAvailable(); err != nil {
+			return index.Table{}, "", err
+		}
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
 	if err != nil {
 		return index.Table{}, "", err
+	}
+	if crossCluster {
+		return unnumberedListing(output, filterTerm), extractNamespace(extraArgs), nil
 	}
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
@@ -134,12 +144,19 @@ func (c TopCommand) Execute(
 func (c TopCommand) ExecuteNodes(
 	filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	if err := c.EnsureAvailable(); err != nil {
-		return index.Table{}, "", err
+	// Another cluster's nodes print unnumbered and unsaved; see Execute.
+	crossCluster := clusterFlagIn(extraArgs) != ""
+	if !crossCluster {
+		if err := c.EnsureAvailable(); err != nil {
+			return index.Table{}, "", err
+		}
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
 	if err != nil {
 		return index.Table{}, "", err
+	}
+	if crossCluster {
+		return unnumberedListing(output, filterTerm), "", nil
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
 	// This is the rule #271 gave kx get nodes, and kx top nodes is the other way

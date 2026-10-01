@@ -119,6 +119,14 @@ func (c GetCommand) Execute(
 	if err != nil {
 		return index.Table{}, "", err
 	}
+	// Another cluster's listing is printed and never saved. Saved, its rows
+	// were stamped with this context and namespace, so `kx get pods
+	// --context=b` then `kx delete 1` deleted a same-named pod here. Its
+	// namespace is only the one named, if any: the current one is this
+	// cluster's, not that one's.
+	if clusterFlagIn(extraArgs) != "" {
+		return unnumberedListing(output, filterTerm), extractNamespace(extraArgs), nil
+	}
 	// An -A listing has no single namespace to record on the entry; each
 	// resource carries its own instead, read from the table's NAMESPACE column.
 	// The caller labels the scope.
@@ -178,6 +186,21 @@ func (c GetCommand) Execute(
 		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
+}
+
+// unnumberedListing is output kx prints but does not index, narrowed by
+// filterTerm as a numbered listing would be. Output that is not a table, or
+// that found nothing, is carried as it came.
+func unnumberedListing(output, filterTerm string) index.Table {
+	headers, rows, _ := index.ParseTable(output)
+	if headers == nil || filterTerm == "" {
+		return index.Table{Raw: output}
+	}
+	rows = index.FilterRows(headers, rows, filterTerm)
+	if len(rows) == 0 {
+		return index.Table{}
+	}
+	return index.Table{Raw: index.Format(append([][]string{headers}, rows...))}
 }
 
 // getListing is the entry `kx get <resource>` saves for a listing: its rows as

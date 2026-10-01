@@ -96,7 +96,7 @@ kx get pods -n prod -l app=api  # anything else passes through to kubectl
 
 - kubectl's own flags pass through — `kx delete 3 --force --grace-period=0`, `kx logs 3 -f --tail=100`.
   Passing `-n` with an index is refused, since the index already carries the namespace it was listed from.
-  So is `--context`, `--kubeconfig`, `--cluster` or `--server`, for the cluster.
+  So is `--context`, `--kubeconfig`, `--cluster` or `--server`, for the cluster, and a listing taken with one prints unnumbered.
 - Listings made with `-A` are indexed too, each row with its own namespace.
 - Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` — kubectl's shorthands and your CRDs included.
 - The `--watch`/`-w` flag redraws the table in place rather than appending lines.

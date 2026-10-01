@@ -179,6 +179,14 @@ func clusterFlagBesideIndexError(flag string) error {
 			"with kx context and list it there.", flag)
 }
 
+// crossClusterCaption heads a listing taken with a cluster-selecting flag,
+// which kx prints but never numbers: an index is spent in the cluster it was
+// counted in, and this listing's cluster is not the one kx resolves against.
+// Worded as kx get --watch's caption is, for the same kind of output.
+func crossClusterCaption(flag string) string {
+	return "listings with '" + flag + "' can't be indexed — printing kubectl output directly"
+}
+
 // refuseScopeFlag rejects a namespace-scope flag in args that would contradict
 // a resolved index, given the namespace that index resolved to. A
 // cluster-selecting flag is refused beside any index, cluster-scoped or not.
