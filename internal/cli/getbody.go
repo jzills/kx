@@ -217,8 +217,14 @@ func runGet(services Services, resource string, args []string, options getOption
 	if allNamespaces(extra) {
 		namespace = render.AllNamespaces
 	}
+	// Another cluster's listing was printed, not saved, so nothing behind it
+	// moved and there is no way back to offer.
+	crossCluster := clusterFlagIn(extra)
+	if crossCluster != "" {
+		render.Caption(crossClusterCaption(crossCluster))
+	}
 	render.IndexedTable(output, resource, namespace)
-	if output.Empty() {
+	if output.Empty() && crossCluster == "" {
 		render.PreviousListingNote(previousListing(services))
 	}
 	return nil

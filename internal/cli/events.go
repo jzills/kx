@@ -183,6 +183,19 @@ func newTopCommand(services Services) *cobra.Command {
 					"'--json' cannot be combined with '%s' — one is for a "+
 						"machine and the other for a browser.", htmlFlagName(html))
 			}
+			// Both are built from the numbered rows, and another cluster's
+			// listing has none: the document would report an empty namespace.
+			crossCluster := clusterFlagIn(rest)
+			if crossCluster != "" && (asJSON || wantsHTML) {
+				flag := "--json"
+				if wantsHTML {
+					flag = htmlFlagName(html)
+				}
+				return fmt.Errorf(
+					"'%s' cannot be combined with '%s' — kx can't index another "+
+						"cluster's listing, and the report is built from the indexed one.",
+					flag, crossCluster)
+			}
 
 			// A leading non-flag token names the resource type, mirroring
 			// how `kx get`/`kx <kind>` resolve kind shorthands. A
@@ -273,8 +286,12 @@ func newTopCommand(services Services) *cobra.Command {
 				render.Raw(document)
 				return nil
 			}
+			// As for kx get: printed, not saved, so there is no way back to offer.
+			if crossCluster != "" {
+				render.Caption(crossClusterCaption(crossCluster))
+			}
 			render.IndexedTable(output, resourceLabel, namespace)
-			if output.Empty() {
+			if output.Empty() && crossCluster == "" {
 				render.PreviousListingNote(previousListing(services))
 			}
 			if !htmlOpts.Enabled {
