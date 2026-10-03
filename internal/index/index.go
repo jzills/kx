@@ -454,7 +454,17 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 // One definition, so kx get -m and the sweeps' -m can never disagree about
 // which names a term selects.
 func MatchesName(name, term string) bool {
-	return strings.Contains(strings.ToLower(name), strings.ToLower(term))
+	return NameMatcher(term)(name)
+}
+
+// NameMatcher is MatchesName with the term fixed, for a caller testing one
+// term against many names: the term is lowercased once, where MatchesName in
+// a loop lowercased it for every name.
+func NameMatcher(term string) func(name string) bool {
+	term = strings.ToLower(term)
+	return func(name string) bool {
+		return strings.Contains(strings.ToLower(name), term)
+	}
 }
 
 // FilterRows keeps the rows whose NAME contains term, case-insensitively.
@@ -463,9 +473,10 @@ func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	if !ok {
 		return rows
 	}
+	matches := NameMatcher(term)
 	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if MatchesName(row[shape.NameIdx], term) {
+		if matches(row[shape.NameIdx]) {
 			kept = append(kept, row)
 		}
 	}

@@ -365,7 +365,7 @@ func waitTimeout(extraArgs []string) (time.Duration, error) {
 }
 
 func newWaitCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:        "wait <index>... [kubectl flags]",
 		SuggestFor: []string{"until", "block"},
 		Short:      "Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address.",
@@ -382,8 +382,7 @@ func newWaitCommand(services Services) *cobra.Command {
 			"Several indexes are all resolved and checked before anything waits, then waited for in " +
 			"order; the first that fails or times out ends the command. --timeout covers " +
 			"them together, as it does for kubectl: each waits for what the ones before " +
-			"it left, not a timeout of its own.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"it left, not a timeout of its own.",
 		Example: "  kx wait 2\n  kx wait 1..4 --timeout=2m\n  kx wait @db-claim\n" +
 			"  kx wait 3 --for=delete\n  kx wait 5 --for=condition=Ready=false",
 		// No Args validator, for the reason scale has none: cobra counts the
@@ -416,23 +415,19 @@ func newWaitCommand(services Services) *cobra.Command {
 			}
 			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
 				func(target Resolved, met string) {
-					render.Success(strings.Join(captionPartsOf(
-						string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
+					render.Success(scopeCaption(
+						string(target.Kind)+"/"+target.Name, target.Namespace, met))
 				})
 		},
 	}
-}
-
-// captionPartsOf keeps the non-empty parts in order, so a cluster-scoped
-// resource's line has no empty namespace segment.
-func captionPartsOf(parts ...string) []string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			kept = append(kept, part)
-		}
-	}
-	return kept
+	// Read by hand out of the passthrough args — kx acts on both, rather than
+	// only forwarding them — so they have to be registered too, or they work
+	// and are invisible to `kx wait --help`.
+	cmd.Flags().StringArray("for", nil,
+		"Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable")
+	cmd.Flags().Duration("timeout", defaultWaitTimeout,
+		"How long to wait for every index together (default 30s); 0 checks once")
+	return cmd
 }
 
 // watchJob reads events until the Job finishes or is deleted, the channel

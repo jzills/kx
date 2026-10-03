@@ -25,8 +25,12 @@ type TreeCommand struct {
 	Save func(state.State) error
 	// Match narrows a namespace walk to the roots whose name contains it,
 	// case-insensitively, each with everything it owns — kx tree -m. Empty
-	// walks everything. An indexed walk has no roots to choose between and
-	// ignores it; the command refuses the pair before it gets here.
+	// walks everything. It is not ignored on an indexed walk: a Namespace
+	// target walks that namespace and would be narrowed like any other, while
+	// any other target has no roots to choose between. What keeps a term away
+	// from an index is the callers, which refuse the pair before they get
+	// here — kx tree with errMatchBesideIndex, the MCP tool with
+	// errMCPMatchBesideTarget.
 	Match string
 }
 
@@ -160,10 +164,12 @@ func treeInvocation(scope, match string, indexed bool, port int) string {
 	return invocation("tree", scope, matchFlag(match), indexFlag(indexed), portFlag(port))
 }
 
-// scopeCaption joins non-empty parts with " · " for the page's muted caption
-// line, matching the text render.Banner/render.ScopeBanner already printed
-// to the terminal just above render.Tree, so the two must not read
-// differently.
+// scopeCaption joins non-empty parts with " · ", so a part that may be
+// missing — a cluster-scoped resource's namespace — leaves no empty segment.
+// The tree page's muted caption line uses it to match the text
+// render.Banner/render.ScopeBanner already printed to the terminal just above
+// render.Tree, so the two must not read differently; kx wait's success line
+// uses it too.
 func scopeCaption(parts ...string) string {
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {

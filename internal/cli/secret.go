@@ -322,7 +322,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
-	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")

@@ -410,6 +410,71 @@ func TestListingCommandsDocumentWatch(t *testing.T) {
 	}
 }
 
+// kx wait reads --for and --timeout by hand and acts on both — --for replaces
+// the kind's default, --timeout bounds kx's own Job wait and the deadline every
+// index shares — yet neither was registered, so `kx wait --help` showed no
+// Options at all. Registered, they appear with the kind of value each takes.
+func TestWaitHelpListsTheFlagsItReads(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"wait"})
+	if err != nil {
+		t.Fatalf("root.Find(wait): %v", err)
+	}
+	var options []string
+	for _, option := range commandHelp(cmd).Options {
+		options = append(options, option.Name)
+	}
+	joined := strings.Join(options, "\n")
+	for _, want := range []string{"--for strings", "--timeout duration"} {
+		if !strings.Contains("\n"+joined+"\n", "\n"+want+"\n") {
+			t.Errorf("kx wait --help Options = %q, missing %q", options, want)
+		}
+	}
+}
+
+// commandHelp adds the pass-through sentence to any command whose Use ends in
+// [kubectl flags], so a Long that says it too prints it twice in a row — as
+// delete, scale, wait and set image all did, the newer ones copying the older.
+func TestPassthroughNoteIsSaidOnce(t *testing.T) {
+	const note = "Unrecognized flags are passed through to kubectl."
+	root := NewRoot(Services{}, "test")
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if got := strings.Count(commandHelp(cmd).Doc, note); got > 1 {
+			t.Errorf("%s --help says %q %d times", cmd.CommandPath(), note, got)
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// --match means one thing everywhere it is registered — index.MatchesName —
+// so it is described by the one constant. kx top and kx secret spelled the
+// text out, and matched only until matchUsage is next reworded.
+func TestMatchIsDescribedTheSameWayEverywhere(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	seen := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if flag := cmd.LocalFlags().Lookup("match"); flag != nil {
+			seen++
+			if flag.Usage != matchUsage {
+				t.Errorf("%s --match is described %q, want matchUsage (%q)",
+					cmd.CommandPath(), flag.Usage, matchUsage)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if seen < 6 {
+		t.Errorf("found --match on %d commands, want get, secret, top, diag, scan and tree at least", seen)
+	}
+}
+
 // The four --html commands must describe --port and --no-open identically —
 // kx top's own wording ("Port to serve --html on (random free port by
 // default)", "Don't open a browser automatically with --html") used to

@@ -255,8 +255,7 @@ func newSetImageCommand(services Services) *cobra.Command {
 			"A Deployment, StatefulSet or DaemonSet rolls out the change; kx rollout status " +
 			"on the same index follows it, and kx rollout undo reverts it.\n\n" +
 			"kubectl's own flags pass through — --dry-run=server to check the change is " +
-			"accepted without making it.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"accepted without making it.",
 		Example: "  kx set image 1 nginx:1.27.3\n" +
 			"  kx set image 1 api=api:v2 envoy=envoyproxy/envoy:v1.31\n" +
 			"  kx set image 1 '*=api:v2'\n" +

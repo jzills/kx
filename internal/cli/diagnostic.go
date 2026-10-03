@@ -98,8 +98,9 @@ func (c TriageCommand) Execute(
 	// them loose as orphan rows of their own. Before anything is counted,
 	// sorted or saved, so a matched sweep is the sweep of what matched.
 	reports := make([]diagnostics.Report, 0, len(all))
+	matches := index.NameMatcher(c.Match)
 	for _, data := range all {
-		if !index.MatchesName(data.Name, c.Match) {
+		if !matches(data.Name) {
 			continue
 		}
 		reports = append(reports, diagnostics.BuildReport(data))

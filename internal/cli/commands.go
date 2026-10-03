@@ -523,8 +523,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			"kubectl's own flags pass through: --force --grace-period=0 for a pod that " +
 			"will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still " +
 			"prompts — kx does not read kubectl's flag semantics, and reading " +
-			"--dry-run=none as a dry run would skip the prompt on a real delete.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"--dry-run=none as a dry run would skip the prompt on a real delete.",
 		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..\n" +
 			"  kx delete 3 --force --grace-period=0",
 		// No Args validator: cobra's arity check runs against the
@@ -595,8 +594,7 @@ func newScaleCommand(services Services) *cobra.Command {
 			"kubectl's own flags pass through — --current-replicas to make the scale " +
 			"conditional, --timeout, --dry-run. --replicas is the exception: kx builds it " +
 			"from the replica count given here, so a second one is refused rather than " +
-			"left for kubectl to choose between.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"left for kubectl to choose between.",
 		Example: "  kx scale 1 3\n  kx scale 1 3 --current-replicas=2\n  kx scale 1 0 --timeout=1m",
 		// No Args validator: cobra's arity check runs against the
 		// unstripped argv, which counts forwarded kubectl flags as
@@ -801,8 +799,7 @@ func newYamlCommand(services Services) *cobra.Command {
 			"works with anything kubectl's own YAML output has.\n\n" +
 			"kubectl's own flags pass through. Naming an output format yourself replaces " +
 			"kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints " +
-			"JSON. --show cannot be combined with one: it parses the YAML it narrows.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"JSON. --show cannot be combined with one: it parses the YAML it narrows.",
 		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
 			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
 		// No Args validator: cobra's arity check runs against the

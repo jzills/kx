@@ -12,8 +12,6 @@ kubectl's own flags pass through. Naming an output format yourself replaces kx's
 
 Unrecognized flags are passed through to kubectl.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text
