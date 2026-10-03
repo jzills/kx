@@ -365,7 +365,7 @@ func waitTimeout(extraArgs []string) (time.Duration, error) {
 }
 
 func newWaitCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:        "wait <index>... [kubectl flags]",
 		SuggestFor: []string{"until", "block"},
 		Short:      "Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address.",
@@ -420,6 +420,14 @@ func newWaitCommand(services Services) *cobra.Command {
 				})
 		},
 	}
+	// Read by hand out of the passthrough args — kx acts on both, rather than
+	// only forwarding them — so they have to be registered too, or they work
+	// and are invisible to `kx wait --help`.
+	cmd.Flags().StringArray("for", nil,
+		"Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable")
+	cmd.Flags().Duration("timeout", defaultWaitTimeout,
+		"How long to wait for every index together (default 30s); 0 checks once")
+	return cmd
 }
 
 // captionPartsOf keeps the non-empty parts in order, so a cluster-scoped

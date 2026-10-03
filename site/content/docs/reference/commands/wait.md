@@ -28,6 +28,13 @@ kx wait [OPTIONS] <index>... [kubectl flags]
 |---|---|
 | `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
+## Options
+
+| Option | Description |
+|---|---|
+| `--for strings` | Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable |
+| `--timeout duration` | How long to wait for every index together (default 30s); 0 checks once |
+
 ## Global options
 
 | Option | Description |

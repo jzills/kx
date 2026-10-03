@@ -410,6 +410,28 @@ func TestListingCommandsDocumentWatch(t *testing.T) {
 	}
 }
 
+// kx wait reads --for and --timeout by hand and acts on both — --for replaces
+// the kind's default, --timeout bounds kx's own Job wait and the deadline every
+// index shares — yet neither was registered, so `kx wait --help` showed no
+// Options at all. Registered, they appear with the kind of value each takes.
+func TestWaitHelpListsTheFlagsItReads(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"wait"})
+	if err != nil {
+		t.Fatalf("root.Find(wait): %v", err)
+	}
+	var options []string
+	for _, option := range commandHelp(cmd).Options {
+		options = append(options, option.Name)
+	}
+	joined := strings.Join(options, "\n")
+	for _, want := range []string{"--for strings", "--timeout duration"} {
+		if !strings.Contains("\n"+joined+"\n", "\n"+want+"\n") {
+			t.Errorf("kx wait --help Options = %q, missing %q", options, want)
+		}
+	}
+}
+
 // commandHelp adds the pass-through sentence to any command whose Use ends in
 // [kubectl flags], so a Long that says it too prints it twice in a row — as
 // delete, scale, wait and set image all did, the newer ones copying the older.
