@@ -451,3 +451,36 @@ func TestWaitGivesALaterJobWhatIsLeft(t *testing.T) {
 		t.Errorf("err = %v, want the Job to time out on the 50ms left", err)
 	}
 }
+
+// A refusal kx can make from the target alone is made before anything waits.
+// It was made only when the loop reached the target, so on a mixed listing
+// `kx wait 3 1`, a pod still coming up then a Deployment, waited out the pod
+// first — up to the whole timeout — and the refusal arrived after it, or not
+// at all (#433).
+func TestWaitRefusesEveryTargetBeforeTheFirstWait(t *testing.T) {
+	clusterIP := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+	}
+	for _, tc := range []struct {
+		later Resolved
+		want  string
+	}{
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Deployment, Name: "web", Namespace: "prod"},
+			"waited for with 'kx rollout status 2'"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.ConfigMap, Name: "settings", Namespace: "prod"},
+			"no default condition for a ConfigMap"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Service, Name: "api", Namespace: "prod"},
+			"is a ClusterIP Service"},
+	} {
+		kube := &clockKubectl{recordingKubectl: &recordingKubectl{}}
+		_, err := waitAll(t, kube, fake.NewSimpleClientset(clusterIP),
+			[]Resolved{podTarget(1, "a"), tc.later}, "--timeout=10m")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.later.Kind, err, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: waited on %q before the refusal", tc.later.Kind, kube.runs)
+		}
+	}
+}
