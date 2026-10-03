@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -63,11 +64,23 @@ func (s APIService) Warnings(ctx context.Context, namespace string) ([]corev1.Ev
 
 // list reads every page of a namespace's events (every namespace's, for an
 // empty one) matching selector.
+//
+// A continue token lapses once the version it was issued at is compacted, and
+// the page after it then fails with 410 Gone. That is answered as client-go's
+// pager answers it — the pages read so far are dropped and the rest comes as
+// one full list — rather than failing the whole read, which the single list
+// paging replaced could never do. Not the pager itself: it also checks ctx
+// before each page, and the tests that stop kx diag --html with a context
+// already done rely on the fake clientset never looking.
 func (s APIService) list(ctx context.Context, namespace, selector string) ([]corev1.Event, error) {
 	var events []corev1.Event
 	options := metav1.ListOptions{FieldSelector: selector, Limit: eventPageSize}
 	for {
 		page, err := s.Client.CoreV1().Events(namespace).List(ctx, options)
+		if apierrors.IsResourceExpired(err) && options.Continue != "" {
+			events, options.Limit, options.Continue = nil, 0, ""
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -275,5 +276,45 @@ func TestEventListingsFollowEveryPage(t *testing.T) {
 				t.Errorf("%s request %d Continue = %q, want %q", name, i, options.Continue, want)
 			}
 		}
+	}
+}
+
+// A continue token lapses once the version it was issued at is compacted, and
+// the next page then fails with 410 Gone. The paging loop returned that error,
+// failing a whole kx diag sweep, where the single list before paging could not
+// meet it (#438). The read falls back to one full list instead, as client-go's
+// pager does — still asking for Warnings alone, and without the events of the
+// page it had already read appearing twice.
+func TestAnExpiredContinueTokenFallsBackToAFullList(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	var requests []metav1.ListOptions
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		options := action.(k8stesting.ListActionImpl).ListOptions
+		requests = append(requests, options)
+		switch {
+		case options.Continue == "page-1":
+			return true, nil, apierrors.NewResourceExpired("the continue token has expired")
+		case options.Limit == 0:
+			return true, &corev1.EventList{Items: []corev1.Event{
+				event("a", "Pod", "BackOff"), event("b", "Pod", "BackOff"), event("c", "Pod", "BackOff"),
+			}}, nil
+		}
+		return true, &corev1.EventList{
+			ListMeta: metav1.ListMeta{Continue: "page-1"},
+			Items:    []corev1.Event{event("a", "Pod", "BackOff")},
+		}, nil
+	})
+	got, err := (APIService{Client: client}).Warnings(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Warnings: %v", err)
+	}
+	if len(got) != 3 || got[0].InvolvedObject.Name != "a" || got[2].InvolvedObject.Name != "c" {
+		t.Errorf("Warnings returned %d events, want a, b, c from the full list", len(got))
+	}
+	if len(requests) != 3 {
+		t.Fatalf("made %d requests, want a page, the expired page, then a full list", len(requests))
+	}
+	if full := requests[2]; full.FieldSelector != "type=Warning" || full.Continue != "" {
+		t.Errorf("full list asked with %+v, want Warnings and no continue token", full)
 	}
 }
