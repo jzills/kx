@@ -99,9 +99,10 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (str
 }
 
 // isDryRun reports whether extraArgs ask kubectl for a dry run, so kx's own
-// success line does not claim a deletion that did not happen — it replaces
-// kubectl's output ("pod \"x\" deleted (dry run)") with its own, so the
-// distinction is only there if kx puts it there.
+// success line does not claim a change that did not happen — delete, scale,
+// label, annotate and set image replace kubectl's output ("pod \"x\" deleted
+// (dry run)") with their own, so the distinction is only there if kx puts it
+// there.
 //
 // Deliberately narrow: only the spellings kubectl itself runs as a dry run are
 // recognised — client and server, plus the deprecated ones it still accepts
@@ -167,7 +168,11 @@ func (c ScaleCommand) Execute(ref state.Ref, replicas int, extraArgs []string) (
 	if replicas == 1 {
 		noun = "replica"
 	}
-	return fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun), nil
+	message := fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun)
+	if isDryRun(extraArgs) {
+		message += " (dry run — nothing was changed)"
+	}
+	return message, nil
 }
 
 var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}

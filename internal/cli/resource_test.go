@@ -633,6 +633,32 @@ func TestScaleSingularReplica(t *testing.T) {
 	}
 }
 
+// kx scale prints its own line in place of kubectl's "scaled (server dry
+// run)", so a dry run read "✓ Scaled Deployment/api to 3 replicas" — a change
+// that never happened. The same spellings delete and label recognise count
+// here, and a real scale stays unlabelled.
+func TestScaleSaysWhenItWasADryRun(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--dry-run=server"}, "Scaled Deployment/api to 3 replicas (dry run — nothing was changed)"},
+		{[]string{"--dry-run"}, "Scaled Deployment/api to 3 replicas (dry run — nothing was changed)"},
+		{[]string{"--dry-run=none"}, "Scaled Deployment/api to 3 replicas"},
+		{nil, "Scaled Deployment/api to 3 replicas"},
+	} {
+		message, err := ScaleCommand{
+			Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment),
+		}.Execute(state.Ref{Index: 1}, 3, tc.args)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", tc.args, err)
+		}
+		if message != tc.want {
+			t.Errorf("message = %q for %v, want %q", message, tc.args, tc.want)
+		}
+	}
+}
+
 func TestScaleRejectsUnsupportedKind(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	_, err := ScaleCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, 3, nil)
