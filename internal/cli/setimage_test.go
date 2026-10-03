@@ -66,13 +66,17 @@ func TestSetImageInfersTheOnlyContainer(t *testing.T) {
 // Init containers count: kubectl matches them by name too, so a bare image on
 // a workload with any second container is a guess kx refuses to make — before
 // anything is changed.
+//
+// The suggestion names the first container, not the first init container:
+// it suggested 'migrate=api:v2', and copying it replaced the migration image
+// (#434).
 func TestSetImageRefusesABareImageWithSeveralContainers(t *testing.T) {
 	_, _, kube, err := setImage(t, kinds.Deployment, sidecarDeploy, false, "1", "api:v2")
 	if err == nil {
 		t.Fatal("a bare image on three containers succeeded, want a refusal")
 	}
 	want := "Deployment/api has containers migrate, api, envoy — name one: " +
-		"'kx set image 1 migrate=api:v2'."
+		"'kx set image 1 api=api:v2'."
 	if err.Error() != want {
 		t.Errorf("err = %q, want %q", err, want)
 	}
