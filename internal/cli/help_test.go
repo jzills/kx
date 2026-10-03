@@ -485,6 +485,36 @@ func TestPassthroughNoteNamesWhereFlagsGo(t *testing.T) {
 	}
 }
 
+// A description that writes a flag as code writes every flag as code. kx
+// state's Long formats its own (`--all`, `--targets`), and the paragraph added
+// for --json formatted `--json` and then "or the stack with --all" a few words
+// later — one sentence, two conventions, both in --help and on the reference
+// page generated from it.
+func TestLongFormatsFlagsOneWay(t *testing.T) {
+	flag := regexp.MustCompile("`[^`]*`|--[a-z][a-z-]*")
+	root := NewRoot(Services{}, "test")
+	checked := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if strings.Contains(cmd.Long, "`--") {
+			checked++
+			for _, match := range flag.FindAllString(cmd.Long, -1) {
+				if strings.HasPrefix(match, "--") {
+					t.Errorf("%s --help writes flags as code but leaves %s bare",
+						cmd.CommandPath(), match)
+				}
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if checked == 0 {
+		t.Fatal("no Long writes a flag as code; the walk checked nothing")
+	}
+}
+
 // --match means one thing everywhere it is registered — index.MatchesName —
 // so it is described by the one constant. kx top and kx secret spelled the
 // text out, and matched only until matchUsage is next reworded.

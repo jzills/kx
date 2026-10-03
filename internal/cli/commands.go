@@ -1142,7 +1142,7 @@ func newStateCommand(services Services) *cobra.Command {
 			"however much you have listed since, and switching namespace never " +
 			"pushes work off the stack. `--targets` expands both slots, so you " +
 			"can pick a number without listing again.\n\n" +
-			"`--json` prints the current entry, or the stack with --all, as a " +
+			"`--json` prints the current entry, or the stack with `--all`, as a " +
 			"document for a script: each row's index, kind, name and namespace, " +
 			"and each entry's context, query and provenance. Like `kx ref`, it " +
 			"never contacts the cluster.\n\n" +
