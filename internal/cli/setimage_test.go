@@ -132,6 +132,11 @@ func TestSetImageRefusesBadSpecsBeforeChangingAnything(t *testing.T) {
 		{[]string{"1", "api:v2", "envoy=envoy:1.31"}, "a bare image can only stand alone"},
 		{[]string{"1", "=api:v2"}, "is not a container=image pair"},
 		{[]string{"1", "api="}, "is not a container=image pair"},
+		// kubectl keeps the pairs in a map, so a name given twice applied only
+		// the last image while kx reported both changes (#435).
+		{[]string{"1", "api=api:v2", "envoy=envoy:1.31", "api=api:v3"},
+			"'api' is named twice — kubectl would apply only the last image"},
+		{[]string{"1", "*=base:v9", "*=base:v10"}, "'*' is named twice"},
 	} {
 		_, _, kube, err := setImage(t, kinds.Deployment, sidecarDeploy, false, tc.args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -118,6 +118,9 @@ func imagePairs(
 
 	var pairs []string
 	var changes []imageChange
+	// kubectl keeps the pairs in a map, so a name given twice gets only its
+	// last image, while each would be reported as a change.
+	named := map[string]bool{}
 	for _, spec := range specs {
 		name, image, paired := strings.Cut(spec, "=")
 		if !paired {
@@ -139,6 +142,12 @@ func imagePairs(
 			return nil, nil, fmt.Errorf(
 				"'%s' is not a container=image pair — both sides are needed.", spec)
 		}
+		if named[name] {
+			return nil, nil, fmt.Errorf(
+				"'%s' is named twice — kubectl would apply only the last image, "+
+					"so name each container once.", name)
+		}
+		named[name] = true
 		pairs = append(pairs, name+"="+image)
 		if name == "*" {
 			for _, each := range containers {
