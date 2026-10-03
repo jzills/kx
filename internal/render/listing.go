@@ -187,6 +187,11 @@ func (r *Renderer) indexedTable(
 		return
 	}
 
+	if len(table.Sections) > 1 {
+		r.sectionedTable(table, resourceType, namespace, available)
+		return
+	}
+
 	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
 	// The snapshot listing shrinks NAME exactly as the live watch does. It was
 	// wired into RedrawTable alone, on the grounds that its cursor arithmetic
@@ -202,6 +207,24 @@ func (r *Renderer) indexedTable(
 
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.table(columns, cells, available)
+}
+
+// sectionedTable draws a listing of several kinds the way kubectl prints one:
+// a table per kind under its own header, a blank line between, each sized to
+// its own columns. One caption heads them all, counting every row, since the
+// indexes run on from one table into the next.
+func (r *Renderer) sectionedTable(
+	table index.Table, resourceType, namespace string, available int,
+) {
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
+	for i, section := range table.Sections {
+		if i > 0 {
+			r.line("")
+		}
+		columns, cells := styledColumnsAndCells(section.Headers, section.Rows)
+		enableNameFlex(section.Headers, columns)
+		r.table(columns, cells, available)
+	}
 }
 
 // SwitchListing renders the listing a switch command indexes into — kx ns —

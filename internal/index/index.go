@@ -187,24 +187,62 @@ func (s TableShape) Row(line string) []string {
 // Returns the whole TableShape rather than the three loose values the exported
 // wrapper hands back, because Add needs NamespaceIdx as well and rebuilding the
 // shape from a []string of headers would mean locating those columns twice.
+//
+// A listing of several kinds is several tables; their rows come back together
+// under the first one's shape, each split by its own. Callers that draw or
+// number a listing read the tables apart through parseSections.
 func parseTable(output string) (shape TableShape, rows [][]string, ok bool) {
-	lines := strings.Split(output, "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return TableShape{}, nil, false
-	}
-
-	shape, ok = ParseHeader(lines[0])
+	sections, ok := parseSections(output)
 	if !ok {
 		return TableShape{}, nil, false
 	}
+	for _, section := range sections {
+		rows = append(rows, section.rows...)
+	}
+	return sections[0].shape, rows, true
+}
 
+// section is one table of kubectl's output: a header and the rows under it.
+type section struct {
+	shape TableShape
+	rows  [][]string
+}
+
+// parseSections splits kubectl table output into its tables.
+//
+// kubectl prints one table per kind when a listing names several — `kubectl
+// get all`, `kubectl get deploy,svc` — each under its own header, a blank line
+// before each. Read as one table, the second header became a row: numbered,
+// saved, and resolving to a resource called "NAME", while every later header
+// was deduplicated away as another "NAME" and its rows were laid out under
+// the first table's columns, a Service's TYPE under a Deployment's READY.
+//
+// A header is a line after a blank one that parses as a header. kubectl puts
+// no blank line inside a table, so only a new table follows one.
+func parseSections(output string) ([]section, bool) {
+	lines := strings.Split(output, "\n")
+	shape, ok := ParseHeader(lines[0])
+	if !ok {
+		return nil, false
+	}
+	sections := []section{{shape: shape}}
+	afterBlank := false
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "" {
+			afterBlank = true
 			continue
 		}
-		rows = append(rows, shape.Row(line))
+		if afterBlank {
+			afterBlank = false
+			if shape, ok := ParseHeader(line); ok {
+				sections = append(sections, section{shape: shape})
+				continue
+			}
+		}
+		current := &sections[len(sections)-1]
+		current.rows = append(current.rows, current.shape.Row(line))
 	}
-	return shape, rows, true
+	return sections, true
 }
 
 // parseOutput splits kubectl table output into headers, rows and the position
@@ -325,11 +363,25 @@ type Table struct {
 	// Raw is the untouched output, carried for the shapes kx cannot index —
 	// JSON, YAML, a table with no NAME column.
 	Raw string
+	// Sections is the listing table by table when kubectl printed more than
+	// one — a listing of several kinds — and nil otherwise. Each carries its
+	// own header and its own rows, numbered on from the table before it.
+	// Headers is then the first table's and Rows every table's, so a caller
+	// counting rows or asking whether anything was found reads them as for
+	// any listing; only drawing one needs the tables apart.
+	Sections []Section
 	// Match is the --match term the rows were narrowed by, empty for none.
 	// It matters only once the narrowing leaves nothing: the caption then
 	// names the term, since "none found" would say the namespace is empty
 	// when it may be full of resources the term did not match.
 	Match string
+}
+
+// Section is one table of a listing kubectl printed as several.
+type Section struct {
+	// Headers include "X", as Table.Headers does.
+	Headers []string
+	Rows    [][]string
 }
 
 // Indexable reports whether the output parsed as a table kx could number.
@@ -365,6 +417,25 @@ func (t Table) Placed() bool {
 	return false
 }
 
+// Unnumbered renders the table as kubectl would have printed it, without the
+// index column — for a listing kx narrows by --match but does not number,
+// which is all a listing from another cluster gets.
+func (t Table) Unnumbered() string {
+	sections := t.Sections
+	if len(sections) == 0 {
+		sections = []Section{{Headers: t.Headers, Rows: t.Rows}}
+	}
+	tables := make([]string, 0, len(sections))
+	for _, section := range sections {
+		rows := make([][]string, 0, len(section.Rows)+1)
+		for _, row := range append([][]string{section.Headers}, section.Rows...) {
+			rows = append(rows, row[1:])
+		}
+		tables = append(tables, Format(rows))
+	}
+	return strings.Join(tables, "\n\n")
+}
+
 // Text renders the table back to padded text. Non-tabular output comes back
 // exactly as it arrived.
 //
@@ -380,6 +451,13 @@ func (t Table) Text() string {
 	if !t.Indexable() {
 		return t.Raw
 	}
+	if len(t.Sections) > 1 {
+		tables := make([]string, 0, len(t.Sections))
+		for _, section := range t.Sections {
+			tables = append(tables, Format(append([][]string{section.Headers}, section.Rows...)))
+		}
+		return strings.Join(tables, "\n\n")
+	}
 	return Format(append([][]string{t.Headers}, t.Rows...))
 }
 
@@ -391,12 +469,60 @@ type Service struct{}
 // A thin parse in front of AddRows, so the text and rows entry points cannot
 // disagree about numbering, deduplication or which column is which.
 func (s Service) Add(output string) Table {
-	shape, rows, ok := parseTable(output)
+	return s.AddMatching(output, "")
+}
+
+// AddMatching is Add narrowed to the rows whose name contains term, before
+// anything is numbered, so the indexes run 1..n over the rows on screen. A
+// table the term empties is dropped rather than drawn as a header over
+// nothing. An empty term keeps every row.
+func (s Service) AddMatching(output, term string) Table {
+	sections, ok := parseSections(output)
 	if !ok {
 		return Table{Raw: output}
 	}
-	table := s.AddRows(shape.Headers, rows)
+	if term != "" {
+		kept := sections[:0:0]
+		for _, section := range sections {
+			section.rows = FilterRows(section.shape.Headers, section.rows, term)
+			if len(section.rows) > 0 {
+				kept = append(kept, section)
+			}
+		}
+		if len(kept) == 0 {
+			// Every row filtered out: an empty listing under the first
+			// table's header, as one table's filtered to nothing has
+			// always been.
+			kept = sections[:1]
+			kept[0].rows = nil
+		}
+		sections = kept
+	}
+	var table Table
+	if len(sections) == 1 {
+		table = s.AddRows(sections[0].shape.Headers, sections[0].rows)
+	} else {
+		table = addSections(sections)
+	}
 	table.Raw = output
+	table.Match = term
+	return table
+}
+
+// addSections numbers several tables as one listing: the indexes run on from
+// one table into the next, as the saved entry they resolve against does.
+func addSections(sections []section) Table {
+	var numbering numberer
+	table := Table{Sections: make([]Section, 0, len(sections))}
+	for _, section := range sections {
+		rows := numbering.add(section.shape, section.rows)
+		table.Sections = append(table.Sections, Section{
+			Headers: append([]string{"X"}, section.shape.Headers...), Rows: rows,
+		})
+		table.Rows = append(table.Rows, rows...)
+	}
+	table.Headers = table.Sections[0].Headers
+	table.Entries = numbering.entries
 	return table
 }
 
@@ -412,6 +538,27 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	if !ok {
 		return Table{}
 	}
+	var numbering numberer
+	indexed := numbering.add(shape, rows)
+	return Table{
+		Headers: append([]string{"X"}, shape.Headers...),
+		Rows:    indexed,
+		Entries: numbering.entries,
+	}
+}
+
+// numberer assigns indexes across one or more tables, collapsing a row that
+// repeats an earlier one.
+type numberer struct {
+	seen    map[rowKey]bool
+	entries []Entry
+}
+
+// add numbers rows of one shape, continuing from whatever was numbered before.
+func (n *numberer) add(shape TableShape, rows [][]string) [][]string {
+	if n.seen == nil {
+		n.seen = make(map[rowKey]bool, len(rows))
+	}
 
 	// Index numbers must map 1:1 to saved state, so a row that is
 	// indistinguishable from an earlier one is collapsed (first-seen wins) —
@@ -425,9 +572,7 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	// `kubectl top pod --containers` prints one per container — which are
 	// different rows however identical their Entry is. Collapsing on the Entry
 	// dropped every container after the first, rendering six rows as three.
-	seen := make(map[rowKey]bool, len(rows))
 	indexed := make([][]string, 0, len(rows))
-	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
 		entry := Entry{Name: row[shape.ResourceIdx]}
 		if shape.NamespaceIdx >= 0 {
@@ -437,19 +582,14 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 		if shape.ResourceIdx != shape.NameIdx {
 			key.Label = row[shape.NameIdx]
 		}
-		if seen[key] {
+		if n.seen[key] {
 			continue
 		}
-		seen[key] = true
-		entries = append(entries, entry)
-		indexed = append(indexed, append([]string{strconv.Itoa(len(entries))}, row...))
+		n.seen[key] = true
+		n.entries = append(n.entries, entry)
+		indexed = append(indexed, append([]string{strconv.Itoa(len(n.entries))}, row...))
 	}
-
-	return Table{
-		Headers: append([]string{"X"}, shape.Headers...),
-		Rows:    indexed,
-		Entries: entries,
-	}
+	return indexed
 }
 
 // MatchesName reports whether name contains term, case-insensitively — what
@@ -473,6 +613,10 @@ func NameMatcher(term string) func(name string) bool {
 }
 
 // FilterRows keeps the rows whose NAME contains term, case-insensitively.
+//
+// The name, not the kind kubectl puts in front of it in a listing of several
+// kinds: "app" is in every "deployment.apps/…". A name never holds a "/", so
+// whatever precedes the last one is that prefix.
 func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	shape, ok := shapeOf(headers)
 	if !ok {
@@ -481,7 +625,11 @@ func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	matches := NameMatcher(term)
 	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if matches(row[shape.NameIdx]) {
+		name := row[shape.NameIdx]
+		if slash := strings.LastIndex(name, "/"); slash >= 0 {
+			name = name[slash+1:]
+		}
+		if matches(name) {
 			kept = append(kept, row)
 		}
 	}

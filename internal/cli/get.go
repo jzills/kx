@@ -14,6 +14,8 @@ import (
 type Indexer interface {
 	// Add parses kubectl output and numbers it, for callers holding text.
 	Add(output string) index.Table
+	// AddMatching is Add narrowed by a --match term before numbering.
+	AddMatching(output, term string) index.Table
 	// AddRows numbers rows already parsed, for callers that narrowed or
 	// widened the table on the way and must not re-serialise it to do so.
 	AddRows(headers []string, rows [][]string) index.Table
@@ -157,7 +159,7 @@ func (c GetCommand) Execute(
 	// This is display and saved state only. kubectl ignores -n for a
 	// cluster-scoped resource, and accepts an empty one, so the commands that
 	// resolve these indexes need no change.
-	if !allNamespaces(extraArgs) && !clusterScoped(resource) {
+	if !allNamespaces(extraArgs) && !clusterScoped(string(listingKind(resource))) {
 		namespace = extractNamespace(extraArgs)
 		if namespace == "" {
 			namespace = c.Kubectl.CurrentNamespace()
@@ -177,6 +179,13 @@ func (c GetCommand) Execute(
 	// that actually returned rows kx can't resolve is printed unnumbered.
 	if allNamespaces(extraArgs) && len(indexed.Entries) > 0 && !indexed.Placed() {
 		return index.Table{Raw: output}, namespace, nil
+	}
+	// A listing of several kinds is resolvable only through the kind kubectl
+	// puts in front of each name, which is where every row's kind comes
+	// from. A shape that leaves it out — custom columns — has nothing to say
+	// which table a row belonged to, and is printed as one kx cannot number.
+	if kinds.Several(resource) && !namesCarryKinds(indexed.Entries) {
+		return unnumberedListing(output, filterTerm), namespace, nil
 	}
 	// Output kx cannot number leaves the current listing alone: `-o json`,
 	// `-o yaml` and `-o name` are printed as they arrived, and the numbers on
@@ -208,15 +217,37 @@ func (c GetCommand) Execute(
 // filterTerm as a numbered listing would be. Output that is not a table, or
 // that found nothing, is carried as it came.
 func unnumberedListing(output, filterTerm string) index.Table {
-	headers, rows, _ := index.ParseTable(output)
-	if headers == nil || filterTerm == "" {
+	if filterTerm == "" {
 		return index.Table{Raw: output}
 	}
-	rows = index.FilterRows(headers, rows, filterTerm)
-	if len(rows) == 0 {
+	table := index.Service{}.AddMatching(output, filterTerm)
+	if !table.Indexable() {
+		return index.Table{Raw: output}
+	}
+	if table.Empty() {
 		return index.Table{Match: filterTerm}
 	}
-	return index.Table{Raw: index.Format(append([][]string{headers}, rows...))}
+	return index.Table{Raw: table.Unnumbered()}
+}
+
+// namesCarryKinds reports whether every row of a listing of several kinds is
+// named kind/name, which is what kubectl prints for one.
+func namesCarryKinds(entries []index.Entry) bool {
+	for _, entry := range entries {
+		if !strings.Contains(entry.Name, "/") {
+			return false
+		}
+	}
+	return true
+}
+
+// listingKind is the kind of a listing's rows when the rows don't name their
+// own: the argument's, or for type/name the type's.
+func listingKind(resource string) kinds.Kind {
+	if kind, _, named := strings.Cut(resource, "/"); named {
+		return kinds.Normalize(kind)
+	}
+	return kinds.Normalize(resource)
 }
 
 // getListing is the entry `kx get <resource>` saves for a listing: its rows as
@@ -239,7 +270,7 @@ func getListing(
 		extraArgs = []string{}
 	}
 	return state.State{
-		Resources:     resourcesFrom(entries, kinds.Normalize(resource)),
+		Resources:     resourcesFrom(entries, listingKind(resource)),
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces(extraArgs),
 		Query: &state.Query{
@@ -324,7 +355,7 @@ func (c GetCommand) ExecuteGroups(
 	if err := c.State.Save(state.State{
 		// Groups are fetched one namespace at a time and stitched back
 		// together, so the merged listing spans them by construction.
-		Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+		Resources:     resourcesFrom(indexed.Entries, listingKind(resource)),
 		AllNamespaces: true,
 	}); err != nil {
 		return index.Table{}, err
@@ -339,26 +370,24 @@ func (c GetCommand) ExecuteGroups(
 // user is actually looking at, and on the rows themselves so nothing has to be
 // re-serialised to text and parsed again between the two.
 func (c GetCommand) index(output, filterTerm string) index.Table {
-	if filterTerm == "" {
-		return c.Index.Add(output)
-	}
-	headers, rows, _ := index.ParseTable(output)
-	if headers == nil {
-		return c.Index.Add(output)
-	}
-	table := c.Index.AddRows(headers, index.FilterRows(headers, rows, filterTerm))
-	table.Match = filterTerm
-	return table
+	return c.Index.AddMatching(output, filterTerm)
 }
 
-// resourcesFrom turns indexed entries into saved resources of a single kind,
-// carrying each row's namespace through when the listing reported one.
+// resourcesFrom turns indexed entries into saved resources, carrying each
+// row's namespace through when the listing reported one.
+//
+// A row is of kind unless it names its own: a listing of several kinds names
+// every row kind/name — deployment.apps/web — and saved whole under the
+// argument, it resolved to deploy,svc/deployment.apps/web, which kubectl
+// rejects. A name never holds a "/", so one in a row is that prefix.
 func resourcesFrom(entries []index.Entry, kind kinds.Kind) state.Resources {
 	resources := make([]state.Resource, 0, len(entries))
 	for _, entry := range entries {
-		resources = append(resources, state.Resource{
-			Name: entry.Name, Kind: kind, Namespace: entry.Namespace,
-		})
+		resource := state.Resource{Name: entry.Name, Kind: kind, Namespace: entry.Namespace}
+		if prefix, name, named := strings.Cut(entry.Name, "/"); named {
+			resource.Name, resource.Kind = name, kinds.Qualified(prefix)
+		}
+		resources = append(resources, resource)
 	}
 	return state.NewOrderedResources(resources)
 }
