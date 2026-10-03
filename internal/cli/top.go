@@ -99,6 +99,7 @@ func (c TopCommand) Execute(
 	}
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
 	var match *string
@@ -177,6 +178,7 @@ func (c TopCommand) ExecuteNodes(
 	headers = relabelPercentColumns(headers)
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Match = filterTerm
 	// Saved even when nothing was listed; see Execute above.
 	if extraArgs == nil {
 		extraArgs = []string{}

@@ -214,7 +214,7 @@ func unnumberedListing(output, filterTerm string) index.Table {
 	}
 	rows = index.FilterRows(headers, rows, filterTerm)
 	if len(rows) == 0 {
-		return index.Table{}
+		return index.Table{Match: filterTerm}
 	}
 	return index.Table{Raw: index.Format(append([][]string{headers}, rows...))}
 }
@@ -308,20 +308,26 @@ func (c GetCommand) ExecuteGroups(
 			merged = append(merged, append([]string{group.Namespace}, row...))
 		}
 	}
-	if !tabular || len(merged) == 0 {
+	// No headers means no reply was a table at all. Headers with no rows is a
+	// term that matched none of them, which is a listing like any other: the
+	// raw replies it used to fall back to were kubectl's unfiltered tables,
+	// printing exactly the rows the term had excluded.
+	if !tabular || headers == nil {
 		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 
 	indexed := c.Index.AddRows(headers, merged)
-	if len(indexed.Entries) > 0 {
-		if err := c.State.Save(state.State{
-			// Groups are fetched one namespace at a time and stitched back
-			// together, so the merged listing spans them by construction.
-			Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
-			AllNamespaces: true,
-		}); err != nil {
-			return index.Table{}, err
-		}
+	indexed.Match = filterTerm
+	// Saved even when the term left nothing, as GetCommand.Execute saves an
+	// empty listing: otherwise the -A listing these indexes came from stays
+	// current behind a screen that shows none of it.
+	if err := c.State.Save(state.State{
+		// Groups are fetched one namespace at a time and stitched back
+		// together, so the merged listing spans them by construction.
+		Resources:     resourcesFrom(indexed.Entries, kinds.Normalize(resource)),
+		AllNamespaces: true,
+	}); err != nil {
+		return index.Table{}, err
 	}
 	return indexed, nil
 }
@@ -340,7 +346,9 @@ func (c GetCommand) index(output, filterTerm string) index.Table {
 	if headers == nil {
 		return c.Index.Add(output)
 	}
-	return c.Index.AddRows(headers, index.FilterRows(headers, rows, filterTerm))
+	table := c.Index.AddRows(headers, index.FilterRows(headers, rows, filterTerm))
+	table.Match = filterTerm
+	return table
 }
 
 // resourcesFrom turns indexed entries into saved resources of a single kind,

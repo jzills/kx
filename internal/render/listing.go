@@ -176,7 +176,7 @@ func (r *Renderer) indexedTable(
 	table index.Table, resourceType, namespace string, available int,
 ) {
 	if table.Empty() {
-		r.emptyListing(resourceType, namespace)
+		r.emptyListing(resourceType, namespace, table.Match)
 		return
 	}
 	if !table.Indexable() {
@@ -228,7 +228,7 @@ func (r *Renderer) switchListing(
 	table index.Table, resourceType, current string, available int,
 ) {
 	if table.Empty() {
-		r.emptyListing(resourceType, current)
+		r.emptyListing(resourceType, current, table.Match)
 		return
 	}
 	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
@@ -260,8 +260,20 @@ func (r *Renderer) switchListing(
 // where kubectl's own "No resources found in X namespace" at least says
 // nothing was there — this says the same thing without repeating the
 // namespace the caption already carries a segment for.
-func (r *Renderer) emptyListing(resourceType, namespace string) {
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, noneFound)
+//
+// A listing a --match term emptied says so instead, in the words the sweeps
+// use: "Pods · prod · none found" claims prod has no pods.
+func (r *Renderer) emptyListing(resourceType, namespace, match string) {
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, emptyLabel(match))
+}
+
+// emptyLabel is what stands where a count would for a listing that holds
+// nothing: the term that emptied it, or noneFound.
+func emptyLabel(match string) string {
+	if match != "" {
+		return NothingMatches(match)
+	}
+	return noneFound
 }
 
 // noneFound is how kx says a listing held nothing, wherever a count would

@@ -325,6 +325,11 @@ type Table struct {
 	// Raw is the untouched output, carried for the shapes kx cannot index —
 	// JSON, YAML, a table with no NAME column.
 	Raw string
+	// Match is the --match term the rows were narrowed by, empty for none.
+	// It matters only once the narrowing leaves nothing: the caption then
+	// names the term, since "none found" would say the namespace is empty
+	// when it may be full of resources the term did not match.
+	Match string
 }
 
 // Indexable reports whether the output parsed as a table kx could number.
