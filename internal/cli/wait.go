@@ -382,8 +382,7 @@ func newWaitCommand(services Services) *cobra.Command {
 			"Several indexes are all resolved and checked before anything waits, then waited for in " +
 			"order; the first that fails or times out ends the command. --timeout covers " +
 			"them together, as it does for kubectl: each waits for what the ones before " +
-			"it left, not a timeout of its own.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"it left, not a timeout of its own.",
 		Example: "  kx wait 2\n  kx wait 1..4 --timeout=2m\n  kx wait @db-claim\n" +
 			"  kx wait 3 --for=delete\n  kx wait 5 --for=condition=Ready=false",
 		// No Args validator, for the reason scale has none: cobra counts the

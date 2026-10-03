@@ -12,8 +12,6 @@ kubectl's own flags pass through — --current-replicas to make the scale condit
 
 Unrecognized flags are passed through to kubectl.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text

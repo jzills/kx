@@ -410,6 +410,24 @@ func TestListingCommandsDocumentWatch(t *testing.T) {
 	}
 }
 
+// commandHelp adds the pass-through sentence to any command whose Use ends in
+// [kubectl flags], so a Long that says it too prints it twice in a row — as
+// delete, scale, wait and set image all did, the newer ones copying the older.
+func TestPassthroughNoteIsSaidOnce(t *testing.T) {
+	const note = "Unrecognized flags are passed through to kubectl."
+	root := NewRoot(Services{}, "test")
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if got := strings.Count(commandHelp(cmd).Doc, note); got > 1 {
+			t.Errorf("%s --help says %q %d times", cmd.CommandPath(), note, got)
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
 // The four --html commands must describe --port and --no-open identically —
 // kx top's own wording ("Port to serve --html on (random free port by
 // default)", "Don't open a browser automatically with --html") used to

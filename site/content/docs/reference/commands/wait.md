@@ -16,8 +16,6 @@ Several indexes are all resolved and checked before anything waits, then waited 
 
 Unrecognized flags are passed through to kubectl.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text
