@@ -450,6 +450,31 @@ func TestPassthroughNoteIsSaidOnce(t *testing.T) {
 	walk(root)
 }
 
+// --match means one thing everywhere it is registered — index.MatchesName —
+// so it is described by the one constant. kx top and kx secret spelled the
+// text out, and matched only until matchUsage is next reworded.
+func TestMatchIsDescribedTheSameWayEverywhere(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	seen := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if flag := cmd.LocalFlags().Lookup("match"); flag != nil {
+			seen++
+			if flag.Usage != matchUsage {
+				t.Errorf("%s --match is described %q, want matchUsage (%q)",
+					cmd.CommandPath(), flag.Usage, matchUsage)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if seen < 6 {
+		t.Errorf("found --match on %d commands, want get, secret, top, diag, scan and tree at least", seen)
+	}
+}
+
 // The four --html commands must describe --port and --no-open identically —
 // kx top's own wording ("Port to serve --html on (random free port by
 // default)", "Don't open a browser automatically with --html") used to
