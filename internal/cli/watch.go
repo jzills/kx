@@ -100,12 +100,14 @@ func removeString(list []string, s string) []string {
 // watchNamespace resolves the caption namespace for a watch listing: "all
 // namespaces" for -A (rows there are keyed by NAMESPACE/NAME, not scoped to
 // one), the explicit -n/--namespace value if given, or the current
-// context's namespace otherwise.
+// context's namespace otherwise — unless a cluster-selecting flag points the
+// watch elsewhere, where the current namespace is this cluster's and says
+// nothing about the rows, so none is named (as GetCommand.Execute does).
 func watchNamespace(extra []string, kube kubectl.Service) string {
 	if allNamespaces(extra) {
 		return render.AllNamespaces
 	}
-	if namespace := extractNamespace(extra); namespace != "" {
+	if namespace := extractNamespace(extra); namespace != "" || clusterFlagIn(extra) != "" {
 		return namespace
 	}
 	return kube.CurrentNamespace()
