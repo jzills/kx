@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -432,22 +433,56 @@ func TestWaitHelpListsTheFlagsItReads(t *testing.T) {
 	}
 }
 
-// commandHelp adds the pass-through sentence to any command whose Use ends in
-// [kubectl flags], so a Long that says it too prints it twice in a row — as
-// delete, scale, wait and set image all did, the newer ones copying the older.
-func TestPassthroughNoteIsSaidOnce(t *testing.T) {
-	const note = "Unrecognized flags are passed through to kubectl."
+// A command that forwards flags says so once. commandHelp closes the
+// description with a note for any command whose Use declares the flags it
+// forwards, and most of those Longs already open a paragraph with "kubectl's
+// own flags pass through — …" and the flags worth knowing, so the note
+// restated the paragraph a few lines below it on delete, drain, logs, scale,
+// yaml and set image. rollout forwards flags without declaring them in its
+// Use, and wrote the note into its Long by hand to make up for it.
+func TestPassthroughIsDescribedOnce(t *testing.T) {
+	mention := regexp.MustCompile(`(?i)\bpass(ed|es)? through\b`)
 	root := NewRoot(Services{}, "test")
+	forwarding := 0
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
-		if got := strings.Count(commandHelp(cmd).Doc, note); got > 1 {
-			t.Errorf("%s --help says %q %d times", cmd.CommandPath(), note, got)
+		if cmd.DisableFlagParsing && cmd != root {
+			forwarding++
+			if ParseUse(cmd.Use).Passthrough == "" {
+				t.Errorf("%s forwards flags, but its Use %q does not declare them",
+					cmd.CommandPath(), cmd.Use)
+			}
+			if got := len(mention.FindAllString(commandHelp(cmd).Doc, -1)); got != 1 {
+				t.Errorf("%s --help says flags pass through %d times, want once:\n%s",
+					cmd.CommandPath(), got, commandHelp(cmd).Doc)
+			}
 		}
 		for _, child := range cmd.Commands() {
 			walk(child)
 		}
 	}
 	walk(root)
+	if forwarding == 0 {
+		t.Fatal("found no command that forwards flags; the walk checked nothing")
+	}
+}
+
+// kx scan forwards what it does not recognise to the scanner, and its help
+// said they went to kubectl — the note was one sentence for every
+// placeholder, whatever the placeholder named.
+func TestPassthroughNoteNamesWhereFlagsGo(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	scan, _, err := root.Find([]string{"scan"})
+	if err != nil || scan.Name() != "scan" {
+		t.Fatalf("Find(scan) = %v, %v", scan, err)
+	}
+	doc := commandHelp(scan).Doc
+	if !strings.Contains(doc, "Unrecognized flags are passed through to the scanner.") {
+		t.Errorf("kx scan --help = %q, want its flags passed through to the scanner", doc)
+	}
+	if strings.Contains(doc, "to kubectl") {
+		t.Errorf("kx scan --help = %q, still says its flags go to kubectl", doc)
+	}
 }
 
 // --match means one thing everywhere it is registered — index.MatchesName —

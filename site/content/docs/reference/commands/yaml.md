@@ -10,8 +10,6 @@ Prints the raw YAML manifest for one or more indexed resources. --show fetches t
 
 kubectl's own flags pass through. Naming an output format yourself replaces kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints JSON. --show cannot be combined with one: it parses the YAML it narrows.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text

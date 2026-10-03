@@ -648,14 +648,13 @@ func newScaleCommand(services Services) *cobra.Command {
 
 func newRolloutCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use: "rollout <action> <index>",
+		Use: "rollout <action> <index> [kubectl flags]",
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
 		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
 			"live and blocks until the rollout settles; the other actions run and return immediately.\n\n" +
 			"kubectl's own flags pass through, which is how undo reaches a particular " +
-			"revision: --to-revision, --revision for history, --timeout for status.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"revision: --to-revision, --revision for history, --timeout for status.",
 		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1\n" +
 			"  kx rollout undo 1 --to-revision=2\n  kx rollout status 1 --timeout=2m",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
