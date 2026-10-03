@@ -469,8 +469,9 @@ func (b Builder) BuildNamespace(
 	// so the indexes run 1..n over what is shown.
 	if match != "" {
 		kept := roots[:0]
+		matches := index.NameMatcher(match)
 		for _, entry := range roots {
-			if index.MatchesName(entry.object.GetName(), match) {
+			if matches(entry.object.GetName()) {
 				kept = append(kept, entry)
 			}
 		}

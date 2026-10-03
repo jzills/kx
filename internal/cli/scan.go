@@ -135,10 +135,11 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 		return nil, err
 	}
 	var images []string
+	matches := index.NameMatcher(scope.Match)
 	for _, item := range list.Items {
 		// Before the images are read, so a workload the term leaves out
 		// never costs a scanner run.
-		if !index.MatchesName(itemName(item), scope.Match) {
+		if !matches(itemName(item)) {
 			continue
 		}
 		images = append(images, imagesOf(item)...)

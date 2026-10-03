@@ -2,6 +2,7 @@ package index
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -757,7 +758,8 @@ func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
 }
 
 // MatchesName is the one definition of --match: a case-insensitive substring,
-// with an empty term matching everything.
+// with an empty term matching everything. NameMatcher, the same test with the
+// term fixed for a loop, must agree with it on every case.
 func TestMatchesName(t *testing.T) {
 	for _, tc := range []struct {
 		name, term string
@@ -772,5 +774,25 @@ func TestMatchesName(t *testing.T) {
 		if got := MatchesName(tc.name, tc.term); got != tc.want {
 			t.Errorf("MatchesName(%q, %q) = %v, want %v", tc.name, tc.term, got, tc.want)
 		}
+		if got := NameMatcher(tc.term)(tc.name); got != tc.want {
+			t.Errorf("NameMatcher(%q)(%q) = %v, want %v", tc.term, tc.name, got, tc.want)
+		}
+	}
+}
+
+// A term is lowercased once per filter, not once per row: MatchesName
+// lowered it on every call, so `kx get pods -A -m API` over a large listing
+// allocated a fresh copy of "api" for each row. The names here are already
+// lowercase, which strings.ToLower returns without copying, so whatever is
+// left scaling with the rows is the term.
+func TestFilterRowsLowersTheTermOnce(t *testing.T) {
+	headers := []string{"NAME", "STATUS"}
+	rows := make([][]string, 200)
+	for i := range rows {
+		rows[i] = []string{"pod-" + strconv.Itoa(i), "Running"}
+	}
+	allocs := testing.AllocsPerRun(20, func() { FilterRows(headers, rows, "POD-1") })
+	if allocs > 10 {
+		t.Errorf("FilterRows over %d rows made %.0f allocations, want a handful", len(rows), allocs)
 	}
 }

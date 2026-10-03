@@ -12,8 +12,6 @@ kubectl's own flags pass through: --force --grace-period=0 for a pod that will n
 
 Unrecognized flags are passed through to kubectl.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text

@@ -418,6 +418,10 @@ func TestIndexCommandsRefuseAClusterFlag(t *testing.T) {
 // for another cluster to contradict, and kubectl gets the flag as typed. And
 // --as, --user and --token choose who acts rather than where, so they still
 // pass beside one.
+//
+// The delete runs on the same state as the listing before it: another
+// cluster's listing is printed, never saved (#427), so index 1 still names
+// nginx in prod.
 func TestClusterFlagsPassWhereNoIndexIsSpent(t *testing.T) {
 	kube := &recordingKubectl{output: ""}
 	services := labelServices(t, kube)
@@ -434,10 +438,7 @@ func TestClusterFlagsPassWhereNoIndexIsSpent(t *testing.T) {
 		t.Errorf("kubectl calls = %q, want --context=b forwarded", kube.runs)
 	}
 
-	// Fresh state: the empty listing just saved retired index 1.
-	kube = &recordingKubectl{output: ""}
-	services = labelServices(t, kube)
-	services.Confirm = func(string) error { return nil }
+	kube.runs = nil
 	cmd = newDeleteCommand(services)
 	cmd.SetArgs([]string{"1", "-y", "--as=admin"})
 	if err := cmd.Execute(); err != nil {
