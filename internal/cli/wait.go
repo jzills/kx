@@ -415,8 +415,8 @@ func newWaitCommand(services Services) *cobra.Command {
 			}
 			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
 				func(target Resolved, met string) {
-					render.Success(strings.Join(captionPartsOf(
-						string(target.Kind)+"/"+target.Name, target.Namespace, met), " · "))
+					render.Success(scopeCaption(
+						string(target.Kind)+"/"+target.Name, target.Namespace, met))
 				})
 		},
 	}
@@ -428,18 +428,6 @@ func newWaitCommand(services Services) *cobra.Command {
 	cmd.Flags().Duration("timeout", defaultWaitTimeout,
 		"How long to wait for every index together (default 30s); 0 checks once")
 	return cmd
-}
-
-// captionPartsOf keeps the non-empty parts in order, so a cluster-scoped
-// resource's line has no empty namespace segment.
-func captionPartsOf(parts ...string) []string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			kept = append(kept, part)
-		}
-	}
-	return kept
 }
 
 // watchJob reads events until the Job finishes or is deleted, the channel

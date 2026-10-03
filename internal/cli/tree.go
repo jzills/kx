@@ -160,10 +160,12 @@ func treeInvocation(scope, match string, indexed bool, port int) string {
 	return invocation("tree", scope, matchFlag(match), indexFlag(indexed), portFlag(port))
 }
 
-// scopeCaption joins non-empty parts with " · " for the page's muted caption
-// line, matching the text render.Banner/render.ScopeBanner already printed
-// to the terminal just above render.Tree, so the two must not read
-// differently.
+// scopeCaption joins non-empty parts with " · ", so a part that may be
+// missing — a cluster-scoped resource's namespace — leaves no empty segment.
+// The tree page's muted caption line uses it to match the text
+// render.Banner/render.ScopeBanner already printed to the terminal just above
+// render.Tree, so the two must not read differently; kx wait's success line
+// uses it too.
 func scopeCaption(parts ...string) string {
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {
