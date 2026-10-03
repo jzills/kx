@@ -92,6 +92,13 @@ func (c WaitCommand) ExecuteAll(
 			args = withWaitTimeout(extraArgs, remaining)
 		}
 		met, err := c.wait(ctx, target, plans[i], remaining, args)
+		// A later target waits on what was left, but the deadline it missed
+		// is the whole --timeout, the number the caller typed.
+		var expired waitTimedOut
+		if errors.As(err, &expired) {
+			expired.After = timeout
+			return expired
+		}
 		if err != nil {
 			return err
 		}
@@ -322,8 +329,18 @@ func staleTarget(target Resolved) error {
 	}
 }
 
+// waitTimedOut is a wait kx carried out itself running out of time.
+type waitTimedOut struct {
+	Target Resolved
+	After  time.Duration
+}
+
+func (e waitTimedOut) Error() string {
+	return fmt.Sprintf("Timed out after %s waiting for %s/%s.", e.After, e.Target.Kind, e.Target.Name)
+}
+
 func timedOut(target Resolved, timeout time.Duration) error {
-	return fmt.Errorf("Timed out after %s waiting for %s/%s.", timeout, target.Kind, target.Name)
+	return waitTimedOut{Target: target, After: timeout}
 }
 
 // negativeWaitTimeout is what kubectl waits for given a negative --timeout.

@@ -439,16 +439,26 @@ func TestWaitWithAZeroTimeoutChecksEveryIndexOnce(t *testing.T) {
 	}
 }
 
-// A Job kx waits on itself gets what is left too, not the whole timeout.
+// A Job kx waits on itself gets what is left too, not the whole timeout —
+// which the wall clock shows: the Job's watch never answers, so the wait ends
+// only at its deadline, 50ms after it starts rather than 10s.
+//
+// The message names the whole --timeout all the same. It named the 50ms left,
+// a number the caller never typed, where a target reached with nothing left
+// named the 10s (#439).
 func TestWaitGivesALaterJobWhatIsLeft(t *testing.T) {
-	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{2*time.Second - 50*time.Millisecond}}
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{10*time.Second - 50*time.Millisecond}}
 	client := fake.NewSimpleClientset(job())
 	client.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
 		return true, watch.NewFake(), nil
 	})
-	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=2s")
-	if err == nil || err.Error() != "Timed out after 50ms waiting for Job/migrate." {
-		t.Errorf("err = %v, want the Job to time out on the 50ms left", err)
+	began := time.Now()
+	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=10s")
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("the Job waited %s, want the 50ms left", took)
+	}
+	if err == nil || err.Error() != "Timed out after 10s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout named as the 10s given", err)
 	}
 }
 
