@@ -63,6 +63,7 @@ func (s Services) scannerService() scanner.Service {
 // NewServices builds the production service set from the loaded config.
 func NewServices(cfg config.Config) Services {
 	client := kubectl.New()
+	client.Warn = render.Warning
 	states := state.NewService(cfg.MaxHistory)
 	// Every entry the state service writes records the context it was listed
 	// against. Wired here, as a hook rather than a value, because the state

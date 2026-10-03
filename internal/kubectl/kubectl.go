@@ -49,10 +49,59 @@ type Exec struct {
 	// complaint. Nil means "do not cache", which is what a bare Exec{} in a
 	// test gets and what the uncached behaviour used to be everywhere.
 	context *contextCache
+	// Warn receives each warning kubectl writes on a call that succeeds — a
+	// deprecated API, an admission webhook's notice, the caveat rollout undo
+	// prints — as kubectl worded it, "Warning: …". Run reads stderr only to
+	// report a failure, so without this a warning on a success was dropped.
+	// Nil drops them still, which is what the MCP server's bare Exec{} wants:
+	// nobody is reading its stderr.
+	Warn func(line string)
+	// warned holds the warnings Warn has been given, so one repeated by each
+	// of a command's kubectl calls is said once, as kubectl says it once per
+	// process. Nil remembers nothing.
+	warned *warningSet
 }
 
 // New returns a kubectl service backed by the kubectl binary.
-func New() *Exec { return &Exec{context: &contextCache{}} }
+func New() *Exec { return &Exec{context: &contextCache{}, warned: &warningSet{}} }
+
+// warningSet is the warnings already forwarded in this process.
+type warningSet struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+// first reports whether line has not been forwarded before, and records it.
+func (s *warningSet) first(line string) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen[line] {
+		return false
+	}
+	if s.seen == nil {
+		s.seen = map[string]bool{}
+	}
+	s.seen[line] = true
+	return true
+}
+
+// forwardWarnings hands Warn the warning lines from a successful call's
+// stderr. Only those: the rest is kubectl's account of what kx reports its
+// own way — "No resources found in prod namespace." is the empty-listing
+// caption — and printing it too would say everything twice.
+func (e Exec) forwardWarnings(stderr string) {
+	if e.Warn == nil {
+		return
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(line, "Warning:") && e.warned.first(line) {
+			e.Warn(line)
+		}
+	}
+}
 
 // contextCache holds the current context for the life of the process.
 //
@@ -154,6 +203,7 @@ func (e Exec) Run(args []string) (string, error) {
 	if err != nil {
 		return "", translate(err)
 	}
+	e.forwardWarnings(stderr.String())
 	return stdout.String(), nil
 }
 

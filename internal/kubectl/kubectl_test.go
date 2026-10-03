@@ -258,3 +258,63 @@ func TestWatchReturnsATypedErrorCarryingStderr(t *testing.T) {
 		t.Errorf("Stderr = %q, want kubectl's own message verbatim", reported.Stderr)
 	}
 }
+
+// kubectl writes a server's warnings to stderr and still succeeds — a
+// deprecated API, an admission webhook's notice, the "last-applied-
+// configuration" caveat on rollout undo — and Run read stderr only on a
+// failure, so every one of them was dropped: `kubectl rollout undo` printed
+// one that `kx rollout undo` never showed.
+//
+// Only the warning lines go on. The rest of a successful call's stderr is
+// kubectl's account of what kx shows its own way ("No resources found …" is
+// the empty-listing caption), and a repeat across the several kubectl calls one
+// kx command can make is said once, as kubectl says it once per process.
+func TestRunForwardsWarningsOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	const warning = "Warning: resource deployments/web was previously managed with 'kubectl apply'."
+	shim(t, dir, "#!/bin/sh\n"+
+		"echo \""+warning+"\" >&2\n"+
+		"echo 'No resources found in prod namespace.' >&2\n"+
+		"echo \""+warning+"\" >&2\n"+
+		"echo 'Warning: policy/v1beta1 PodSecurityPolicy is deprecated' >&2\n"+
+		"echo out\n")
+
+	var forwarded []string
+	client := New()
+	client.Warn = func(line string) { forwarded = append(forwarded, line) }
+	for range 2 {
+		output, err := client.Run([]string{"rollout", "undo", "deployment/web"})
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if output != "out\n" {
+			t.Errorf("output = %q, want stdout alone", output)
+		}
+	}
+
+	want := []string{warning, "Warning: policy/v1beta1 PodSecurityPolicy is deprecated"}
+	if fmt.Sprint(forwarded) != fmt.Sprint(want) {
+		t.Errorf("forwarded %q, want each warning once and nothing else: %q", forwarded, want)
+	}
+}
+
+// A failing call already returns all of stderr as its error, warnings
+// included; forwarding them as well would print them twice.
+func TestRunDoesNotForwardWarningsOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	shim(t, dir, "#!/bin/sh\necho 'Warning: deprecated' >&2\necho 'error: boom' >&2\nexit 1\n")
+
+	var forwarded []string
+	client := New()
+	client.Warn = func(line string) { forwarded = append(forwarded, line) }
+	_, err := client.Run([]string{"get", "pods"})
+	if err == nil {
+		t.Fatal("Run succeeded on a non-zero exit")
+	}
+	if len(forwarded) != 0 {
+		t.Errorf("forwarded %q on a failure, whose error already carries them", forwarded)
+	}
+	if want := "Warning: deprecated\nerror: boom"; err.Error() != want {
+		t.Errorf("err = %q, want all of stderr: %q", err, want)
+	}
+}
