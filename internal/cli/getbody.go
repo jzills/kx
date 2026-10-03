@@ -201,7 +201,11 @@ func runGet(services Services, resource string, args []string, options getOption
 		if wantsLiveTable(extra) {
 			return runWatch(services, resource, extra)
 		}
-		render.Caption("watches can't be indexed — streaming kubectl output directly")
+		// Not ahead of a stream another program reads: `kx get ns -w -o name`
+		// opened with a line that is not a name.
+		if printsTable(extra) {
+			render.Caption("watches can't be indexed — streaming kubectl output directly")
+		}
 		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
 		return err
 	}
@@ -218,9 +222,10 @@ func runGet(services Services, resource string, args []string, options getOption
 		namespace = render.AllNamespaces
 	}
 	// Another cluster's listing was printed, not saved, so nothing behind it
-	// moved and there is no way back to offer.
+	// moved and there is no way back to offer. Captioned only as a table:
+	// ahead of JSON or names, the caption is a line the reader can't parse.
 	crossCluster := clusterFlagIn(extra)
-	if crossCluster != "" {
+	if crossCluster != "" && printsTable(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
 	render.IndexedTable(output, resource, namespace)

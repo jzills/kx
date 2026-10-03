@@ -29,8 +29,8 @@ const defaultWaitTimeout = 30 * time.Second
 // the kinds where one condition means "ready" unambiguously. Label is what
 // the success line says was met.
 //
-// Jobs and Services are absent because kx waits for them itself — see
-// WaitCommand.waitJob and waitService. Deployments, StatefulSets and
+// Jobs and Services are absent because each is planned on its own — see
+// WaitCommand.waitJob and planService. Deployments, StatefulSets and
 // DaemonSets are absent on purpose: Available is true in the middle of a
 // rollout, so it would report done while old pods are still being replaced.
 // kx rollout status is the wait for those.
@@ -52,6 +52,11 @@ type WaitCommand struct {
 // ExecuteAll waits for each target in turn and reports each as it is met,
 // stopping at the first that fails or times out.
 //
+// Every target is planned before the first wait begins, so one kx refuses to
+// wait on — a rollout kind, a kind with no default, a Service that will never
+// have an address — is refused at once rather than after the targets ahead of
+// it have waited, perhaps for the whole timeout.
+//
 // timeout is one deadline for the whole set, as kubectl wait keeps one: the
 // first target gets the flags as typed, and each after it the time left, as a
 // --timeout of its own. A target reached with none left times out without
@@ -66,6 +71,14 @@ func (c WaitCommand) ExecuteAll(
 		now = time.Now
 	}
 	start := now()
+	plans := make([]waitPlan, len(targets))
+	for i, target := range targets {
+		plan, err := c.plan(ctx, target, extraArgs)
+		if err != nil {
+			return err
+		}
+		plans[i] = plan
+	}
 	for i, target := range targets {
 		remaining, args := timeout, extraArgs
 		if i > 0 {
@@ -78,7 +91,14 @@ func (c WaitCommand) ExecuteAll(
 			}
 			args = withWaitTimeout(extraArgs, remaining)
 		}
-		met, err := c.Execute(ctx, target, remaining, args)
+		met, err := c.wait(ctx, target, plans[i], remaining, args)
+		// A later target waits on what was left, but the deadline it missed
+		// is the whole --timeout, the number the caller typed.
+		var expired waitTimedOut
+		if errors.As(err, &expired) {
+			expired.After = timeout
+			return expired
+		}
 		if err != nil {
 			return err
 		}
@@ -103,20 +123,35 @@ func withWaitTimeout(extraArgs []string, timeout time.Duration) []string {
 func (c WaitCommand) Execute(
 	ctx context.Context, target Resolved, timeout time.Duration, extraArgs []string,
 ) (string, error) {
-	subject := string(target.Kind) + "/" + target.Name
-	stop := c.Status("waiting for " + subject)
-	defer stop()
+	plan, err := c.plan(ctx, target, extraArgs)
+	if err != nil {
+		return "", err
+	}
+	return c.wait(ctx, target, plan, timeout, extraArgs)
+}
 
+// waitPlan is how one target is waited for: by kx's own Job watch, or by
+// kubectl wait with forArgs, reported as label once met.
+type waitPlan struct {
+	job     bool
+	forArgs []string
+	label   string
+}
+
+// plan decides how target is waited for, or refuses it, without waiting.
+// Only a Service is read to decide — its type says whether it will ever have
+// an address — and a refusal names the reason and the command that does wait.
+func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []string) (waitPlan, error) {
 	if hasFlag(extraArgs, "--for", "") {
-		return c.kubectlWait(target, nil, extraArgs, forLabel(extraArgs))
+		return waitPlan{label: forLabel(extraArgs)}, nil
 	}
 	switch {
 	case target.Kind == kinds.Job:
-		return c.waitJob(ctx, target, timeout)
+		return waitPlan{job: true}, nil
 	case target.Kind == kinds.Service:
-		return c.waitService(ctx, target, extraArgs)
+		return c.planService(ctx, target)
 	case rolloutKinds.Has(target.Kind):
-		return "", fmt.Errorf(
+		return waitPlan{}, fmt.Errorf(
 			"A %s is waited for with 'kx rollout status %s' — its Available condition "+
 				"is true mid-rollout, so it can't say the rollout finished. "+
 				"Pass --for to wait on a condition anyway.",
@@ -124,11 +159,23 @@ func (c WaitCommand) Execute(
 	}
 	condition, ok := waitDefaults[target.Kind]
 	if !ok {
-		return "", fmt.Errorf(
+		return waitPlan{}, fmt.Errorf(
 			"kx has no default condition for a %s — pass one with --for, "+
 				"e.g. --for=condition=Ready, or --for=delete.", target.Kind)
 	}
-	return c.kubectlWait(target, []string{"--for=" + condition.For}, extraArgs, condition.Label)
+	return waitPlan{forArgs: []string{"--for=" + condition.For}, label: condition.Label}, nil
+}
+
+// wait carries out a plan for one target.
+func (c WaitCommand) wait(
+	ctx context.Context, target Resolved, plan waitPlan, timeout time.Duration, extraArgs []string,
+) (string, error) {
+	stop := c.Status("waiting for " + string(target.Kind) + "/" + target.Name)
+	defer stop()
+	if plan.job {
+		return c.waitJob(ctx, target, timeout)
+	}
+	return c.kubectlWait(target, plan.forArgs, extraArgs, plan.label)
 }
 
 // kubectlWait runs kubectl wait and reports label once it returns. kubectl's
@@ -238,26 +285,27 @@ func jobOutcome(target Resolved, job *batchv1.Job) (label string, err error, don
 	return "", nil, false
 }
 
-// waitService waits for a LoadBalancer Service's address. Any other type
-// never gets one, so waiting would only ever time out; that is refused
+// planService plans the wait for a LoadBalancer Service's address. Any other
+// type never gets one, so waiting would only ever time out; that is refused
 // instead, naming the type.
-func (c WaitCommand) waitService(ctx context.Context, target Resolved, extraArgs []string) (string, error) {
+func (c WaitCommand) planService(ctx context.Context, target Resolved) (waitPlan, error) {
 	client, err := c.Kubernetes()
 	if err != nil {
-		return "", err
+		return waitPlan{}, err
 	}
 	service, err := client.CoreV1().Services(target.Namespace).Get(ctx, target.Name, metav1.GetOptions{})
 	if err != nil {
-		return "", c.apiError(ctx, target, 0, err)
+		return waitPlan{}, c.apiError(ctx, target, 0, err)
 	}
 	if service.Spec.Type != corev1.ServiceTypeLoadBalancer {
-		return "", fmt.Errorf(
+		return waitPlan{}, fmt.Errorf(
 			"%s/%s is a %s Service, which is never given an external address — "+
 				"only a LoadBalancer is. Pass --for to wait on something else.",
 			target.Kind, target.Name, service.Spec.Type)
 	}
-	return c.kubectlWait(target,
-		[]string{"--for=jsonpath={.status.loadBalancer.ingress}"}, extraArgs, "has an address")
+	return waitPlan{
+		forArgs: []string{"--for=jsonpath={.status.loadBalancer.ingress}"}, label: "has an address",
+	}, nil
 }
 
 // apiError turns a failed API read into the error kx reports: a vanished
@@ -281,8 +329,18 @@ func staleTarget(target Resolved) error {
 	}
 }
 
+// waitTimedOut is a wait kx carried out itself running out of time.
+type waitTimedOut struct {
+	Target Resolved
+	After  time.Duration
+}
+
+func (e waitTimedOut) Error() string {
+	return fmt.Sprintf("Timed out after %s waiting for %s/%s.", e.After, e.Target.Kind, e.Target.Name)
+}
+
 func timedOut(target Resolved, timeout time.Duration) error {
-	return fmt.Errorf("Timed out after %s waiting for %s/%s.", timeout, target.Kind, target.Name)
+	return waitTimedOut{Target: target, After: timeout}
 }
 
 // negativeWaitTimeout is what kubectl waits for given a negative --timeout.
@@ -321,7 +379,7 @@ func newWaitCommand(services Services) *cobra.Command {
 			"--for replaces the default and goes to kubectl wait as written: " +
 			"--for=condition=Ready, --for=delete, --for=jsonpath=... . --timeout is 30s " +
 			"unless given, as it is for kubectl.\n\n" +
-			"Several indexes are all resolved before anything waits, then waited for in " +
+			"Several indexes are all resolved and checked before anything waits, then waited for in " +
 			"order; the first that fails or times out ends the command. --timeout covers " +
 			"them together, as it does for kubectl: each waits for what the ones before " +
 			"it left, not a timeout of its own.\n\n" +

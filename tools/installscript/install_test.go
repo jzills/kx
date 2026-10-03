@@ -34,6 +34,9 @@ type releaseOptions struct {
 	tamper   bool // serve archives whose bytes differ from the listed hash
 	unlisted bool // omit archive lines from SHA256SUMS
 	broken   bool // ship a kx that cannot start, like a pre-Go v0.0.x build
+	// noexec ships a kx that cannot start from anywhere under this directory,
+	// as a binary can't on a filesystem mounted noexec.
+	noexec string
 }
 
 var platforms = []string{"linux_amd64", "linux_arm64", "darwin_amd64", "darwin_arm64"}
@@ -43,7 +46,7 @@ func newRelease(t *testing.T, version string, opts releaseOptions) *release {
 	files := map[string][]byte{}
 	var sums strings.Builder
 	for _, p := range platforms {
-		archive := stubArchive(t, version, opts.broken)
+		archive := stubArchive(t, version, opts)
 		sum := sha256.Sum256(archive)
 		for _, name := range []string{"kx_" + p + ".tar.gz", "kx_" + version + "_" + p + ".tar.gz"} {
 			if !opts.unlisted {
@@ -102,8 +105,9 @@ echo 'kx VERSION'
 `
 
 // stubArchive builds kx/kx and kx/LICENSE, gzipped, in the layout
-// scripts/build_binaries.sh produces. A broken archive's kx exits 1.
-func stubArchive(t *testing.T, version string, broken bool) []byte {
+// scripts/build_binaries.sh produces. A broken archive's kx exits 1, and a
+// noexec one's fails as exec does on a noexec mount when run from under it.
+func stubArchive(t *testing.T, version string, opts releaseOptions) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -117,8 +121,12 @@ func stubArchive(t *testing.T, version string, broken bool) []byte {
 		}
 	}
 	body := strings.ReplaceAll(stubKx, "VERSION", version)
-	if broken {
+	if opts.broken {
 		body = "#!/bin/sh\necho 'kx: cannot start' >&2\nexit 1\n"
+	}
+	if opts.noexec != "" {
+		body = strings.Replace(body, "#!/bin/sh\n", "#!/bin/sh\n"+
+			`case "$(pwd -P)/" in '`+opts.noexec+`'/*) echo "./kx: Permission denied" >&2; exit 126 ;; esac`+"\n", 1)
 	}
 	add("kx/kx", 0o755, body)
 	add("kx/LICENSE", 0o644, "MIT\n")
@@ -404,6 +412,43 @@ func TestRefusesABinaryThatDoesNotRun(t *testing.T) {
 	out, _ := exec.Command(filepath.Join(dir, "kx"), "--version").Output()
 	if strings.TrimSpace(string(out)) != "kx v0.6.0" {
 		t.Errorf("existing kx now reports %q, want the working v0.6.0 left in place", out)
+	}
+	assertNothingStaged(t, dir)
+}
+
+// The check that the binary runs is made on the copy staged in the install
+// directory, not in the download's temporary one: on a host that mounts /tmp
+// noexec, nothing can run from there, and every install was refused as a kx
+// that "did not run here" (#437).
+func TestChecksTheBinaryWhereItWillRun(t *testing.T) {
+	hostPlatform(t)
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	r := newRelease(t, "v0.7.0", releaseOptions{noexec: tmp})
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir, "TMPDIR": tmp}, toolbox(t))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr %q: want an install, with only the temporary directory noexec",
+			res.code, res.stderr)
+	}
+	out, _ := exec.Command(filepath.Join(dir, "kx"), "--version").Output()
+	if strings.TrimSpace(string(out)) != "kx v0.7.0" {
+		t.Errorf("after install kx --version = %q, want kx v0.7.0", out)
+	}
+	assertNothingStaged(t, dir)
+}
+
+// assertNothingStaged checks dir holds no copy left staged for the rename.
+func assertNothingStaged(t *testing.T, dir string) {
+	t.Helper()
+	staged, err := filepath.Glob(filepath.Join(dir, ".kx.*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staged) != 0 {
+		t.Errorf("%s holds %q, want no staged copy left behind", dir, staged)
 	}
 }
 

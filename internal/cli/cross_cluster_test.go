@@ -146,3 +146,68 @@ func TestTopFromAnotherClusterRefusesJSONAndHTML(t *testing.T) {
 		}
 	}
 }
+
+// The caption goes to stdout, so ahead of output that isn't a table it is a
+// line of prose in the middle of JSON, YAML or names: `kx get ns --context=b
+// -o json | jq` failed to parse. Output kx can't number is printed exactly as
+// it came, as it is without a cluster flag. A table keeps its caption, which
+// proves the caption can still be seen at all.
+func TestGetFromAnotherClusterLeavesMachineOutputAlone(t *testing.T) {
+	for _, tc := range []struct {
+		output  string
+		args    []string
+		caption bool
+	}{
+		{`{"items": []}`, []string{"-o", "json"}, false},
+		{"items: []", []string{"-o=yaml"}, false},
+		{"pod/api\npod/web", []string{"-o", "name"}, false},
+		{"api web", []string{"-o", "jsonpath={.items[*].metadata.name}"}, false},
+		{"POD\napi\nweb", []string{"-o", "custom-columns=POD:.metadata.name"}, true},
+		{crossClusterPods, []string{"-owide"}, true},
+	} {
+		kube := &recordingKubectl{output: tc.output}
+		services := crossClusterServices(t, kube)
+		args := append([]string{"pods", "--context=b"}, tc.args...)
+		stdout, _, err := runCaptured(t, newGetCommand(services), args)
+		if err != nil {
+			t.Fatalf("kx get %v: %v", args, err)
+		}
+		captioned := strings.Contains(stdout, "can't be indexed")
+		if captioned != tc.caption {
+			t.Errorf("kx get %v captioned=%v, want %v: %q", args, captioned, tc.caption, stdout)
+		}
+		if !tc.caption && strings.TrimSpace(stdout) != strings.TrimSpace(tc.output) {
+			t.Errorf("kx get %v printed %q, want kubectl's output exactly", args, stdout)
+		}
+		assertListingUntouched(t, services, 1)
+	}
+}
+
+// A watch kx can't draw as a live table streams straight through, and had the
+// same caption ahead of it: `kx get ns -w -o name` opened with a line that is
+// not a name. A custom-columns stream is still a table and keeps it.
+func TestWatchStreamLeavesMachineOutputAlone(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		caption bool
+	}{
+		{[]string{"-o", "name"}, false},
+		{[]string{"--output=json"}, false},
+		{[]string{"-oyaml"}, false},
+		{[]string{"-o", "custom-columns=NS:.metadata.name"}, true},
+	} {
+		kube := &recordingKubectl{}
+		args := append([]string{"ns", "-w"}, tc.args...)
+		stdout, _, err := runCaptured(t, newGetCommand(switchServices(t, kube)), args)
+		if err != nil {
+			t.Fatalf("kx get %v: %v", args, err)
+		}
+		if len(kube.interactive) != 1 {
+			t.Fatalf("kx get %v streamed %q, want one kubectl watch", args, kube.interactive)
+		}
+		captioned := strings.Contains(stdout, "can't be indexed")
+		if captioned != tc.caption {
+			t.Errorf("kx get %v captioned=%v, want %v: %q", args, captioned, tc.caption, stdout)
+		}
+	}
+}

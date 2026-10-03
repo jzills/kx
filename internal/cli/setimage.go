@@ -38,6 +38,9 @@ type imageChange struct {
 // container is one entry of a pod spec: its name and the image it runs.
 type container struct {
 	Name, Image string
+	// Init marks an init container, which kubectl set image matches by name
+	// like any other but which a suggestion should never pick by default.
+	Init bool `json:"-"`
 }
 
 // Execute reads the workload's containers, turns specs into kubectl's
@@ -98,13 +101,26 @@ func imagePairs(
 		names = append(names, each.Name)
 		byName[each.Name] = each
 	}
+	// The suggestion names the first container, not the init container
+	// listed ahead of it: copied as it stands, 'migrate=api:v2' replaced the
+	// migration image and rolled the workload for it.
 	nameOne := func(image string) error {
+		example := names[0]
+		for _, each := range containers {
+			if !each.Init {
+				example = each.Name
+				break
+			}
+		}
 		return fmt.Errorf("%s has containers %s — name one: 'kx set image %s %s=%s'.",
-			subject, strings.Join(names, ", "), ref, names[0], image)
+			subject, strings.Join(names, ", "), ref, example, image)
 	}
 
 	var pairs []string
 	var changes []imageChange
+	// kubectl keeps the pairs in a map, so a name given twice gets only its
+	// last image, while each would be reported as a change.
+	named := map[string]bool{}
 	for _, spec := range specs {
 		name, image, paired := strings.Cut(spec, "=")
 		if !paired {
@@ -126,6 +142,12 @@ func imagePairs(
 			return nil, nil, fmt.Errorf(
 				"'%s' is not a container=image pair — both sides are needed.", spec)
 		}
+		if named[name] {
+			return nil, nil, fmt.Errorf(
+				"'%s' is named twice — kubectl would apply only the last image, "+
+					"so name each container once.", name)
+		}
+		named[name] = true
 		pairs = append(pairs, name+"="+image)
 		if name == "*" {
 			for _, each := range containers {
@@ -152,6 +174,9 @@ func containersOf(object map[string]json.RawMessage) []container {
 		var entries []container
 		if raw, ok := spec[group]; ok {
 			_ = json.Unmarshal(raw, &entries)
+		}
+		for i := range entries {
+			entries[i].Init = group == "initContainers"
 		}
 		containers = append(containers, entries...)
 	}

@@ -105,6 +105,22 @@ func wantsLiveTable(extraArgs []string) bool {
 	return output == "" || output == "wide"
 }
 
+// printsTable reports whether the pass-through flags leave kubectl printing a
+// table, which a caption can head. Anything else — JSON, YAML, names, a
+// template — is read by another program as often as by a person, and a line
+// of prose ahead of it breaks the reading: `kx get ns --context=b -o json | jq`
+// failed to parse. A format kubectl adds later counts as not a table, since a
+// missing caption is a smaller failure than corrupted output.
+func printsTable(extraArgs []string) bool {
+	output, _, _ := extractString(extraArgs, "--output", "-o")
+	format, _, _ := strings.Cut(output, "=")
+	switch format {
+	case "", "wide", "custom-columns", "custom-columns-file":
+		return true
+	}
+	return false
+}
+
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
 // the text to display and the namespace the listing came from.
 //

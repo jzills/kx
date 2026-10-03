@@ -439,15 +439,58 @@ func TestWaitWithAZeroTimeoutChecksEveryIndexOnce(t *testing.T) {
 	}
 }
 
-// A Job kx waits on itself gets what is left too, not the whole timeout.
+// A Job kx waits on itself gets what is left too, not the whole timeout —
+// which the wall clock shows: the Job's watch never answers, so the wait ends
+// only at its deadline, 50ms after it starts rather than 10s.
+//
+// The message names the whole --timeout all the same. It named the 50ms left,
+// a number the caller never typed, where a target reached with nothing left
+// named the 10s (#439).
 func TestWaitGivesALaterJobWhatIsLeft(t *testing.T) {
-	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{2*time.Second - 50*time.Millisecond}}
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{10*time.Second - 50*time.Millisecond}}
 	client := fake.NewSimpleClientset(job())
 	client.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
 		return true, watch.NewFake(), nil
 	})
-	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=2s")
-	if err == nil || err.Error() != "Timed out after 50ms waiting for Job/migrate." {
-		t.Errorf("err = %v, want the Job to time out on the 50ms left", err)
+	began := time.Now()
+	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=10s")
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("the Job waited %s, want the 50ms left", took)
+	}
+	if err == nil || err.Error() != "Timed out after 10s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout named as the 10s given", err)
+	}
+}
+
+// A refusal kx can make from the target alone is made before anything waits.
+// It was made only when the loop reached the target, so on a mixed listing
+// `kx wait 3 1`, a pod still coming up then a Deployment, waited out the pod
+// first — up to the whole timeout — and the refusal arrived after it, or not
+// at all (#433).
+func TestWaitRefusesEveryTargetBeforeTheFirstWait(t *testing.T) {
+	clusterIP := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+	}
+	for _, tc := range []struct {
+		later Resolved
+		want  string
+	}{
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Deployment, Name: "web", Namespace: "prod"},
+			"waited for with 'kx rollout status 2'"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.ConfigMap, Name: "settings", Namespace: "prod"},
+			"no default condition for a ConfigMap"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Service, Name: "api", Namespace: "prod"},
+			"is a ClusterIP Service"},
+	} {
+		kube := &clockKubectl{recordingKubectl: &recordingKubectl{}}
+		_, err := waitAll(t, kube, fake.NewSimpleClientset(clusterIP),
+			[]Resolved{podTarget(1, "a"), tc.later}, "--timeout=10m")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.later.Kind, err, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: waited on %q before the refusal", tc.later.Kind, kube.runs)
+		}
 	}
 }

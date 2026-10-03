@@ -86,6 +86,28 @@ func TestWatchNamespaceFallsBackToCurrentNamespace(t *testing.T) {
 	}
 }
 
+// Another cluster's watch is not standing in this cluster's namespace:
+// `kx get pods -w --kubeconfig=b.yaml` streamed b's kube-system pods under
+// "Pods · default". It names only a namespace given with -n, as kx get does
+// for another cluster's listing (#436).
+func TestWatchNamespaceFromAnotherCluster(t *testing.T) {
+	kube := &fakeKubectl{namespace: "prod"}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--context=b"}, ""},
+		{[]string{"--kubeconfig", "/tmp/b.yaml"}, ""},
+		{[]string{"-s", "https://b:6443"}, ""},
+		{[]string{"--context=b", "-n", "staging"}, "staging"},
+		{[]string{"--context=b", "-A"}, "all namespaces"},
+	} {
+		if got := watchNamespace(tc.args, kube); got != tc.want {
+			t.Errorf("watchNamespace(%q) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestWatchRowsDeletedOnlyRemovesMatchingNamespace(t *testing.T) {
 	shape := watchAllNamespacesShape(t)
 	rows := newWatchRows()

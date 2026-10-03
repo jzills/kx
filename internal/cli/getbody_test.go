@@ -106,8 +106,12 @@ func TestGetWatchNonTabularOutputKeepsPassthrough(t *testing.T) {
 	if joinArgs(kube.interactive[0]) != joinArgs(want) {
 		t.Errorf("interactive args = %v, want %v", kube.interactive[0], want)
 	}
-	if !strings.Contains(out.String(), "can't be indexed") {
-		t.Errorf("output = %q, want a note that watch listings aren't indexed", out.String())
+	// No note ahead of it: a line of prose breaks a stream another program
+	// reads (#432), and JSON is never numbered, watched or not, so there is
+	// nothing for the note to say. TestWatchStreamLeavesMachineOutputAlone
+	// shows a table stream keeps it.
+	if out.String() != "" {
+		t.Errorf("output = %q, want kubectl's stream alone", out.String())
 	}
 }
 

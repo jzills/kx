@@ -114,14 +114,15 @@ verify() {
 	[ "${actual%% *}" = "$expected" ] || fail "checksum mismatch for $ARCHIVE; refusing to install it"
 }
 
-# Prints the first line of "kx --version" for the kx in directory $1, or on
-# failure everything it said. It runs in a clean environment: the check is
-# whether the binary starts on this machine, and a KX_* setting or config file
-# kx would reject is the user's to fix, not a reason to call a good install a
-# failure. It runs as ./kx from inside $1 because env(1) reads any argument
-# containing "=" as an assignment, and $1 is a path the user may have named.
+# Prints the first line of "kx --version" for the kx in directory $1 — named
+# $2, or kx — or on failure everything it said. It runs in a clean
+# environment: the check is whether the binary starts on this machine, and a
+# KX_* setting or config file kx would reject is the user's to fix, not a
+# reason to call a good install a failure. It runs as ./kx from inside $1
+# because env(1) reads any argument containing "=" as an assignment, and $1 is
+# a path the user may have named.
 kx_version() {
-	out=$(cd "$1" && env -i HOME="$tmp" ./kx --version 2>&1) || {
+	out=$(cd "$1" && env -i HOME="$tmp" ./"${2:-kx}" --version 2>&1) || {
 		printf '%s' "$out"
 		return 1
 	}
@@ -141,15 +142,20 @@ install_kx() {
 	DIR=$(cd "$DIR" && pwd) || fail "cannot use $DIR; $hint"
 	[ -w "$DIR" ] || fail "cannot write to $DIR; $hint"
 	tar -xzf "$1/$ARCHIVE" -C "$1" kx/kx || fail "could not unpack $ARCHIVE"
+	# Staged beside the kx it replaces and renamed over it: overwriting a kx
+	# that is running fails with "text file busy" on Linux, and a rename does
+	# not. The exit trap removes the staged copy if the rename never happens.
+	STAGED="$DIR/.kx.$$"
+	cp "$1/kx/kx" "$STAGED" || fail "cannot write to $DIR; $hint"
+	chmod 0755 "$STAGED"
 	# Before anything is replaced: a kx that cannot start here — a pre-Go
 	# release, a misdetected architecture — must not take the place of one
-	# that can.
-	NEW=$(kx_version "$1/kx") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
-	# Through a temp file and mv: overwriting a kx that is running fails with
-	# "text file busy" on Linux, and a rename does not.
-	cp "$1/kx/kx" "$DIR/.kx.$$" || fail "cannot write to $DIR; $hint"
-	chmod 0755 "$DIR/.kx.$$"
-	mv -f "$DIR/.kx.$$" "$DIR/kx"
+	# that can. Checked on the staged copy, in the directory it will run from:
+	# the download's temporary directory may be mounted noexec, and nothing
+	# can run from there however good the binary.
+	NEW=$(kx_version "$DIR" ".kx.$$") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
+	mv -f "$STAGED" "$DIR/kx"
+	STAGED=""
 }
 
 path_hint() {
@@ -183,7 +189,8 @@ main() {
 	detect_platform
 	choose_release
 	tmp=$(mktemp -d) || fail "could not create a temporary directory"
-	trap 'rm -rf "$tmp"' EXIT
+	STAGED=""
+	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"' EXIT
 	trap 'exit 1' INT TERM
 	say "Downloading $LABEL for $OS/$ARCH…"
 	fetch "$URL_DIR/$ARCHIVE" "$tmp/$ARCHIVE"
