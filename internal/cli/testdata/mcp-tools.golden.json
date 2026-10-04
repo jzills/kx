@@ -973,6 +973,9 @@
               "allNamespaces": {
                 "type": "boolean"
               },
+              "match": {
+                "type": "string"
+              },
               "namespace": {
                 "type": "string"
               },

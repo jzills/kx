@@ -110,6 +110,9 @@ type TreePage struct {
 type TopPage struct {
 	Meta
 	Scope string
+	// Match is the --match term the listing was narrowed by, empty for none —
+	// named on the page when it left no rows, as ScanPage's is.
+	Match string
 	Rows  []TopRow
 }
 

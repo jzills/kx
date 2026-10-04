@@ -20,6 +20,7 @@ import (
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/graph"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -350,6 +351,14 @@ func TestSweepPagesNameATermThatMatchedNothing(t *testing.T) {
 			cmd.SetArgs([]string{"-m", "absent", "--out", out})
 			return cmd.Execute()
 		}},
+		{"top", "0 items</p>", func(t *testing.T, out string) error {
+			services := diagnosticHTMLServices(t)
+			services.Kubectl = &fakeKubectl{output: topPodsOutput, namespace: "prod"}
+			services.Index = index.Service{}
+			cmd := newTopCommand(services)
+			cmd.SetArgs([]string{"-m", "absent", "--no-limits", "--out", out})
+			return cmd.Execute()
+		}},
 		{"tree -A", "all namespaces</p>", func(t *testing.T, out string) error {
 			services := diagnosticHTMLServices(t)
 			services.Kubernetes = func() (kubernetes.Interface, error) { return matchForest(), nil }
@@ -376,5 +385,46 @@ func TestSweepPagesNameATermThatMatchedNothing(t *testing.T) {
 				t.Errorf("page still says %q, the empty-scope reading", tc.empty)
 			}
 		})
+	}
+}
+
+// What kubectl top pods prints, for kx top's own -m tests.
+const topPodsOutput = "NAME     CPU(cores)   MEMORY(bytes)\n" +
+	"api      1m           2Mi\n" +
+	"worker   3m           4Mi\n"
+
+// kx top -m names its term wherever the sweeps do: in the --json document, so
+// a consumer can tell a narrowed listing from a whole one, and on the --html
+// page's invocation line.
+func TestTopMatchReachesTheDocumentAndThePage(t *testing.T) {
+	sink := captureRender(t)
+	services := diagnosticHTMLServices(t)
+	services.Kubectl = &fakeKubectl{output: topPodsOutput, namespace: "prod"}
+	services.Index = index.Service{}
+	cmd := newTopCommand(services)
+	cmd.SetArgs([]string{"-m", "api", "--no-limits", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -m api --json: %v", err)
+	}
+	var document topDocument
+	if err := json.Unmarshal([]byte(sink.String()), &document); err != nil {
+		t.Fatalf("decoding %q: %v", sink.String(), err)
+	}
+	if document.Match != "api" || len(document.Rows) != 1 || document.Rows[0].Name != "api" {
+		t.Errorf("document = %+v, want api alone, under match api", document)
+	}
+
+	out := filepath.Join(t.TempDir(), "top.html")
+	cmd = newTopCommand(services)
+	cmd.SetArgs([]string{"-m", "api", "--no-limits", "--out", out})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx top -m api --out: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("reading the page: %v", err)
+	}
+	if !strings.Contains(string(page), "<b>kx top -n prod -m api</b>") {
+		t.Errorf("the page's invocation line does not name the term")
 	}
 }
