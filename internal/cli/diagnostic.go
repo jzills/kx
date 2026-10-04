@@ -34,7 +34,11 @@ func (c DiagnosticCommand) Execute(ctx context.Context, ref state.Ref) (diagnost
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
-	return c.ExecuteResource(ctx, kind, name, namespace)
+	report, err := c.ExecuteResource(ctx, kind, name, namespace)
+	if err != nil {
+		return diagnostics.Report{}, staleIfMissing(err, kind, name, namespace, ref)
+	}
+	return report, nil
 }
 
 // ExecuteResource diagnoses a resource that is already resolved — from an

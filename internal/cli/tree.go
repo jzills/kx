@@ -41,7 +41,11 @@ func (c TreeCommand) Execute(ctx context.Context, ref state.Ref, indexed bool) (
 	if err != nil {
 		return nil, err
 	}
-	return c.ExecuteResource(ctx, kind, name, namespace, indexed)
+	node, err := c.ExecuteResource(ctx, kind, name, namespace, indexed)
+	if err != nil {
+		return nil, staleIfMissing(err, kind, name, namespace, ref)
+	}
+	return node, nil
 }
 
 // ExecuteResource graphs a resource that is already resolved. A Namespace

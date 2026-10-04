@@ -17,6 +17,7 @@ import (
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // StaleResourceError reports that a probe confirmed the indexed resource no
@@ -84,6 +85,26 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 	}
 	return nil
+}
+
+// staleIfMissing is ensureExists for a command that reads through client-go:
+// its not-found error is the API server's own, typed, rather than kubectl's
+// stderr, which IsNotFound deliberately will not read. kx tree and kx diag
+// printed `pods "x" not found` for an index whose resource had gone and
+// stopped there, where every kubectl-backed command refreshed the listing.
+//
+// Only a not-found naming the indexed resource itself is stale: something
+// else the command read being missing says nothing about the listing, and is
+// returned as it came.
+func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref state.Ref) error {
+	var status apierrors.APIStatus
+	if !apierrors.IsNotFound(err) || !errors.As(err, &status) {
+		return err
+	}
+	if details := status.Status().Details; details == nil || details.Name != name {
+		return err
+	}
+	return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 }
 
 // forwardExit turns a non-zero kubectl exit into the error kx should return.
