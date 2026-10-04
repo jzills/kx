@@ -270,6 +270,11 @@ func runEach(resolved []Resolved, act func(target Resolved) error) error {
 		var silent SilentError
 		var refused kubectl.Error
 		switch {
+		case isStale(err):
+			// Before kubectl's own verdict: a not-found is both, and
+			// withRefresh reports it above the listing it refreshes.
+			// Rendered here as well, it printed twice.
+			return err
 		case errors.As(err, &silent):
 			// kubectl streamed its own message already.
 		case errors.As(err, &refused):

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -76,5 +77,29 @@ func TestDiagOnSomethingElseMissingIsNotStale(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "settings") {
 		t.Errorf("err = %v, want the original failure unchanged", err)
+	}
+}
+
+// kubectl's not-found under kx yaml, labels or logs is both kubectl's verdict
+// on one resource, which runEach reports under that resource's banner, and
+// stale state, which withRefresh reports above the refreshed listing — so it
+// was printed twice. A stale failure is left to withRefresh, and stops the
+// batch, as the error that can be recovered from has to.
+func TestAStaleKubectlErrorIsReportedOnce(t *testing.T) {
+	out := captureRender(t)
+	const notFound = `Error from server (NotFound): pods "api-old" not found`
+	kube := &recordingKubectl{errs: []error{kubectl.Error{Stderr: notFound}}, output: podsOutput}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+
+	cmd := withRefresh(services, newYamlCommand(services))
+	cmd.SetArgs([]string{"1"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("kx yaml on a vanished pod succeeded")
+	}
+	if got := strings.Count(out.String(), notFound); got != 1 {
+		t.Errorf("printed kubectl's error %d times, want once:\n%s", got, out.String())
+	}
+	if !strings.Contains(out.String(), "State was stale") {
+		t.Errorf("output = %q, want the listing refreshed", out.String())
 	}
 }
