@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/jzills/kx/internal/index"
 )
 
 // The diagnose sweep narrows by the same term kx diag -m does, and its
@@ -87,4 +89,27 @@ func TestMCPMatchIsRefusedBesideATarget(t *testing.T) {
 			t.Errorf("%s with a target and a match: err = %v, want the refusal", name, err)
 		}
 	}
+}
+
+// list_resources narrows by name as kx get -m does: the other three listing
+// tools took a match and the one kx get mirrors did not. What it saves with
+// --write-listings is kx get -m's listing, term included.
+func TestMCPListResourcesTakesAMatch(t *testing.T) {
+	deps := writingDeps(t, &recordingKubectl{output: podsOutput, namespace: "prod"})
+	var out listOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "list_resources",
+		map[string]any{"kind": "pods", "match": "REDIS"}), &out)
+	if out.Match != "REDIS" || out.Total != 1 || len(out.Resources) != 1 ||
+		out.Resources[0].Name != "redis-def-uvw" || out.Resources[0].Index != 1 {
+		t.Errorf("out = %+v, want redis alone, at index 1, under its match", out)
+	}
+
+	entry := onlyTaggedEntry(t, deps.State)
+	cli := cliState(t)
+	if _, _, err := (GetCommand{
+		Kubectl: &recordingKubectl{output: podsOutput, namespace: "prod"}, State: cli, Index: index.Service{},
+	}).Execute("pods", "REDIS", []string{"-n", "prod"}); err != nil {
+		t.Fatal(err)
+	}
+	assertSavedLikeTheCLI(t, entry, cli)
 }

@@ -241,6 +241,7 @@ type listInput struct {
 	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to list; defaults to the current namespace."`
 	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"List across every namespace."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
+	Match         string `json:"match,omitempty" jsonschema:"List only the resources whose name contains this, case-insensitively, as kx get -m does."`
 }
 
 type listedResource struct {
@@ -257,6 +258,7 @@ type listOutput struct {
 	Kind          string           `json:"kind"`
 	Namespace     string           `json:"namespace,omitempty"`
 	AllNamespaces bool             `json:"allNamespaces,omitempty"`
+	Match         string           `json:"match,omitempty"`
 	Total         int              `json:"total"`
 	Resources     []listedResource `json:"resources"`
 }
@@ -313,7 +315,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if err != nil {
 		return nil, listOutput{}, err
 	}
-	table := index.Service{}.Add(output)
+	table := index.Service{}.AddMatching(output, in.Match)
 	if !table.Indexable() && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
@@ -327,7 +329,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		indexed = false
 	}
 	if indexed {
-		if err := d.listingSave(current)(getListing(in.Kind, "", args[2:], namespace, table.Entries)); err != nil {
+		if err := d.listingSave(current)(getListing(in.Kind, in.Match, args[2:], namespace, table.Entries)); err != nil {
 			return nil, listOutput{}, err
 		}
 	}
@@ -335,7 +337,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: current, Kind: string(kind), Namespace: namespace,
-		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
+		AllNamespaces: in.AllNamespaces, Match: in.Match, Total: len(table.Entries),
 		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
 	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {

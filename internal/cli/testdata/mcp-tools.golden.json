@@ -478,6 +478,10 @@
             "description": "Most rows to return; default 200, at most 1000. total always counts every row.",
             "type": "integer"
           },
+          "match": {
+            "description": "List only the resources whose name contains this, case-insensitively, as kx get -m does.",
+            "type": "string"
+          },
           "namespace": {
             "description": "Namespace to list; defaults to the current namespace.",
             "type": "string"
@@ -498,6 +502,9 @@
             "type": "string"
           },
           "kind": {
+            "type": "string"
+          },
+          "match": {
             "type": "string"
           },
           "namespace": {
