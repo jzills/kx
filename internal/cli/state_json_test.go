@@ -38,8 +38,6 @@ func mustSave(t *testing.T, services Services, entry state.State) {
 	}
 }
 
-func matchTerm(term string) *string { return &term }
-
 // The whole document is pinned, not probed field by field: this is a public
 // shape, and a field renamed, dropped or added is exactly the change a
 // consumer notices and a Contains check does not.
@@ -48,7 +46,7 @@ func TestStateJSONPrintsTheCurrentEntry(t *testing.T) {
 	mustSave(t, services, state.State{
 		Resources: state.NewResources([]string{"api-7f9", "worker-2c1"}, kinds.Pod),
 		Namespace: "prod",
-		Query:     &state.Query{Resource: "pods", Args: []string{}, Match: matchTerm("a")},
+		Query:     &state.Query{Resource: "pods", Args: []string{}, Match: matchOf("a")},
 	})
 
 	got, err := runStateJSON(t, services, "--json")

@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 )
@@ -116,23 +117,49 @@ func (c TopCommand) Execute(
 	if allNamespaces {
 		entryNamespace = ""
 	}
+	// --no-limits is kx's flag, not kubectl's, and recorded beside them: it
+	// decides the columns the listing was read from.
+	recorded := extraArgs
+	if noLimits {
+		recorded = append(append([]string{}, extraArgs...), "--no-limits")
+	}
 	if err := c.State.Save(state.State{
 		Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
 		Namespace:     entryNamespace,
 		AllNamespaces: allNamespaces,
-		// Recorded as a `get pods` query so a stale entry refreshes into a
-		// listing, which is what the indexes were assigned against. Command
-		// keeps it from *being* that listing: top omits pods no metrics have
-		// arrived for and orders by usage, so the two hold different
-		// resources in a different order, and an entry that replaced the get
-		// listing put those numbers where the get listing's had been.
+		// Command keeps it from being a `kx get pods` listing, which it is
+		// not: top omits pods no metrics have arrived for and orders by
+		// usage, so the two hold different resources in a different order.
+		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
-			Resource: "pods", Args: extraArgs, Match: match, Command: "top",
+			Resource: "pods", Args: recorded, Match: match, Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
+}
+
+// topListing runs kx top's listing, of pods or of nodes, and returns it with
+// the label and scope its caption takes: "all namespaces" for an -A listing,
+// which spanning then reports. Shared by the command and by a refresh, so a
+// stale kx top listing is listed again exactly as it was.
+func topListing(
+	services Services, nodes bool, match string, rest []string, noLimits bool,
+) (table index.Table, label, namespace string, spanning bool, err error) {
+	command := TopCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+	if nodes {
+		table, namespace, err = command.ExecuteNodes(match, rest)
+		return table, "nodes", namespace, false, err
+	}
+	spanning = allNamespaces(rest)
+	table, namespace, err = command.Execute(match, rest, noLimits)
+	if spanning {
+		// Matches kx get -A's own caption override (getbody.go): many
+		// namespaces span the listing, so there is no single one to name.
+		namespace = render.AllNamespaces
+	}
+	return table, "pods", namespace, spanning, err
 }
 
 // ExecuteNodes lists node CPU/memory usage, indexed like kx get nodes.
@@ -190,12 +217,10 @@ func (c TopCommand) ExecuteNodes(
 	if err := c.State.Save(state.State{
 		Resources: resourcesFrom(indexed.Entries, kinds.Node),
 		Namespace: namespace,
-		// Recorded as a `get nodes` query, matching kx get nodes' own
-		// convention, so a stale entry refreshes into the same listing
-		// shape the indexes were assigned against — and carrying the command
-		// that produced it, for the same reason Execute's entry does.
+		// Carrying the command that produced it, for the same reasons
+		// Execute's entry does.
 		Query: &state.Query{
-			Resource: "nodes", Args: extraArgs, Match: match, Command: "top",
+			Resource: "nodes", Args: extraArgs, Match: match, Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err

@@ -10,7 +10,6 @@ import (
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
-	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -240,26 +239,8 @@ func newTopCommand(services Services) *cobra.Command {
 				}
 			}
 
-			command := TopCommand{
-				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
-			}
-			resourceLabel := "pods"
-			scopedAllNamespaces := false
-			var output index.Table
-			var namespace string
-			if nodes {
-				resourceLabel = "nodes"
-				output, namespace, err = command.ExecuteNodes(match, rest)
-			} else {
-				scopedAllNamespaces = allNamespaces(rest)
-				output, namespace, err = command.Execute(match, rest, noLimits)
-				if scopedAllNamespaces {
-					// Matches kx get -A's own caption override (getbody.go):
-					// many namespaces span the listing, so there is no
-					// single one to name.
-					namespace = render.AllNamespaces
-				}
-			}
+			output, resourceLabel, namespace, scopedAllNamespaces, err :=
+				topListing(services, nodes, match, rest, noLimits)
 			if err != nil {
 				return err
 			}

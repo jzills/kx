@@ -296,6 +296,10 @@ func displayPlural(kind Kind, apiPlural string) string {
 	return string(kind) + "s"
 }
 
+// Mixed is how kx captions a listing that spans kinds — a sweep, a tree, kx
+// get all — in place of the one kind a listing is otherwise named by.
+const Mixed = "Mixed"
+
 // PluralDisplay renders a resource type for captions ("pods" -> "Pods"),
 // passing unknown types through unchanged.
 //
@@ -305,7 +309,7 @@ func displayPlural(kind Kind, apiPlural string) string {
 // resource ("pod/nginx · prod").
 func PluralDisplay(resourceType string) string {
 	if Several(resourceType) {
-		return "Mixed"
+		return Mixed
 	}
 	if kind, _, named := strings.Cut(resourceType, "/"); named {
 		return PluralDisplay(kind)

@@ -24,6 +24,15 @@ var errMCPMatchBesideTarget = errors.New(
 	"'match' applies without a target — a target already names one resource. " +
 		"Drop it, or drop the target to sweep.")
 
+// matchOf is a term as a saved query records it: nil for none, so a listing
+// that was not narrowed reads as one rather than as one narrowed by "".
+func matchOf(term string) *string {
+	if term == "" {
+		return nil
+	}
+	return &term
+}
+
 // matchFlag renders a term for an HTML report's invocation line, so the page
 // says it covers only what matched.
 func matchFlag(term string) string {

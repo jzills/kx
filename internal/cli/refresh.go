@@ -1,22 +1,25 @@
 // Stale-state detection and recovery.
 //
 // When a command fails because its indexed resource no longer exists (pod
-// churn), the `kx get` query that produced the current state entry is re-run,
-// pushing the fresh list as a new history entry so the user can pick a new
-// index. The original command is never retried — the index→name mapping may
-// have shifted, so retrying could act on a different resource than the one
-// that was asked for.
+// churn), the command that produced the current state entry — kx get, kx top,
+// or a kx diag or kx tree — is run again, saving the fresh listing so the user
+// can pick a new index. The original command is never retried — the
+// index→name mapping may have shifted, so retrying could act on a different
+// resource than the one that was asked for.
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jzills/kx/internal/graph"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // StaleResourceError reports that a probe confirmed the indexed resource no
@@ -84,6 +87,26 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 	}
 	return nil
+}
+
+// staleIfMissing is ensureExists for a command that reads through client-go:
+// its not-found error is the API server's own, typed, rather than kubectl's
+// stderr, which IsNotFound deliberately will not read. kx tree and kx diag
+// printed `pods "x" not found` for an index whose resource had gone and
+// stopped there, where every kubectl-backed command refreshed the listing.
+//
+// Only a not-found naming the indexed resource itself is stale: something
+// else the command read being missing says nothing about the listing, and is
+// returned as it came.
+func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref state.Ref) error {
+	var status apierrors.APIStatus
+	if !apierrors.IsNotFound(err) || !errors.As(err, &status) {
+		return err
+	}
+	if details := status.Status().Details; details == nil || details.Name != name {
+		return err
+	}
+	return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 }
 
 // forwardExit turns a non-zero kubectl exit into the error kx should return.
@@ -162,9 +185,9 @@ type recoverOutcome int
 const (
 	// refreshed: the listing was re-run and rendered.
 	refreshed recoverOutcome = iota
-	// noQuery: the entry was not created by `kx get` — a tree walk or a triage
-	// sweep — so there is nothing to replay, and running a `kx get` is
-	// genuinely the way forward.
+	// noQuery: the entry records no command to run again — it was saved
+	// before its command recorded one — so the way forward is a listing the
+	// user runs.
 	noQuery
 	// replayFailed: the replay broke on its own terms — most often because the
 	// saved query names the very resource that went stale, which is what a
@@ -175,31 +198,166 @@ const (
 	replayFailed
 )
 
-// recoverState re-runs the query behind the current state entry and renders the
-// fresh listing under lead, which names why it was re-run.
-func recoverState(services Services, lead string) recoverOutcome {
+// recoverState runs the command behind the current state entry again and
+// renders the fresh listing under lead, which names why it was re-run. The
+// query comes back too, for the instruction a failed replay ends with.
+//
+// Each command lists as it would typed: kx top's usage table, kx diag's
+// triage table, kx tree's walk. A refresh only ever prints — the flags that
+// send a listing to a browser or a script were never recorded.
+func recoverState(ctx context.Context, services Services, lead string) (recoverOutcome, *state.Query) {
 	current, err := services.State.Load()
 	if err != nil {
-		return replayFailed
-	}
-	if current.Query == nil {
-		return noQuery
+		return replayFailed, nil
 	}
 	query := current.Query
-	match := ""
-	if query.Match != nil {
-		match = *query.Match
+	if query == nil {
+		return noQuery, nil
 	}
-
-	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-	table, namespace, err := get.Execute(query.Resource, match, query.Args)
+	var replay func() (func(), error)
+	switch query.Command {
+	case "":
+		replay = func() (func(), error) { return replayGet(services, *query) }
+	case state.CommandTop:
+		replay = func() (func(), error) { return replayTop(services, *query) }
+	case state.CommandDiag:
+		replay = func() (func(), error) { return replaySweep(ctx, services, *query) }
+	case state.CommandTree:
+		replay = func() (func(), error) { return replayTree(ctx, services, *query) }
+	default:
+		return noQuery, nil
+	}
+	show, err := replay()
 	if err != nil {
-		return replayFailed
+		return replayFailed, query
 	}
-
 	render.Raw(lead)
-	render.IndexedTable(table, query.Resource, namespace)
-	return refreshed
+	show()
+	return refreshed, query
+}
+
+// Each replay lists and saves, then returns what draws the listing, so
+// nothing is drawn — not even the lead — for a replay that failed.
+
+func replayGet(services Services, query state.Query) (func(), error) {
+	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
+	if err != nil {
+		return nil, err
+	}
+	return func() { render.IndexedTable(table, query.Resource, namespace) }, nil
+}
+
+func replayTop(services Services, query state.Query) (func(), error) {
+	noLimits, rest := extractBool(query.Args, "--no-limits")
+	table, label, namespace, _, err := topListing(
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits)
+	if err != nil {
+		return nil, err
+	}
+	return func() { render.IndexedTable(table, label, namespace) }, nil
+}
+
+func replaySweep(ctx context.Context, services Services, query state.Query) (func(), error) {
+	namespace, all, rest := recordedScope(query.Args)
+	since, _, err := extractString(rest, "--since", "")
+	if err != nil {
+		return nil, err
+	}
+	window, err := resolveWindow(since, services.Config.DiagMaxAge)
+	if err != nil {
+		return nil, err
+	}
+	result, err := runSweep(ctx, services, namespace, all, false, window, since, queryMatch(query))
+	if err != nil {
+		return nil, err
+	}
+	return func() { render.Triage(result) }, nil
+}
+
+func replayTree(ctx context.Context, services Services, query state.Query) (func(), error) {
+	client, err := services.Kubernetes()
+	if err != nil {
+		return nil, err
+	}
+	command := TreeCommand{
+		Builder: graph.Builder{Client: client}, State: services.State,
+		Save: services.State.Save, Match: queryMatch(query),
+	}
+	namespace, all, _ := recordedScope(query.Args)
+	stop := render.Status("resolving ownership graph")
+	defer stop()
+	switch kind, name, named := strings.Cut(query.Resource, "/"); {
+	case named:
+		node, err := command.ExecuteResource(ctx, kinds.Kind(kind), name, namespace, true)
+		if err != nil {
+			return nil, err
+		}
+		return func() {
+			render.Banner(kind, name, namespace, "")
+			render.Tree(node)
+		}, nil
+	case all:
+		roots, _, err := command.ExecuteAllNamespaces(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		return func() { printForest(roots, command.Match) }, nil
+	default:
+		node, err := command.ExecuteNamespace(ctx, namespace, true)
+		if err != nil {
+			return nil, err
+		}
+		return func() {
+			render.ScopeBanner("Namespace", namespace, "")
+			render.Tree(node)
+		}, nil
+	}
+}
+
+// recordedScope reads the scope a sweep or walk recorded: -n with the
+// namespace, or -A. The rest of its flags come back with them removed.
+func recordedScope(args []string) (namespace string, all bool, rest []string) {
+	namespace, rest, _ = extractString(args, "--namespace", "-n")
+	all, rest = extractBool(rest, "--all-namespaces", "-A")
+	return namespace, all, rest
+}
+
+// queryMatch is a query's --match term, empty for none.
+func queryMatch(query state.Query) string {
+	if query.Match == nil {
+		return ""
+	}
+	return *query.Match
+}
+
+// relistCommand is what to run when a listing could not be run again: the
+// command that made it, as it would be typed. A kx get listing is named by
+// its resource alone — the arguments of a relist are the very names that went
+// stale — and a tree of one resource by the listing of its kind, since that
+// resource may be the one that went.
+func relistCommand(query *state.Query) string {
+	if query == nil {
+		return "kx get <resource>"
+	}
+	words := []string{"kx", query.Command}
+	switch query.Command {
+	case "":
+		return "kx get " + query.Resource
+	case state.CommandTop:
+		if query.Resource == "nodes" {
+			words = append(words, "nodes")
+		}
+	case state.CommandTree:
+		if kind, _, named := strings.Cut(query.Resource, "/"); named {
+			return kinds.ListCommand(kinds.Kind(kind))
+		}
+	}
+	words = append(words, query.Args...)
+	if term := queryMatch(*query); term != "" {
+		words = append(words, "-m", term)
+	}
+	return strings.Join(words, " ")
 }
 
 // handleStale reports a failure caused by a vanished resource, then refreshes
@@ -209,14 +367,13 @@ func recoverState(services Services, lead string) recoverOutcome {
 // fresh listing is what the user picks their next index from, so it has to be
 // the last thing on screen. Callers return SilentError so the entrypoint
 // doesn't print the same failure a second time.
-func handleStale(services Services, err error) {
+func handleStale(ctx context.Context, services Services, err error) {
 	render.Error(err.Error())
 	// Anything but a rendered listing ends with the instruction. Only a
 	// successful refresh has an answer on screen already; a replay that failed
-	// leaves nothing behind, since Run captures both of kubectl's streams and
-	// recoverState discards the error with them.
-	if recoverState(services, refreshLead(err)) != refreshed {
-		render.Raw("Run 'kx get <resource>' to refresh the list.")
+	// leaves nothing behind, since its error is discarded with it.
+	if outcome, query := recoverState(ctx, services, refreshLead(err)); outcome != refreshed {
+		render.Raw("Run '" + relistCommand(query) + "' to refresh the list.")
 	}
 }
 
@@ -249,6 +406,11 @@ func runEach(resolved []Resolved, act func(target Resolved) error) error {
 		var silent SilentError
 		var refused kubectl.Error
 		switch {
+		case isStale(err):
+			// Before kubectl's own verdict: a not-found is both, and
+			// withRefresh reports it above the listing it refreshes.
+			// Rendered here as well, it printed twice.
+			return err
 		case errors.As(err, &silent):
 			// kubectl streamed its own message already.
 		case errors.As(err, &refused):

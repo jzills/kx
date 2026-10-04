@@ -699,9 +699,11 @@ func newRolloutCommand(services Services) *cobra.Command {
 				return err
 			}
 			if strings.TrimSpace(output) != "" {
-				// Printed with its trailing newline intact, so consecutive
-				// manifests are separated the way kubectl's own output is.
-				render.Raw(strings.TrimRight(output, "\n") + "\n")
+				// As kubectl printed it: Raw adds back the one newline taken
+				// off here. Trimming them all and adding one, Raw's own made
+				// a blank line kubectl never printed after "rolled back" —
+				// while history, which does end in one, keeps it.
+				render.Raw(strings.TrimSuffix(output, "\n"))
 			}
 			return nil
 		},
@@ -864,9 +866,10 @@ func newYamlCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// Printed with its trailing newline intact, so consecutive
-				// manifests are separated the way kubectl's own output is.
-				render.Raw(strings.TrimRight(output, "\n") + "\n")
+				// Trimmed: the blank line above the next banner is the only
+				// separator. Kept as well, a manifest's trailing newline put
+				// two between every pair and one after the last.
+				render.Raw(strings.TrimRight(output, "\n"))
 				return nil
 			})
 		},

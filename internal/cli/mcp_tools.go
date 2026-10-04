@@ -241,6 +241,7 @@ type listInput struct {
 	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to list; defaults to the current namespace."`
 	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"List across every namespace."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
+	Match         string `json:"match,omitempty" jsonschema:"List only the resources whose name contains this, case-insensitively, as kx get -m does."`
 }
 
 type listedResource struct {
@@ -257,6 +258,7 @@ type listOutput struct {
 	Kind          string           `json:"kind"`
 	Namespace     string           `json:"namespace,omitempty"`
 	AllNamespaces bool             `json:"allNamespaces,omitempty"`
+	Match         string           `json:"match,omitempty"`
 	Total         int              `json:"total"`
 	Resources     []listedResource `json:"resources"`
 }
@@ -313,7 +315,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if err != nil {
 		return nil, listOutput{}, err
 	}
-	table := index.Service{}.Add(output)
+	table := index.Service{}.AddMatching(output, in.Match)
 	if !table.Indexable() && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
@@ -327,7 +329,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		indexed = false
 	}
 	if indexed {
-		if err := d.listingSave(current)(getListing(in.Kind, "", args[2:], namespace, table.Entries)); err != nil {
+		if err := d.listingSave(current)(getListing(in.Kind, in.Match, args[2:], namespace, table.Entries)); err != nil {
 			return nil, listOutput{}, err
 		}
 	}
@@ -335,7 +337,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: current, Kind: string(kind), Namespace: namespace,
-		AllNamespaces: in.AllNamespaces, Total: len(table.Entries),
+		AllNamespaces: in.AllNamespaces, Match: in.Match, Total: len(table.Entries),
 		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
 	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {
@@ -421,7 +423,8 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// below narrows only what is returned, so each index it keeps is still
 	// the row's position in the saved sweep.
 	result, err := TriageCommand{
-		Diagnostics: service, Save: d.listingSave(out.Context), Window: window, Match: in.Match,
+		Diagnostics: service, Save: d.listingSave(out.Context), Window: window,
+		Match: in.Match, Since: in.Since,
 	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
@@ -553,13 +556,8 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		}
 		out.Tree = treeDocumentOf(subject, []*tree.Node{node})
 	case in.AllNamespaces:
-		roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
+		roots, _, err := command.ExecuteAllNamespaces(ctx, indexed)
 		if err != nil {
-			return nil, nil, err
-		}
-		// ExecuteAllNamespaces saves nothing itself; the CLI saves the forest
-		// after the walk, with no entry namespace, and so does this.
-		if err := command.save(resources, "", indexed, true); err != nil {
 			return nil, nil, err
 		}
 		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true, Match: in.Match}, roots)

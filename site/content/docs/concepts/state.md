@@ -32,7 +32,7 @@ Jumping does not re-run anything: the entry already holds the listing, so the in
 The `--all` flag only clears what accumulates on its own, one `kx get` at a time.
 [A mark](../marks/) is named on purpose, not accumulated, so it takes a command that says so: `kx unmark --all`.
 
-Re-running the listing you are already on refreshes that entry instead of pushing another copy of it.
+Re-running the listing you are already on refreshes that entry instead of pushing another copy of it, whether it came from `kx get`, `kx top`, a `kx diag` sweep or a `kx tree`.
 Re-running `kx get` is how you see what changed, so without that the stack filled with one listing — five runs of `kx get pods` around a single `kx get deploy` left nine entries, eight of them the same, and `kx state back` could not reach the Deployments listing.
 The same session now leaves three: pods, deployments, pods.
 
