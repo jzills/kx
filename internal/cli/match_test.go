@@ -25,6 +25,25 @@ func TestGetMatchingNothingNamesTheTerm(t *testing.T) {
 	assertNothingMatches(t, out.String(), "zzz")
 }
 
+// A term given where kubectl found nothing at all is still the term the
+// listing was asked for, and says so as kx top, the sweeps, kx state and the
+// refusal of an index into it all do. The screen alone said "none found",
+// because an empty reply was not parsed far enough to carry the term, so the
+// one entry was captioned two ways.
+func TestGetWithATermInAnEmptyNamespaceNamesTheTerm(t *testing.T) {
+	for _, args := range [][]string{nil, {"--context=b"}} {
+		kube := &fakeKubectl{output: "", namespace: "prod"}
+		services := switchServices(t, kube)
+
+		var out bytes.Buffer
+		render.SetOutput(&out, &out, "github-dark")
+		if err := runGet(services, "pods", args, getOptions{Match: "api"}); err != nil {
+			t.Fatalf("runGet %v: %v", args, err)
+		}
+		assertNothingMatches(t, out.String(), "api")
+	}
+}
+
 // kx top -m takes the same rows through its own filter.
 func TestTopMatchingNothingNamesTheTerm(t *testing.T) {
 	kube := &fakeKubectl{

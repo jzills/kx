@@ -234,11 +234,11 @@ func unnumberedListing(output, filterTerm string) index.Table {
 		return index.Table{Raw: output}
 	}
 	table := index.Service{}.AddMatching(output, filterTerm)
-	if !table.Indexable() {
-		return index.Table{Raw: output}
-	}
 	if table.Empty() {
 		return index.Table{Match: filterTerm}
+	}
+	if !table.Indexable() {
+		return index.Table{Raw: output}
 	}
 	return index.Table{Raw: table.Unnumbered()}
 }
