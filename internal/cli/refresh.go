@@ -377,6 +377,19 @@ func handleStale(ctx context.Context, services Services, err error) {
 	}
 }
 
+// reportStale is handleStale for a command whose stdout a program reads:
+// the failure, and the command that would refresh the listing, on stderr,
+// with nothing run again. A refresh nobody sees would also replace the
+// listing the user's indexes come from with one they never looked at.
+func reportStale(services Services, err error) {
+	render.Error(err.Error())
+	var query *state.Query
+	if current, loadErr := services.State.Load(); loadErr == nil {
+		query = current.Query
+	}
+	render.Notice("Run '" + relistCommand(query) + "' to refresh the list.")
+}
+
 // runEach runs act for every resolved reference, continuing past a failure
 // that concerns only one of them.
 //
