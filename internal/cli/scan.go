@@ -119,7 +119,14 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	}
 
 	stop := c.Status("resolving images in " + scope.label())
-	args := []string{"get", namespaceScanKinds}
+	listed := namespaceScanKinds
+	if scope.Match != "" {
+		// Listed to reach a pod's Deployment, which a term is matched against
+		// (see workloadNames) — never scanned themselves: one left from a
+		// rollout holds the images its Deployment has moved on from.
+		listed += ",replicasets"
+	}
+	args := []string{"get", listed}
 	args = append(args, scope.selector()...)
 	args = append(args, "-o", "json")
 	raw, err := c.Kubectl.Run(args)
@@ -136,10 +143,11 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	}
 	var images []string
 	matches := index.NameMatcher(scope.Match)
-	for _, item := range list.Items {
+	workloads := workloadNames(list.Items)
+	for i, item := range list.Items {
 		// Before the images are read, so a workload the term leaves out
 		// never costs a scanner run.
-		if !matches(itemName(item)) {
+		if !matches(workloads[i]) || itemKind(item) == "ReplicaSet" {
 			continue
 		}
 		images = append(images, imagesOf(item)...)
@@ -147,13 +155,64 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	return dedupe(images), nil
 }
 
-// itemName reads metadata.name off one item of a kubectl -o json list.
-func itemName(item map[string]json.RawMessage) string {
-	var metadata struct {
-		Name string `json:"name"`
+// listedObject is what Collect reads off an item's metadata to place it.
+type listedObject struct {
+	Name   string `json:"name"`
+	UID    string `json:"uid"`
+	Owners []struct {
+		UID        string `json:"uid"`
+		Controller *bool  `json:"controller"`
+	} `json:"ownerReferences"`
+}
+
+// workloadNames gives each listed item the name of the workload it belongs
+// to: its controller's, and that one's, as far up as the list goes — a pod's
+// ReplicaSet's Deployment — or its own when nothing listed owns it.
+//
+// What a --match term is matched against, as kx tree -m matches the roots of
+// a walk. Matched against every name kubectl lists, a term found the
+// generated ones too: "db" is in the pod web-7fdb9-dbx2k, which pulled web's
+// images into a sweep of db.
+func workloadNames(items []map[string]json.RawMessage) []string {
+	objects := make([]listedObject, len(items))
+	byUID := make(map[string]int, len(items))
+	for i, item := range items {
+		_ = json.Unmarshal(item["metadata"], &objects[i])
+		if objects[i].UID != "" {
+			byUID[objects[i].UID] = i
+		}
 	}
-	_ = json.Unmarshal(item["metadata"], &metadata)
-	return metadata.Name
+	names := make([]string, len(items))
+	for i := range items {
+		at := i
+		// Bounded by the list, so owners that name each other cannot loop.
+		for range items {
+			owner, listed := byUID[controllerOf(objects[at])]
+			if !listed || owner == at {
+				break
+			}
+			at = owner
+		}
+		names[i] = objects[at].Name
+	}
+	return names
+}
+
+// controllerOf is the UID of the owner that controls object, empty for none.
+func controllerOf(object listedObject) string {
+	for _, owner := range object.Owners {
+		if owner.Controller != nil && *owner.Controller {
+			return owner.UID
+		}
+	}
+	return ""
+}
+
+// itemKind reads kind off one item of a kubectl -o json list.
+func itemKind(item map[string]json.RawMessage) string {
+	var kind string
+	_ = json.Unmarshal(item["kind"], &kind)
+	return kind
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so

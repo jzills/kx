@@ -166,6 +166,67 @@ func TestCollectMatchSkipsWorkloadsBeforeReadingTheirImages(t *testing.T) {
 	}
 }
 
+// ownedScanItems is what kubectl lists for a namespace holding Deployments
+// db and web, each with its ReplicaSets and pods, db with an older ReplicaSet
+// left from a rollout, a bare pod, and a pod run by a controller kx does not
+// list. web's generated names both contain "db".
+const ownedScanItems = `{"items":[
+  {"kind":"Deployment","metadata":{"name":"db","uid":"d-db"},
+   "spec":{"template":{"spec":{"containers":[{"image":"postgres:16"}]}}}},
+  {"kind":"ReplicaSet","metadata":{"name":"db-5c4","uid":"rs-db",
+   "ownerReferences":[{"uid":"d-db","kind":"Deployment","name":"db","controller":true}]},
+   "spec":{"template":{"spec":{"containers":[{"image":"postgres:16"}]}}}},
+  {"kind":"ReplicaSet","metadata":{"name":"db-9a1","uid":"rs-db-old",
+   "ownerReferences":[{"uid":"d-db","kind":"Deployment","name":"db","controller":true}]},
+   "spec":{"template":{"spec":{"containers":[{"image":"postgres:15"}]}}}},
+  {"kind":"Pod","metadata":{"name":"db-5c4-q8x2z","uid":"p-db",
+   "ownerReferences":[{"uid":"rs-db","kind":"ReplicaSet","name":"db-5c4","controller":true}]},
+   "spec":{"containers":[{"image":"postgres:16"}]}},
+  {"kind":"Deployment","metadata":{"name":"web","uid":"d-web"},
+   "spec":{"template":{"spec":{"containers":[{"image":"web:v1"}]}}}},
+  {"kind":"ReplicaSet","metadata":{"name":"web-7fdb9","uid":"rs-web",
+   "ownerReferences":[{"uid":"d-web","kind":"Deployment","name":"web","controller":true}]},
+   "spec":{"template":{"spec":{"containers":[{"image":"web:v1"}]}}}},
+  {"kind":"Pod","metadata":{"name":"web-7fdb9-dbx2k","uid":"p-web",
+   "ownerReferences":[{"uid":"rs-web","kind":"ReplicaSet","name":"web-7fdb9","controller":true}]},
+   "spec":{"containers":[{"image":"web:v1"},{"image":"envoy:1"}]}},
+  {"kind":"Pod","metadata":{"name":"debug-db","uid":"p-debug"},
+   "spec":{"containers":[{"image":"busybox:1"}]}},
+  {"kind":"Pod","metadata":{"name":"cache-db-0","uid":"p-cache",
+   "ownerReferences":[{"uid":"rollout-cache","kind":"Rollout","name":"cache-db","controller":true}]},
+   "spec":{"containers":[{"image":"redis:7"}]}}
+]}`
+
+// A term is matched against the workload a pod belongs to, as kx tree -m
+// matches roots, not against every name kubectl lists: a pod's generated
+// suffix, and its ReplicaSet's hash, are not names anyone chose, and "db" in
+// web-7fdb9-dbx2k pulled web's images into a sweep of db. ReplicaSets are
+// listed to reach a pod's Deployment, and never scanned: db-9a1 holds the
+// image db has rolled forward from. A pod whose owner kx does not list is
+// judged by its own name.
+func TestCollectMatchJudgesAPodByItsWorkload(t *testing.T) {
+	kube := &fakeKubectl{output: ownedScanItems}
+	command := ScanCommand{Kubectl: kube, Scanner: &fakeScanner{}, Status: noStatus}
+	images, err := command.Collect(scanScope{Namespace: "prod", Match: "db"}, "scout")
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if got, want := strings.Join(images, ","), "postgres:16,busybox:1,redis:7"; got != want {
+		t.Errorf("images = %s, want %s", got, want)
+	}
+	if got := joinArgs(kube.args); !strings.Contains(got, "pods,replicasets ") {
+		t.Errorf("kubectl %q, want ReplicaSets listed to reach a pod's Deployment", got)
+	}
+
+	// Without a term nothing is judged, and nothing extra is listed.
+	if _, err := command.Collect(scanScope{Namespace: "prod"}, "scout"); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if got := joinArgs(kube.args); strings.Contains(got, "replicasets") {
+		t.Errorf("kubectl %q listed ReplicaSets with no term to judge", got)
+	}
+}
+
 func scanMatchServices(t *testing.T, output string) (Services, *fakeScanner) {
 	t.Helper()
 	scanner := &fakeScanner{}
