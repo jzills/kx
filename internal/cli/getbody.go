@@ -125,9 +125,9 @@ func runGet(services Services, resource string, args []string, options getOption
 	// are — kx get all 2 is kx get deployment 2 — since kubectl takes no list
 	// of kinds beside names. Checked against "all" as a kind, every index
 	// was refused for not being one. Rows of several kinds are named
-	// Kind/name instead, with no resource argument at all (spanning), and
-	// captioned as the listing they came from was.
-	caption := resource
+	// Kind/name instead (spanning), and stay a listing of the resource they
+	// were asked with: kubectl is given none beside them (see getArgs), but
+	// the caption, the saved entry and the command to relist it name it.
 	spanning := false
 	if kinds.Several(resource) && len(refs) > 0 {
 		kind, err := kindOfEvery(services.State, refs)
@@ -135,9 +135,9 @@ func runGet(services Services, resource string, args []string, options getOption
 			return err
 		}
 		if kind == "" {
-			spanning, resource = true, ""
+			spanning = true
 		} else {
-			resource, caption = string(kind), string(kind)
+			resource = string(kind)
 		}
 	}
 
@@ -174,7 +174,7 @@ func runGet(services Services, resource string, args []string, options getOption
 				return err
 			}
 		}
-		return decodeSecrets(services, caption, resolved, extra, options)
+		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
 	if len(refs) > 0 {
@@ -230,13 +230,13 @@ func runGet(services Services, resource string, args []string, options getOption
 		// the user overrode the scope, so there is nothing to span.
 		if len(groups) > 1 && extractNamespace(extra) == "" {
 			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-			stop := render.Status("fetching " + caption)
+			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
 			stop()
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, caption, render.AllNamespaces)
+			render.IndexedTable(output, resource, render.AllNamespaces)
 			if output.Empty() {
 				render.PreviousListingNote(previousListing(services))
 			}
@@ -276,7 +276,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-	stop := render.Status("fetching " + caption)
+	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()
 	if err != nil {
@@ -293,7 +293,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	if crossCluster != "" && printsTable(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
-	render.IndexedTable(output, caption, namespace)
+	render.IndexedTable(output, resource, namespace)
 	if output.Empty() && crossCluster == "" {
 		render.PreviousListingNote(previousListing(services))
 	}

@@ -351,8 +351,8 @@ func relistCommand(query *state.Query) string {
 	words := []string{"kx", query.Command}
 	switch query.Command {
 	case "":
-		// A fetch of rows spanning kinds names each row instead, and the
-		// listing they came from is not recorded.
+		// A fetch of rows spanning kinds saved before it recorded the
+		// listing it was asked with names none.
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}
@@ -370,7 +370,8 @@ func relistCommand(query *state.Query) string {
 		return strings.Join(words, " ")
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
-		// indexes into that listing.
+		// indexes into that listing. One spanning kinds saved before it
+		// recorded the listing names none.
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}

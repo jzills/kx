@@ -145,3 +145,20 @@ func TestCompletionLabelsASweepByItsCommand(t *testing.T) {
 		t.Errorf("candidates = %q, want the sweep labelled \"diag in prod\"", candidates)
 	}
 }
+
+// A fetch is named by its resource, never by its command, which nobody types:
+// one spanning kinds saved before it recorded its listing is labelled Mixed,
+// as kx state calls it, rather than "fetch".
+func TestCompletionNeverLabelsAFetchByItsCommand(t *testing.T) {
+	services := completionServices(t)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Deployment), AllNamespaces: true,
+		Query: &state.Query{Command: state.CommandFetch, Args: []string{}},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	candidates := completePosition(services, "")
+	if len(candidates) == 0 || candidates[len(candidates)-1] != "2\tMixed" {
+		t.Errorf("candidates = %q, want the fetch labelled \"Mixed\"", candidates)
+	}
+}
