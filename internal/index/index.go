@@ -479,7 +479,10 @@ func (s Service) Add(output string) Table {
 func (s Service) AddMatching(output, term string) Table {
 	sections, ok := parseSections(output)
 	if !ok {
-		return Table{Raw: output}
+		// Carried even here, where there are no rows for it to narrow: a
+		// listing asked for with a term that found nothing at all is still
+		// captioned with it, as every other empty listing with one is.
+		return Table{Raw: output, Match: term}
 	}
 	if term != "" {
 		for i := range sections {

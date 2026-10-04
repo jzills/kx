@@ -255,7 +255,7 @@ func newTopCommand(services Services) *cobra.Command {
 				// returns an empty namespace because a Node is cluster-scoped,
 				// so there is nothing here to blank.
 				subject := scanSubject{
-					Namespace: namespace, AllNamespaces: scopedAllNamespaces,
+					Namespace: namespace, AllNamespaces: scopedAllNamespaces, Match: match,
 				}
 				if scopedAllNamespaces {
 					subject.Namespace = ""
@@ -281,12 +281,13 @@ func newTopCommand(services Services) *cobra.Command {
 
 			label := kinds.PluralDisplay(resourceLabel)
 			meta, err := pageMeta(services.Config.Theme, "top · "+label,
-				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), portFlag(port)))
+				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), matchFlag(match), portFlag(port)))
 			if err != nil {
 				return err
 			}
 			page, err := web.RenderTop(web.TopPage{
-				Meta: meta, Scope: scopeCaption(label, namespace), Rows: topPageRows(output),
+				Meta: meta, Scope: scopeCaption(label, namespace), Match: match,
+				Rows: topPageRows(output),
 			})
 			if err != nil {
 				return err

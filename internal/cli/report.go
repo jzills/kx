@@ -489,12 +489,15 @@ type jsonTopRow struct {
 // here rather than as a second type, matching how treeDocument carries a
 // Truncated only tree's caller ever sets.
 type topDocument struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	Resource      string       `json:"resource"`
-	Namespace     string       `json:"namespace,omitempty"`
-	AllNamespaces bool         `json:"allNamespaces,omitempty"`
-	Rows          []jsonTopRow `json:"rows"`
-	Truncated     int          `json:"truncated,omitempty"`
+	SchemaVersion int    `json:"schemaVersion"`
+	Resource      string `json:"resource"`
+	Namespace     string `json:"namespace,omitempty"`
+	AllNamespaces bool   `json:"allNamespaces,omitempty"`
+	// Match is the --match term the rows were narrowed by, absent for none,
+	// as the sweeps' documents carry theirs.
+	Match     string       `json:"match,omitempty"`
+	Rows      []jsonTopRow `json:"rows"`
+	Truncated int          `json:"truncated,omitempty"`
 }
 
 // topDocumentOf converts a usage listing's rows into topJSON's document,
@@ -515,7 +518,7 @@ func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topD
 	return topDocument{
 		SchemaVersion: reportSchemaVersion, Resource: resource,
 		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
-		Rows: converted,
+		Match: subject.Match, Rows: converted,
 	}
 }
 

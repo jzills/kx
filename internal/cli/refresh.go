@@ -224,6 +224,9 @@ func recoverState(ctx context.Context, services Services, lead string) (recoverO
 		replay = func() (func(), error) { return replaySweep(ctx, services, *query) }
 	case state.CommandTree:
 		replay = func() (func(), error) { return replayTree(ctx, services, *query) }
+	case state.CommandFetch:
+		// Nothing runs it again, but it names the listing to run instead.
+		return noQuery, query
 	default:
 		return noQuery, nil
 	}
@@ -244,6 +247,11 @@ func replayGet(services Services, query state.Query) (func(), error) {
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
 		return nil, err
+	}
+	// Captioned as kx get -A captions it (runGet): Execute hands back no
+	// namespace for a listing that spans them.
+	if allNamespaces(query.Args) {
+		namespace = render.AllNamespaces
 	}
 	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
@@ -333,9 +341,9 @@ func queryMatch(query state.Query) string {
 
 // relistCommand is what to run when a listing could not be run again: the
 // command that made it, as it would be typed. A kx get listing is named by
-// its resource alone — the arguments of a relist are the very names that went
-// stale — and a tree of one resource by the listing of its kind, since that
-// resource may be the one that went.
+// its resource, scope and term — not its other arguments, since a relist's
+// are the very names that went stale — and a tree of one resource by the
+// listing of its kind, since that resource may be the one that went.
 func relistCommand(query *state.Query) string {
 	if query == nil {
 		return "kx get <resource>"
@@ -348,7 +356,25 @@ func relistCommand(query *state.Query) string {
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}
-		return "kx get " + query.Resource
+		words = []string{"kx", "get", query.Resource}
+		// The scope it was listed in: without it, the command lists
+		// whichever namespace the user is standing in.
+		if allNamespaces(query.Args) {
+			words = append(words, "-A")
+		} else if namespace := extractNamespace(query.Args); namespace != "" {
+			words = append(words, "-n", namespace)
+		}
+		if term := queryMatch(*query); term != "" {
+			words = append(words, "-m", term)
+		}
+		return strings.Join(words, " ")
+	case state.CommandFetch:
+		// The -A listing its indexes came from, since its own arguments were
+		// indexes into that listing.
+		if query.Resource == "" {
+			return "kx get <resource>"
+		}
+		return "kx get " + query.Resource + " -A"
 	case state.CommandTop:
 		if query.Resource == "nodes" {
 			words = append(words, "nodes")

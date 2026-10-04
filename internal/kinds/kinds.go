@@ -216,6 +216,9 @@ func Normalize(resourceType string) Kind {
 	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
 		return kind
 	}
+	if kind, ok := builtinInGroup(resourceType); ok {
+		return kind
+	}
 	if shorthandSource != nil {
 		if kind, _, ok := shorthandSource.Resolve(resourceType); ok {
 			return kind
@@ -241,6 +244,30 @@ var builtinGroups = map[Kind]string{
 	Job: "batch", CronJob: "batch",
 	HorizontalPodAutoscaler: "autoscaling",
 	Ingress:                 "networking.k8s.io",
+}
+
+// builtinInGroup reads kubectl's resource.group spelling of a kind kx names
+// itself — deployments.apps, ingresses.networking.k8s.io — as that kind.
+//
+// Only in the kind's own group, for the reason Qualified gives: Knative's
+// services.serving.knative.dev is not a Service. A spelling with a version in
+// it (deployments.v1.apps) names no group kx compares, and is left alone.
+// Read as unknown, kx get deployments.apps saved every row as a kind called
+// "deployments.apps", which kx scale and kx rollout refused, while the same
+// Deployment reached through kx get all worked.
+func builtinInGroup(spelling string) (Kind, bool) {
+	resource, group, dotted := strings.Cut(strings.ToLower(spelling), ".")
+	if !dotted {
+		return "", false
+	}
+	kind, ok := kindMap[resource]
+	if !ok {
+		return "", false
+	}
+	if want, builtin := builtinGroups[kind]; !builtin || want != group || group == "" {
+		return "", false
+	}
+	return kind, true
 }
 
 // Qualified maps the kind kubectl prefixes a row's name with, when a listing
@@ -319,6 +346,9 @@ func PluralDisplay(resourceType string) string {
 			return plural
 		}
 		return string(kind) + "s"
+	}
+	if kind, ok := builtinInGroup(resourceType); ok {
+		return PluralDisplay(string(kind))
 	}
 	if shorthandSource != nil {
 		if kind, plural, ok := shorthandSource.Resolve(resourceType); ok && kind != "" {

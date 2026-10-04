@@ -391,3 +391,32 @@ func TestListCommandForSeveralKinds(t *testing.T) {
 		t.Errorf("ListCommand = %q, want %q", got, want)
 	}
 }
+
+// kubectl's resource.group spelling of a kind kx names itself is that kind:
+// kx get deployments.apps listed Deployments and saved every row as a kind
+// called "deployments.apps", which kx scale and kx rollout then refused, while
+// the same Deployment reached through kx get all worked. Only in the kind's
+// own group, as Qualified recognises it: Knative's services.serving.knative.dev
+// is not a Service.
+func TestNormalizeRecognisesABuiltinKindInItsOwnGroup(t *testing.T) {
+	for spelling, want := range map[string]Kind{
+		"deployments.apps":                     Deployment,
+		"Deployments.Apps":                     Deployment,
+		"deploy.apps":                          Deployment,
+		"statefulsets.apps":                    StatefulSet,
+		"cronjobs.batch":                       CronJob,
+		"horizontalpodautoscalers.autoscaling": HorizontalPodAutoscaler,
+		"ingresses.networking.k8s.io":          Ingress,
+		"services.serving.knative.dev":         "services.serving.knative.dev",
+		"jobs.apps":                            "jobs.apps",
+		"deployments.v1.apps":                  "deployments.v1.apps",
+		"certificates.cert-manager.io":         "certificates.cert-manager.io",
+	} {
+		if got := Normalize(spelling); got != want {
+			t.Errorf("Normalize(%q) = %q, want %q", spelling, got, want)
+		}
+	}
+	if got := PluralDisplay("deployments.apps"); got != "Deployments" {
+		t.Errorf("PluralDisplay(deployments.apps) = %q, want Deployments", got)
+	}
+}

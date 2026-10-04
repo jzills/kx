@@ -1,6 +1,6 @@
 {{define "body"}}
 <div class="block">
-  <p class="caption">{{.Scope}} · {{len .Rows}} {{if eq (len .Rows) 1}}item{{else}}items{{end}}</p>
+  <p class="caption">{{.Scope}} · {{if and .Match (not .Rows)}}{{nothingMatches .Match}}{{else}}{{len .Rows}} {{if eq (len .Rows) 1}}item{{else}}items{{end}}{{end}}</p>
   <div class="grid-mount" data-kx-grid="top"></div>
   <script type="application/json" id="kx-top-data">{{topRowsJSON .Rows}}</script>
 </div>

@@ -150,3 +150,40 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 		})
 	}
 }
+
+// A stale -A listing is refreshed under the caption it was listed with. The
+// replay took the namespace kx get hands back, which is empty for -A, and so
+// captioned "Pods · 2 items" what kx get -A captions "Pods · all namespaces",
+// as a refreshed kx top -A already did.
+func TestStaleRefreshOfAnAllNamespacesListingSaysSo(t *testing.T) {
+	kube := &fakeKubectl{output: "NAMESPACE   NAME      READY   STATUS    RESTARTS   AGE\n" +
+		"prod        api-new   1/1     Running   0          1m\n"}
+	out := runStale(t, staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{"-A"}}))
+	if !strings.Contains(out, "Pods · all namespaces · 1 item") {
+		t.Errorf("output = %q, want the refresh captioned all namespaces", out)
+	}
+}
+
+// A kx get listing that could not be run again is named with its scope and
+// term. Its names are left out — they are what went stale — but "kx get pods"
+// for a listing of prod, typed in default, lists default.
+func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
+	term := "api"
+	for _, tc := range []struct {
+		query state.Query
+		want  string
+	}{
+		{state.Query{Resource: "pods", Args: []string{"api-old", "-n", "prod"}, Match: &term},
+			"Run 'kx get pods -n prod -m api' to refresh the list."},
+		{state.Query{Resource: "pods", Args: []string{"--namespace=prod"}},
+			"Run 'kx get pods -n prod' to refresh the list."},
+		{state.Query{Resource: "deploy", Args: []string{"-A", "-o", "wide"}},
+			"Run 'kx get deploy -A' to refresh the list."},
+	} {
+		query := tc.query
+		out := runStale(t, staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, &query))
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("output = %q\n  want %q", out, tc.want)
+		}
+	}
+}
