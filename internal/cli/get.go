@@ -19,6 +19,9 @@ type Indexer interface {
 	// AddRows numbers rows already parsed, for callers that narrowed or
 	// widened the table on the way and must not re-serialise it to do so.
 	AddRows(headers []string, rows [][]string) index.Table
+	// AddTables is AddRows for a listing of several tables — kinds — numbered
+	// on from one into the next.
+	AddTables(tables []index.RawTable) index.Table
 }
 
 // StateWriter is the slice of the state service `get` needs.
@@ -123,6 +126,16 @@ func printsTable(extraArgs []string) bool {
 	return false
 }
 
+// getArgs begins a kubectl get of resource. An empty resource is a fetch of
+// rows spanning kinds, each named Kind/name in the arguments that follow,
+// which kubectl refuses beside a resource type.
+func getArgs(resource string) []string {
+	if resource == "" {
+		return []string{"get"}
+	}
+	return []string{"get", resource}
+}
+
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
 // the text to display and the namespace the listing came from.
 //
@@ -133,7 +146,7 @@ func printsTable(extraArgs []string) bool {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	output, err := c.Kubectl.Run(append([]string{"get", resource}, extraArgs...))
+	output, err := c.Kubectl.Run(append(getArgs(resource), extraArgs...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -283,8 +296,8 @@ func getListing(
 
 // ExecuteGroups fetches named resources that span namespaces — one kubectl call
 // per namespace, since kubectl cannot fetch named resources across namespaces in
-// one — and stitches the replies into a single table shaped like the -A listing
-// the indexes came from.
+// one — and stitches the replies into a listing shaped like the -A listing the
+// indexes came from: one table, or one per kind when they span kinds.
 //
 // Each reply is namespaced, so it arrives without a NAMESPACE column; the column
 // is put back from the namespace that call was made for. That is what keeps the
@@ -298,8 +311,9 @@ func getListing(
 func (c GetCommand) ExecuteGroups(
 	resource, filterTerm string, groups []namespaceGroup, extraArgs []string,
 ) (table index.Table, err error) {
-	var headers []string
-	var merged [][]string
+	// The stitched tables, one per kind, in the order each was first seen.
+	var tables []index.RawTable
+	at := map[string]int{}
 	var raw []string
 	// Whether the replies are tables kx can stitch. A non-tabular reply ends
 	// the stitching, not the fetching: every namespace the user named still has
@@ -309,7 +323,7 @@ func (c GetCommand) ExecuteGroups(
 	tabular := true
 
 	for _, group := range groups {
-		args := append([]string{"get", resource}, group.Names...)
+		args := append(getArgs(resource), group.Names...)
 		args = append(args, "-n", group.Namespace)
 		args = append(args, extraArgs...)
 		output, err := c.Kubectl.Run(args)
@@ -321,33 +335,45 @@ func (c GetCommand) ExecuteGroups(
 			continue
 		}
 
-		groupHeaders, rows, _ := index.ParseTable(output)
-		if groupHeaders == nil {
+		replies, ok := index.ParseTables(output)
+		if !ok {
 			// Non-tabular (-o json/yaml/name). Nothing to index or stitch; the
 			// raw replies are printed as they came, the same degradation a
 			// non-tabular single-namespace listing already gets.
 			tabular = false
 			continue
 		}
-		if filterTerm != "" {
-			rows = index.FilterRows(groupHeaders, rows, filterTerm)
-		}
-		if headers == nil {
-			headers = append([]string{"NAMESPACE"}, groupHeaders...)
-		}
-		for _, row := range rows {
-			merged = append(merged, append([]string{group.Namespace}, row...))
+		// Each kind's rows join its own table, whichever namespace they came
+		// from: rows of several kinds — kx get all's — laid under one header
+		// put a Service's TYPE under a Deployment's READY.
+		for _, reply := range replies {
+			key := strings.Join(reply.Headers, "\x00")
+			position, seen := at[key]
+			if !seen {
+				position = len(tables)
+				at[key] = position
+				tables = append(tables, index.RawTable{
+					Headers: append([]string{"NAMESPACE"}, reply.Headers...),
+				})
+			}
+			rows := reply.Rows
+			if filterTerm != "" {
+				rows = index.FilterRows(reply.Headers, rows, filterTerm)
+			}
+			for _, row := range rows {
+				tables[position].Rows = append(tables[position].Rows, append([]string{group.Namespace}, row...))
+			}
 		}
 	}
-	// No headers means no reply was a table at all. Headers with no rows is a
+	// No tables means no reply was a table at all. Tables with no rows is a
 	// term that matched none of them, which is a listing like any other: the
 	// raw replies it used to fall back to were kubectl's unfiltered tables,
 	// printing exactly the rows the term had excluded.
-	if !tabular || headers == nil {
+	if !tabular || len(tables) == 0 {
 		return index.Table{Raw: strings.Join(raw, "\n")}, nil
 	}
 
-	indexed := c.Index.AddRows(headers, merged)
+	indexed := c.Index.AddTables(tables)
 	indexed.Match = filterTerm
 	// Saved even when the term left nothing, as GetCommand.Execute saves an
 	// empty listing: otherwise the -A listing these indexes came from stays

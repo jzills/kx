@@ -50,34 +50,33 @@ func groupByNamespace(resolved []Resolved) []namespaceGroup {
 }
 
 // kindOfEvery is the one kind every ref resolves to, for fetching rows of a
-// listing of several kinds again. Rows of different kinds are refused with
-// each kind's own command, since one kubectl get cannot name them all.
+// listing of several kinds again, or "" when they span kinds.
 func kindOfEvery(resolver IndexResolver, refs []state.Ref) (kinds.Kind, error) {
 	resolved, err := resolveParsed(refs, resolver.Resolve)
 	if err != nil {
 		return "", err
 	}
-	var order []kinds.Kind
-	byKind := map[kinds.Kind][]string{}
-	for _, target := range resolved {
-		if _, seen := byKind[target.Kind]; !seen {
-			order = append(order, target.Kind)
+	for _, target := range resolved[1:] {
+		if target.Kind != resolved[0].Kind {
+			return "", nil
 		}
-		byKind[target.Kind] = append(byKind[target.Kind], target.Ref.String())
 	}
-	if len(order) == 1 {
-		return order[0], nil
+	return resolved[0].Kind, nil
+}
+
+// fetchNames are the names a kubectl get of resolved is given: bare when the
+// command names their one kind, Kind/name when they span kinds — the only
+// spelling in which kubectl takes several kinds beside names.
+func fetchNames(resolved []Resolved, spanning bool) []Resolved {
+	if !spanning {
+		return resolved
 	}
-	names := make([]string, 0, len(order))
-	commands := make([]string, 0, len(order))
-	for _, kind := range order {
-		names = append(names, kinds.PluralDisplay(string(kind)))
-		commands = append(commands,
-			"'"+kinds.ListCommand(kind)+" "+strings.Join(byKind[kind], " ")+"'")
+	named := make([]Resolved, 0, len(resolved))
+	for _, target := range resolved {
+		target.Name = string(target.Kind) + "/" + target.Name
+		named = append(named, target)
 	}
-	return "", fmt.Errorf(
-		"Those indexes span %s, and kx get fetches one kind at a time — run %s.",
-		joinAnd(names), joinAnd(commands))
+	return named
 }
 
 // runGet is the shared body of `get` and `secret`.
@@ -125,13 +124,21 @@ func runGet(services Services, resource string, args []string, options getOption
 	// Rows of a listing of several kinds are fetched again as the kind they
 	// are — kx get all 2 is kx get deployment 2 — since kubectl takes no list
 	// of kinds beside names. Checked against "all" as a kind, every index
-	// was refused for not being one.
+	// was refused for not being one. Rows of several kinds are named
+	// Kind/name instead, with no resource argument at all (spanning), and
+	// captioned as the listing they came from was.
+	caption := resource
+	spanning := false
 	if kinds.Several(resource) && len(refs) > 0 {
 		kind, err := kindOfEvery(services.State, refs)
 		if err != nil {
 			return err
 		}
-		resource = string(kind)
+		if kind == "" {
+			spanning, resource = true, ""
+		} else {
+			resource, caption = string(kind), string(kind)
+		}
 	}
 
 	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
@@ -167,11 +174,10 @@ func runGet(services Services, resource string, args []string, options getOption
 				return err
 			}
 		}
-		return decodeSecrets(services, resource, resolved, extra, options)
+		return decodeSecrets(services, caption, resolved, extra, options)
 	}
 
 	if len(refs) > 0 {
-		expected := kinds.Normalize(resource)
 		// resolveRefsExpecting resolves every index before any of them is
 		// acted on, so an out-of-range index late in the batch is caught
 		// before the first kubectl call rather than after some of them have
@@ -180,11 +186,27 @@ func runGet(services Services, resource string, args []string, options getOption
 		// range, no state, or an index left over from a listing of a
 		// different kind — is reported against that kind, the way
 		// FieldsExpecting always has, instead of generically or silently
-		// fetched as whatever the index actually names.
-		resolved, err := resolveParsedExpecting(services.State, refs, expected)
+		// fetched as whatever the index actually names. Rows spanning kinds
+		// were asked for as the listing they came from, which has no one
+		// kind to expect.
+		var resolved []Resolved
+		var err error
+		if spanning {
+			resolved, err = resolveParsed(refs, services.State.Resolve)
+		} else {
+			resolved, err = resolveParsedExpecting(services.State, refs, kinds.Normalize(resource))
+		}
 		if err != nil {
 			return err
 		}
+		if spanning && !hasFlag(extra, "--show-kind", "") {
+			// Every row names its kind whichever way kubectl replies: it
+			// puts the kind in front of a name only when one reply holds
+			// several kinds, and an -A listing's indexes are fetched a
+			// namespace at a time.
+			extra = append(extra, "--show-kind")
+		}
+		resolved = fetchNames(resolved, spanning)
 		groups := groupByNamespace(resolved)
 
 		// kubectl watches one named resource at a time — "you may only watch a
@@ -208,13 +230,13 @@ func runGet(services Services, resource string, args []string, options getOption
 		// the user overrode the scope, so there is nothing to span.
 		if len(groups) > 1 && extractNamespace(extra) == "" {
 			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-			stop := render.Status("fetching " + resource)
+			stop := render.Status("fetching " + caption)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
 			stop()
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resource, render.AllNamespaces)
+			render.IndexedTable(output, caption, render.AllNamespaces)
 			if output.Empty() {
 				render.PreviousListingNote(previousListing(services))
 			}
@@ -254,7 +276,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
-	stop := render.Status("fetching " + resource)
+	stop := render.Status("fetching " + caption)
 	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()
 	if err != nil {
@@ -271,7 +293,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	if crossCluster != "" && printsTable(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
-	render.IndexedTable(output, resource, namespace)
+	render.IndexedTable(output, caption, namespace)
 	if output.Empty() && crossCluster == "" {
 		render.PreviousListingNote(previousListing(services))
 	}

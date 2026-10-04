@@ -482,31 +482,78 @@ func (s Service) AddMatching(output, term string) Table {
 		return Table{Raw: output}
 	}
 	if term != "" {
-		kept := sections[:0:0]
-		for _, section := range sections {
-			section.rows = FilterRows(section.shape.Headers, section.rows, term)
-			if len(section.rows) > 0 {
-				kept = append(kept, section)
-			}
+		for i := range sections {
+			sections[i].rows = FilterRows(sections[i].shape.Headers, sections[i].rows, term)
 		}
-		if len(kept) == 0 {
-			// Every row filtered out: an empty listing under the first
-			// table's header, as one table's filtered to nothing has
-			// always been.
-			kept = sections[:1]
-			kept[0].rows = nil
-		}
-		sections = kept
 	}
-	var table Table
-	if len(sections) == 1 {
-		table = s.AddRows(sections[0].shape.Headers, sections[0].rows)
-	} else {
-		table = addSections(sections)
-	}
+	table := s.number(sections)
 	table.Raw = output
 	table.Match = term
 	return table
+}
+
+// RawTable is one of kubectl's tables as parsed, before anything is numbered:
+// its header and the rows under it.
+type RawTable struct {
+	Headers []string
+	Rows    [][]string
+}
+
+// ParseTables splits kubectl table output into its tables — one for a listing
+// of one kind, one per kind for a listing of several — and reports false for
+// output that is not a table.
+//
+// For a caller stitching several replies into one listing, which has to keep
+// each kind's rows under that kind's own columns: ParseTable lays every
+// table's rows under the first one's.
+func ParseTables(output string) ([]RawTable, bool) {
+	sections, ok := parseSections(output)
+	if !ok {
+		return nil, false
+	}
+	tables := make([]RawTable, 0, len(sections))
+	for _, section := range sections {
+		tables = append(tables, RawTable{Headers: section.shape.Headers, Rows: section.rows})
+	}
+	return tables, true
+}
+
+// AddTables numbers tables already parsed as one listing, as Add numbers the
+// tables of one reply: the indexes run on from one into the next, and a table
+// left with no rows is dropped. A table with no NAME column numbers nothing.
+func (s Service) AddTables(tables []RawTable) Table {
+	sections := make([]section, 0, len(tables))
+	for _, table := range tables {
+		shape, ok := shapeOf(table.Headers)
+		if !ok {
+			return Table{}
+		}
+		sections = append(sections, section{shape: shape, rows: table.Rows})
+	}
+	if len(sections) == 0 {
+		return Table{}
+	}
+	return s.number(sections)
+}
+
+// number numbers a listing's tables, dropping any with no rows rather than
+// drawing a header over nothing. When none has rows the listing is an empty
+// one under the first table's header, as one table filtered to nothing has
+// always been.
+func (s Service) number(sections []section) Table {
+	kept := sections[:0:0]
+	for _, section := range sections {
+		if len(section.rows) > 0 {
+			kept = append(kept, section)
+		}
+	}
+	if len(kept) == 0 {
+		kept = []section{{shape: sections[0].shape}}
+	}
+	if len(kept) == 1 {
+		return s.AddRows(kept[0].shape.Headers, kept[0].rows)
+	}
+	return addSections(kept)
 }
 
 // addSections numbers several tables as one listing: the indexes run on from

@@ -245,7 +245,7 @@ func replayGet(services Services, query state.Query) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	return func() { render.IndexedTable(table, query.Resource, namespace) }, nil
+	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
 
 func replayTop(services Services, query state.Query) (func(), error) {
@@ -343,6 +343,11 @@ func relistCommand(query *state.Query) string {
 	words := []string{"kx", query.Command}
 	switch query.Command {
 	case "":
+		// A fetch of rows spanning kinds names each row instead, and the
+		// listing they came from is not recorded.
+		if query.Resource == "" {
+			return "kx get <resource>"
+		}
 		return "kx get " + query.Resource
 	case state.CommandTop:
 		if query.Resource == "nodes" {
