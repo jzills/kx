@@ -126,14 +126,29 @@ func printsTable(extraArgs []string) bool {
 	return false
 }
 
-// getArgs begins a kubectl get of resource. An empty resource is a fetch of
-// rows spanning kinds, each named Kind/name in the arguments that follow,
-// which kubectl refuses beside a resource type.
-func getArgs(resource string) []string {
-	if resource == "" {
+// getArgs begins a kubectl get of resource, with args the arguments that
+// follow it.
+//
+// Rows of a listing of several kinds fetched again by index lead those
+// arguments named Kind/name, the one spelling in which kubectl takes several
+// kinds beside names, and kubectl refuses a resource type beside it. The
+// resource is left out of the call, though not out of the listing: kx get all
+// 2 3 is still a listing of all, which is how its caption, kx state and the
+// command to relist it name it. Read off the arguments rather than passed
+// along, so a stale one is replayed from what its entry records.
+//
+// An empty resource is such a fetch saved before it recorded the resource.
+func getArgs(resource string, args []string) []string {
+	if resource == "" || kinds.Several(resource) && len(args) > 0 && namesKind(args[0]) {
 		return []string{"get"}
 	}
 	return []string{"get", resource}
+}
+
+// namesKind reports whether a kubectl get argument is a Kind/name rather than
+// a flag or a bare name.
+func namesKind(arg string) bool {
+	return !strings.HasPrefix(arg, "-") && strings.Contains(arg, "/")
 }
 
 // Execute runs `kubectl get`, indexes the output and persists it. It returns
@@ -146,7 +161,7 @@ func getArgs(resource string) []string {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	output, err := c.Kubectl.Run(append(getArgs(resource), extraArgs...))
+	output, err := c.Kubectl.Run(append(getArgs(resource, extraArgs), extraArgs...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -325,7 +340,7 @@ func (c GetCommand) ExecuteGroups(
 	tabular := true
 
 	for _, group := range groups {
-		args := append(getArgs(resource), group.Names...)
+		args := append(getArgs(resource, group.Names), group.Names...)
 		args = append(args, "-n", group.Namespace)
 		args = append(args, extraArgs...)
 		output, err := c.Kubectl.Run(args)
@@ -377,6 +392,13 @@ func (c GetCommand) ExecuteGroups(
 
 	indexed := c.Index.AddTables(tables)
 	indexed.Match = filterTerm
+	// Rows of several kinds whose names carry no kind cannot be numbered, as
+	// in Execute. Here a namespace holding one of the kinds answers with bare
+	// names whenever --show-kind is not in force, and saved, every row's kind
+	// was the argument's. Printed stitched, under the namespaces put back.
+	if kinds.Several(resource) && !namesCarryKinds(indexed.Entries) {
+		return index.Table{Raw: indexed.Unnumbered()}, nil
+	}
 	// Saved even when the term left nothing, as GetCommand.Execute saves an
 	// empty listing: otherwise the -A listing these indexes came from stays
 	// current behind a screen that shows none of it.

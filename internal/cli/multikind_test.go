@@ -214,12 +214,12 @@ func TestGetSeveralKindsByIndexAcrossNamespacesKeepsEachKindsTable(t *testing.T)
 	}
 }
 
-// A fetch of rows spanning kinds records no resource — each row names its own
-// — and is refreshed by running that fetch again, captioned Mixed as it was
-// first. A replay that fails names no command it cannot know: the listing the
-// rows came from is not recorded.
+// A fetch of rows spanning kinds is refreshed by running that fetch again,
+// captioned Mixed as it was first. kubectl is given no resource beside rows
+// named Kind/name, but the fetch is recorded under the one it was asked
+// with, so a replay that fails names the listing to run instead.
 func TestAStaleFetchAcrossKindsIsRefreshedAsOne(t *testing.T) {
-	query := &state.Query{Args: []string{"Deployment/api", "Service/api", "--show-kind", "-n", "prod"}}
+	query := &state.Query{Resource: "deploy,svc", Args: []string{"Deployment/api", "Service/api", "--show-kind", "-n", "prod"}}
 	kube := &fakeKubectl{output: deploySvcOutput, namespace: "prod"}
 	out := runStale(t, staleServices(t, kube, query))
 	if got, want := joinArgs(kube.calls[0]), "get Deployment/api Service/api --show-kind -n prod"; got != want {
@@ -231,8 +231,125 @@ func TestAStaleFetchAcrossKindsIsRefreshedAsOne(t *testing.T) {
 
 	failing := &fakeKubectl{err: errors.New("connection refused")}
 	out = runStale(t, staleServices(t, failing, query))
-	if !strings.Contains(out, "Run 'kx get <resource>' to refresh the list.") {
-		t.Errorf("output = %q, want the generic instruction", out)
+	if !strings.Contains(out, "Run 'kx get deploy,svc -n prod' to refresh the list.") {
+		t.Errorf("output = %q, want the listing the rows came from", out)
+	}
+}
+
+// A fetch of rows spanning kinds is recorded as the listing it was asked for:
+// kx get deploy,svc 1 3 is a deploy,svc listing. Recorded with no resource,
+// a stale index into it named no command to relist — "kx get <resource>" —
+// and kx state <TAB> labelled one spanning namespaces "fetch", a command
+// nobody types.
+func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
+	t.Run("one namespace", func(t *testing.T) {
+		kube := &fakeKubectl{outputs: []string{deploySvcOutput, deploySvcOutput}, namespace: "prod"}
+		services := switchServices(t, kube)
+		quietRender(t)
+		if err := runGet(services, "deploy,svc", nil, getOptions{}); err != nil {
+			t.Fatalf("seed listing: %v", err)
+		}
+		if err := runGet(services, "deploy,svc", []string{"1", "3"}, getOptions{}); err != nil {
+			t.Fatalf("kx get deploy,svc 1 3: %v", err)
+		}
+		if got, want := relistCommand(currentQuery(t, services)), "kx get deploy,svc -n prod"; got != want {
+			t.Errorf("relist = %q, want %q", got, want)
+		}
+		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tdeploy,svc in prod" {
+			t.Errorf("candidates = %q, want the fetch labelled \"deploy,svc in prod\"", candidates)
+		}
+	})
+	t.Run("across namespaces", func(t *testing.T) {
+		kube := &fakeKubectl{outputs: []string{
+			"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+				"prod        deployment.apps/api   1/1     1            1           5d\n" +
+				"\n" +
+				"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+				"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+			"NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+				"deployment.apps/api   1/1     1            1           5d\n",
+			"NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+				"service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		}, namespace: "prod"}
+		services := switchServices(t, kube)
+		quietRender(t)
+		if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+			t.Fatalf("seed listing: %v", err)
+		}
+		if err := runGet(services, "all", []string{"1", "2"}, getOptions{}); err != nil {
+			t.Fatalf("kx get all 1 2: %v", err)
+		}
+		if got, want := relistCommand(currentQuery(t, services)), "kx get all -A"; got != want {
+			t.Errorf("relist = %q, want %q", got, want)
+		}
+		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tall" {
+			t.Errorf("candidates = %q, want the fetch labelled \"all\"", candidates)
+		}
+	})
+}
+
+// Rows fetched across kinds in a shape that leaves the kind off their names —
+// custom columns — are printed as kubectl gave them and saved as nothing, as
+// kx get deploy,svc -o custom-columns is. Saved, every row's kind was empty,
+// and kx describe 1 ran kubectl describe "" and reported a Deployment that
+// exists as one that no longer does.
+func TestGetSeveralKindsByIndexWithoutKindsInTheNamesIsNotNumbered(t *testing.T) {
+	output := "NAME\napi\napi\n"
+	kube := &fakeKubectl{outputs: []string{deploySvcOutput, output}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "deploy,svc", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "deploy,svc",
+		[]string{"1", "3", "-o", "custom-columns=NAME:.metadata.name"}, getOptions{}); err != nil {
+		t.Fatalf("kx get deploy,svc 1 3 -o custom-columns: %v", err)
+	}
+	if out.String() != output+"\n" {
+		t.Errorf("output = %q, want kubectl's own %q", out.String(), output)
+	}
+	name, _, kind, err := services.State.Fields(1)
+	if err != nil || name != "api" || kind != kinds.Deployment {
+		t.Errorf("index 1 = %s/%s (err %v), want the listing before it still current", kind, name, err)
+	}
+}
+
+// The same across namespaces, where each namespace is fetched on its own and
+// one holding a single kind answers with bare names unless --show-kind is
+// in force: --show-kind=false left both rows of kx get all 1 2 with an empty
+// kind. They are printed stitched but unnumbered, and the -A listing stays
+// current.
+func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumbered(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+		"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "all", []string{"1", "2", "--show-kind=false"}, getOptions{}); err != nil {
+		t.Fatalf("kx get all 1 2 --show-kind=false: %v", err)
+	}
+	if strings.Contains(out.String(), "Mixed ·") {
+		t.Errorf("output = %q, want no caption over rows kx did not number", out.String())
+	}
+	if !strings.Contains(out.String(), "stage") || !strings.Contains(out.String(), "CLUSTER-IP") {
+		t.Errorf("output = %q, want each kind's table, its namespace put back", out.String())
+	}
+	name, namespace, kind, err := services.State.Fields(1)
+	if err != nil || name != "api" || kind != kinds.Deployment || namespace != "prod" {
+		t.Errorf("index 1 = %s/%s in %s (err %v), want the -A listing still current", kind, name, namespace, err)
 	}
 }
 
