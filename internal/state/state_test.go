@@ -815,6 +815,43 @@ func TestEmptyListingRefusalNamesTheTerm(t *testing.T) {
 	}
 }
 
+// An emptied sweep is refused like an emptied listing, named as kx state
+// names it.
+func TestEmptySweepRefusalNamesTheTerm(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	term := "zzz"
+	save(t, service, State{
+		Namespace: "prod",
+		Query:     &Query{Command: "tree", Args: []string{"-n", "prod"}, Match: &term},
+	})
+	_, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatal("Fields(1) resolved against an empty sweep, want an error")
+	}
+	if want := "nothing in Mixed · prod matches 'zzz'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q\n  missing %q", err, want)
+	}
+}
+
+// A sweep run again replaces its entry, as a kx get run again does, rather
+// than pushing beside it because what it found moved. Before sweeps recorded
+// a query they were compared by contents, so a sweep that found anything
+// different was a new view.
+func TestRepeatingASweepReplacesItsEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query { return &Query{Command: "diag", Args: []string{"-n", "prod"}} }
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("history holds %d entries, want the sweep replaced in place", len(history.States))
+	}
+}
+
 // The kind-checking path is the one kx scale, kx rollout and kx cordon take —
 // the destructive half of the command set — so it needs the same refusal, and
 // it keeps its own relist clause the way its out-of-range sibling does.

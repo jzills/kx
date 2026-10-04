@@ -421,7 +421,8 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// below narrows only what is returned, so each index it keeps is still
 	// the row's position in the saved sweep.
 	result, err := TriageCommand{
-		Diagnostics: service, Save: d.listingSave(out.Context), Window: window, Match: in.Match,
+		Diagnostics: service, Save: d.listingSave(out.Context), Window: window,
+		Match: in.Match, Since: in.Since,
 	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
@@ -553,13 +554,8 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 		}
 		out.Tree = treeDocumentOf(subject, []*tree.Node{node})
 	case in.AllNamespaces:
-		roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
+		roots, _, err := command.ExecuteAllNamespaces(ctx, indexed)
 		if err != nil {
-			return nil, nil, err
-		}
-		// ExecuteAllNamespaces saves nothing itself; the CLI saves the forest
-		// after the walk, with no entry namespace, and so does this.
-		if err := command.save(resources, "", indexed, true); err != nil {
 			return nil, nil, err
 		}
 		out.Tree = treeDocumentOf(scanSubject{AllNamespaces: true, Match: in.Match}, roots)

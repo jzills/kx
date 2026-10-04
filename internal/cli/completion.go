@@ -399,7 +399,11 @@ func completePosition(services Services, _ string) []string {
 	for position, entry := range history.States {
 		label := entry.Namespace
 		if entry.Query != nil {
+			// A sweep has no resource to name; its command says what it was.
 			label = entry.Query.Resource
+			if label == "" {
+				label = entry.Query.Command
+			}
 			if entry.Namespace != "" {
 				label += " in " + entry.Namespace
 			}

@@ -611,6 +611,22 @@ func TestStateNamesTheTermThatEmptiedAListing(t *testing.T) {
 	}
 }
 
+// A sweep records its query too, with no resource to name it by: what it
+// spans is several kinds, so it is captioned Mixed, as a populated sweep
+// is, and the term that emptied it is named like any other.
+func TestStateNamesAnEmptySweepAndItsTerm(t *testing.T) {
+	term := "zzz"
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Namespace: "prod",
+			Query:     &state.Query{Command: "diag", Args: []string{"-n", "prod"}, Match: &term},
+		})
+	})
+	if want := "Mixed · prod · nothing matches 'zzz'"; !strings.Contains(out, want) {
+		t.Errorf("output = %q\n  missing %q", out, want)
+	}
+}
+
 // With no query there is nothing to name it with, so the kind segment drops
 // out rather than being invented. A tree walk and a triage sweep save entries
 // this shape.

@@ -73,21 +73,6 @@ func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {
 	}
 }
 
-// A tree entry has no Query: it wasn't produced by `kx get`, so there is
-// nothing to re-run if it goes stale.
-func TestTreeSavesWithoutQuery(t *testing.T) {
-	states := &fakeState{}
-	command := TreeCommand{
-		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
-	}
-	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if states.saved[0].Query != nil {
-		t.Errorf("Query = %+v, want nil", states.saved[0].Query)
-	}
-}
-
 // Without --index the tree is display-only and must not disturb the listing the
 // user is working through.
 func TestUnindexedTreeSavesNothing(t *testing.T) {
@@ -346,7 +331,7 @@ func TestTreeExecuteAllNamespacesIndexes(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
 	)
-	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: (&fakeState{}).Save}
 
 	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {
@@ -374,7 +359,7 @@ func TestTreeExecuteAllNamespacesNumbersContinuouslyAcrossNamespaces(t *testing.
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "alpha"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "beta"}},
 	)
-	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: (&fakeState{}).Save}
 
 	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {

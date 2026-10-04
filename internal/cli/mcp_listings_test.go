@@ -412,11 +412,7 @@ func TestWriteListingsTreeAcrossNamespacesSavesLikeKxTreeA(t *testing.T) {
 	}
 	cli := cliState(t)
 	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: cli.Save}
-	_, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := command.save(resources, "", true, true); err != nil {
+	if _, _, err := command.ExecuteAllNamespaces(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	assertSavedLikeTheCLI(t, entry, cli)

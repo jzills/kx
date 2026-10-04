@@ -116,6 +116,12 @@ func (c TopCommand) Execute(
 	if allNamespaces {
 		entryNamespace = ""
 	}
+	// --no-limits is kx's flag, not kubectl's, and recorded beside them: it
+	// decides the columns the listing was read from.
+	recorded := extraArgs
+	if noLimits {
+		recorded = append(append([]string{}, extraArgs...), "--no-limits")
+	}
 	if err := c.State.Save(state.State{
 		Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
 		Namespace:     entryNamespace,
@@ -127,7 +133,7 @@ func (c TopCommand) Execute(
 		// resources in a different order, and an entry that replaced the get
 		// listing put those numbers where the get listing's had been.
 		Query: &state.Query{
-			Resource: "pods", Args: extraArgs, Match: match, Command: "top",
+			Resource: "pods", Args: recorded, Match: match, Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -195,7 +201,7 @@ func (c TopCommand) ExecuteNodes(
 		// shape the indexes were assigned against — and carrying the command
 		// that produced it, for the same reason Execute's entry does.
 		Query: &state.Query{
-			Resource: "nodes", Args: extraArgs, Match: match, Command: "top",
+			Resource: "nodes", Args: extraArgs, Match: match, Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err

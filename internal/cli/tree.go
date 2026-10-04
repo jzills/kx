@@ -60,7 +60,7 @@ func (c TreeCommand) ExecuteResource(
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed, false); err != nil {
+	if err := c.save(resources, namespace, string(kind)+"/"+name, indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -72,7 +72,7 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 	if err != nil {
 		return nil, err
 	}
-	if err := c.save(resources, namespace, indexed, false); err != nil {
+	if err := c.save(resources, namespace, "", indexed, false); err != nil {
 		return nil, err
 	}
 	return node, nil
@@ -84,7 +84,8 @@ func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, ind
 // Numbering runs continuously through the forest rather than restarting in each
 // namespace: two namespaces would otherwise both hold a node numbered 1, and an
 // index that names two rows names neither. Each resource records the namespace
-// it came from, which is what lets the saved indexes resolve afterwards.
+// it came from, which is what lets the saved indexes resolve afterwards. The
+// forest is saved with no entry namespace, since it spans them.
 func (c TreeCommand) ExecuteAllNamespaces(
 	ctx context.Context, indexed bool,
 ) ([]*tree.Node, []graph.Resource, error) {
@@ -110,20 +111,23 @@ func (c TreeCommand) ExecuteAllNamespaces(
 		roots = append(roots, node)
 		resources = append(resources, walked...)
 	}
+	if err := c.save(resources, "", "", indexed, true); err != nil {
+		return nil, nil, err
+	}
 	return roots, resources, nil
 }
 
-// save records the tree's nodes as a state entry.
-//
-// A tree entry carries no Query: it wasn't produced by `kx get`, so there is
-// nothing to re-run if it goes stale.
+// save records the tree's nodes as a state entry, with the walk that made
+// them, so a stale one is refreshed by walking it again: root is the
+// resource at the top of a one-resource tree, as Kind/name, and empty for a
+// namespace or the forest.
 //
 // allNamespaces is passed rather than inferred from an empty namespace: a walk
 // records the namespace on every resource it returns, including a
 // single-namespace one, so nothing about the resources distinguishes the two
 // scopes afterwards.
 func (c TreeCommand) save(
-	resources []graph.Resource, namespace string, indexed, allNamespaces bool,
+	resources []graph.Resource, namespace, root string, indexed, allNamespaces bool,
 ) error {
 	// --no-index is display-only and must not disturb the listing the user is
 	// working through. An empty walk is a different thing: it *is* the listing
@@ -140,10 +144,21 @@ func (c TreeCommand) save(
 			Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
 		})
 	}
+	query := &state.Query{Command: state.CommandTree, Resource: root, Args: []string{}}
+	switch {
+	case allNamespaces:
+		query.Args = []string{"-A"}
+	case namespace != "":
+		query.Args = []string{"-n", namespace}
+	}
+	if root == "" {
+		query.Match = matchOf(c.Match)
+	}
 	return c.Save(state.State{
 		Resources:     state.NewOrderedResources(entries),
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
+		Query:         query,
 	})
 }
 
@@ -254,14 +269,9 @@ func newTreeCommand(services Services) *cobra.Command {
 			if len(args) == 0 {
 				if allNamespaces {
 					stop := render.Status("resolving ownership graphs")
-					roots, resources, err := command.ExecuteAllNamespaces(ctx, indexed)
+					roots, _, err := command.ExecuteAllNamespaces(ctx, indexed)
 					stop()
 					if err != nil {
-						return err
-					}
-					// Saved with no entry namespace: the forest spans them, and
-					// each resource records its own.
-					if err := command.save(resources, "", indexed, true); err != nil {
 						return err
 					}
 					if asJSON {

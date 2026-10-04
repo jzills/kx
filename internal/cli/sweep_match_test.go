@@ -274,7 +274,10 @@ func TestTreeMatchIsOnRootsNotOnWhatTheyOwn(t *testing.T) {
 
 // -A narrowed by a term shows only the namespaces it hit, numbered from 1.
 func TestTreeMatchAcrossNamespacesDropsTheOnesItMissed(t *testing.T) {
-	command := TreeCommand{Builder: graph.Builder{Client: matchForest()}, Match: "web"}
+	command := TreeCommand{
+		Builder: graph.Builder{Client: matchForest()}, Match: "web",
+		Save: func(state.State) error { return nil },
+	}
 	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {
 		t.Fatalf("ExecuteAllNamespaces: %v", err)
