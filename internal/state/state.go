@@ -144,6 +144,12 @@ const (
 	CommandTop  = "top"
 	CommandDiag = "diag"
 	CommandTree = "tree"
+	// CommandFetch is kx get fetching indexes of an -A listing that span
+	// namespaces: one kubectl call per namespace, stitched together, which no
+	// one invocation runs again. Recorded for the kind it names and the term
+	// it was narrowed by, which an empty one is captioned with; never
+	// replayed.
+	CommandFetch = "fetch"
 )
 
 // Subject names what a listing was asked for, in a caption: the kind kx get

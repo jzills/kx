@@ -86,8 +86,30 @@ func TestGetSpanningIndexesMatchingNothingNamesTheTerm(t *testing.T) {
 	if strings.Contains(out.String(), "nginx-abc-xyz") {
 		t.Errorf("output = %q, printed rows the term did not match", out.String())
 	}
-	if _, _, _, err := services.State.Fields(1); err == nil {
-		t.Error("index 1 still resolves; the empty listing must replace the -A one")
+	_, _, _, err := services.State.Fields(1)
+	if err == nil {
+		t.Fatal("index 1 still resolves; the empty listing must replace the -A one")
+	}
+	// The entry names what it held and the term that emptied it, as the
+	// caption did. Saved with no query, it read "Mixed · none found" in kx
+	// state and refused an index as "The current listing is empty."
+	if want := "nothing in Pods matches 'zzz'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to name the kind and the term", err)
+	}
+}
+
+// A fetch by index across namespaces is one kubectl call per namespace,
+// which no one invocation replays, so a stale index into one is not run
+// again: kx names the listing its indexes came from instead.
+func TestAStaleFetchAcrossNamespacesIsNotReplayed(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput}
+	out := runStale(t, staleServices(t, kube,
+		&state.Query{Command: state.CommandFetch, Resource: "pods", Args: []string{}}))
+	if len(kube.calls) > 0 {
+		t.Errorf("replayed %v", kube.calls)
+	}
+	if !strings.Contains(out, "Run 'kx get pods -A' to refresh the list.") {
+		t.Errorf("output = %q, want the -A listing named", out)
 	}
 }
 

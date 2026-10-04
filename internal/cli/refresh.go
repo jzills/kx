@@ -224,6 +224,9 @@ func recoverState(ctx context.Context, services Services, lead string) (recoverO
 		replay = func() (func(), error) { return replaySweep(ctx, services, *query) }
 	case state.CommandTree:
 		replay = func() (func(), error) { return replayTree(ctx, services, *query) }
+	case state.CommandFetch:
+		// Nothing runs it again, but it names the listing to run instead.
+		return noQuery, query
 	default:
 		return noQuery, nil
 	}
@@ -349,6 +352,13 @@ func relistCommand(query *state.Query) string {
 			return "kx get <resource>"
 		}
 		return "kx get " + query.Resource
+	case state.CommandFetch:
+		// The -A listing its indexes came from, since its own arguments were
+		// indexes into that listing.
+		if query.Resource == "" {
+			return "kx get <resource>"
+		}
+		return "kx get " + query.Resource + " -A"
 	case state.CommandTop:
 		if query.Resource == "nodes" {
 			words = append(words, "nodes")

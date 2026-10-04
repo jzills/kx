@@ -305,9 +305,11 @@ func getListing(
 // namespace and the relisted indexes would resolve no better than the ones they
 // replaced.
 //
-// The entry records no Query. There is no single `kx get` invocation that
-// produces this table, and inventing one — the original -A args, say — would
-// replay something other than what the entry holds.
+// The entry's Query is a CommandFetch, which is never run again. There is no
+// single `kx get` invocation that produces this table, and inventing one — the
+// original -A args, say — would replay something other than what the entry
+// holds. It records the kind and the term all the same, which an empty
+// listing is captioned with.
 func (c GetCommand) ExecuteGroups(
 	resource, filterTerm string, groups []namespaceGroup, extraArgs []string,
 ) (table index.Table, err error) {
@@ -383,6 +385,9 @@ func (c GetCommand) ExecuteGroups(
 		// together, so the merged listing spans them by construction.
 		Resources:     resourcesFrom(indexed.Entries, listingKind(resource)),
 		AllNamespaces: true,
+		Query: &state.Query{
+			Command: state.CommandFetch, Resource: resource, Args: []string{}, Match: matchOf(filterTerm),
+		},
 	}); err != nil {
 		return index.Table{}, err
 	}
