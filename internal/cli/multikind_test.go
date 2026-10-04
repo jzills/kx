@@ -316,6 +316,43 @@ func TestGetSeveralKindsByIndexWithoutKindsInTheNamesIsNotNumbered(t *testing.T)
 	}
 }
 
+// The same across namespaces, where each namespace is fetched on its own and
+// one holding a single kind answers with bare names unless --show-kind is
+// in force: --show-kind=false left both rows of kx get all 1 2 with an empty
+// kind. They are printed stitched but unnumbered, and the -A listing stays
+// current.
+func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumbered(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+		"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "all", []string{"1", "2", "--show-kind=false"}, getOptions{}); err != nil {
+		t.Fatalf("kx get all 1 2 --show-kind=false: %v", err)
+	}
+	if strings.Contains(out.String(), "Mixed ·") {
+		t.Errorf("output = %q, want no caption over rows kx did not number", out.String())
+	}
+	if !strings.Contains(out.String(), "stage") || !strings.Contains(out.String(), "CLUSTER-IP") {
+		t.Errorf("output = %q, want each kind's table, its namespace put back", out.String())
+	}
+	name, namespace, kind, err := services.State.Fields(1)
+	if err != nil || name != "api" || kind != kinds.Deployment || namespace != "prod" {
+		t.Errorf("index 1 = %s/%s in %s (err %v), want the -A listing still current", kind, name, namespace, err)
+	}
+}
+
 // A kind named by its group — kx get deployments.apps — is saved and
 // captioned as the kind it is. Saved as "deployments.apps", the rows were
 // refused by kx scale and kx rollout as an unsupported kind.

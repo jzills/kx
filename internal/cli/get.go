@@ -392,6 +392,13 @@ func (c GetCommand) ExecuteGroups(
 
 	indexed := c.Index.AddTables(tables)
 	indexed.Match = filterTerm
+	// Rows of several kinds whose names carry no kind cannot be numbered, as
+	// in Execute. Here a namespace holding one of the kinds answers with bare
+	// names whenever --show-kind is not in force, and saved, every row's kind
+	// was the argument's. Printed stitched, under the namespaces put back.
+	if kinds.Several(resource) && !namesCarryKinds(indexed.Entries) {
+		return index.Table{Raw: indexed.Unnumbered()}, nil
+	}
 	// Saved even when the term left nothing, as GetCommand.Execute saves an
 	// empty listing: otherwise the -A listing these indexes came from stays
 	// current behind a screen that shows none of it.
