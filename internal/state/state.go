@@ -757,12 +757,12 @@ func (s *Service) save(state State, maxHistory int) error {
 // can replace the older rather than pushing beside it.
 //
 // The query decides it when both have one: it is what produced the listing,
-// and two runs of it are one view whose contents moved. Entries saved without
-// a query — a tree walk or a triage sweep from before they recorded one —
-// have only what they hold to compare, so an identical walk repeated is one
-// view and a walk of somewhere else is not. A queried entry and a queryless
-// one are never the same view, whatever they hold: one can be re-run and the
-// other cannot.
+// and two runs of it are one view whose contents moved — except a fetch's,
+// which does not record what it fetched. Entries saved without a query — a
+// tree walk or a triage sweep from before they recorded one — have only what
+// they hold to compare, so an identical walk repeated is one view and a walk
+// of somewhere else is not. A queried entry and a queryless one are never the
+// same view, whatever they hold: one can be re-run and the other cannot.
 func sameListing(current, next State) bool {
 	if (current.Query == nil) != (next.Query == nil) {
 		return false
@@ -771,7 +771,18 @@ func sameListing(current, next State) bool {
 		return false
 	}
 	if current.Query != nil {
-		return sameQuery(*current.Query, *next.Query)
+		if !sameQuery(*current.Query, *next.Query) {
+			return false
+		}
+		// A fetch's query records its kind and term but not the rows it was
+		// asked for, which were indexes into another listing. Two fetches of
+		// pods are one view only when they hold the same pods: compared by
+		// query alone, kx get pods 1 2 against a fetch replaced that fetch,
+		// and kx state back skipped the listing its indexes came from.
+		if current.Query.Command == CommandFetch {
+			return sameResources(current.Resources, next.Resources)
+		}
+		return true
 	}
 	return sameResources(current.Resources, next.Resources)
 }

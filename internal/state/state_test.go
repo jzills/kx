@@ -2141,6 +2141,42 @@ func TestSaveKeepsDifferentQuerylessEntriesApart(t *testing.T) {
 	}
 }
 
+// A fetch's query records its kind and term but not the rows it was asked
+// for, so two fetches of pods are one view only when they hold the same pods.
+// Compared by query alone, kx get pods 1 2 against a fetch replaced that
+// fetch, and kx state back skipped the listing its indexes came from.
+func TestSaveKeepsFetchesOfDifferentRowsApart(t *testing.T) {
+	service := newTestService(t, 10)
+	fetch := func(names ...string) State {
+		return State{Resources: pods(names...), AllNamespaces: true,
+			Query: &Query{Command: CommandFetch, Resource: "pods", Args: []string{}}}
+	}
+	save(t, service, State{Resources: pods("api", "web", "db"), AllNamespaces: true,
+		Query: &Query{Resource: "pods", Args: []string{"-A"}}})
+	save(t, service, fetch("api", "web", "db"))
+	save(t, service, fetch("api", "web"))
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Fatalf("len(States) = %d, want 3 — the -A listing and two fetches", len(history.States))
+	}
+	if names := history.States[1].Resources.Names(); len(names) != 3 {
+		t.Errorf("first fetch holds %v, want its three rows", names)
+	}
+
+	// The same rows fetched again are the same view, refreshed in place.
+	save(t, service, fetch("api", "web"))
+	if history, err = service.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — the same fetch twice is one view", len(history.States))
+	}
+}
+
 // A Ref carrying an index resolves exactly as Fields did — Resolve is the
 // shape that will also carry a mark, not a change of behaviour.
 func TestResolveAnIndexRefMatchesFields(t *testing.T) {
