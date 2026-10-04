@@ -97,3 +97,53 @@ func TestAddMatchingNarrowsEachTableByName(t *testing.T) {
 		t.Errorf("'app' matched %q through the apps group in the kind prefix", entryNames(table.Entries))
 	}
 }
+
+// ParseTables hands back each of kubectl's tables apart, so a caller that
+// stitches several replies — one per namespace — can keep a kind's rows under
+// that kind's own columns.
+func TestParseTablesKeepsEachTableApart(t *testing.T) {
+	tables, ok := ParseTables(multiKindOutput)
+	if !ok || len(tables) != 2 {
+		t.Fatalf("ParseTables = %d tables (ok %v), want 2", len(tables), ok)
+	}
+	if got := strings.Join(tables[1].Headers, " "); got != "NAME TYPE CLUSTER-IP EXTERNAL-IP PORT(S) AGE" {
+		t.Errorf("second table's headers = %q, want the Service table's", got)
+	}
+	if len(tables[0].Rows) != 2 || len(tables[1].Rows) != 1 || tables[1].Rows[0][1] != "ClusterIP" {
+		t.Errorf("rows = %q / %q, want two Deployments and one Service under its own columns",
+			tables[0].Rows, tables[1].Rows)
+	}
+	if _, ok := ParseTables(`{"items":[]}`); ok {
+		t.Error("JSON parsed as a table")
+	}
+}
+
+// AddTables numbers several tables as one listing, the indexes running on
+// from one into the next, and drops a table with no rows left rather than
+// drawing a header over nothing.
+func TestAddTablesNumbersOnAndDropsAnEmptyTable(t *testing.T) {
+	table := Service{}.AddTables([]RawTable{
+		{Headers: []string{"NAME", "READY"}, Rows: [][]string{{"deployment.apps/api", "1/1"}}},
+		{Headers: []string{"NAME", "DATA"}},
+		{Headers: []string{"NAME", "TYPE"}, Rows: [][]string{{"service/api", "ClusterIP"}}},
+	})
+	if len(table.Sections) != 2 {
+		t.Fatalf("got %d sections, want the empty table dropped", len(table.Sections))
+	}
+	if got := table.Sections[1].Rows[0][0]; got != "2" {
+		t.Errorf("the second table starts at index %s, want 2", got)
+	}
+	if got, want := entryNames(table.Entries), []string{"deployment.apps/api", "service/api"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("entries = %q, want %q", got, want)
+	}
+
+	one := Service{}.AddTables([]RawTable{{Headers: []string{"NAME", "READY"}, Rows: [][]string{{"api", "1/1"}}}})
+	if one.Sections != nil || len(one.Rows) != 1 {
+		t.Errorf("one table = %+v, want an ordinary listing", one)
+	}
+
+	none := Service{}.AddTables([]RawTable{{Headers: []string{"NAME", "READY"}}, {Headers: []string{"NAME", "TYPE"}}})
+	if !none.Indexable() || !none.Empty() {
+		t.Errorf("all tables empty = %+v, want an empty listing under the first header", none)
+	}
+}

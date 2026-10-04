@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -190,7 +191,13 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 
 	command := SecretCommand{Kubectl: services.Kubectl, State: services.State}
 	if len(resolved) == 0 {
-		return decodeNamespace(services, command, extra, options.Yes)
+		return decodeNamespace(services, command, extra, options.Match, options.Yes)
+	}
+	// Refused rather than ignored: the index already names the Secret, and a
+	// term that narrowed nothing on a command printing credentials would look
+	// as though it had.
+	if options.Match != "" {
+		return errMatchBesideIndex
 	}
 
 	for position, target := range resolved {
@@ -224,13 +231,14 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 	return nil
 }
 
-// decodeNamespace prints every Secret in the namespace, stacked.
+// decodeNamespace prints every Secret in the namespace whose name contains
+// match, stacked — every Secret when match is empty.
 //
 // Confirms first unless --yes: unlike an indexed decode this prints every
 // credential in the namespace, and it sits one flag away from the `kx secret`
 // listing people run by reflex. Fetching before prompting costs nothing and
 // discloses nothing, and lets the prompt name the blast radius.
-func decodeNamespace(services Services, command SecretCommand, extra []string, yes bool) error {
+func decodeNamespace(services Services, command SecretCommand, extra []string, match string, yes bool) error {
 	stop := render.Status("fetching secrets")
 	secrets, err := command.ExecuteAll(extra)
 	stop()
@@ -248,8 +256,24 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, y
 		}
 	}
 
+	// Narrowed before anything is counted or printed, as the listing is: the
+	// term is how a decode leaves credentials out, so the prompt must count
+	// only what it will print.
+	matches := index.NameMatcher(match)
+	kept := secrets[:0:0]
+	for _, secret := range secrets {
+		if matches(secret.Name) {
+			kept = append(kept, secret)
+		}
+	}
+	secrets = kept
+
 	count := len(secrets)
-	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, itemCount(count))
+	label := itemCount(count)
+	if count == 0 && match != "" {
+		label = render.NothingMatches(match)
+	}
+	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, label)
 	if count == 0 {
 		return nil
 	}

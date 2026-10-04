@@ -278,6 +278,9 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, listOutput{}, err
 	}
+	if err := validMatch(in.Match); err != nil {
+		return nil, listOutput{}, err
+	}
 	kind := kinds.Normalize(in.Kind)
 	// Context is kx's own pseudo-kind for kubeconfig contexts, not something
 	// kubectl lists — and a saved listing of it would overwrite the Context
@@ -385,6 +388,9 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	}
 	if in.Target != nil && in.Match != "" {
 		return nil, diagnoseOutput{}, errMCPMatchBesideTarget
+	}
+	if err := validMatch(in.Match); err != nil {
+		return nil, diagnoseOutput{}, err
 	}
 	window, err := resolveWindowAs("since", in.Since, d.Config.DiagMaxAge)
 	if err != nil {
@@ -521,6 +527,9 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 	}
 	if in.Target != nil && in.Match != "" {
 		return nil, nil, errMCPMatchBesideTarget
+	}
+	if err := validMatch(in.Match); err != nil {
+		return nil, nil, err
 	}
 	// The context before the client, as in diagnose; it stamps the saved walk.
 	out := treeOutput{Context: d.Kubectl.CurrentContext()}

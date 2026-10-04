@@ -1,6 +1,10 @@
 package cli
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"unicode"
+)
 
 // matchUsage is --match's help text, the same on kx get and on every sweep,
 // because the flag means the same thing on each: index.MatchesName.
@@ -16,13 +20,28 @@ var errMatchBesideIndex = errors.New(
 
 // errMCPMatchBesideTarget is errMatchBesideIndex for the MCP tools, whose
 // resource argument is a target rather than an index.
-//
-// The term is never validated beyond that: it is compared against names kx
-// already holds and never reaches an argv, so there is nothing for it to
-// inject into.
 var errMCPMatchBesideTarget = errors.New(
 	"'match' applies without a target — a target already names one resource. " +
 		"Drop it, or drop the target to sweep.")
+
+// validMatch refuses an MCP match term holding a control character.
+//
+// The term is compared against names kx already holds and never reaches an
+// argv, but under --write-listings it is saved with the listing, and kx
+// prints a saved term back to the user's terminal: kx state's caption for an
+// emptied listing, the refusal of an index into one, the command a failed
+// refresh names. An escape sequence in an agent's term was written to that
+// terminal as it stood. No resource name holds a control character, so the
+// refusal costs no term that could match; anything a name can hold — RBAC's
+// "system:controller:…" included — still passes.
+//
+// The error leaves the term out, since echoing it is what is being refused.
+func validMatch(term string) error {
+	if strings.IndexFunc(term, unicode.IsControl) >= 0 {
+		return errors.New("'match' cannot hold a control character — no resource name does.")
+	}
+	return nil
+}
 
 // matchOf is a term as a saved query records it: nil for none, so a listing
 // that was not narrowed reads as one rather than as one narrowed by "".

@@ -238,6 +238,76 @@ func TestNamespaceDecodeWithNoSecretsDoesNotPrompt(t *testing.T) {
 	}
 }
 
+// --match narrows a namespace-wide decode as it narrows the listing. Dropped
+// on the way to the decode, `kx secret --decode -m db -y` printed every
+// credential in the namespace — the ones the term was there to leave out.
+func TestNamespaceDecodeDecodesOnlyWhatMatches(t *testing.T) {
+	out := captureRender(t)
+	services := secretServices(t, &fakeKubectl{output: secretListJSON}, kinds.Secret)
+	asked := ""
+	services.Confirm = func(message string) error {
+		asked = message
+		return nil
+	}
+
+	options := decodeOptions()
+	options.Match = "DB"
+	if err := decodeSecrets(services, "secret", nil, nil, options); err != nil {
+		t.Fatalf("decodeSecrets: %v", err)
+	}
+	if !strings.Contains(asked, "Decode 1 Secret in prod?") {
+		t.Errorf("prompt = %q, want it to count only the Secret the term matched", asked)
+	}
+	if !strings.Contains(out.String(), "hunter2") {
+		t.Errorf("output is missing db-creds' value:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "tkn-9f3a2b") {
+		t.Errorf("decoded api-token, which 'DB' does not match:\n%s", out.String())
+	}
+}
+
+// A term that matches nothing decodes nothing, asks nothing, and says why
+// there is nothing — "0 items" would say the namespace holds no Secrets.
+func TestNamespaceDecodeWithATermThatMatchesNothing(t *testing.T) {
+	out := captureRender(t)
+	services := secretServices(t, &fakeKubectl{output: secretListJSON}, kinds.Secret)
+	services.Confirm = func(string) error {
+		t.Error("prompted with no Secret matching the term")
+		return nil
+	}
+
+	options := decodeOptions()
+	options.Match = "zzz"
+	if err := decodeSecrets(services, "secret", nil, nil, options); err != nil {
+		t.Fatalf("decodeSecrets: %v", err)
+	}
+	if want := "nothing matches 'zzz'"; !strings.Contains(out.String(), want) {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	for _, plaintext := range secretPlaintexts {
+		if strings.Contains(out.String(), plaintext) {
+			t.Errorf("decoded %q for a term that matches nothing:\n%s", plaintext, out.String())
+		}
+	}
+}
+
+// Beside an index the term has nothing to narrow — the index already names
+// the Secret — so it is refused, as kx diag and kx tree refuse it, rather
+// than silently ignored on a command that prints credentials.
+func TestIndexedDecodeRefusesMatch(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: oneSecretJSON}
+	services := secretServices(t, kube, kinds.Secret)
+
+	err := Execute(NewRoot(services, "test"), []string{"secret", "1", "--decode", "-m", "db"})
+	if err == nil || !strings.Contains(err.Error(), "'--match' cannot be combined with an index") {
+		t.Fatalf("err = %v, want the --match beside an index refusal", err)
+	}
+	if len(kube.calls) > 0 {
+		t.Errorf("kubectl ran %v before the refusal", kube.calls)
+	}
+}
+
 // oneResolved and twoResolved stand in for what runGet's resolveRefsExpecting
 // call would have produced, for tests that exercise decodeSecrets directly
 // rather than through the whole runGet path. decodeSecrets trusts these —

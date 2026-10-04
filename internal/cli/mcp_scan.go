@@ -140,6 +140,9 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 		if in.Target != nil && in.Match != "" {
 			return errMCPMatchBesideTarget
 		}
+		if err := validMatch(in.Match); err != nil {
+			return err
+		}
 		var err error
 		if minRank, err = parseMinSeverity(in.MinSeverity); err != nil {
 			return err

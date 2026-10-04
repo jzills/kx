@@ -245,7 +245,7 @@ func replayGet(services Services, query state.Query) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	return func() { render.IndexedTable(table, query.Resource, namespace) }, nil
+	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
 
 func replayTop(services Services, query state.Query) (func(), error) {
@@ -343,6 +343,11 @@ func relistCommand(query *state.Query) string {
 	words := []string{"kx", query.Command}
 	switch query.Command {
 	case "":
+		// A fetch of rows spanning kinds names each row instead, and the
+		// listing they came from is not recorded.
+		if query.Resource == "" {
+			return "kx get <resource>"
+		}
 		return "kx get " + query.Resource
 	case state.CommandTop:
 		if query.Resource == "nodes" {
@@ -375,6 +380,19 @@ func handleStale(ctx context.Context, services Services, err error) {
 	if outcome, query := recoverState(ctx, services, refreshLead(err)); outcome != refreshed {
 		render.Raw("Run '" + relistCommand(query) + "' to refresh the list.")
 	}
+}
+
+// reportStale is handleStale for a command whose stdout a program reads:
+// the failure, and the command that would refresh the listing, on stderr,
+// with nothing run again. A refresh nobody sees would also replace the
+// listing the user's indexes come from with one they never looked at.
+func reportStale(services Services, err error) {
+	render.Error(err.Error())
+	var query *state.Query
+	if current, loadErr := services.State.Load(); loadErr == nil {
+		query = current.Query
+	}
+	render.Notice("Run '" + relistCommand(query) + "' to refresh the list.")
 }
 
 // runEach runs act for every resolved reference, continuing past a failure

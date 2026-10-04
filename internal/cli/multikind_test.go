@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
 )
 
 // What `kubectl get deploy,svc` prints: a table per kind, every name
@@ -128,25 +130,108 @@ func TestGetSeveralKindsByIndexFetchesTheRowsOwnKind(t *testing.T) {
 	}
 }
 
-// Indexes of different kinds have no one kind to fetch them as, and kubectl
-// will not take a list of kinds beside names, so each kind's own command is
-// named instead.
-func TestGetSeveralKindsByIndexAcrossKindsIsRefused(t *testing.T) {
-	kube := &fakeKubectl{output: deploySvcOutput, namespace: "prod"}
+// Indexes of different kinds are fetched together, each named Kind/name,
+// which kubectl takes in one call where it takes no list of kinds beside
+// names. They were refused with a command per kind, and the first of those
+// saved a listing of its own rows, so the second's index no longer meant what
+// it had: following the advice as written failed.
+func TestGetSeveralKindsByIndexAcrossKindsFetchesThemTogether(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{deploySvcOutput, deploySvcOutput}, namespace: "prod"}
 	services := switchServices(t, kube)
 	if err := runGet(services, "deploy,svc", nil, getOptions{}); err != nil {
 		t.Fatalf("seed listing: %v", err)
 	}
-	err := runGet(services, "deploy,svc", []string{"1", "3"}, getOptions{})
-	if err == nil {
-		t.Fatal("fetched indexes of two kinds as one")
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "deploy,svc", []string{"1", "3"}, getOptions{}); err != nil {
+		t.Fatalf("kx get deploy,svc 1 3: %v", err)
 	}
-	for _, want := range []string{"Deployment", "Service", "kx get deployments 1", "kx get services 3"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err = %q\n  missing %q", err, want)
+	if got, want := joinArgs(kube.calls[1]), "get Deployment/api Service/api --show-kind -n prod"; got != want {
+		t.Errorf("kubectl %q, want %q", got, want)
+	}
+	if !strings.Contains(out.String(), "Mixed · prod") || !strings.Contains(out.String(), "CLUSTER-IP") {
+		t.Errorf("output = %q, want a Mixed listing with each kind under its own header", out.String())
+	}
+	// The fetch is a listing like any other: its rows are the next indexes,
+	// each the kind kubectl printed in front of it.
+	for i, want := range []struct {
+		name string
+		kind kinds.Kind
+	}{{"api", kinds.Deployment}, {"web", kinds.Deployment}, {"api", kinds.Service}} {
+		name, _, kind, err := services.State.Fields(i + 1)
+		if err != nil || name != want.name || kind != want.kind {
+			t.Errorf("index %d = %s/%s (err %v), want %s/%s", i+1, kind, name, err, want.kind, want.name)
 		}
 	}
-	if len(kube.calls) != 1 {
-		t.Errorf("kubectl ran %d times, want the refusal before any fetch", len(kube.calls))
+}
+
+// --show-kind is what keeps every row naming its kind: kubectl prefixes names
+// only when one reply holds several kinds, and an -A listing's indexes are
+// fetched a namespace at a time, so a namespace holding one of them answers
+// with a bare name. Each kind keeps its own table across the namespaces, under
+// a NAMESPACE column, rather than every row sitting under the first table's
+// columns.
+func TestGetSeveralKindsByIndexAcrossNamespacesKeepsEachKindsTable(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"deployment.apps/api   1/1     1            1           5d\n",
+		"NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "all", []string{"1", "2"}, getOptions{}); err != nil {
+		t.Fatalf("kx get all 1 2: %v", err)
+	}
+	for i, want := range []string{
+		"get Deployment/api -n prod --show-kind", "get Service/web -n stage --show-kind",
+	} {
+		if got := joinArgs(kube.calls[i+1]); got != want {
+			t.Errorf("call %d = %q, want %q", i+1, got, want)
+		}
+	}
+	if !strings.Contains(out.String(), "CLUSTER-IP") || strings.Count(out.String(), "NAMESPACE") != 2 {
+		t.Errorf("output = %q, want each kind's table under its own header", out.String())
+	}
+	for i, want := range []struct {
+		name, namespace string
+		kind            kinds.Kind
+	}{{"api", "prod", kinds.Deployment}, {"web", "stage", kinds.Service}} {
+		name, namespace, kind, err := services.State.Fields(i + 1)
+		if err != nil || name != want.name || kind != want.kind || namespace != want.namespace {
+			t.Errorf("index %d = %s/%s in %s (err %v), want %s/%s in %s",
+				i+1, kind, name, namespace, err, want.kind, want.name, want.namespace)
+		}
+	}
+}
+
+// A fetch of rows spanning kinds records no resource — each row names its own
+// — and is refreshed by running that fetch again, captioned Mixed as it was
+// first. A replay that fails names no command it cannot know: the listing the
+// rows came from is not recorded.
+func TestAStaleFetchAcrossKindsIsRefreshedAsOne(t *testing.T) {
+	query := &state.Query{Args: []string{"Deployment/api", "Service/api", "--show-kind", "-n", "prod"}}
+	kube := &fakeKubectl{output: deploySvcOutput, namespace: "prod"}
+	out := runStale(t, staleServices(t, kube, query))
+	if got, want := joinArgs(kube.calls[0]), "get Deployment/api Service/api --show-kind -n prod"; got != want {
+		t.Errorf("replayed %q, want %q", got, want)
+	}
+	if !strings.Contains(out, "Mixed · prod · 3 items") {
+		t.Errorf("output = %q, want the refresh captioned Mixed", out)
+	}
+
+	failing := &fakeKubectl{err: errors.New("connection refused")}
+	out = runStale(t, staleServices(t, failing, query))
+	if !strings.Contains(out, "Run 'kx get <resource>' to refresh the list.") {
+		t.Errorf("output = %q, want the generic instruction", out)
 	}
 }

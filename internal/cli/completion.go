@@ -400,9 +400,13 @@ func completePosition(services Services, _ string) []string {
 		label := entry.Namespace
 		if entry.Query != nil {
 			// A sweep has no resource to name; its command says what it was.
+			// Nor does a fetch of rows spanning kinds, which is a kx get.
 			label = entry.Query.Resource
 			if label == "" {
 				label = entry.Query.Command
+			}
+			if label == "" {
+				label = kinds.Mixed
 			}
 			if entry.Namespace != "" {
 				label += " in " + entry.Namespace
