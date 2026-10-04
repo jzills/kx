@@ -22,6 +22,12 @@ import (
 )
 
 func treeFixture() graph.Builder {
+	return graph.Builder{Client: fake.NewSimpleClientset(treeObjects()...)}
+}
+
+// treeObjects is the fixture's cluster: a Deployment owning a ReplicaSet
+// owning a Pod, in prod.
+func treeObjects() []runtime.Object {
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
 		Name: "web", Namespace: "prod", UID: types.UID("d1"),
@@ -39,7 +45,7 @@ func treeFixture() graph.Builder {
 	// actual Namespace objects, and the fake clientset does not synthesize one
 	// from a workload's namespace field. Without it, an -A sweep of this
 	// fixture would see no namespaces at all and walk nothing.
-	return graph.Builder{Client: fake.NewSimpleClientset(namespace, deployment, replicaSet, pod)}
+	return []runtime.Object{namespace, deployment, replicaSet, pod}
 }
 
 func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {

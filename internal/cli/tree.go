@@ -162,6 +162,25 @@ func (c TreeCommand) save(
 	})
 }
 
+// printForest prints the -A forest under its banner, returning the note the
+// banner carried. Every namespace dropped by a term is the one case with
+// nothing under the banner, so the banner says why — and the page's caption,
+// which reads the same, says it too. Shared by kx tree -A and the refresh of
+// a stale forest.
+func printForest(roots []*tree.Node, match string) (note string) {
+	if match != "" && len(roots) == 0 {
+		note = render.NothingMatches(match)
+	}
+	render.ScopeBanner("Namespace", render.AllNamespaces, note)
+	for i, root := range roots {
+		if i > 0 {
+			render.Blank()
+		}
+		render.Tree(root)
+	}
+	return note
+}
+
 // indexFlag renders --no-index for the invocation line when node indexes
 // were skipped, so the page's provenance line matches what was actually run.
 // Indexing is the default, so the common case renders nothing.
@@ -283,20 +302,7 @@ func newTreeCommand(services Services) *cobra.Command {
 						render.Raw(document)
 						return nil
 					}
-					// Every namespace dropped is the one case with nothing
-					// under the banner, so the banner says why — and the
-					// page's caption, which reads the same, says it too.
-					note := ""
-					if match != "" && len(roots) == 0 {
-						note = render.NothingMatches(match)
-					}
-					render.ScopeBanner("Namespace", render.AllNamespaces, note)
-					for i, root := range roots {
-						if i > 0 {
-							render.Blank()
-						}
-						render.Tree(root)
-					}
+					note := printForest(roots, match)
 					if !htmlOpts.Enabled {
 						return nil
 					}

@@ -191,6 +191,33 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match)}
 }
 
+// runSweep sweeps a namespace, or every namespace, under a spinner, and saves
+// it as the current listing. Shared by kx diag and by the refresh of a stale
+// sweep, so the two cannot sweep differently. window is since resolved
+// against diag_max_age; since is recorded as typed.
+func runSweep(
+	ctx context.Context, services Services, namespace string, allNamespaces, full bool,
+	window time.Duration, since, match string,
+) (render.TriageResult, error) {
+	client, err := services.Kubernetes()
+	if err != nil {
+		return render.TriageResult{}, err
+	}
+	service := diagnostics.New(client)
+	service.MaxAge = window
+	sweeping := "sweeping namespace"
+	if allNamespaces {
+		sweeping = "sweeping all namespaces"
+	}
+	stop := render.Status(sweeping)
+	result, err := TriageCommand{
+		Diagnostics: service, Save: services.State.Save, Window: window,
+		Match: match, Since: since,
+	}.Execute(ctx, namespace, allNamespaces, full)
+	stop()
+	return result, err
+}
+
 // sweepPage builds the HTML page for a namespace sweep from the same
 // TriageResult the terminal table renders, so the two shapes cannot drift
 // apart: Scope and AllNamespaces are derived from the result rather than
@@ -369,28 +396,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"the namespace instead.")
 			}
 
-			client, err := services.Kubernetes()
-			if err != nil {
-				return err
-			}
-			service := diagnostics.New(client)
-			service.MaxAge = window
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
 				if namespace == "" {
 					namespace = services.Kubectl.CurrentNamespace()
 				}
-				sweeping := "sweeping namespace"
-				if allNamespaces {
-					sweeping = "sweeping all namespaces"
-				}
-				stop := render.Status(sweeping)
-				result, err := TriageCommand{
-					Diagnostics: service, Save: services.State.Save, Window: window,
-					Match: match, Since: since,
-				}.Execute(ctx, namespace, allNamespaces, full)
-				stop()
+				result, err := runSweep(ctx, services, namespace, allNamespaces, full, window, since, match)
 				if err != nil {
 					return err
 				}
@@ -435,6 +447,12 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
+			client, err := services.Kubernetes()
+			if err != nil {
+				return err
+			}
+			service := diagnostics.New(client)
+			service.MaxAge = window
 			stop := render.Status("gathering diagnostics")
 			report, err := DiagnosticCommand{
 				State: services.State, Diagnostics: service,

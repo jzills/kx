@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
 
 // withRefresh wraps a command so that a failure caused by a stale index
 // re-runs the listing the index came from and renders it, letting the user pick
@@ -21,7 +25,11 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 		// Reported here, rather than by the entrypoint, so the refreshed
 		// listing lands under the failure that caused it. SilentError tells
 		// the entrypoint the failure has already reached the user.
-		handleStale(services, err)
+		ctx := c.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		handleStale(ctx, services, err)
 		return SilentError{Code: 1}
 	}
 	return cmd
