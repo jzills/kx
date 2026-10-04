@@ -235,3 +235,29 @@ func TestAStaleFetchAcrossKindsIsRefreshedAsOne(t *testing.T) {
 		t.Errorf("output = %q, want the generic instruction", out)
 	}
 }
+
+// A kind named by its group — kx get deployments.apps — is saved and
+// captioned as the kind it is. Saved as "deployments.apps", the rows were
+// refused by kx scale and kx rollout as an unsupported kind.
+func TestGetAGroupQualifiedKindSavesTheKind(t *testing.T) {
+	kube := &fakeKubectl{
+		output:    "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           3d\n",
+		namespace: "prod",
+	}
+	services := switchServices(t, kube)
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "deployments.apps", nil, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+	name, _, kind, err := services.State.Fields(1)
+	if err != nil || name != "web" || kind != kinds.Deployment {
+		t.Errorf("index 1 = %s/%s (err %v), want Deployment/web", kind, name, err)
+	}
+	if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
+		t.Errorf("output = %q, want it captioned as Deployments", out.String())
+	}
+	if _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
+		t.Errorf("kx scale refused the row: %v", err)
+	}
+}
