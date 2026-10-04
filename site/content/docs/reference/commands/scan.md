@@ -15,7 +15,7 @@ Trivy is available via --engine trivy: https://trivy.dev/
 Grype is available via --engine grype: https://github.com/anchore/grype
 Run 'kx engine' to see or change the default.
 
-Unrecognized flags are passed through to kubectl.
+Unrecognized flags are passed through to the scanner.
 
 ## Usage
 

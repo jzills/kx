@@ -224,6 +224,47 @@ func Normalize(resourceType string) Kind {
 	return Kind(resourceType)
 }
 
+// Several reports whether a kubectl resource argument asks for more than one
+// kind: a list ("deploy,svc") or the "all" category. kubectl prints such a
+// listing as a table per kind and names every row kind/name, so what each row
+// is comes from the row (see Qualified), not from the argument.
+func Several(resourceType string) bool {
+	return strings.Contains(resourceType, ",") || strings.EqualFold(resourceType, "all")
+}
+
+// builtinGroups is the API group each kind kx names itself is served from, ""
+// for the core group.
+var builtinGroups = map[Kind]string{
+	Pod: "", Service: "", ConfigMap: "", Secret: "", PersistentVolumeClaim: "",
+	Node: "", Namespace: "",
+	Deployment: "apps", ReplicaSet: "apps", StatefulSet: "apps", DaemonSet: "apps",
+	Job: "batch", CronJob: "batch",
+	HorizontalPodAutoscaler: "autoscaling",
+	Ingress:                 "networking.k8s.io",
+}
+
+// Qualified maps the kind kubectl prefixes a row's name with, when a listing
+// spans kinds — "pod", "deployment.apps", "lease.coordination.k8s.io" — onto
+// a kind.
+//
+// A kind kx names itself is recognised only in its own API group: Knative's
+// service.serving.knative.dev is not a Service, and resolving it as one would
+// send kx describe to a core Service that happens to share the name. Any
+// other group is kept as written, which kubectl takes back as it gave it, as
+// kx already keeps certificates.cert-manager.io when that is what was typed.
+// The core group has no suffix to keep, so its spellings are normalised.
+func Qualified(spelling string) Kind {
+	resource, group, _ := strings.Cut(spelling, ".")
+	kind := Normalize(resource)
+	if want, builtin := builtinGroups[kind]; builtin && want == group {
+		return kind
+	}
+	if group == "" {
+		return kind
+	}
+	return Kind(spelling)
+}
+
 // displayPlural builds a caption plural from a kind and the API's own plural
 // for it.
 //
@@ -257,7 +298,18 @@ func displayPlural(kind Kind, apiPlural string) string {
 
 // PluralDisplay renders a resource type for captions ("pods" -> "Pods"),
 // passing unknown types through unchanged.
+//
+// A request for several kinds is "Mixed", the label kx gives any listing that
+// spans kinds, rather than the argument as typed ("deploy,svc · prod"). One
+// naming a resource as type/name is captioned by its type, not by the one
+// resource ("pod/nginx · prod").
 func PluralDisplay(resourceType string) string {
+	if Several(resourceType) {
+		return "Mixed"
+	}
+	if kind, _, named := strings.Cut(resourceType, "/"); named {
+		return PluralDisplay(kind)
+	}
 	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
 		if plural, ok := pluralDisplay[kind]; ok {
 			return plural
@@ -297,6 +349,11 @@ type PreviousLister interface {
 // through discovery, so this is a lowering of a spelling kx already computes
 // rather than a second rule that would have to learn the same exceptions.
 func ListCommand(kind Kind) string {
+	// Captioned "Mixed", which is no kind kubectl knows; the argument itself
+	// is what lists it again.
+	if Several(string(kind)) {
+		return "kx get " + string(kind)
+	}
 	return "kx get " + strings.ToLower(PluralDisplay(string(kind)))
 }
 

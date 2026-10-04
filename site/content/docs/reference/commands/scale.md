@@ -10,8 +10,6 @@ Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica coun
 
 kubectl's own flags pass through — --current-replicas to make the scale conditional, --timeout, --dry-run. --replicas is the exception: kx builds it from the replica count given here, so a second one is refused rather than left for kubectl to choose between.
 
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text

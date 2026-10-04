@@ -14,7 +14,7 @@ Re-running the listing you are already on refreshes that entry rather than pushi
 
 Namespaces and contexts sit in slots of their own, outside that stack: `kx ns 2` counts against the namespaces you last listed however much you have listed since, and switching namespace never pushes work off the stack. `--targets` expands both slots, so you can pick a number without listing again.
 
-`--json` prints the current entry, or the stack with --all, as a document for a script: each row's index, kind, name and namespace, and each entry's context, query and provenance. Like `kx ref`, it never contacts the cluster.
+`--json` prints the current entry, or the stack with `--all`, as a document for a script: each row's index, kind, name and namespace, and each entry's context, query and provenance. Like `kx ref`, it never contacts the cluster.
 
 To act on a namespace rather than switch to it, list it with `kx get ns`. That stacks it like any other listing — `kx describe 2`, `kx label 2` — and refreshes the slot too, so the two spellings never disagree about what 2 means.
 

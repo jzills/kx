@@ -252,8 +252,8 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	if doc == "" {
 		doc = strings.TrimSpace(cmd.Short)
 	}
-	if spec.Passthrough != "" {
-		doc += "\n\nUnrecognized flags are passed through to kubectl."
+	if spec.Passthrough != "" && !passthroughMention.MatchString(doc) {
+		doc += "\n\nUnrecognized flags are passed through to " + passthroughTarget(spec.Passthrough) + "."
 	}
 
 	// Use carries the argument spec after the command name; the name itself is
@@ -326,6 +326,22 @@ type Arg struct {
 	Name     string
 	Required bool
 	Variadic bool
+}
+
+// passthroughMention finds a description that already says its flags pass
+// through. Most commands that forward flags say it in a paragraph of their
+// own, naming the flags worth knowing; the generic note below it only
+// repeated the claim without the examples.
+var passthroughMention = regexp.MustCompile(`(?i)\bpass(ed|es)? through\b`)
+
+// passthroughTarget names where a Use placeholder's flags go: "kubectl flags"
+// to kubectl, "scanner flags" to the scanner.
+func passthroughTarget(placeholder string) string {
+	target := strings.TrimSuffix(placeholder, " flags")
+	if target == "kubectl" {
+		return target
+	}
+	return "the " + target
 }
 
 // UseSpec is everything a command's Use string declares about what follows the

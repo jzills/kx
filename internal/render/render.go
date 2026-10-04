@@ -128,6 +128,30 @@ func (r *Renderer) Notice(msg string) {
 	fmt.Fprintln(r.err, r.emphasizeQuoted(msg, theme.Muted))
 }
 
+// Warning prints a warning kubectl wrote on a call that succeeded, worded as
+// kubectl worded it, on stderr where kubectl would have put it. The word
+// "Warning" takes the style kx gives a Warning event's TYPE.
+func (r *Renderer) Warning(line string) {
+	r.warning(line, isTerminal(r.out))
+}
+
+// warning is Warning with the terminal check injected, as status takes it.
+//
+// It runs while the call that produced it is still under its spinner, whose
+// frame sits on the error stream with no newline after it, so on a terminal —
+// the only place a spinner paints — the line is cleared first. The next frame
+// paints on the line below, and stopping clears that one as it always does.
+func (r *Renderer) warning(line string, terminal bool) {
+	text := line
+	if rest, ok := strings.CutPrefix(line, "Warning:"); ok {
+		text = r.style(theme.Warn, "Warning:") + rest
+	}
+	if terminal {
+		text = clearLine + text
+	}
+	fmt.Fprintln(r.err, text)
+}
+
 // emphasizeQuoted accents 'single-quoted' fragments within an otherwise
 // uniformly styled message.
 func (r *Renderer) emphasizeQuoted(msg, base string) string {
@@ -230,6 +254,7 @@ func (r *Renderer) Raw(text string) { r.line(text) }
 func Success(msg string)                    { current.Success(msg) }
 func Error(msg string)                      { current.Error(msg) }
 func Notice(msg string)                     { current.Notice(msg) }
+func Warning(line string)                   { current.Warning(line) }
 func Caption(parts ...string)               { current.Caption(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }

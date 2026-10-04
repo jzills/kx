@@ -357,8 +357,12 @@ func (r *Renderer) State(entry state.State) {
 // the entry's caption already names the one namespace they are all in.
 func (r *Renderer) listing(entry state.State, scope, context, via string) {
 	count := entry.Resources.Len()
+	label := countLabel(count)
+	if count == 0 && entry.Query != nil && entry.Query.Match != nil {
+		label = emptyLabel(*entry.Query.Match)
+	}
 	// The context sits beside the scope, and Caption drops either when empty.
-	r.Caption(kindLabel(entry), scope, context, via, countLabel(count))
+	r.Caption(kindLabel(entry), scope, context, via, label)
 	// A header row over no rows is noise: the caption has already said the
 	// listing found nothing, which is what emptyListing does for kx get.
 	if count == 0 {

@@ -341,3 +341,53 @@ func TestNamespacedPrefersTheStaticTable(t *testing.T) {
 		t.Errorf("Namespaced(Pod) = (%v, %v), want (true, true)", namespaced, known)
 	}
 }
+
+// kubectl names each row of a listing that spans kinds as kind.group/name.
+// A kind kx knows maps to its canonical name only in its own API group:
+// Knative's service.serving.knative.dev is not a Service, and calling it one
+// sent kx describe to the core Service of the same name. Anything else keeps
+// the group, which kubectl takes back as written.
+func TestQualified(t *testing.T) {
+	for spelling, want := range map[string]Kind{
+		"pod":                                 Pod,
+		"service":                             Service,
+		"deployment.apps":                     Deployment,
+		"replicaset.apps":                     ReplicaSet,
+		"cronjob.batch":                       CronJob,
+		"job.batch":                           Job,
+		"horizontalpodautoscaler.autoscaling": HorizontalPodAutoscaler,
+		"ingress.networking.k8s.io":           Ingress,
+		"service.serving.knative.dev":         "service.serving.knative.dev",
+		"deployment.example.com":              "deployment.example.com",
+		"lease.coordination.k8s.io":           "lease.coordination.k8s.io",
+	} {
+		if got := Qualified(spelling); got != want {
+			t.Errorf("Qualified(%q) = %q, want %q", spelling, got, want)
+		}
+	}
+}
+
+// A request for several kinds is captioned as kx captions any listing that
+// spans kinds, and one naming a resource by type/name by its type — not as
+// the argument was typed, "deploy,svc · prod" or "pod/nginx · prod".
+func TestPluralDisplayOfSeveralKindsAndOfANamedResource(t *testing.T) {
+	for spelling, want := range map[string]string{
+		"deploy,svc": "Mixed",
+		"all":        "Mixed",
+		"ALL":        "Mixed",
+		"pod/nginx":  "Pods",
+		"pods":       "Pods",
+	} {
+		if got := PluralDisplay(spelling); got != want {
+			t.Errorf("PluralDisplay(%q) = %q, want %q", spelling, got, want)
+		}
+	}
+}
+
+// The relist hint for a kind spells a command that exists. A request for
+// several kinds captions as "Mixed", and "kx get mixed" is not one.
+func TestListCommandForSeveralKinds(t *testing.T) {
+	if got, want := ListCommand("deploy,svc"), "kx get deploy,svc"; got != want {
+		t.Errorf("ListCommand = %q, want %q", got, want)
+	}
+}

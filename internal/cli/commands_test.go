@@ -1229,3 +1229,17 @@ func TestNamespaceListingMarksTheCurrentNamespace(t *testing.T) {
 	}
 	t.Errorf("output = %q, want a row for the current namespace", out.String())
 }
+
+// The real kubectl service hands kubectl's warnings to the renderer. Every
+// command test builds Services with a fake, so without this the wiring could
+// be dropped and nothing else would notice.
+func TestNewServicesForwardsKubectlWarnings(t *testing.T) {
+	t.Setenv("KX_STATE", filepath.Join(t.TempDir(), "state.json"))
+	client, ok := NewServices(config.Default()).Kubectl.(*kubectl.Exec)
+	if !ok {
+		t.Fatalf("Kubectl is %T, want *kubectl.Exec", NewServices(config.Default()).Kubectl)
+	}
+	if client.Warn == nil {
+		t.Error("kubectl.Exec.Warn is nil; kubectl's warnings are dropped")
+	}
+}

@@ -999,6 +999,11 @@ func positionOutOfRange(position, count int) error {
 // relist that a generic one cannot.
 func emptyListing(entry State, where string) error {
 	if label := listingLabel(entry); label != "" {
+		// A term that emptied the listing found resources, just none it kept.
+		if match := entry.Query.Match; match != nil && *match != "" {
+			return fmt.Errorf("The current listing is empty — nothing in %s matches '%s'. %s",
+				label, *match, where)
+		}
 		return fmt.Errorf("The current listing is empty — %s found none. %s", label, where)
 	}
 	return fmt.Errorf("The current listing is empty. %s", where)

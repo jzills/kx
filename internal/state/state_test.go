@@ -792,6 +792,29 @@ func TestFieldsRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
 	}
 }
 
+// A listing a --match term emptied found pods, just none it kept, so the
+// refusal names the term rather than saying kube-public has none.
+func TestEmptyListingRefusalNamesTheTerm(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	term := "zzz"
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "pods", Match: &term},
+	})
+
+	_, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatal("Fields(1) resolved against an empty listing, want an error")
+	}
+	if want := "nothing in Pods · kube-public matches 'zzz'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q\n  missing %q", err, want)
+	}
+	if strings.Contains(err.Error(), "found none") {
+		t.Errorf("err = %q, says found none for a listing a term emptied", err)
+	}
+}
+
 // The kind-checking path is the one kx scale, kx rollout and kx cordon take —
 // the destructive half of the command set — so it needs the same refusal, and
 // it keeps its own relist clause the way its out-of-range sibling does.

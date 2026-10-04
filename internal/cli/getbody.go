@@ -49,6 +49,37 @@ func groupByNamespace(resolved []Resolved) []namespaceGroup {
 	return groups
 }
 
+// kindOfEvery is the one kind every ref resolves to, for fetching rows of a
+// listing of several kinds again. Rows of different kinds are refused with
+// each kind's own command, since one kubectl get cannot name them all.
+func kindOfEvery(resolver IndexResolver, refs []state.Ref) (kinds.Kind, error) {
+	resolved, err := resolveParsed(refs, resolver.Resolve)
+	if err != nil {
+		return "", err
+	}
+	var order []kinds.Kind
+	byKind := map[kinds.Kind][]string{}
+	for _, target := range resolved {
+		if _, seen := byKind[target.Kind]; !seen {
+			order = append(order, target.Kind)
+		}
+		byKind[target.Kind] = append(byKind[target.Kind], target.Ref.String())
+	}
+	if len(order) == 1 {
+		return order[0], nil
+	}
+	names := make([]string, 0, len(order))
+	commands := make([]string, 0, len(order))
+	for _, kind := range order {
+		names = append(names, kinds.PluralDisplay(string(kind)))
+		commands = append(commands,
+			"'"+kinds.ListCommand(kind)+" "+strings.Join(byKind[kind], " ")+"'")
+	}
+	return "", fmt.Errorf(
+		"Those indexes span %s, and kx get fetches one kind at a time — run %s.",
+		joinAnd(names), joinAnd(commands))
+}
+
 // runGet is the shared body of `get` and `secret`.
 //
 // Numeric arguments are indexes into the current listing rather than names:
@@ -91,12 +122,24 @@ func runGet(services Services, resource string, args []string, options getOption
 		return switchTo(services, "context", refs[0].Index, true)
 	}
 
+	// Rows of a listing of several kinds are fetched again as the kind they
+	// are — kx get all 2 is kx get deployment 2 — since kubectl takes no list
+	// of kinds beside names. Checked against "all" as a kind, every index
+	// was refused for not being one.
+	if kinds.Several(resource) && len(refs) > 0 {
+		kind, err := kindOfEvery(services.State, refs)
+		if err != nil {
+			return err
+		}
+		resource = string(kind)
+	}
+
 	// A namespace flag on a cluster-scoped kind is refused, not forwarded — the
 	// same call kx already makes for a scope flag beside an index. Checked
 	// after the contexts branch, which is not a Kubernetes kind and never
 	// reaches a namespace question, and before anything runs: the point of
 	// refusing is that nothing about the cluster is read on a contradiction.
-	if flag := scopeFlagIn(extra); flag != "" && clusterScoped(resource) {
+	if flag := scopeFlagIn(extra); flag != "" && clusterScoped(string(listingKind(resource))) {
 		return clusterScopedScopeError(flag, resource)
 	}
 	// An index carries its cluster as every index command's does, so a flag

@@ -648,14 +648,13 @@ func newScaleCommand(services Services) *cobra.Command {
 
 func newRolloutCommand(services Services) *cobra.Command {
 	return &cobra.Command{
-		Use: "rollout <action> <index>",
+		Use: "rollout <action> <index> [kubectl flags]",
 		Short: "Run a rollout action (" + strings.Join(rolloutActionNames(), ", ") +
 			") on a Deployment, StatefulSet, or DaemonSet.",
 		Long: "Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams " +
 			"live and blocks until the rollout settles; the other actions run and return immediately.\n\n" +
 			"kubectl's own flags pass through, which is how undo reaches a particular " +
-			"revision: --to-revision, --revision for history, --timeout for status.\n\n" +
-			"Unrecognized flags are passed through to kubectl.",
+			"revision: --to-revision, --revision for history, --timeout for status.",
 		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1\n" +
 			"  kx rollout undo 1 --to-revision=2\n  kx rollout status 1 --timeout=2m",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
@@ -1143,7 +1142,7 @@ func newStateCommand(services Services) *cobra.Command {
 			"however much you have listed since, and switching namespace never " +
 			"pushes work off the stack. `--targets` expands both slots, so you " +
 			"can pick a number without listing again.\n\n" +
-			"`--json` prints the current entry, or the stack with --all, as a " +
+			"`--json` prints the current entry, or the stack with `--all`, as a " +
 			"document for a script: each row's index, kind, name and namespace, " +
 			"and each entry's context, query and provenance. Like `kx ref`, it " +
 			"never contacts the cluster.\n\n" +
