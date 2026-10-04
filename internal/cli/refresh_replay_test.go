@@ -129,6 +129,8 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 	}{
 		{"kx get", &state.Query{Resource: "pods", Args: []string{}}, "Run 'kx get pods' to refresh the list."},
 		{"kx top", &state.Query{Command: state.CommandTop, Resource: "nodes", Args: []string{}}, "Run 'kx top nodes' to refresh the list."},
+		{"kx top, narrowed", &state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"-A", "--no-limits"}, Match: matchOf("api")},
+			"Run 'kx top -A --no-limits -m api' to refresh the list."},
 		{"a sweep", &state.Query{Command: state.CommandDiag, Args: []string{"-A"}, Match: matchOf("api")},
 			"Run 'kx diag -A -m api' to refresh the list."},
 		{"a namespace's tree", &state.Query{Command: state.CommandTree, Args: []string{"-n", "prod"}},

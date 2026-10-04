@@ -348,7 +348,6 @@ func relistCommand(query *state.Query) string {
 		if query.Resource == "nodes" {
 			words = append(words, "nodes")
 		}
-		return strings.Join(words, " ")
 	case state.CommandTree:
 		if kind, _, named := strings.Cut(query.Resource, "/"); named {
 			return kinds.ListCommand(kinds.Kind(kind))
