@@ -150,3 +150,16 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 		})
 	}
 }
+
+// A stale -A listing is refreshed under the caption it was listed with. The
+// replay took the namespace kx get hands back, which is empty for -A, and so
+// captioned "Pods · 2 items" what kx get -A captions "Pods · all namespaces",
+// as a refreshed kx top -A already did.
+func TestStaleRefreshOfAnAllNamespacesListingSaysSo(t *testing.T) {
+	kube := &fakeKubectl{output: "NAMESPACE   NAME      READY   STATUS    RESTARTS   AGE\n" +
+		"prod        api-new   1/1     Running   0          1m\n"}
+	out := runStale(t, staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{"-A"}}))
+	if !strings.Contains(out, "Pods · all namespaces · 1 item") {
+		t.Errorf("output = %q, want the refresh captioned all namespaces", out)
+	}
+}

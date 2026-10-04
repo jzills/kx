@@ -248,6 +248,11 @@ func replayGet(services Services, query state.Query) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	// Captioned as kx get -A captions it (runGet): Execute hands back no
+	// namespace for a listing that spans them.
+	if allNamespaces(query.Args) {
+		namespace = render.AllNamespaces
+	}
 	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
 
