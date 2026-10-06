@@ -749,6 +749,26 @@ func TestFilterRowsNarrowsByName(t *testing.T) {
 	}
 }
 
+// A --match term selects what the index resolves to. Under kubectl top pod
+// --containers that is the pod in POD, not the container in NAME: -m frontend
+// found nothing beside two frontend pods, and -m nginx, a container, returned
+// every pod running one.
+func TestFilterRowsMatchesTheColumnAnIndexResolvesTo(t *testing.T) {
+	containers := "POD             NAME          CPU(cores)   MEMORY(bytes)\n" +
+		"frontend-abc    nginx         1m           2Mi\n" +
+		"frontend-abc    istio-proxy   1m           2Mi\n" +
+		"web-xyz         nginx         1m           2Mi\n"
+	headers, rows, _ := ParseTable(containers)
+
+	kept := FilterRows(headers, rows, "frontend")
+	if len(kept) != 2 || kept[0][0] != "frontend-abc" || kept[1][0] != "frontend-abc" {
+		t.Errorf("-m frontend kept %q, want both of frontend-abc's containers", kept)
+	}
+	if kept := FilterRows(headers, rows, "istio"); len(kept) != 0 {
+		t.Errorf("-m istio kept %q, want none: istio-proxy is a container, not a pod", kept)
+	}
+}
+
 func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
 	headers, rows, _ := ParseTable(podsOutput)
 
