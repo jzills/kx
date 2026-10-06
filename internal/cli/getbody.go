@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -267,10 +268,7 @@ func runGet(services Services, resource string, args []string, options getOption
 			if err != nil {
 				return err
 			}
-			render.IndexedTable(output, resource, render.AllNamespaces)
-			if output.Empty() {
-				render.PreviousListingNote(previousListing(services))
-			}
+			showListing(services, output, resource, render.AllNamespaces, options.Match, extra)
 			return nil
 		}
 
@@ -317,18 +315,35 @@ func runGet(services Services, resource string, args []string, options getOption
 	if allNamespaces(extra) {
 		namespace = render.AllNamespaces
 	}
-	// Another cluster's listing was printed, not saved, so nothing behind it
-	// moved and there is no way back to offer. Captioned only as a table:
+	// Another cluster's listing is captioned as one, but only as a table:
 	// ahead of JSON or names, the caption is a line the reader can't parse.
 	crossCluster := clusterFlagIn(extra)
 	if crossCluster != "" && printsTable(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
+	showListing(services, output, resource, namespace, options.Match, extra)
+	return nil
+}
+
+// showListing prints what kx get fetched: the listing, and under an empty one
+// the way back to the listing it replaced.
+//
+// A format another program reads gets kubectl's output and nothing of kx's
+// on stdout. An empty one is reported on stderr, where kubectl reports it,
+// with no way back offered: nothing was saved over the listing behind it (see
+// GetCommand.Execute). Nor for another cluster's listing, which is printed
+// and never saved.
+func showListing(
+	services Services, output index.Table, resource, namespace, match string, extra []string,
+) {
+	if !printsTable(extra) && output.Empty() {
+		render.EmptyListingNotice(resource, namespace, match)
+		return
+	}
 	render.IndexedTable(output, resource, namespace)
-	if output.Empty() && crossCluster == "" {
+	if output.Empty() && clusterFlagIn(extra) == "" {
 		render.PreviousListingNote(previousListing(services))
 	}
-	return nil
 }
 
 // previousListing is the entry `kx state back` would return to, for the note an

@@ -266,6 +266,10 @@ func IndexedTable(table index.Table, resourceType, namespace string) {
 
 func PreviousListingNote(previous state.State) { current.PreviousListingNote(previous) }
 
+func EmptyListingNotice(resourceType, namespace, match string) {
+	current.EmptyListingNotice(resourceType, namespace, match)
+}
+
 // active rather than current: the package-level renderer is named current, and
 // shadowing it inside a wrapper whose whole job is to call it invites exactly
 // the mistake that reads correctly.

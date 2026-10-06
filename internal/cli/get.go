@@ -226,8 +226,11 @@ func (c GetCommand) Execute(
 	// Not a table kx can read, rather than a table with no rows in it: the
 	// empty listing below has no header either (kubectl puts "No resources
 	// found" on stderr), and it is a fact about the cluster that the indexes
-	// must follow. What separates them is whether anything came back at all.
-	if !indexed.Indexable() && !indexed.Empty() {
+	// must follow. What separates them is whether anything came back at all —
+	// in a table format. An empty -o name or template reply is no more a
+	// listing than a full one: saved, kx get pods -l app=x -o name replaced
+	// the listing behind it, where one that found pods left it alone.
+	if !indexed.Indexable() && (!indexed.Empty() || !printsTable(extraArgs)) {
 		return indexed, namespace, nil
 	}
 	// Saved unconditionally, including when the listing found nothing. An

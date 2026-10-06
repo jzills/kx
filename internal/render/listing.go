@@ -290,6 +290,16 @@ func (r *Renderer) emptyListing(resourceType, namespace, match string) {
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, emptyLabel(match))
 }
 
+// EmptyListingNotice is the empty listing's caption on stderr, for a listing
+// asked for in a format another program reads — names, a template — whose
+// stdout must hold nothing of kx's: "Pods · prod · none found" ahead of
+// | xargs is a line the reader takes for a name. kubectl reports an empty
+// listing on stderr for the same reason.
+func (r *Renderer) EmptyListingNotice(resourceType, namespace, match string) {
+	fmt.Fprintln(r.err, r.style(theme.Muted, strings.Join(captionParts(
+		kinds.PluralDisplay(resourceType), namespace, emptyLabel(match)), " · ")))
+}
+
 // emptyLabel is what stands where a count would for a listing that holds
 // nothing: the term that emptied it, or noneFound.
 func emptyLabel(match string) string {
