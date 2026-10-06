@@ -635,12 +635,12 @@ func newScaleCommand(services Services) *cobra.Command {
 			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
-			message, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
+			message, output, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
 				Execute(ref, replicas, extra)
 			if err != nil {
 				return err
 			}
-			render.Success(message)
+			reportChange(extra, output, message)
 			return nil
 		},
 	}
@@ -977,13 +977,13 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 				return err
 			}
-			message, err := MetadataWriteCommand{
+			message, output, err := MetadataWriteCommand{
 				Kubectl: services.Kubectl, State: services.State, Verb: verb, Field: field,
 			}.Execute(ref, keys, values, removes, overwrite, extra)
 			if err != nil {
 				return err
 			}
-			render.Success(message)
+			reportChange(extra, output, message)
 			return nil
 		},
 	}
@@ -992,6 +992,34 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 	cmd.Flags().StringArray("remove", nil, "Key to remove (repeatable)")
 	cmd.Flags().Bool("overwrite", false, "Allow replacing an existing key")
 	return cmd
+}
+
+// askedForOutput reports whether kubectl was given an output format, which a
+// command that changes a resource answers with the object as changed — or,
+// under --dry-run, as it would be — rather than with its summary.
+func askedForOutput(extra []string) bool {
+	return hasFlag(extra, "--output", "-o")
+}
+
+// reportChange prints what a command that changes a resource did: kx's own
+// lines, which stand in for kubectl's summary. When an output format was
+// asked for, kubectl's output is what was asked for: it is printed alone on
+// stdout, and kx's lines go to stderr, so it can be piped on. Discarded, kx
+// set image 1 api:v2 --dry-run=server -o yaml — the usual way to preview a
+// change — printed none of the YAML it asked for, and exited 0.
+func reportChange(extra []string, output string, lines ...string) {
+	if !askedForOutput(extra) {
+		for _, line := range lines {
+			render.Success(line)
+		}
+		return
+	}
+	if output = strings.TrimRight(output, "\n"); output != "" {
+		render.Raw(output)
+	}
+	for _, line := range lines {
+		render.Notice(line)
+	}
 }
 
 // splitLeadingPositionals splits args at the first flag.

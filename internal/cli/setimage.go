@@ -50,35 +50,39 @@ type container struct {
 // specs are what was typed after the index: one bare image for a workload with
 // a single container, or any number of name=image pairs, where * names every
 // container, as kubectl spells it.
+//
+// kubectl's own output comes back beside the changes, for reportChange to
+// print in their place when an output format was asked for.
 func (c SetImageCommand) Execute(
 	target Resolved, specs, extraArgs []string,
-) ([]imageChange, error) {
+) (changes []imageChange, output string, err error) {
 	if !imageKinds.Has(target.Kind) {
-		return nil, unsupportedKindError("set image", target.Kind, imageKinds)
+		return nil, "", unsupportedKindError("set image", target.Kind, imageKinds)
 	}
 	subject := string(target.Kind) + "/" + target.Name
 	raw, err := c.Kubectl.Run([]string{
 		"get", subject, "-n", target.Namespace, "-o", "json",
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &object); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	containers := containersOf(object)
 
 	pairs, changes, err := imagePairs(subject, target.Ref.String(), containers, specs)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	args := append([]string{"set", "image", subject}, pairs...)
 	args = append(args, "-n", target.Namespace)
-	if _, err := c.Kubectl.Run(append(args, extraArgs...)); err != nil {
-		return nil, err
+	output, err = c.Kubectl.Run(append(args, extraArgs...))
+	if err != nil {
+		return nil, "", err
 	}
-	return changes, nil
+	return changes, output, nil
 }
 
 // imagePairs builds kubectl's name=image arguments and the change each one
@@ -255,7 +259,8 @@ func newSetImageCommand(services Services) *cobra.Command {
 			"A Deployment, StatefulSet or DaemonSet rolls out the change; kx rollout status " +
 			"on the same index follows it, and kx rollout undo reverts it.\n\n" +
 			"kubectl's own flags pass through — --dry-run=server to check the change is " +
-			"accepted without making it.",
+			"accepted without making it, with -o yaml to see the result. Under -o, " +
+			"kubectl's output is printed and the before-and-after lines go to stderr.",
 		Example: "  kx set image 1 nginx:1.27.3\n" +
 			"  kx set image 1 api=api:v2 envoy=envoyproxy/envoy:v1.31\n" +
 			"  kx set image 1 '*=api:v2'\n" +
@@ -293,21 +298,28 @@ func newSetImageCommand(services Services) *cobra.Command {
 			if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
 				return err
 			}
-			changes, err := SetImageCommand{Kubectl: services.Kubectl}.
+			changes, output, err := SetImageCommand{Kubectl: services.Kubectl}.
 				Execute(target, rest[1:1+specs], extra)
 			if err != nil {
 				return err
 			}
 			dryRun := isDryRun(extra)
 			changed := false
+			lines := make([]string, 0, len(changes))
 			for _, change := range changes {
-				render.Success(imageChangeLine(target, change, dryRun))
+				lines = append(lines, imageChangeLine(target, change, dryRun))
 				changed = changed || change.From != change.To
 			}
+			reportChange(extra, output, lines...)
 			// Only a real change starts a rollout: a dry run makes none, and
 			// nor does setting every container to the image it already runs.
 			if rolloutKinds.Has(kind) && changed && !dryRun {
-				render.Caption("kx rollout status " + ref.String() + " to follow it")
+				hint := "kx rollout status " + ref.String() + " to follow it"
+				if askedForOutput(extra) {
+					render.Notice(hint)
+				} else {
+					render.Caption(hint)
+				}
 			}
 			return nil
 		},

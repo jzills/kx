@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jzills/kx/internal/kinds"
 )
 
@@ -280,5 +282,51 @@ func TestSetAloneShowsHelp(t *testing.T) {
 	}
 	if !strings.Contains(sink.String(), "kx set image") {
 		t.Errorf("kx set printed %q, want its help", sink.String())
+	}
+}
+
+// An output format is a request for what kubectl prints: the object as it was
+// changed, or under --dry-run as it would be — the usual way to preview one.
+// It was discarded, and kx's own line printed in its place with exit 0. Now
+// kubectl's output is stdout, alone, and kx's line goes to stderr, so the YAML
+// can be piped on.
+func TestMutatingCommandsPrintTheOutputFormatAskedFor(t *testing.T) {
+	const manifest = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+	for _, tc := range []struct {
+		name    string
+		command func(Services) *cobra.Command
+		outputs []string
+		args    []string
+		summary string
+	}{
+		{"set image", newSetCommand, []string{oneContainerDeploy, manifest},
+			[]string{"image", "1", "api:v2", "--dry-run=server", "-o", "yaml"},
+			"Deployment/api · prod · api: api:v1 → api:v2 (dry run — nothing was changed)"},
+		// A real change starts a rollout, and the way to follow it is kx's
+		// too: it joins the line on stderr rather than trailing the YAML.
+		{"set image, rolling out", newSetCommand, []string{oneContainerDeploy, manifest},
+			[]string{"image", "1", "api:v2", "-o", "yaml"}, "kx rollout status 1 to follow it"},
+		{"scale", newScaleCommand, []string{manifest},
+			[]string{"1", "3", "-o", "yaml"}, "Scaled Deployment/api to 3 replicas"},
+		{"label", func(s Services) *cobra.Command {
+			return newMetadataWriteCommand(s, "label", "labels", "", "")
+		}, []string{manifest}, []string{"1", "team=web", "--overwrite", "--output=yaml"},
+			"Labeled Deployment/api (set 1)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &recordingKubectl{outputs: tc.outputs}
+			services := switchServices(t, kube)
+			saveListing(t, services, kinds.Deployment, "prod", false, "api")
+			stdout, stderr, err := runCaptured(t, tc.command(services), tc.args)
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if stdout != manifest {
+				t.Errorf("stdout = %q, want kubectl's own output alone", stdout)
+			}
+			if !strings.Contains(stderr, tc.summary) {
+				t.Errorf("stderr = %q, want kx's line %q", stderr, tc.summary)
+			}
+		})
 	}
 }

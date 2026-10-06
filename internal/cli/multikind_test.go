@@ -374,7 +374,7 @@ func TestGetAGroupQualifiedKindSavesTheKind(t *testing.T) {
 	if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
 		t.Errorf("output = %q, want it captioned as Deployments", out.String())
 	}
-	if _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
+	if _, _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
 		t.Errorf("kx scale refused the row: %v", err)
 	}
 }

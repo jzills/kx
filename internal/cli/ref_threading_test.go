@@ -122,7 +122,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 			kind: kinds.Deployment,
 			run: func(resolver fakeResolver) error {
 				command := ScaleCommand{Kubectl: &recordingKubectl{}, State: resolver}
-				_, err := command.Execute(mark, 3, nil)
+				_, _, err := command.Execute(mark, 3, nil)
 				return err
 			},
 		},
@@ -196,7 +196,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 					Kubectl: &recordingKubectl{output: `{"metadata":{"name":"target"}}`},
 					State:   resolver, Verb: "label", Field: "labels",
 				}
-				_, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
+				_, _, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
 				return err
 			},
 		},
