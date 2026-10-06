@@ -317,10 +317,6 @@ func listingKind(resource string) kinds.Kind {
 func getListing(
 	resource, filterTerm string, extraArgs []string, namespace string, entries []index.Entry,
 ) state.State {
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -331,7 +327,7 @@ func getListing(
 		Query: &state.Query{
 			Resource: resource,
 			Args:     extraArgs,
-			Match:    match,
+			Match:    matchOf(filterTerm),
 		},
 	}
 }

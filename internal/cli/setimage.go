@@ -277,11 +277,11 @@ func newSetImageCommand(services Services) *cobra.Command {
 			}
 			// The specs are the words before the first flag: an image never
 			// starts with a dash, and anything that does is kubectl's.
-			specs := 0
-			for specs+1 < len(rest) && !strings.HasPrefix(rest[specs+1], "-") {
-				specs++
+			if len(rest) < 2 {
+				return requiredArgsError(cmd)
 			}
-			if len(rest) < 2 || specs == 0 {
+			specs, extra := splitLeadingPositionals(rest[1:])
+			if len(specs) == 0 {
 				return requiredArgsError(cmd)
 			}
 			installAgentIndexNotice(services)
@@ -289,7 +289,6 @@ func newSetImageCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			extra := rest[1+specs:]
 			name, namespace, kind, err := services.State.Resolve(ref)
 			if err != nil {
 				return err
@@ -299,7 +298,7 @@ func newSetImageCommand(services Services) *cobra.Command {
 				return err
 			}
 			changes, output, err := SetImageCommand{Kubectl: services.Kubectl}.
-				Execute(target, rest[1:1+specs], extra)
+				Execute(target, specs, extra)
 			if err != nil {
 				return err
 			}

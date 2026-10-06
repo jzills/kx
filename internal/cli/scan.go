@@ -147,7 +147,7 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	for i, item := range list.Items {
 		// Before the images are read, so a workload the term leaves out
 		// never costs a scanner run.
-		if !matches(workloads[i]) || itemKind(item) == "ReplicaSet" {
+		if !matches(workloads[i]) || kindOf(item) == string(kinds.ReplicaSet) {
 			continue
 		}
 		images = append(images, imagesOf(item)...)
@@ -206,13 +206,6 @@ func controllerOf(object listedObject) string {
 		}
 	}
 	return ""
-}
-
-// itemKind reads kind off one item of a kubectl -o json list.
-func itemKind(item map[string]json.RawMessage) string {
-	var kind string
-	_ = json.Unmarshal(item["kind"], &kind)
-	return kind
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so

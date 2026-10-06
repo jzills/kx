@@ -111,10 +111,6 @@ func (c TopCommand) Execute(
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -140,7 +136,7 @@ func (c TopCommand) Execute(
 		// usage, so the two hold different resources in a different order.
 		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
-			Resource: "pods", Args: recorded, Match: match, Command: state.CommandTop,
+			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -221,17 +217,13 @@ func (c TopCommand) ExecuteNodes(
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if err := c.State.Save(state.State{
 		Resources: resourcesFrom(indexed.Entries, kinds.Node),
 		Namespace: namespace,
 		// Carrying the command that produced it, for the same reasons
 		// Execute's entry does.
 		Query: &state.Query{
-			Resource: "nodes", Args: extraArgs, Match: match, Command: state.CommandTop,
+			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
