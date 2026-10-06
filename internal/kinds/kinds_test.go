@@ -420,3 +420,41 @@ func TestNormalizeRecognisesABuiltinKindInItsOwnGroup(t *testing.T) {
 		t.Errorf("PluralDisplay(deployments.apps) = %q, want Deployments", got)
 	}
 }
+
+// A row is fetched under a resource naming several kinds only when that
+// resource lists its kind. Against the API server's own "all" category:
+// kubectl api-resources -o wide puts pods, services, the workloads, jobs,
+// cronjobs and horizontalpodautoscalers in it, and no ConfigMap or Secret.
+// A kind kx does not name, under spellings it does not recognise either, is
+// let through rather than refused for a spelling mismatch.
+func TestCovers(t *testing.T) {
+	cases := []struct {
+		resource string
+		kind     Kind
+		want     bool
+	}{
+		{"deploy,svc", Deployment, true},
+		{"deploy,svc", Service, true},
+		{"deploy,svc", Pod, false},
+		{"deploy,svc", Kind("ServiceAccount"), false},
+		{"all", Pod, true},
+		{"ALL", Deployment, true},
+		{"all", HorizontalPodAutoscaler, true},
+		{"all", CronJob, true},
+		{"all", Secret, false},
+		{"all", ConfigMap, false},
+		{"all", Ingress, false},
+		{"all", PersistentVolumeClaim, false},
+		{"all", Node, false},
+		{"all", Namespace, false},
+		{"all,cm", ConfigMap, true},
+		{"all", Kind("service.serving.knative.dev"), true},
+		{"certificates,issuers", Kind("certificate.cert-manager.io"), true},
+		{"certificates,issuers", Pod, false},
+	}
+	for _, c := range cases {
+		if got := Covers(c.resource, c.kind); got != c.want {
+			t.Errorf("Covers(%q, %q) = %v, want %v", c.resource, c.kind, got, c.want)
+		}
+	}
+}

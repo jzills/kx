@@ -49,19 +49,49 @@ func groupByNamespace(resolved []Resolved) []namespaceGroup {
 	return groups
 }
 
-// kindOfEvery is the one kind every ref resolves to, for fetching rows of a
-// listing of several kinds again, or "" when they span kinds.
-func kindOfEvery(resolver IndexResolver, refs []state.Ref) (kinds.Kind, error) {
+// resolveCovered resolves refs for a resource naming several kinds, refusing
+// any that resolves to a kind the resource does not list (kinds.Covers) —
+// the check every other kx get <kind> N makes through ResolveExpecting.
+// Without it, kx get deploy,svc 3 after kx get pods fetched Pod 3 and saved
+// it over the listing, and kx get all 3 --decode printed a Secret.
+//
+// Every ref is resolved before any is refused or fetched, as
+// resolveRefsExpecting does, so the refusal names the first row it finds.
+func resolveCovered(resolver IndexResolver, refs []state.Ref, resource string) ([]Resolved, error) {
 	resolved, err := resolveParsed(refs, resolver.Resolve)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	for _, target := range resolved[1:] {
-		if target.Kind != resolved[0].Kind {
-			return "", nil
+	for _, target := range resolved {
+		if !kinds.Covers(resource, target.Kind) {
+			return nil, notCoveredError(target, resource)
 		}
 	}
-	return resolved[0].Kind, nil
+	return resolved, nil
+}
+
+// notCoveredError refuses a row a resource naming several kinds does not
+// list, in the shape kinds.EnsureKind gives a row of the wrong kind. A mark
+// is pointed at its own kind instead: it names one resource whatever is
+// listed, so relisting changes nothing about it.
+func notCoveredError(target Resolved, resource string) error {
+	subject := fmt.Sprintf("%s/%s, which '%s' does not include", target.Kind, target.Name, resource)
+	if target.Ref.Mark != "" {
+		return fmt.Errorf("%s is %s — run '%s %s' to fetch it.",
+			target.Ref, subject, kinds.ListCommand(target.Kind), target.Ref)
+	}
+	return fmt.Errorf("Index %s is %s — run '%s' to relist.",
+		target.Ref, subject, kinds.ListCommand(kinds.Kind(resource)))
+}
+
+// soleKind is the one kind every resolved row is, or "" when they span kinds.
+func soleKind(resolved []Resolved) kinds.Kind {
+	for _, target := range resolved[1:] {
+		if target.Kind != resolved[0].Kind {
+			return ""
+		}
+	}
+	return resolved[0].Kind
 }
 
 // fetchNames are the names a kubectl get of resolved is given: bare when the
@@ -128,13 +158,19 @@ func runGet(services Services, resource string, args []string, options getOption
 	// Kind/name instead (spanning), and stay a listing of the resource they
 	// were asked with: kubectl is given none beside them (see getArgs), but
 	// the caption, the saved entry and the command to relist it name it.
+	// Either way each row must be one the resource lists (resolveCovered).
+	//
+	// Resolved once, here, and not again below: each resolve loads the state
+	// file, and kx get all 1..200 loaded it four hundred times.
+	var resolved []Resolved
 	spanning := false
 	if kinds.Several(resource) && len(refs) > 0 {
-		kind, err := kindOfEvery(services.State, refs)
+		var err error
+		resolved, err = resolveCovered(services.State, refs, resource)
 		if err != nil {
 			return err
 		}
-		if kind == "" {
+		if kind := soleKind(resolved); kind == "" {
 			spanning = true
 		} else {
 			resource = string(kind)
@@ -166,8 +202,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		// before decodeSecrets fetches or renders anything — is what stops a
 		// bad index late in the batch from letting an earlier one's secret
 		// reach the terminal first.
-		var resolved []Resolved
-		if options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
+		if resolved == nil && options.Decode && kinds.Normalize(resource) == kinds.Secret && len(indexArgs) > 0 {
 			var err error
 			resolved, err = resolveParsedExpecting(services.State, refs, kinds.Secret)
 			if err != nil {
@@ -186,18 +221,14 @@ func runGet(services Services, resource string, args []string, options getOption
 		// range, no state, or an index left over from a listing of a
 		// different kind — is reported against that kind, the way
 		// FieldsExpecting always has, instead of generically or silently
-		// fetched as whatever the index actually names. Rows spanning kinds
-		// were asked for as the listing they came from, which has no one
-		// kind to expect.
-		var resolved []Resolved
-		var err error
-		if spanning {
-			resolved, err = resolveParsed(refs, services.State.Resolve)
-		} else {
+		// fetched as whatever the index actually names. Rows of a resource
+		// naming several kinds were resolved and checked above.
+		if resolved == nil {
+			var err error
 			resolved, err = resolveParsedExpecting(services.State, refs, kinds.Normalize(resource))
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 		if spanning && !hasFlag(extra, "--show-kind", "") {
 			// Every row names its kind whichever way kubectl replies: it

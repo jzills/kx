@@ -235,6 +235,48 @@ func Several(resourceType string) bool {
 	return strings.Contains(resourceType, ",") || strings.EqualFold(resourceType, "all")
 }
 
+// allCategory is kubectl's "all" category as the API server defines it, of the
+// kinds kx names itself: the workloads and the Services in front of them.
+// ReplicationController is in it too, but kx has no kind for it. A CRD can
+// join the category, and only discovery knows which do.
+var allCategory = map[Kind]bool{
+	Pod: true, Service: true, Deployment: true, ReplicaSet: true, StatefulSet: true,
+	DaemonSet: true, Job: true, CronJob: true, HorizontalPodAutoscaler: true,
+}
+
+// Covers reports whether a resource argument naming several kinds — a list,
+// or the "all" category — lists rows of kind, so an index of that kind can be
+// fetched under it.
+//
+// False only when kx can tell. A kind kx names itself is saved under one
+// spelling, so it is compared exactly, and it is in "all" or it is not. A kind
+// kx does not name — a CRD, which a listing of several kinds records as
+// kubectl prefixed it (certificate.cert-manager.io) — compared with a
+// spelling kx does not recognise either, could be the same kind under two
+// spellings, and is let through: refusing it would turn away an index into
+// kx get certificates,issuers for being one of its own rows.
+func Covers(resourceType string, kind Kind) bool {
+	_, known := pluralDisplay[kind]
+	undecided := false
+	for _, part := range strings.Split(resourceType, ",") {
+		if strings.EqualFold(part, "all") {
+			if allCategory[kind] {
+				return true
+			}
+			undecided = undecided || !known
+			continue
+		}
+		listed := Normalize(part)
+		if listed == kind {
+			return true
+		}
+		if _, listedKnown := pluralDisplay[listed]; !listedKnown && !known {
+			undecided = true
+		}
+	}
+	return undecided
+}
+
 // builtinGroups is the API group each kind kx names itself is served from, ""
 // for the core group.
 var builtinGroups = map[Kind]string{

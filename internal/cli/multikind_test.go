@@ -378,3 +378,83 @@ func TestGetAGroupQualifiedKindSavesTheKind(t *testing.T) {
 		t.Errorf("kx scale refused the row: %v", err)
 	}
 }
+
+// A row is fetched under a resource naming several kinds only when the
+// resource lists it. Skipping the check, kx get deploy,svc 2 after kx get pods
+// fetched Pod 2 and saved it over the listing, where kx get deploy 2 is
+// refused; and kx get all 2 --decode after kx get secrets printed a Secret's
+// plaintext, though kubectl's all category holds none.
+func TestGetSeveralKindsRefusesARowItDoesNotList(t *testing.T) {
+	cases := []struct {
+		resource string
+		kind     kinds.Kind
+		options  getOptions
+		want     string
+	}{
+		{"deploy,svc", kinds.Pod, getOptions{},
+			"Index 2 is Pod/web-2, which 'deploy,svc' does not include — run 'kx get deploy,svc' to relist."},
+		{"all", kinds.Secret, getOptions{Decode: true},
+			"Index 2 is Secret/web-2, which 'all' does not include — run 'kx get all' to relist."},
+		{"all", kinds.ConfigMap, getOptions{},
+			"Index 2 is ConfigMap/web-2, which 'all' does not include — run 'kx get all' to relist."},
+	}
+	for _, c := range cases {
+		t.Run(c.resource+"/"+string(c.kind), func(t *testing.T) {
+			kube := &fakeKubectl{output: singlePodOutput, namespace: "prod"}
+			services := switchServices(t, kube)
+			saveListing(t, services, c.kind, "prod", false, "web-1", "web-2")
+			quietRender(t)
+			err := runGet(services, c.resource, []string{"2"}, c.options)
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+			if len(kube.calls) != 0 {
+				t.Errorf("kubectl ran %q; nothing should be fetched", kube.calls)
+			}
+			if name, _, kind, err := services.State.Fields(2); err != nil || name != "web-2" || kind != c.kind {
+				t.Errorf("index 2 = %s/%s (err %v), want the listing left as it was", kind, name, err)
+			}
+		})
+	}
+}
+
+// One row the resource does not list refuses the batch, before anything is
+// fetched — the same way an out-of-range index late in a batch does.
+func TestGetSeveralKindsRefusesABatchHoldingARowItDoesNotList(t *testing.T) {
+	kube := &fakeKubectl{output: deploySvcOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "api", Kind: kinds.Deployment}, {Name: "creds", Kind: kinds.Secret},
+		}),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	quietRender(t)
+	err := runGet(services, "all", []string{"1", "2"}, getOptions{})
+	if err == nil || !strings.Contains(err.Error(), "Index 2 is Secret/creds, which 'all' does not include") {
+		t.Fatalf("err = %v, want index 2 refused", err)
+	}
+	if len(kube.calls) != 0 {
+		t.Errorf("kubectl ran %q; nothing should be fetched", kube.calls)
+	}
+}
+
+// A mark names its resource whatever is listed, so it is refused in its own
+// voice, and pointed at the kind it is.
+func TestGetSeveralKindsRefusesAMarkItDoesNotList(t *testing.T) {
+	kube := &fakeKubectl{output: singlePodOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := services.State.SaveMark("db", state.Mark{
+		Resource: state.Resource{Name: "creds", Kind: kinds.Secret, Namespace: "prod"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	quietRender(t)
+	err := runGet(services, "all", []string{"@db"}, getOptions{Decode: true})
+	want := "@db is Secret/creds, which 'all' does not include — run 'kx get secrets @db' to fetch it."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
