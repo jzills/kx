@@ -246,13 +246,21 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, m
 		return err
 	}
 
-	namespace := ""
-	if len(secrets) > 0 {
-		namespace = secrets[0].Namespace
-	}
-	if namespace == "" {
-		if namespace = extractNamespace(extra); namespace == "" {
-			namespace = services.Kubectl.CurrentNamespace()
+	// The scope the banner and the prompt name is the reach of the decode.
+	// Under -A that is every namespace, and each Secret carries its own: read
+	// off the first one, "Decode 9 Secrets in diagnostics?" guarded Secrets
+	// from three.
+	spanning := allNamespaces(extra)
+	namespace := render.AllNamespaces
+	if !spanning {
+		namespace = ""
+		if len(secrets) > 0 {
+			namespace = secrets[0].Namespace
+		}
+		if namespace == "" {
+			if namespace = extractNamespace(extra); namespace == "" {
+				namespace = services.Kubectl.CurrentNamespace()
+			}
 		}
 	}
 
@@ -291,8 +299,13 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, m
 	}
 	for _, secret := range secrets {
 		render.Raw("")
-		// The namespace is left to the scope banner rather than repeated.
-		renderSecret(secret, "")
+		// The namespace is left to the scope banner rather than repeated,
+		// unless the banner spans them.
+		where := ""
+		if spanning {
+			where = secret.Namespace
+		}
+		renderSecret(secret, where)
 	}
 	return nil
 }
