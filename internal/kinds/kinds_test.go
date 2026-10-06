@@ -425,7 +425,7 @@ func TestNormalizeRecognisesABuiltinKindInItsOwnGroup(t *testing.T) {
 // resource lists its kind. Against the API server's own "all" category:
 // kubectl api-resources -o wide puts pods, services, the workloads, jobs,
 // cronjobs and horizontalpodautoscalers in it, and no ConfigMap or Secret.
-// A kind kx does not name, under spellings it does not recognise either, is
+// A kind kx does not name, under spellings it does not recognize either, is
 // let through rather than refused for a spelling mismatch.
 func TestCovers(t *testing.T) {
 	cases := []struct {

@@ -252,7 +252,7 @@ var allCategory = map[Kind]bool{
 // spelling, so it is compared exactly, and it is in "all" or it is not. A kind
 // kx does not name — a CRD, which a listing of several kinds records as
 // kubectl prefixed it (certificate.cert-manager.io) — compared with a
-// spelling kx does not recognise either, could be the same kind under two
+// spelling kx does not recognize either, could be the same kind under two
 // spellings, and is let through: refusing it would turn away an index into
 // kx get certificates,issuers for being one of its own rows.
 func Covers(resourceType string, kind Kind) bool {
