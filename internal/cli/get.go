@@ -204,9 +204,10 @@ func (c GetCommand) Execute(
 	// same thing kx already says about `-o json`: this is output it cannot index.
 	// Rows it cannot place, not rows it did not find: an empty listing has
 	// nothing to place, and it is saved below like any other. Only a listing
-	// that actually returned rows kx can't resolve is printed unnumbered.
+	// that actually returned rows kx can't resolve is printed unnumbered —
+	// narrowed by the term all the same, which kubectl's own text was not.
 	if allNamespaces(extraArgs) && len(indexed.Entries) > 0 && !indexed.Placed() {
-		return index.Table{Raw: output}, namespace, nil
+		return unnumberedListing(output, filterTerm), namespace, nil
 	}
 	// A listing of several kinds is resolvable only through the kind kubectl
 	// puts in front of each name, which is where every row's kind comes
