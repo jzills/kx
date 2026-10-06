@@ -89,9 +89,21 @@ func readOnlyTool(title string) *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}
 }
 
-// scopeConflict refuses a namespace named beside allNamespaces — the MCP
-// spelling of the refusal kx get and kx diag make for -n beside -A.
-func scopeConflict(namespace string, allNamespaces bool) error {
+// validScope holds a tool's namespace and allNamespaces to what a scope can
+// be: a namespace that is a Kubernetes namespace (validNamespace), and not
+// one named beside allNamespaces — the MCP spelling of the refusal kx get and
+// kx diag make for -n beside -A.
+//
+// One check every tool that takes a scope calls, rather than validNamespace
+// beside it at each: diagnose and tree called only the conflict half, so a
+// namespace holding an escape sequence was saved under --write-listings and
+// written to the user's terminal by kx state.
+func validScope(namespace string, allNamespaces bool) error {
+	if namespace != "" {
+		if err := validNamespace(namespace); err != nil {
+			return err
+		}
+	}
 	if namespace != "" && allNamespaces {
 		return errors.New("'allNamespaces' and 'namespace' cannot be combined.")
 	}
@@ -270,12 +282,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if err := validKind(in.Kind); err != nil {
 		return nil, listOutput{}, err
 	}
-	if in.Namespace != "" {
-		if err := validNamespace(in.Namespace); err != nil {
-			return nil, listOutput{}, err
-		}
-	}
-	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, listOutput{}, err
 	}
 	if err := validMatch(in.Match); err != nil {
@@ -379,7 +386,7 @@ type diagnoseOutput struct {
 func discardListing(state.State) error { return nil }
 
 func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagnoseInput) (*mcp.CallToolResult, diagnoseOutput, error) {
-	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, diagnoseOutput{}, err
 	}
 	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.Full) {
@@ -518,7 +525,7 @@ func countNodes(roots []jsonTreeNode) int {
 }
 
 func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput) (*mcp.CallToolResult, any, error) {
-	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, nil, err
 	}
 	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces) {
