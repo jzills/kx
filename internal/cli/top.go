@@ -22,6 +22,9 @@ type TopCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
+	// Scope is GetCommand.Scope for kx top's pods: the namespace a refresh
+	// replays a listing in when its arguments name none.
+	Scope string
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -55,7 +58,9 @@ func (c TopCommand) Execute(
 			return index.Table{}, "", err
 		}
 	}
-	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
+	scope := replayScope(c.Scope, extraArgs)
+	args := append([]string{"top", "pods"}, extraArgs...)
+	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -74,6 +79,9 @@ func (c TopCommand) Execute(
 	}
 
 	namespace = extractNamespace(extraArgs)
+	if namespace == "" && scope != nil {
+		namespace = c.Scope
+	}
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
@@ -143,11 +151,14 @@ func (c TopCommand) Execute(
 // topListing runs kx top's listing, of pods or of nodes, and returns it with
 // the label and scope its caption takes: "all namespaces" for an -A listing,
 // which spanning then reports. Shared by the command and by a refresh, so a
-// stale kx top listing is listed again exactly as it was.
+// stale kx top listing is listed again exactly as it was — in the namespace
+// it was taken in, which a refresh passes as scope (TopCommand.Scope).
 func topListing(
-	services Services, nodes bool, match string, rest []string, noLimits bool,
+	services Services, nodes bool, match string, rest []string, noLimits bool, scope string,
 ) (table index.Table, label, namespace string, spanning bool, err error) {
-	command := TopCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+	command := TopCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+	}
 	if nodes {
 		table, namespace, err = command.ExecuteNodes(match, rest)
 		return table, "nodes", namespace, false, err

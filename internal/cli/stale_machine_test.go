@@ -52,7 +52,7 @@ func TestAStaleIndexUnderJSONLeavesStdoutAlone(t *testing.T) {
 				t.Errorf("stdout = %q, want nothing ahead of a reader expecting JSON", stdout.String())
 			}
 			for _, want := range []string{
-				"Pod/api-old no longer exists", "Run 'kx get pods' to refresh the list.",
+				"Pod/api-old no longer exists", "Run 'kx get pods -n prod' to refresh the list.",
 			} {
 				if !strings.Contains(stderr.String(), want) {
 					t.Errorf("stderr = %q, want %q", stderr.String(), want)

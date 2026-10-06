@@ -67,6 +67,20 @@ type GetCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
+	// Scope is the namespace a listing whose arguments name none is taken
+	// in: a refresh's, which replays a listing where it was first taken.
+	// Empty takes it in the current namespace, as kx get does. The query is
+	// saved as typed either way, so the refresh replaces the stale entry.
+	Scope string
+}
+
+// replayScope is the -n a listing is taken under when its arguments name no
+// scope of their own: Scope's, if any.
+func replayScope(scope string, extraArgs []string) []string {
+	if scope == "" || scopeFlagIn(extraArgs) != "" {
+		return nil
+	}
+	return []string{"-n", scope}
 }
 
 // extractNamespace finds an explicit namespace in the pass-through flags, so
@@ -161,7 +175,13 @@ func namesKind(arg string) bool {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	output, err := c.Kubectl.Run(append(getArgs(resource, extraArgs), extraArgs...))
+	// A cluster-scoped kind is listed in no namespace, replayed or not.
+	scope := replayScope(c.Scope, extraArgs)
+	if clusterScoped(string(listingKind(resource))) {
+		scope = nil
+	}
+	args := append(getArgs(resource, extraArgs), extraArgs...)
+	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -189,6 +209,9 @@ func (c GetCommand) Execute(
 	// resolve these indexes need no change.
 	if !allNamespaces(extraArgs) && !clusterScoped(string(listingKind(resource))) {
 		namespace = extractNamespace(extraArgs)
+		if namespace == "" && scope != nil {
+			namespace = c.Scope
+		}
 		if namespace == "" {
 			namespace = c.Kubectl.CurrentNamespace()
 		}

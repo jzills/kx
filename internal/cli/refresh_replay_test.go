@@ -39,11 +39,16 @@ func runStale(t *testing.T, services Services) string {
 
 func currentQuery(t *testing.T, services Services) *state.Query {
 	t.Helper()
+	return currentEntry(t, services).Query
+}
+
+func currentEntry(t *testing.T, services Services) state.State {
+	t.Helper()
 	entry, err := services.State.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	return entry.Query
+	return entry
 }
 
 // A stale index from kx top was refreshed into a kx get pods table: the
@@ -59,7 +64,7 @@ func TestStaleRefreshRunsKxTopAgain(t *testing.T) {
 		&state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"--no-limits"}})
 
 	out := runStale(t, services)
-	if got := joinArgs(kube.args); got != "top pods" {
+	if got := joinArgs(kube.args); got != "top pods -n prod" {
 		t.Errorf("kubectl %q, want kx top's own call", got)
 	}
 	if !strings.Contains(out, "CPU(cores)") || !strings.Contains(out, "api-new") {
@@ -127,7 +132,7 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 		query *state.Query
 		want  string
 	}{
-		{"kx get", &state.Query{Resource: "pods", Args: []string{}}, "Run 'kx get pods' to refresh the list."},
+		{"kx get", &state.Query{Resource: "pods", Args: []string{}}, "Run 'kx get pods -n prod' to refresh the list."},
 		{"kx top", &state.Query{Command: state.CommandTop, Resource: "nodes", Args: []string{}}, "Run 'kx top nodes' to refresh the list."},
 		{"kx top, narrowed", &state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"-A", "--no-limits"}, Match: matchOf("api")},
 			"Run 'kx top -A --no-limits -m api' to refresh the list."},
@@ -135,9 +140,11 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 			"Run 'kx diag -A -m api' to refresh the list."},
 		{"a namespace's tree", &state.Query{Command: state.CommandTree, Args: []string{"-n", "prod"}},
 			"Run 'kx tree -n prod' to refresh the list."},
-		// The root itself may be what went: list its kind to find it again.
+		// The root itself may be what went: list its kind to find it again,
+		// where it was walked — "kx get deployments" typed in default lists
+		// default's.
 		{"one resource's tree", &state.Query{Command: state.CommandTree, Resource: "Deployment/web", Args: []string{"-n", "prod"}},
-			"Run 'kx get deployments' to refresh the list."},
+			"Run 'kx get deployments -n prod' to refresh the list."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			services := staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, tc.query)
@@ -183,6 +190,67 @@ func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 		query := tc.query
 		out := runStale(t, staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, &query))
 		if !strings.Contains(out, tc.want) {
+			t.Errorf("output = %q\n  want %q", out, tc.want)
+		}
+	}
+}
+
+// A stale listing taken without -n is refreshed in the namespace it was taken
+// in, not whichever one is current now. kx get deploy in diagnostics, a
+// switch to kube-system, and a stale index refreshed into kube-system's
+// Deployments — another namespace's listing, saved as current. kx diag and
+// kx tree already replay the scope they swept. The query is left as typed,
+// so the refresh replaces the stale entry rather than pushing beside it.
+func TestAStaleListingIsRefreshedWhereItWasTaken(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		query  *state.Query
+		output string
+		call   string
+		want   string
+	}{
+		{"kx get", &state.Query{Resource: "pods", Args: []string{}}, podsOutput,
+			"get pods -n prod", "Pods · prod · 2 items"},
+		{"kx top", &state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"--no-limits"}},
+			"NAME      CPU(cores)   MEMORY(bytes)\napi-new   1m           2Mi\n",
+			"top pods -n prod", "Pods · prod · 1 item"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Current namespace kube-system; the listing was taken in prod.
+			kube := &fakeKubectl{output: tc.output, namespace: "kube-system"}
+			services := staleServices(t, kube, tc.query)
+
+			out := runStale(t, services)
+			if got := joinArgs(kube.calls[len(kube.calls)-1]); got != tc.call {
+				t.Errorf("kubectl %q, want %q", got, tc.call)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("output = %q, want %q", out, tc.want)
+			}
+			history, err := services.State.LoadHistory()
+			if err != nil {
+				t.Fatalf("LoadHistory: %v", err)
+			}
+			if len(history.States) != 1 || history.States[0].Namespace != "prod" {
+				t.Errorf("history = %+v, want the stale entry replaced by prod's", history.States)
+			}
+		})
+	}
+}
+
+// The command a failed replay names lists the same namespace: "kx get pods"
+// for a listing of prod, typed in kube-system, lists kube-system.
+func TestAFailedReplayNamesTheNamespaceTheListingWasTakenIn(t *testing.T) {
+	for _, tc := range []struct {
+		query *state.Query
+		want  string
+	}{
+		{&state.Query{Resource: "pods", Args: []string{}}, "Run 'kx get pods -n prod' to refresh the list."},
+		{&state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"--no-limits"}},
+			"Run 'kx top --no-limits -n prod' to refresh the list."},
+	} {
+		kube := &fakeKubectl{err: errors.New("connection refused"), namespace: "kube-system"}
+		if out := runStale(t, staleServices(t, kube, tc.query)); !strings.Contains(out, tc.want) {
 			t.Errorf("output = %q\n  want %q", out, tc.want)
 		}
 	}

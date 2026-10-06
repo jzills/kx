@@ -200,50 +200,60 @@ const (
 
 // recoverState runs the command behind the current state entry again and
 // renders the fresh listing under lead, which names why it was re-run. The
-// query comes back too, for the instruction a failed replay ends with.
+// entry comes back too, for the instruction a failed replay ends with; the
+// zero State when there is none to read.
 //
 // Each command lists as it would typed: kx top's usage table, kx diag's
 // triage table, kx tree's walk. A refresh only ever prints — the flags that
 // send a listing to a browser or a script were never recorded.
-func recoverState(ctx context.Context, services Services, lead string) (recoverOutcome, *state.Query) {
+func recoverState(ctx context.Context, services Services, lead string) (recoverOutcome, state.State) {
 	current, err := services.State.Load()
 	if err != nil {
-		return replayFailed, nil
+		return replayFailed, state.State{}
 	}
 	query := current.Query
 	if query == nil {
-		return noQuery, nil
+		return noQuery, state.State{}
 	}
 	var replay func() (func(), error)
 	switch query.Command {
 	case "":
-		replay = func() (func(), error) { return replayGet(services, *query) }
+		replay = func() (func(), error) { return replayGet(services, current) }
 	case state.CommandTop:
-		replay = func() (func(), error) { return replayTop(services, *query) }
+		replay = func() (func(), error) { return replayTop(services, current) }
 	case state.CommandDiag:
 		replay = func() (func(), error) { return replaySweep(ctx, services, *query) }
 	case state.CommandTree:
 		replay = func() (func(), error) { return replayTree(ctx, services, *query) }
 	case state.CommandFetch:
 		// Nothing runs it again, but it names the listing to run instead.
-		return noQuery, query
+		return noQuery, current
 	default:
-		return noQuery, nil
+		return noQuery, state.State{}
 	}
 	show, err := replay()
 	if err != nil {
-		return replayFailed, query
+		return replayFailed, current
 	}
 	render.Raw(lead)
 	show()
-	return refreshed, query
+	return refreshed, current
 }
 
 // Each replay lists and saves, then returns what draws the listing, so
 // nothing is drawn — not even the lead — for a replay that failed.
+//
+// A listing of kx get or kx top is replayed in the namespace it was taken in
+// (the entry's), not whichever one is current now, when its arguments name
+// none: kx get deploy in one namespace, a switch to another and a stale index
+// refreshed into the other's Deployments, saved as current. kx diag and kx
+// tree record the scope they swept in their arguments.
 
-func replayGet(services Services, query state.Query) (func(), error) {
-	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+func replayGet(services Services, entry state.State) (func(), error) {
+	query := *entry.Query
+	get := GetCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: entry.Namespace,
+	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
 		return nil, err
@@ -256,10 +266,11 @@ func replayGet(services Services, query state.Query) (func(), error) {
 	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
 
-func replayTop(services Services, query state.Query) (func(), error) {
+func replayTop(services Services, entry state.State) (func(), error) {
+	query := *entry.Query
 	noLimits, rest := extractBool(query.Args, "--no-limits")
 	table, label, namespace, _, err := topListing(
-		services, query.Resource == "nodes", queryMatch(query), rest, noLimits)
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, entry.Namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -340,15 +351,22 @@ func queryMatch(query state.Query) string {
 }
 
 // relistCommand is what to run when a listing could not be run again: the
-// command that made it, as it would be typed. A kx get listing is named by
-// its resource, scope and term — not its other arguments, since a relist's
-// are the very names that went stale — and a tree of one resource by the
-// listing of its kind, since that resource may be the one that went.
-func relistCommand(query *state.Query) string {
+// command that made it, as it would be typed, in the scope it was taken in
+// and narrowed by its term. A kx get listing is named by its resource, scope
+// and term — not its other arguments, since a relist's are the very names
+// that went stale — and a tree of one resource by the listing of its kind in
+// its namespace, since that resource may be the one that went.
+//
+// The scope is the one recorded: the arguments', or for a listing whose
+// arguments name none, the namespace its entry was taken in, which is where
+// a refresh replays it (see replayGet). "kx get pods" for a listing of prod,
+// typed in kube-system, lists kube-system.
+func relistCommand(entry state.State) string {
+	query := entry.Query
 	if query == nil {
 		return "kx get <resource>"
 	}
-	words := []string{"kx", query.Command}
+	var words []string
 	switch query.Command {
 	case "":
 		// A fetch of rows spanning kinds saved before it recorded the
@@ -356,40 +374,55 @@ func relistCommand(query *state.Query) string {
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}
-		words = []string{"kx", "get", query.Resource}
-		// The scope it was listed in: without it, the command lists
-		// whichever namespace the user is standing in.
-		if allNamespaces(query.Args) {
-			words = append(words, "-A")
-		} else if namespace := extractNamespace(query.Args); namespace != "" {
-			words = append(words, "-n", namespace)
-		}
-		if term := queryMatch(*query); term != "" {
-			words = append(words, "-m", term)
-		}
-		return strings.Join(words, " ")
+		words = append([]string{"kx", "get", query.Resource}, listedScope(entry, query.Args)...)
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
-		// indexes into that listing. One spanning kinds saved before it
-		// recorded the listing names none.
+		// indexes into that listing — narrowed by its term, below, or the
+		// listing named numbers its rows differently. One spanning kinds
+		// saved before it recorded the listing names none.
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}
-		return "kx get " + query.Resource + " -A"
+		words = []string{"kx", "get", query.Resource, "-A"}
 	case state.CommandTop:
+		words = []string{"kx", "top"}
 		if query.Resource == "nodes" {
 			words = append(words, "nodes")
 		}
+		words = append(words, query.Args...)
+		if query.Resource != "nodes" && scopeFlagIn(query.Args) == "" {
+			words = append(words, listedScope(entry, nil)...)
+		}
 	case state.CommandTree:
 		if kind, _, named := strings.Cut(query.Resource, "/"); named {
-			return kinds.ListCommand(kinds.Kind(kind))
+			command := kinds.ListCommand(kinds.Kind(kind))
+			if namespace := extractNamespace(query.Args); namespace != "" {
+				command += " -n " + namespace
+			}
+			return command
 		}
+		words = append([]string{"kx", "tree"}, query.Args...)
+	default:
+		words = append([]string{"kx", query.Command}, query.Args...)
 	}
-	words = append(words, query.Args...)
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)
 	}
 	return strings.Join(words, " ")
+}
+
+// listedScope is the scope a relist names: the -A or -n among a listing's
+// arguments, or failing those the namespace its entry was taken in.
+func listedScope(entry state.State, args []string) []string {
+	switch {
+	case allNamespaces(args):
+		return []string{"-A"}
+	case extractNamespace(args) != "":
+		return []string{"-n", extractNamespace(args)}
+	case entry.Namespace != "":
+		return []string{"-n", entry.Namespace}
+	}
+	return nil
 }
 
 // handleStale reports a failure caused by a vanished resource, then refreshes
@@ -404,8 +437,8 @@ func handleStale(ctx context.Context, services Services, err error) {
 	// Anything but a rendered listing ends with the instruction. Only a
 	// successful refresh has an answer on screen already; a replay that failed
 	// leaves nothing behind, since its error is discarded with it.
-	if outcome, query := recoverState(ctx, services, refreshLead(err)); outcome != refreshed {
-		render.Raw("Run '" + relistCommand(query) + "' to refresh the list.")
+	if outcome, entry := recoverState(ctx, services, refreshLead(err)); outcome != refreshed {
+		render.Raw("Run '" + relistCommand(entry) + "' to refresh the list.")
 	}
 }
 
@@ -415,11 +448,11 @@ func handleStale(ctx context.Context, services Services, err error) {
 // listing the user's indexes come from with one they never looked at.
 func reportStale(services Services, err error) {
 	render.Error(err.Error())
-	var query *state.Query
-	if current, loadErr := services.State.Load(); loadErr == nil {
-		query = current.Query
+	current, loadErr := services.State.Load()
+	if loadErr != nil {
+		current = state.State{}
 	}
-	render.Notice("Run '" + relistCommand(query) + "' to refresh the list.")
+	render.Notice("Run '" + relistCommand(current) + "' to refresh the list.")
 }
 
 // runEach runs act for every resolved reference, continuing past a failure
