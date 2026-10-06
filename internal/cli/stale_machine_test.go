@@ -52,7 +52,7 @@ func TestAStaleIndexUnderJSONLeavesStdoutAlone(t *testing.T) {
 				t.Errorf("stdout = %q, want nothing ahead of a reader expecting JSON", stdout.String())
 			}
 			for _, want := range []string{
-				"Pod/api-old no longer exists", "Run 'kx get pods' to refresh the list.",
+				"Pod/api-old no longer exists", "Run 'kx get pods -n prod' to refresh the list.",
 			} {
 				if !strings.Contains(stderr.String(), want) {
 					t.Errorf("stderr = %q, want %q", stderr.String(), want)
@@ -81,6 +81,11 @@ func TestAStaleIndexUnderMachineOutputIsNotRefreshed(t *testing.T) {
 		{[]string{"secret", "1", "--output=name"}, false},
 		{[]string{"secret", "1", "-o", "wide"}, true},
 		{[]string{"secret", "1"}, true},
+		// One value, unwrapped, for $(...) to substitute: the refreshed
+		// table landed in the variable a script exported as a credential.
+		{[]string{"secret", "1", "--decode", "-k", "token"}, false},
+		{[]string{"secret", "1", "--decode", "--key=token"}, false},
+		{[]string{"secret", "1", "--decode"}, true},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			stdout, _ := splitRender(t)
@@ -116,5 +121,18 @@ func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
 	}
 	if !machineOutput(cmd, []string{"1", "-o", "json", "--", "sh"}) {
 		t.Error("an -o before the separator was not read")
+	}
+}
+
+// -k is kx's --key only beside --decode, which is kx's alone. kubectl's own -k
+// — kustomize, on the commands that pass flags through — still prints a
+// table for a person, which a stale index refreshes.
+func TestMachineOutputReadsKeyOnlyBesideDecode(t *testing.T) {
+	services := argvServices(t)
+	if machineOutput(newYamlCommand(services), []string{"1", "-k", "overlays/prod", "-o", "wide"}) {
+		t.Error("kubectl's -k read as --decode's key")
+	}
+	if !machineOutput(newSecretCommand(services, "secret", nil), []string{"1", "--decode", "-k", "token"}) {
+		t.Error("--decode -k not read as raw output")
 	}
 }

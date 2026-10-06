@@ -942,7 +942,7 @@ func TestMetadataWriteSaysWhenItWasADryRun(t *testing.T) {
 		{nil, false},
 	} {
 		kube := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
-		message, err := MetadataWriteCommand{
+		message, _, err := MetadataWriteCommand{
 			Kubectl: kube, State: pod("nginx"), Verb: "label", Field: "labels",
 		}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, false, tc.extra)
 		if err != nil {

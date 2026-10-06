@@ -176,3 +176,52 @@ func TestMCPMatchAcceptsWhatANameCanHold(t *testing.T) {
 		}
 	}
 }
+
+// Every tool that takes a namespace refuses one that is not a Kubernetes
+// namespace, before the cluster is read and before anything is saved. diagnose
+// and tree took it as given: under --write-listings an escape sequence in it
+// was saved as the entry's namespace and in its query, and kx state and the
+// command a failed refresh names wrote it to the user's terminal.
+func TestMCPNamespaceIsValidatedByEveryToolThatTakesOne(t *testing.T) {
+	const namespace = "x\x1b]0;pwned\x07"
+	kube := &recordingKubectl{output: podsOutput, namespace: "prod"}
+	deps := writingDeps(t, kube)
+	deps.Scanner = &fakeScanner{}
+	deps.Kubernetes = func() (kubernetes.Interface, error) {
+		t.Error("the cluster was read for a namespace that is refused")
+		return fake.NewSimpleClientset(), nil
+	}
+	ctx, request := context.Background(), &mcp.CallToolRequest{}
+	for name, call := range map[string]func() error{
+		"list_resources": func() error {
+			_, _, err := deps.listResources(ctx, request, listInput{Kind: "pods", Namespace: namespace})
+			return err
+		},
+		"diagnose": func() error {
+			_, _, err := deps.diagnose(ctx, request, diagnoseInput{Namespace: namespace})
+			return err
+		},
+		"tree": func() error {
+			_, _, err := deps.tree(ctx, request, treeInput{Namespace: namespace})
+			return err
+		},
+		"top": func() error {
+			_, _, err := deps.top(ctx, request, topInput{Namespace: namespace})
+			return err
+		},
+		"scan": func() error {
+			_, _, err := deps.scan(ctx, request, scanInput{Namespace: namespace})
+			return err
+		},
+	} {
+		if err := call(); err == nil || !strings.Contains(err.Error(), "is not a Kubernetes namespace") {
+			t.Errorf("%s: err = %v, want the namespace refused", name, err)
+		}
+	}
+	if len(kube.runs) > 0 {
+		t.Errorf("kubectl ran %v for a namespace that is refused", kube.runs)
+	}
+	if _, err := deps.State.Load(); err == nil {
+		t.Error("a listing was saved under a namespace that is refused")
+	}
+}

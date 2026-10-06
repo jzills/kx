@@ -304,6 +304,45 @@ func TestGetAllNamespacesWithoutANamespaceColumnIsNotIndexed(t *testing.T) {
 	}
 }
 
+// An -A listing printed unnumbered is still narrowed by --match, as every
+// other listing kx prints but does not number is. Returned as kubectl gave
+// it, kx get pods -A -o custom-columns=NAME:.metadata.name -m redis printed
+// every pod; so did kx get ns,deploy -A -m kube-public, whose one matching row
+// is a Namespace and carries none.
+func TestGetAllNamespacesWithoutANamespaceColumnIsStillMatched(t *testing.T) {
+	for _, tc := range []struct {
+		resource string
+		output   string
+		term     string
+		keep     string
+		drop     string
+	}{
+		{"pods", "NAME\nnginx-abc-xyz\nredis-def-uvw\n", "redis", "redis-def-uvw", "nginx-abc-xyz"},
+		{"ns,deploy", "NAME                 STATUS   AGE\n" +
+			"namespace/default    Active   9d\n" +
+			"namespace/kube-public   Active   9d\n" +
+			"\n" +
+			"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n",
+			"kube-public", "namespace/kube-public", "deployment.apps/api"},
+	} {
+		t.Run(tc.resource, func(t *testing.T) {
+			states := &fakeState{}
+			table, _, err := newGet(&fakeKubectl{output: tc.output}, states).Execute(
+				tc.resource, tc.term, []string{"-A"})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if table.Indexable() || len(states.saved) != 0 {
+				t.Fatalf("numbered or saved a listing it cannot place:\n%s", table.Text())
+			}
+			if text := table.Text(); !strings.Contains(text, tc.keep) || strings.Contains(text, tc.drop) {
+				t.Errorf("output = %q, want %q kept and %q narrowed away", text, tc.keep, tc.drop)
+			}
+		})
+	}
+}
+
 // A single-namespace listing has no NAMESPACE column, so its resources record
 // none and the entry's namespace answers for all of them — the shape every
 // existing state file already has.

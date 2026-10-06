@@ -240,7 +240,7 @@ func newTopCommand(services Services) *cobra.Command {
 			}
 
 			output, resourceLabel, namespace, scopedAllNamespaces, err :=
-				topListing(services, nodes, match, rest, noLimits)
+				topListing(services, nodes, match, rest, noLimits, "")
 			if err != nil {
 				return err
 			}

@@ -149,30 +149,35 @@ type ScaleCommand struct {
 	State   IndexResolver
 }
 
-func (c ScaleCommand) Execute(ref state.Ref, replicas int, extraArgs []string) (string, error) {
+// Execute scales the workload, returning kx's line for it and kubectl's own
+// output, which reportChange prints in its place when an output format was
+// asked for.
+func (c ScaleCommand) Execute(
+	ref state.Ref, replicas int, extraArgs []string,
+) (message, output string, err error) {
 	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !scalableKinds.Has(kind) {
-		return "", unsupportedKindError("scale", kind, scalableKinds)
+		return "", "", unsupportedKindError("scale", kind, scalableKinds)
 	}
-	_, err = c.Kubectl.Run(append([]string{
+	output, err = c.Kubectl.Run(append([]string{
 		"scale", string(kind) + "/" + name,
 		"--replicas=" + strconv.Itoa(replicas), "-n", namespace,
 	}, extraArgs...))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	noun := "replicas"
 	if replicas == 1 {
 		noun = "replica"
 	}
-	message := fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun)
+	message = fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun)
 	if isDryRun(extraArgs) {
 		message += " (dry run — nothing was changed)"
 	}
-	return message, nil
+	return message, output, nil
 }
 
 var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}

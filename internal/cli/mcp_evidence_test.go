@@ -473,7 +473,7 @@ func TestTopToolRefusesAllNamespacesWithNodesOrANamespace(t *testing.T) {
 		},
 		"namespace": {
 			args: map[string]any{"namespace": "prod", "allNamespaces": true},
-			want: scopeConflict("prod", true).Error(),
+			want: validScope("prod", true).Error(),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

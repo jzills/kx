@@ -474,3 +474,33 @@ func TestDecodeRefusesTheBatchBeforePrintingAnySecret(t *testing.T) {
 		t.Errorf("made %d kubectl calls for a refused batch, want 0", len(kube.runs))
 	}
 }
+
+// An -A decode spans namespaces, and its banner and prompt say so. Read off
+// the first Secret, they named one namespace — "Decode 3 Secrets in prod?" —
+// over Secrets from three, understating the reach of the prompt that guards
+// their plaintext; and each Secret was printed with no namespace at all.
+func TestNamespaceDecodeAcrossNamespacesNamesEveryNamespace(t *testing.T) {
+	out := captureRender(t)
+	list := `{"items":[` +
+		`{"kind":"Secret","metadata":{"name":"db-creds","namespace":"prod"},"data":{"password":"aHVudGVyMg=="}},` +
+		`{"kind":"Secret","metadata":{"name":"api-token","namespace":"stage"},"data":{"token":"dGtuLTlmM2EyYg=="}}]}`
+	services := secretServices(t, &fakeKubectl{output: list, namespace: "prod"}, kinds.Secret)
+	asked := ""
+	services.Confirm = func(message string) error {
+		asked = message
+		return nil
+	}
+	if err := decodeSecrets(services, "secret", nil, []string{"-A"}, decodeOptions()); err != nil {
+		t.Fatalf("decodeSecrets: %v", err)
+	}
+	if want := "Decode 2 Secrets in all namespaces?"; asked != want {
+		t.Errorf("prompt = %q, want %q", asked, want)
+	}
+	for _, want := range []string{
+		"Secrets · all namespaces · 2 items", "Secret/db-creds · prod", "Secret/api-token · stage",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}

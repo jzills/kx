@@ -125,12 +125,7 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 	// The resolve phase, under the server lock: everything that reads the
 	// state file, the discovery source or the cluster.
 	err := d.locked(func() error {
-		if in.Namespace != "" {
-			if err := validNamespace(in.Namespace); err != nil {
-				return err
-			}
-		}
-		if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+		if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 			return err
 		}
 		if in.Target != nil && (in.Namespace != "" || in.AllNamespaces) {

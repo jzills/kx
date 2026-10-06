@@ -22,6 +22,9 @@ type TopCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
+	// Scope is GetCommand.Scope for kx top's pods: the namespace a refresh
+	// replays a listing in when its arguments name none.
+	Scope string
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -55,7 +58,9 @@ func (c TopCommand) Execute(
 			return index.Table{}, "", err
 		}
 	}
-	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
+	scope := replayScope(c.Scope, extraArgs)
+	args := append([]string{"top", "pods"}, extraArgs...)
+	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -74,6 +79,9 @@ func (c TopCommand) Execute(
 	}
 
 	namespace = extractNamespace(extraArgs)
+	if namespace == "" && scope != nil {
+		namespace = c.Scope
+	}
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
@@ -103,10 +111,6 @@ func (c TopCommand) Execute(
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -132,7 +136,7 @@ func (c TopCommand) Execute(
 		// usage, so the two hold different resources in a different order.
 		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
-			Resource: "pods", Args: recorded, Match: match, Command: state.CommandTop,
+			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -143,11 +147,14 @@ func (c TopCommand) Execute(
 // topListing runs kx top's listing, of pods or of nodes, and returns it with
 // the label and scope its caption takes: "all namespaces" for an -A listing,
 // which spanning then reports. Shared by the command and by a refresh, so a
-// stale kx top listing is listed again exactly as it was.
+// stale kx top listing is listed again exactly as it was — in the namespace
+// it was taken in, which a refresh passes as scope (TopCommand.Scope).
 func topListing(
-	services Services, nodes bool, match string, rest []string, noLimits bool,
+	services Services, nodes bool, match string, rest []string, noLimits bool, scope string,
 ) (table index.Table, label, namespace string, spanning bool, err error) {
-	command := TopCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+	command := TopCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+	}
 	if nodes {
 		table, namespace, err = command.ExecuteNodes(match, rest)
 		return table, "nodes", namespace, false, err
@@ -210,17 +217,13 @@ func (c TopCommand) ExecuteNodes(
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if err := c.State.Save(state.State{
 		Resources: resourcesFrom(indexed.Entries, kinds.Node),
 		Namespace: namespace,
 		// Carrying the command that produced it, for the same reasons
 		// Execute's entry does.
 		Query: &state.Query{
-			Resource: "nodes", Args: extraArgs, Match: match, Command: state.CommandTop,
+			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err

@@ -192,7 +192,7 @@ func TestStaleRefreshStillHintsWhenTheReplayFails(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("stale command returned no error")
 	}
-	if !strings.Contains(out.String(), "Run 'kx get pods' to refresh the list.") {
+	if !strings.Contains(out.String(), "Run 'kx get pods -n prod' to refresh the list.") {
 		t.Errorf("a failed replay left the user with no instruction:\n%s", out.String())
 	}
 }

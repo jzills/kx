@@ -41,10 +41,11 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 }
 
 // machineOutput reports whether an invocation asked for output a program
-// reads rather than a person: kx's own --json, or a kubectl -o format that is
-// not a table (see printsTable). A refreshed listing is a table for a person
-// to pick from, and it goes to stdout, where a script reading the document
-// fails to parse it.
+// reads rather than a person: kx's own --json, one Secret value written raw
+// by --decode --key, or a kubectl -o format that is not a table (see
+// printsTable). A refreshed listing is a table for a person to pick from, and
+// it goes to stdout, where a script reading the document fails to parse it —
+// or, under $(kx secret 1 --decode -k token), exports it as the credential.
 //
 // A command that parses its own flags has them in argv. Only those before a
 // "--" are read: what follows is a command for a container, and an -o there
@@ -58,6 +59,11 @@ func machineOutput(c *cobra.Command, args []string) bool {
 	}
 	if end := slices.Index(args, "--"); end >= 0 {
 		args = args[:end]
+	}
+	// --decode is kx's alone, so its -k is the key and not kubectl's -k
+	// (kustomize), which other commands pass through.
+	if decode, _ := extractBool(args, "--decode"); decode && hasFlag(args, "--key", "-k") {
+		return true
 	}
 	return hasFlag(args, "--json", "") || !printsTable(args)
 }

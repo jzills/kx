@@ -132,6 +132,18 @@ func TestAStaleFetchAcrossNamespacesIsNotReplayed(t *testing.T) {
 	}
 }
 
+// The listing a stale fetch names is narrowed by the term the fetch was:
+// the unnarrowed -A listing numbers its rows differently from the one the
+// indexes came from.
+func TestAStaleFetchNamesTheListingWithItsTerm(t *testing.T) {
+	term := "api"
+	out := runStale(t, staleServices(t, &fakeKubectl{output: podsOutput},
+		&state.Query{Command: state.CommandFetch, Resource: "pods", Args: []string{}, Match: &term}))
+	if !strings.Contains(out, "Run 'kx get pods -A -m api' to refresh the list.") {
+		t.Errorf("output = %q, want the -A listing named with its term", out)
+	}
+}
+
 func assertNothingMatches(t *testing.T, out, term string) {
 	t.Helper()
 	if want := "nothing matches '" + term + "'"; !strings.Contains(out, want) {

@@ -662,7 +662,12 @@ func NameMatcher(term string) func(name string) bool {
 	}
 }
 
-// FilterRows keeps the rows whose NAME contains term, case-insensitively.
+// FilterRows keeps the rows whose name contains term, case-insensitively.
+//
+// The name of what an index resolves to (TableShape.ResourceIdx): NAME, but
+// POD under kubectl top pod --containers, whose NAME is the container. A term
+// read off NAME there selected containers under a caption about pods, and
+// missed the pods it named.
 //
 // The name, not the kind kubectl puts in front of it in a listing of several
 // kinds: "app" is in every "deployment.apps/…". A name never holds a "/", so
@@ -675,7 +680,7 @@ func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	matches := NameMatcher(term)
 	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		name := row[shape.NameIdx]
+		name := row[shape.ResourceIdx]
 		if slash := strings.LastIndex(name, "/"); slash >= 0 {
 			name = name[slash+1:]
 		}

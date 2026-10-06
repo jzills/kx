@@ -275,12 +275,7 @@ type topOutput struct {
 }
 
 func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*mcp.CallToolResult, topOutput, error) {
-	if in.Namespace != "" {
-		if err := validNamespace(in.Namespace); err != nil {
-			return nil, topOutput{}, err
-		}
-	}
-	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, topOutput{}, err
 	}
 	if in.Nodes {

@@ -67,6 +67,20 @@ type GetCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
+	// Scope is the namespace a listing whose arguments name none is taken
+	// in: a refresh's, which replays a listing where it was first taken.
+	// Empty takes it in the current namespace, as kx get does. The query is
+	// saved as typed either way, so the refresh replaces the stale entry.
+	Scope string
+}
+
+// replayScope is the -n a listing is taken under when its arguments name no
+// scope of their own: Scope's, if any.
+func replayScope(scope string, extraArgs []string) []string {
+	if scope == "" || scopeFlagIn(extraArgs) != "" {
+		return nil
+	}
+	return []string{"-n", scope}
 }
 
 // extractNamespace finds an explicit namespace in the pass-through flags, so
@@ -161,7 +175,13 @@ func namesKind(arg string) bool {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	output, err := c.Kubectl.Run(append(getArgs(resource, extraArgs), extraArgs...))
+	// A cluster-scoped kind is listed in no namespace, replayed or not.
+	scope := replayScope(c.Scope, extraArgs)
+	if clusterScoped(string(listingKind(resource))) {
+		scope = nil
+	}
+	args := append(getArgs(resource, extraArgs), extraArgs...)
+	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -189,6 +209,9 @@ func (c GetCommand) Execute(
 	// resolve these indexes need no change.
 	if !allNamespaces(extraArgs) && !clusterScoped(string(listingKind(resource))) {
 		namespace = extractNamespace(extraArgs)
+		if namespace == "" && scope != nil {
+			namespace = c.Scope
+		}
 		if namespace == "" {
 			namespace = c.Kubectl.CurrentNamespace()
 		}
@@ -204,9 +227,10 @@ func (c GetCommand) Execute(
 	// same thing kx already says about `-o json`: this is output it cannot index.
 	// Rows it cannot place, not rows it did not find: an empty listing has
 	// nothing to place, and it is saved below like any other. Only a listing
-	// that actually returned rows kx can't resolve is printed unnumbered.
+	// that actually returned rows kx can't resolve is printed unnumbered —
+	// narrowed by the term all the same, which kubectl's own text was not.
 	if allNamespaces(extraArgs) && len(indexed.Entries) > 0 && !indexed.Placed() {
-		return index.Table{Raw: output}, namespace, nil
+		return unnumberedListing(output, filterTerm), namespace, nil
 	}
 	// A listing of several kinds is resolvable only through the kind kubectl
 	// puts in front of each name, which is where every row's kind comes
@@ -225,8 +249,11 @@ func (c GetCommand) Execute(
 	// Not a table kx can read, rather than a table with no rows in it: the
 	// empty listing below has no header either (kubectl puts "No resources
 	// found" on stderr), and it is a fact about the cluster that the indexes
-	// must follow. What separates them is whether anything came back at all.
-	if !indexed.Indexable() && !indexed.Empty() {
+	// must follow. What separates them is whether anything came back at all —
+	// in a table format. An empty -o name or template reply is no more a
+	// listing than a full one: saved, kx get pods -l app=x -o name replaced
+	// the listing behind it, where one that found pods left it alone.
+	if !indexed.Indexable() && (!indexed.Empty() || !printsTable(extraArgs)) {
 		return indexed, namespace, nil
 	}
 	// Saved unconditionally, including when the listing found nothing. An
@@ -290,10 +317,6 @@ func listingKind(resource string) kinds.Kind {
 func getListing(
 	resource, filterTerm string, extraArgs []string, namespace string, entries []index.Entry,
 ) state.State {
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -304,7 +327,7 @@ func getListing(
 		Query: &state.Query{
 			Resource: resource,
 			Args:     extraArgs,
-			Match:    match,
+			Match:    matchOf(filterTerm),
 		},
 	}
 }
