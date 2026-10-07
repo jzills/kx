@@ -22,8 +22,10 @@ type TopCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
-	// Scope is GetCommand.Scope for kx top's pods: the namespace a refresh
-	// replays a listing in when its arguments name none.
+	// Scope is GetCommand.Scope for kx top's pods: the namespace a listing
+	// whose arguments name none is taken in, without naming it in the query
+	// saved — a refresh's (listingScope), or the one the context gives an
+	// agent's top call.
 	Scope string
 }
 

@@ -108,7 +108,7 @@ func TestMCPListResourcesTakesAMatch(t *testing.T) {
 	cli := cliState(t)
 	if _, _, err := (GetCommand{
 		Kubectl: &recordingKubectl{output: podsOutput, namespace: "prod"}, State: cli, Index: index.Service{},
-	}).Execute("pods", "REDIS", []string{"-n", "prod"}); err != nil {
+	}).Execute("pods", "REDIS", nil); err != nil {
 		t.Fatal(err)
 	}
 	assertSavedLikeTheCLI(t, entry, cli)

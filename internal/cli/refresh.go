@@ -205,8 +205,12 @@ const (
 //
 // Each command lists as it would typed: kx top's usage table, kx diag's
 // triage table, kx tree's walk. A refresh only ever prints — the flags that
-// send a listing to a browser or a script were never recorded.
-func recoverState(ctx context.Context, services Services, lead string) (recoverOutcome, state.State) {
+// send a listing to a browser or a script were never recorded. elsewhere is
+// whether the listing was taken in another context than the current one,
+// which decides the namespace it is taken again in (listingScope).
+func recoverState(
+	ctx context.Context, services Services, lead string, elsewhere bool,
+) (recoverOutcome, state.State) {
 	current, err := services.State.Load()
 	if err != nil {
 		return replayFailed, state.State{}
@@ -218,13 +222,13 @@ func recoverState(ctx context.Context, services Services, lead string) (recoverO
 	var replay func() (func(), error)
 	switch query.Command {
 	case "":
-		replay = func() (func(), error) { return replayGet(services, current) }
+		replay = func() (func(), error) { return replayGet(services, current, elsewhere) }
 	case state.CommandTop:
-		replay = func() (func(), error) { return replayTop(services, current) }
+		replay = func() (func(), error) { return replayTop(services, current, elsewhere) }
 	case state.CommandDiag:
-		replay = func() (func(), error) { return replaySweep(ctx, services, *query) }
+		replay = func() (func(), error) { return replaySweep(ctx, services, current, elsewhere) }
 	case state.CommandTree:
-		replay = func() (func(), error) { return replayTree(ctx, services, *query) }
+		replay = func() (func(), error) { return replayTree(ctx, services, current, elsewhere) }
 	case state.CommandFetch:
 		// Nothing runs it again, but it names the listing to run instead.
 		return noQuery, current
@@ -240,19 +244,50 @@ func recoverState(ctx context.Context, services Services, lead string) (recoverO
 	return refreshed, current
 }
 
-// Each replay lists and saves, then returns what draws the listing, so
-// nothing is drawn — not even the lead — for a replay that failed.
+// listingScope is where a listing is taken again, by a refresh or by the
+// command a failed one names: the scope it was typed with, wherever that is
+// run, or else the namespace its context gave it — but only in that context.
+// ("", false) is the current context's own namespace.
 //
-// A listing of kx get or kx top is replayed in the namespace it was taken in
-// (the entry's), not whichever one is current now, when its arguments name
-// none: kx get deploy in one namespace, a switch to another and a stale index
-// refreshed into the other's Deployments, saved as current. kx diag and kx
-// tree record the scope they swept in their arguments.
+// A listing's query records a scope only when one was named (-n, -A, an
+// agent's namespace), and its entry the namespace it was taken in. The two
+// are different facts. A named namespace is part of the command, so kx get
+// pods -n prod is taken again in prod in whatever context it is run. An
+// inherited one belongs to the context it came from: in that context the
+// listing is taken again where it was, not wherever the caller has moved
+// since (kx get deploy, a switch to another namespace, and a stale index
+// refreshed into the other's Deployments); after a switch to another
+// context it is the listing as typed, in the new context's namespace.
+// Replayed where it was taken, kx get pods in staging's prod, then an index
+// spent in production, listed production's prod — on another cluster usually
+// a namespace that does not exist.
+func listingScope(entry state.State, elsewhere bool) (namespace string, all bool) {
+	var args []string
+	if entry.Query != nil {
+		args = entry.Query.Args
+	}
+	if allNamespaces(args) {
+		return "", true
+	}
+	if named := extractNamespace(args); named != "" {
+		return named, false
+	}
+	if elsewhere {
+		return "", false
+	}
+	return entry.Namespace, false
+}
 
-func replayGet(services Services, entry state.State) (func(), error) {
+// Each replay lists and saves, then returns what draws the listing, so
+// nothing is drawn — not even the lead — for a replay that failed. Each
+// records the query as it was typed, so a refresh in the same namespace
+// replaces the stale entry rather than pushing a second one beside it.
+
+func replayGet(services Services, entry state.State, elsewhere bool) (func(), error) {
 	query := *entry.Query
+	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
-		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: entry.Namespace,
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
@@ -266,19 +301,35 @@ func replayGet(services Services, entry state.State) (func(), error) {
 	return func() { render.IndexedTable(table, query.Subject(), namespace) }, nil
 }
 
-func replayTop(services Services, entry state.State) (func(), error) {
+func replayTop(services Services, entry state.State, elsewhere bool) (func(), error) {
 	query := *entry.Query
+	scope, _ := listingScope(entry, elsewhere)
 	noLimits, rest := extractBool(query.Args, "--no-limits")
 	table, label, namespace, _, err := topListing(
-		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, entry.Namespace)
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope)
 	if err != nil {
 		return nil, err
 	}
 	return func() { render.IndexedTable(table, label, namespace) }, nil
 }
 
-func replaySweep(ctx context.Context, services Services, query state.Query) (func(), error) {
-	namespace, all, rest := recordedScope(query.Args)
+// sweptScope is the namespace a sweep or a walk is taken again in, and
+// whether it was named: listingScope's, resolved to the current namespace
+// when it leaves it to the context. Never "" for one namespace, which
+// client-go reads as every namespace.
+func sweptScope(services Services, entry state.State, elsewhere bool) (namespace string, all, named bool) {
+	namespace, all = listingScope(entry, elsewhere)
+	named = entry.Query != nil && extractNamespace(entry.Query.Args) != ""
+	if !all && namespace == "" {
+		namespace = services.Kubectl.CurrentNamespace()
+	}
+	return namespace, all, named
+}
+
+func replaySweep(ctx context.Context, services Services, entry state.State, elsewhere bool) (func(), error) {
+	query := *entry.Query
+	namespace, all, named := sweptScope(services, entry, elsewhere)
+	_, _, rest := recordedScope(query.Args)
 	since, _, err := extractString(rest, "--since", "")
 	if err != nil {
 		return nil, err
@@ -287,14 +338,16 @@ func replaySweep(ctx context.Context, services Services, query state.Query) (fun
 	if err != nil {
 		return nil, err
 	}
-	result, err := runSweep(ctx, services, namespace, all, false, window, since, queryMatch(query))
+	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
+		false, window, since, queryMatch(query))
 	if err != nil {
 		return nil, err
 	}
 	return func() { render.Triage(result) }, nil
 }
 
-func replayTree(ctx context.Context, services Services, query state.Query) (func(), error) {
+func replayTree(ctx context.Context, services Services, entry state.State, elsewhere bool) (func(), error) {
+	query := *entry.Query
 	client, err := services.Kubernetes()
 	if err != nil {
 		return nil, err
@@ -303,11 +356,12 @@ func replayTree(ctx context.Context, services Services, query state.Query) (func
 		Builder: graph.Builder{Client: client}, State: services.State,
 		Save: services.State.Save, Match: queryMatch(query),
 	}
-	namespace, all, _ := recordedScope(query.Args)
 	stop := render.Status("resolving ownership graph")
 	defer stop()
-	switch kind, name, named := strings.Cut(query.Resource, "/"); {
-	case named:
+	// A tree of one resource records the namespace that resource lives in,
+	// which is part of naming it, not a scope (see TreeCommand.save).
+	if kind, name, named := strings.Cut(query.Resource, "/"); named {
+		namespace := extractNamespace(query.Args)
 		node, err := command.ExecuteResource(ctx, kinds.Kind(kind), name, namespace, true)
 		if err != nil {
 			return nil, err
@@ -316,22 +370,24 @@ func replayTree(ctx context.Context, services Services, query state.Query) (func
 			render.Banner(kind, name, namespace, "")
 			render.Tree(node)
 		}, nil
-	case all:
+	}
+	namespace, all, named := sweptScope(services, entry, elsewhere)
+	if all {
 		roots, _, err := command.ExecuteAllNamespaces(ctx, true)
 		if err != nil {
 			return nil, err
 		}
 		return func() { printForest(roots, command.Match) }, nil
-	default:
-		node, err := command.ExecuteNamespace(ctx, namespace, true)
-		if err != nil {
-			return nil, err
-		}
-		return func() {
-			render.ScopeBanner("Namespace", namespace, "")
-			render.Tree(node)
-		}, nil
 	}
+	command.NamedNamespace = named
+	node, err := command.ExecuteNamespace(ctx, namespace, true)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		render.ScopeBanner("Namespace", namespace, "")
+		render.Tree(node)
+	}, nil
 }
 
 // recordedScope reads the scope a sweep or walk recorded: -n with the
@@ -351,21 +407,23 @@ func queryMatch(query state.Query) string {
 }
 
 // relistCommand is what to run when a listing could not be run again: the
-// command that made it, as it would be typed, in the scope it was taken in
-// and narrowed by its term. A kx get listing is named by its resource, scope
-// and term — not its other arguments, since a relist's are the very names
-// that went stale — and a tree of one resource by the listing of its kind in
-// its namespace, since that resource may be the one that went.
+// command that made it, as it would be typed, in the scope a refresh would
+// take it in (listingScope) and narrowed by its term. A kx get listing is
+// named by its resource, scope and term — not its other arguments, since a
+// relist's are the very names that went stale — and a tree of one resource
+// by the listing of its kind in its namespace, since that resource may be
+// the one that went.
 //
-// The scope is the one recorded: the arguments', or for a listing whose
-// arguments name none, the namespace its entry was taken in, which is where
-// a refresh replays it (see replayGet). "kx get pods" for a listing of prod,
-// typed in kube-system, lists kube-system.
-func relistCommand(entry state.State) string {
+// "kx get pods" for a listing of prod, typed in kube-system, lists
+// kube-system, so the namespace it was taken in is named — unless it was
+// taken in another context (elsewhere), where the listing as typed is what
+// a refresh would have run.
+func relistCommand(entry state.State, elsewhere bool) string {
 	query := entry.Query
 	if query == nil {
 		return "kx get <resource>"
 	}
+	scope := strings.Fields(scopeArgs(listingScope(entry, elsewhere)))
 	var words []string
 	switch query.Command {
 	case "":
@@ -374,7 +432,7 @@ func relistCommand(entry state.State) string {
 		if query.Resource == "" {
 			return "kx get <resource>"
 		}
-		words = append([]string{"kx", "get", query.Resource}, listedScope(entry, query.Args)...)
+		words = append([]string{"kx", "get", query.Resource}, scope...)
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
 		// indexes into that listing — narrowed by its term, below, or the
@@ -384,15 +442,6 @@ func relistCommand(entry state.State) string {
 			return "kx get <resource>"
 		}
 		words = []string{"kx", "get", query.Resource, "-A"}
-	case state.CommandTop:
-		words = []string{"kx", "top"}
-		if query.Resource == "nodes" {
-			words = append(words, "nodes")
-		}
-		words = append(words, query.Args...)
-		if query.Resource != "nodes" && scopeFlagIn(query.Args) == "" {
-			words = append(words, listedScope(entry, nil)...)
-		}
 	case state.CommandTree:
 		if kind, _, named := strings.Cut(query.Resource, "/"); named {
 			command := kinds.ListCommand(kinds.Kind(kind))
@@ -401,9 +450,16 @@ func relistCommand(entry state.State) string {
 			}
 			return command
 		}
-		words = append([]string{"kx", "tree"}, query.Args...)
+		words = withScope([]string{"kx", "tree"}, query.Args, scope)
+	case state.CommandTop:
+		words = []string{"kx", "top"}
+		if query.Resource == "nodes" {
+			words = append(words, "nodes")
+			scope = nil
+		}
+		words = withScope(words, query.Args, scope)
 	default:
-		words = append([]string{"kx", query.Command}, query.Args...)
+		words = withScope([]string{"kx", query.Command}, query.Args, scope)
 	}
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)
@@ -411,18 +467,14 @@ func relistCommand(entry state.State) string {
 	return strings.Join(words, " ")
 }
 
-// listedScope is the scope a relist names: the -A or -n among a listing's
-// arguments, or failing those the namespace its entry was taken in.
-func listedScope(entry state.State, args []string) []string {
-	switch {
-	case allNamespaces(args):
-		return []string{"-A"}
-	case extractNamespace(args) != "":
-		return []string{"-n", extractNamespace(args)}
-	case entry.Namespace != "":
-		return []string{"-n", entry.Namespace}
+// withScope is a relist of a command whose arguments it repeats: them, and
+// the scope after them when they name none of their own.
+func withScope(words, args, scope []string) []string {
+	words = append(words, args...)
+	if scopeFlagIn(args) == "" {
+		words = append(words, scope...)
 	}
-	return nil
+	return words
 }
 
 // handleStale reports a failure caused by a vanished resource, then refreshes
@@ -437,9 +489,18 @@ func handleStale(ctx context.Context, services Services, err error) {
 	// Anything but a rendered listing ends with the instruction. Only a
 	// successful refresh has an answer on screen already; a replay that failed
 	// leaves nothing behind, since its error is discarded with it.
-	if outcome, entry := recoverState(ctx, services, refreshLead(err)); outcome != refreshed {
-		render.Raw("Run '" + relistCommand(entry) + "' to refresh the list.")
+	elsewhere := listedElsewhere(err)
+	if outcome, entry := recoverState(ctx, services, refreshLead(err), elsewhere); outcome != refreshed {
+		render.Raw("Run '" + relistCommand(entry, elsewhere) + "' to refresh the list.")
 	}
+}
+
+// listedElsewhere reports whether a refresh is for a listing taken in
+// another context: what refreshes it is the index it counted refused for
+// that (isStale). Any other stale index resolved, so it was counted here.
+func listedElsewhere(err error) bool {
+	var mismatch state.ContextMismatchError
+	return errors.As(err, &mismatch)
 }
 
 // reportStale is handleStale for a command whose stdout a program reads:
@@ -452,7 +513,7 @@ func reportStale(services Services, err error) {
 	if loadErr != nil {
 		current = state.State{}
 	}
-	render.Notice("Run '" + relistCommand(current) + "' to refresh the list.")
+	render.Notice("Run '" + relistCommand(current, listedElsewhere(err)) + "' to refresh the list.")
 }
 
 // runEach runs act for every resolved reference, continuing past a failure

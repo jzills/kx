@@ -338,8 +338,15 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if indexed && in.AllNamespaces && len(table.Entries) > 0 && !table.Placed() {
 		indexed = false
 	}
+	// The scope is recorded as kx get records it — named, or left to the
+	// entry's namespace when the agent named none — so a refresh after a
+	// context switch lists the new context's namespace (listingScope).
+	recorded := args[2:]
+	if in.Namespace == "" && !in.AllNamespaces {
+		recorded = []string{}
+	}
 	if indexed {
-		if err := d.listingSave(current)(getListing(in.Kind, in.Match, args[2:], namespace, table.Entries)); err != nil {
+		if err := d.listingSave(current)(getListing(in.Kind, in.Match, recorded, namespace, table.Entries)); err != nil {
 			return nil, listOutput{}, err
 		}
 	}
@@ -437,7 +444,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// the row's position in the saved sweep.
 	result, err := TriageCommand{
 		Diagnostics: service, Save: d.listingSave(out.Context), Window: window,
-		Match: in.Match, Since: in.Since,
+		Match: in.Match, Since: in.Since, NamedNamespace: in.Namespace != "",
 	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
@@ -551,6 +558,7 @@ func (d mcpDeps) tree(ctx context.Context, _ *mcp.CallToolRequest, in treeInput)
 	indexed := d.indexed()
 	command := TreeCommand{
 		Builder: graph.Builder{Client: client}, Save: d.listingSave(out.Context), Match: in.Match,
+		NamedNamespace: in.Namespace != "",
 	}
 
 	switch {

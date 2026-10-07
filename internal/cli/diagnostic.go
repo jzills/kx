@@ -75,6 +75,12 @@ type TriageCommand struct {
 	// Window is what the sweep used. A refresh runs the sweep again with this
 	// and resolves the window afresh, as typing the command again would.
 	Since string
+	// NamedNamespace is whether the namespace swept was named — -n, or an
+	// agent's namespace — rather than the context's own. Only a named one is
+	// recorded in the query; the entry records where the sweep was taken
+	// either way, and a refresh after a context switch tells the two apart
+	// (listingScope).
+	NamedNamespace bool
 }
 
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
@@ -173,17 +179,20 @@ func (c TriageCommand) Execute(
 	return result, nil
 }
 
-// query records the sweep so it can be run again: its scope as swept — the
-// namespace itself, not whether -n was typed, since a refresh must sweep
-// where this one did — and the flags that decide what it saves. --full,
-// --json, --html and --fail-on decide only what is done with the sweep: the
-// saved listing is every resource swept either way, so they are left out,
-// and a sweep with --full is the same view as one without. A refresh prints
-// the default table.
+// query records the sweep so it can be run again: its scope as named —
+// -A, or -n when the namespace was named, the entry recording where it was
+// swept either way (see NamedNamespace) — and the flags that decide what it
+// saves. --full, --json, --html and --fail-on decide only what is done with
+// the sweep: the saved listing is every resource swept either way, so they
+// are left out, and a sweep with --full is the same view as one without. A
+// refresh prints the default table.
 func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query {
-	args := []string{"-n", namespace}
-	if allNamespaces {
+	args := []string{}
+	switch {
+	case allNamespaces:
 		args = []string{"-A"}
+	case c.NamedNamespace:
+		args = []string{"-n", namespace}
 	}
 	if c.Since != "" {
 		args = append(args, "--since", c.Since)
@@ -195,8 +204,17 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 // it as the current listing. Shared by kx diag and by the refresh of a stale
 // sweep, so the two cannot sweep differently. window is since resolved
 // against diag_max_age; since is recorded as typed.
+// sweepScope is what a sweep sweeps: one namespace, or every one, and
+// whether the namespace was named rather than the context's own
+// (TriageCommand.NamedNamespace).
+type sweepScope struct {
+	Namespace string
+	All       bool
+	Named     bool
+}
+
 func runSweep(
-	ctx context.Context, services Services, namespace string, allNamespaces, full bool,
+	ctx context.Context, services Services, scope sweepScope, full bool,
 	window time.Duration, since, match string,
 ) (render.TriageResult, error) {
 	client, err := services.Kubernetes()
@@ -206,14 +224,14 @@ func runSweep(
 	service := diagnostics.New(client)
 	service.MaxAge = window
 	sweeping := "sweeping namespace"
-	if allNamespaces {
+	if scope.All {
 		sweeping = "sweeping all namespaces"
 	}
 	stop := render.Status(sweeping)
 	result, err := TriageCommand{
 		Diagnostics: service, Save: services.State.Save, Window: window,
-		Match: match, Since: since,
-	}.Execute(ctx, namespace, allNamespaces, full)
+		Match: match, Since: since, NamedNamespace: scope.Named,
+	}.Execute(ctx, scope.Namespace, scope.All, full)
 	stop()
 	return result, err
 }
@@ -399,10 +417,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
+				named := namespace != ""
 				if namespace == "" {
 					namespace = services.Kubectl.CurrentNamespace()
 				}
-				result, err := runSweep(ctx, services, namespace, allNamespaces, full, window, since, match)
+				result, err := runSweep(ctx, services,
+					sweepScope{Namespace: namespace, All: allNamespaces, Named: named},
+					full, window, since, match)
 				if err != nil {
 					return err
 				}

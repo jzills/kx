@@ -252,7 +252,7 @@ func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
 		if err := runGet(services, "deploy,svc", []string{"1", "3"}, getOptions{}); err != nil {
 			t.Fatalf("kx get deploy,svc 1 3: %v", err)
 		}
-		if got, want := relistCommand(currentEntry(t, services)), "kx get deploy,svc -n prod"; got != want {
+		if got, want := relistCommand(currentEntry(t, services), false), "kx get deploy,svc -n prod"; got != want {
 			t.Errorf("relist = %q, want %q", got, want)
 		}
 		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tdeploy,svc in prod" {
@@ -279,7 +279,7 @@ func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
 		if err := runGet(services, "all", []string{"1", "2"}, getOptions{}); err != nil {
 			t.Fatalf("kx get all 1 2: %v", err)
 		}
-		if got, want := relistCommand(currentEntry(t, services)), "kx get all -A"; got != want {
+		if got, want := relistCommand(currentEntry(t, services), false), "kx get all -A"; got != want {
 			t.Errorf("relist = %q, want %q", got, want)
 		}
 		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tall" {
