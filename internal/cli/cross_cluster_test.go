@@ -104,6 +104,26 @@ func TestGetFromAnotherClusterFindingNothing(t *testing.T) {
 	assertListingUntouched(t, services, 2)
 }
 
+// The same for kx top: another cluster's usage that found nothing is
+// printed, not saved, so it offers no way back to a listing it never
+// replaced.
+func TestTopFromAnotherClusterFindingNothing(t *testing.T) {
+	for _, args := range [][]string{{"--context=b"}, {"nodes", "--context=b"}} {
+		kube := &recordingKubectl{output: ""}
+		services := switchServices(t, kube)
+		saveListing(t, services, kinds.Deployment, "prod", false, "web")
+		saveListing(t, services, kinds.Pod, "prod", false, "nginx")
+		stdout, _, err := runCaptured(t, newTopCommand(services), args)
+		if err != nil {
+			t.Fatalf("kx top %v: %v", args, err)
+		}
+		if !strings.Contains(stdout, "none found") || strings.Contains(stdout, "state back") {
+			t.Errorf("kx top %v: stdout = %q, want 'none found' and no state back", args, stdout)
+		}
+		assertListingUntouched(t, services, 2)
+	}
+}
+
 // kx top reads the current cluster twice beside the listing itself — the
 // metrics-server probe and the pod limits its CPU%/MEM% are computed against —
 // so with another cluster named it does neither, and prints kubectl top's own

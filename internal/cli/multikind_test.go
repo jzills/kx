@@ -493,3 +493,33 @@ func TestGetSeveralKindsByIndexAcrossNamespacesKeepsSameNamedRows(t *testing.T) 
 		t.Errorf("output = %q, want both rows named web", out.String())
 	}
 }
+
+// Stitched rows of several kinds that name no kind are printed unnumbered
+// whatever the term: one that matched none of them left no row to find
+// bare, so the fetch was saved — empty, over the -A listing its indexes came
+// from — where a term that matched one was printed and left that listing
+// current.
+func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumberedUnderATerm(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+		"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	if err := runGet(services, "all", []string{"1", "2", "--show-kind=false"},
+		getOptions{Match: "nothing-is-called-this"}); err != nil {
+		t.Fatalf("kx get all 1 2 --show-kind=false -m nothing-is-called-this: %v", err)
+	}
+	name, namespace, kind, err := services.State.Fields(1)
+	if err != nil || name != "api" || kind != kinds.Deployment || namespace != "prod" {
+		t.Errorf("index 1 = %s/%s in %s (err %v), want the -A listing still current", kind, name, namespace, err)
+	}
+}
