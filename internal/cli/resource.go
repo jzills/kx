@@ -70,32 +70,35 @@ type DeleteCommand struct {
 	Status func(string) func()
 }
 
-func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
+// Execute deletes the resource, returning kx's line for it and kubectl's own
+// output, which reportChange prints in its place when an output format was
+// asked for.
+func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (message, output string, err error) {
 	// Resolved once, target and provenance together — see resolveWithProvenance
 	// for why a second, independent read of the listing's Source is refused.
 	name, namespace, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// The prompt must stay outside the spinner: a prompt underneath a
 	// repainting status line cannot be read.
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
 			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	stop := c.Status("deleting")
-	_, err = c.Kubectl.Run(append(
+	output, err = c.Kubectl.Run(append(
 		[]string{"delete", string(kind), name, "-n", namespace}, extraArgs...))
 	stop()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if isDryRun(extraArgs) {
-		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), nil
+		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), output, nil
 	}
-	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
+	return fmt.Sprintf("Deleted %s/%s", kind, name), output, nil
 }
 
 // isDryRun reports whether extraArgs ask kubectl for a dry run, so kx's own

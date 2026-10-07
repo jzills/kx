@@ -312,6 +312,18 @@ func TestMutatingCommandsPrintTheOutputFormatAskedFor(t *testing.T) {
 			return newMetadataWriteCommand(s, "label", "labels", "", "")
 		}, []string{manifest}, []string{"1", "team=web", "--overwrite", "--output=yaml"},
 			"Labeled Deployment/api (set 1)"},
+		{"annotate", func(s Services) *cobra.Command {
+			return newMetadataWriteCommand(s, "annotate", "annotations", "", "")
+		}, []string{manifest}, []string{"1", "note=x", "--overwrite", "-oyaml"},
+			"Annotated Deployment/api (set 1)"},
+		// kubectl delete takes -o name; kx's own line went in its place.
+		{"delete", newDeleteCommand, []string{manifest},
+			[]string{"1", "-y", "--dry-run=server", "-o", "name"},
+			"Deleted Deployment/api (dry run — nothing was removed)"},
+		// kubectl wait prints the object once the condition is met.
+		{"wait", newWaitCommand, []string{manifest},
+			[]string{"1", "--for=condition=Available", "-o", "yaml"},
+			"Deployment/api · prod · condition=Available"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kube := &recordingKubectl{outputs: tc.outputs}
@@ -328,5 +340,22 @@ func TestMutatingCommandsPrintTheOutputFormatAskedFor(t *testing.T) {
 				t.Errorf("stderr = %q, want kx's line %q", stderr, tc.summary)
 			}
 		})
+	}
+}
+
+// kx waits for a Job itself, through the API, since kubectl wait cannot wait
+// for "Complete or Failed" — so kubectl prints nothing for an output format
+// to shape. Asked for one, kx refuses before it waits rather than printing
+// nothing where the object was asked for.
+func TestWaitRefusesAnOutputFormatForTheJobItWatchesItself(t *testing.T) {
+	kube := &recordingKubectl{}
+	services := switchServices(t, kube)
+	saveListing(t, services, kinds.Job, "prod", false, "migrate")
+	_, _, err := runCaptured(t, newWaitCommand(services), []string{"1", "-o", "yaml"})
+	if err == nil || !strings.Contains(err.Error(), "Job/migrate") || !strings.Contains(err.Error(), "--for") {
+		t.Fatalf("err = %v, want -o refused for a Job kx watches, naming --for", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl was run %q before the refusal", kube.runs)
 	}
 }

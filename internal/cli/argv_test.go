@@ -65,10 +65,22 @@ func TestHandParsedFlagsAppearInHelp(t *testing.T) {
 		},
 		"top":   {"--match", "--no-limits"},
 		"debug": {"--image", "--target"},
+		// An output format and --dry-run change what kx itself prints:
+		// kubectl's output in place of kx's line, and a line that says
+		// nothing was changed.
+		"scale":     {"--output", "--dry-run"},
+		"label":     {"--output", "--dry-run"},
+		"annotate":  {"--output", "--dry-run"},
+		"set image": {"--output", "--dry-run"},
+		"delete":    {"--output", "--dry-run", "--yes"},
+		"wait":      {"--output", "--for", "--timeout"},
 	}
 	byName := map[string]*cobra.Command{}
 	for _, cmd := range NewRoot(argvServices(t), "test").Commands() {
 		byName[cmd.Name()] = cmd
+		for _, sub := range cmd.Commands() {
+			byName[cmd.Name()+" "+sub.Name()] = sub
+		}
 	}
 
 	for name, flags := range want {

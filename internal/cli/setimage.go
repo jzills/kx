@@ -247,7 +247,7 @@ func newSetCommand(services Services) *cobra.Command {
 }
 
 func newSetImageCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use: "image <index> <image>... [kubectl flags]",
 		Short: "Change the container images of an indexed Pod, Deployment, StatefulSet, " +
 			"DaemonSet, ReplicaSet or CronJob.",
@@ -323,6 +323,8 @@ func newSetImageCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	registerChangeFlags(cmd)
+	return cmd
 }
 
 // kubectlSetVerbs are kubectl set's subcommands kx doesn't wrap.

@@ -468,7 +468,7 @@ func TestCopyFailureWithNoIndexIsABareExitCode(t *testing.T) {
 func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	message, err := DeleteCommand{
+	message, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -491,7 +491,7 @@ func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 // Declining the prompt must delete nothing.
 func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(string) error { return errors.New("aborted") },
@@ -508,7 +508,7 @@ func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 func TestDeleteSkipsPromptWithYes(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	prompted := false
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(string) error { prompted = true; return nil },
@@ -527,7 +527,7 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 func TestDeleteConfirmNamesAnMCPListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -545,7 +545,7 @@ func TestDeleteConfirmNamesAnMCPListing(t *testing.T) {
 func TestDeleteConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: ""},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -564,7 +564,7 @@ func TestDeleteConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 func TestDeleteConfirmOmitsProvenanceForAMarkRef(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -587,7 +587,7 @@ func TestDeleteResolvesTargetAndProvenanceInOneRead(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	resolver := &singleReadResolver{fakeResolver: pod("nginx"), source: state.SourceMCP}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   resolver,
 		Confirm: func(m string) error { prompted = m; return nil },
