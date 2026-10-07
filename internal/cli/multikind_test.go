@@ -357,25 +357,53 @@ func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumbered(t *test
 // captioned as the kind it is. Saved as "deployments.apps", the rows were
 // refused by kx scale and kx rollout as an unsupported kind.
 func TestGetAGroupQualifiedKindSavesTheKind(t *testing.T) {
-	kube := &fakeKubectl{
-		output:    "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           3d\n",
-		namespace: "prod",
+	// The version-qualified spelling too, which kubectl reads first.
+	for _, spelling := range []string{"deployments.apps", "deployments.v1.apps", "deploy.v1.apps"} {
+		t.Run(spelling, func(t *testing.T) {
+			kube := &fakeKubectl{
+				output:    "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           3d\n",
+				namespace: "prod",
+			}
+			services := switchServices(t, kube)
+			var out bytes.Buffer
+			render.SetOutput(&out, &out, "github-dark")
+			if err := runGet(services, spelling, nil, getOptions{}); err != nil {
+				t.Fatalf("runGet: %v", err)
+			}
+			name, _, kind, err := services.State.Fields(1)
+			if err != nil || name != "web" || kind != kinds.Deployment {
+				t.Errorf("index 1 = %s/%s (err %v), want Deployment/web", kind, name, err)
+			}
+			if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
+				t.Errorf("output = %q, want it captioned as Deployments", out.String())
+			}
+			if _, _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
+				t.Errorf("kx scale refused the row: %v", err)
+			}
+		})
 	}
+}
+
+// A row of a listing of several kinds is fetched by the resource that listed
+// it, however kubectl let that resource be spelled. kx get
+// deployments.v1.apps,svc 1 was refused as a row 'deployments.v1.apps,svc'
+// does not include, and the refusal's advice was to relist with the same
+// command, which listed the same row again.
+func TestGetSeveralKindsByIndexUnderAVersionedSpelling(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		deploySvcOutput,
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+	}, namespace: "prod"}
 	services := switchServices(t, kube)
-	var out bytes.Buffer
-	render.SetOutput(&out, &out, "github-dark")
-	if err := runGet(services, "deployments.apps", nil, getOptions{}); err != nil {
-		t.Fatalf("runGet: %v", err)
+	quietRender(t)
+	if err := runGet(services, "deployments.v1.apps,svc", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
 	}
-	name, _, kind, err := services.State.Fields(1)
-	if err != nil || name != "web" || kind != kinds.Deployment {
-		t.Errorf("index 1 = %s/%s (err %v), want Deployment/web", kind, name, err)
+	if err := runGet(services, "deployments.v1.apps,svc", []string{"1"}, getOptions{}); err != nil {
+		t.Fatalf("kx get deployments.v1.apps,svc 1: %v", err)
 	}
-	if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
-		t.Errorf("output = %q, want it captioned as Deployments", out.String())
-	}
-	if _, _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
-		t.Errorf("kx scale refused the row: %v", err)
+	if got := joinArgs(kube.calls[len(kube.calls)-1]); got != "get Deployment api -n prod" {
+		t.Errorf("kubectl %q, want the Deployment fetched", got)
 	}
 }
 

@@ -41,11 +41,11 @@ func TestResolveTargetNormalizesKubectlSpellings(t *testing.T) {
 	}
 }
 
-// kubectl reads "secrets." and "secrets.v1." as core/v1 Secrets, but
-// kinds.Normalize passes them through verbatim — so every check keyed on the
-// canonical kind (redaction, the cluster-scope table) would miss them, and a
-// mark would store the odd spelling. A core-group dotted spelling is reduced
-// to its plain form first; a real API group is left alone.
+// kubectl reads "secrets." and "secrets.v1." as core/v1 Secrets, and
+// "deployments.v1.apps" as a Deployment. Left as spelled, every check keyed
+// on the canonical kind (redaction, the cluster-scope table) would miss them,
+// and a mark would store the odd spelling; each is normalised as the kind it
+// names. Another group's kind is left alone.
 func TestResolveTargetNormalisesCoreGroupDottedSpellings(t *testing.T) {
 	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
 	for spelling, want := range map[string]kinds.Kind{
@@ -56,7 +56,7 @@ func TestResolveTargetNormalisesCoreGroupDottedSpellings(t *testing.T) {
 		"pods.v1.":                     kinds.Pod,
 		"nodes.":                       kinds.Node,
 		"certificates.cert-manager.io": "certificates.cert-manager.io",
-		"deployments.v1.apps":          "deployments.v1.apps",
+		"deployments.v1.apps":          kinds.Deployment,
 	} {
 		got, err := deps.resolveTarget(mcpTarget{Kind: spelling, Name: "x"})
 		if err != nil {
@@ -499,5 +499,17 @@ func TestResolveTargetResolvedKindsGetTheTypedPathsChecks(t *testing.T) {
 				t.Errorf("kubectl ran %v / probed %v before validation refused it", kube.runs, kube.probes)
 			}
 		})
+	}
+}
+
+// The 'all' category is refused however it is spelled: kubectl reads the
+// resource as what precedes the first dot.
+func TestResolveTargetRefusesAllHoweverSpelled(t *testing.T) {
+	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
+	for _, spelling := range []string{"all", "ALL", "all.", "all.v1."} {
+		if _, err := deps.resolveTarget(mcpTarget{Kind: spelling, Name: "x"}); err == nil ||
+			!strings.Contains(err.Error(), "'all' is not one resource type") {
+			t.Errorf("%s: err = %v, want the 'all' refusal", spelling, err)
+		}
 	}
 }
