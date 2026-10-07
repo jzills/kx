@@ -15,13 +15,19 @@ import (
 // or NAME alone otherwise). ADDED/MODIFIED upsert a row, DELETED removes it.
 // Order is insertion order: a MODIFIED row keeps its position; a key that
 // reappears after DELETED is appended at the end, same as a fresh ADDED.
+//
+// A --match term narrows it as it narrows any listing: a row whose name the
+// term does not contain is never kept, whatever its event. Dropped, kx get
+// pods -w -m web watched every pod in the namespace.
 type watchRows struct {
-	order []string
-	rows  map[string][]string
+	order   []string
+	rows    map[string][]string
+	matches func(name string) bool
 }
 
-func newWatchRows() *watchRows {
-	return &watchRows{rows: make(map[string][]string)}
+// newWatchRows is an empty row set narrowed by term; "" keeps every row.
+func newWatchRows(term string) *watchRows {
+	return &watchRows{rows: make(map[string][]string), matches: index.NameMatcher(term)}
 }
 
 // rowKey identifies a row uniquely. Names alone collide across namespaces —
@@ -41,7 +47,11 @@ func (w *watchRows) Apply(shape index.TableShape, row []string) {
 	if shape.EventIdx < 0 || shape.EventIdx >= len(row) || shape.NameIdx >= len(row) {
 		return
 	}
-	if row[shape.NameIdx] == "" {
+	name := row[shape.NameIdx]
+	if slash := strings.LastIndex(name, "/"); slash >= 0 {
+		name = name[slash+1:]
+	}
+	if name == "" || !w.matches(name) {
 		return
 	}
 	event := row[shape.EventIdx]
@@ -123,7 +133,7 @@ const watchNote = "watches can't be indexed — showing a live view; press Ctrl-
 // wantsLiveTable). -A watches are included — watchRows keys rows by
 // NAMESPACE/NAME in that case, so same-named pods in different namespaces
 // don't collide.
-func runWatch(services Services, resource string, extra []string) error {
+func runWatch(services Services, resource string, extra []string, match string) error {
 	namespace := watchNamespace(extra, services.Kubectl)
 
 	args := append([]string{"get", resource}, extra...)
@@ -146,7 +156,7 @@ func runWatch(services Services, resource string, extra []string) error {
 
 	var shape index.TableShape
 	var displayHeaders []string
-	rows := newWatchRows()
+	rows := newWatchRows(match)
 	lines := 0
 
 	// Redraws on every event rather than throttling: Watch's callback is

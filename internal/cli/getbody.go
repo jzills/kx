@@ -139,7 +139,12 @@ func runGet(services Services, resource string, args []string, options getOption
 	switch strings.ToLower(resource) {
 	case "context", "contexts":
 		if len(refs) == 0 {
-			return listSwitchTargets(services, true)
+			return listContexts(services, options.Match)
+		}
+		// An index names the context to switch to, so a term has nothing
+		// left to narrow, and is refused rather than dropped.
+		if options.Match != "" {
+			return errMatchBesideContextIndex
 		}
 		// A mark names a Kubernetes resource pinned by kx state, not a
 		// kubeconfig context — there is nothing for it to resolve against
@@ -191,6 +196,15 @@ func runGet(services Services, resource string, args []string, options getOption
 	// would otherwise print a same-named Secret from the other cluster.
 	if flag := clusterFlagIn(extra); flag != "" && len(refs) > 0 {
 		return clusterFlagBesideIndexError(flag)
+	}
+
+	// A term kx could not apply to the format asked for is refused before
+	// anything is fetched (see narrowText). --decode reads Secrets itself, in
+	// a format of its own, and narrows them there (decodeNamespace).
+	if options.Match != "" && !options.Decode && !options.HasKey {
+		if err := matchFormatError(extra); err != nil {
+			return err
+		}
 	}
 
 	if options.Decode || options.HasKey {
@@ -293,7 +307,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		// straight through instead, the same way `logs -f` does — re-theming
 		// non-tabular output doesn't make sense.
 		if wantsLiveTable(extra) {
-			return runWatch(services, resource, extra)
+			return runWatch(services, resource, extra, options.Match)
 		}
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
 		// opened with a line that is not a name.

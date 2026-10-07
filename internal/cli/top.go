@@ -65,7 +65,8 @@ func (c TopCommand) Execute(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		return unnumberedListing(output, filterTerm), extractNamespace(extraArgs), nil
+		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
@@ -95,6 +96,12 @@ func (c TopCommand) Execute(
 	// resources found" goes to stderr — and that is saved below like any other
 	// listing, so the indexes it replaces stop resolving.
 	if headers == nil && strings.TrimSpace(output) != "" {
+		// A term cannot narrow what kx cannot read (narrowText), and is
+		// refused rather than printed past: kx top --no-headers -m web
+		// listed every pod.
+		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
 		raw := c.Index.Add(output)
 		raw.Unnumbered = true
 		return raw, namespace, nil
@@ -193,7 +200,8 @@ func (c TopCommand) ExecuteNodes(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		return unnumberedListing(output, filterTerm), "", nil
+		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
 	// This is the rule #271 gave kx get nodes, and kx top nodes is the other way
@@ -206,6 +214,12 @@ func (c TopCommand) ExecuteNodes(
 	// Empty output is a listing that found nothing and is saved; anything else
 	// kx cannot number prints as-is. See Execute.
 	if headers == nil && strings.TrimSpace(output) != "" {
+		// A term cannot narrow what kx cannot read (narrowText), and is
+		// refused rather than printed past: kx top --no-headers -m web
+		// listed every pod.
+		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
 		raw := c.Index.Add(output)
 		raw.Unnumbered = true
 		return raw, namespace, nil

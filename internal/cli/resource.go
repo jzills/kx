@@ -746,6 +746,9 @@ type ContextsCommand struct {
 	Kubectl kubectl.Service
 	State   NamedStateWriter
 	Index   Indexer
+	// Match narrows the contexts by name, as kx get -m narrows a listing;
+	// empty keeps them all.
+	Match string
 }
 
 // Execute lists the contexts and returns the indexed table along with the active
@@ -768,7 +771,11 @@ func (c ContextsCommand) Execute() (table index.Table, context string, err error
 	// re-parsed the padded text, where an empty cell and column padding are the
 	// same run of spaces. Rows reach the renderer intact now, so the marker
 	// kubectl prints is the marker kx prints.
-	indexed := c.Index.Add(output)
+	indexed := index.Table{Raw: output}
+	if listing, ok := c.Index.Parse(output); ok {
+		indexed = listing.Narrow(c.Match).Number()
+		indexed.Raw, indexed.Match = output, c.Match
+	}
 	if len(indexed.Entries) > 0 {
 		if err := c.State.SaveNamed(state.State{
 			Resources: contextResources(indexed.Entries),

@@ -233,7 +233,10 @@ func newGetCommand(services Services) *cobra.Command {
 			"A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a " +
 			"cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace " +
 			"for either to name, so kx refuses them rather than listing something " +
-			"other than what was asked for.",
+			"other than what was asked for.\n\n" +
+			"A `--match` term narrows the table, a watch's live table or `-o name` by " +
+			"each row's name. JSON, YAML and templates have no rows for it to pick, so " +
+			"kx refuses it beside them rather than printing everything.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
 		Args:    minArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's

@@ -192,7 +192,8 @@ func (c GetCommand) Execute(
 	// namespace is only the one named, if any: the current one is this
 	// cluster's, not that one's.
 	if clusterFlagIn(extraArgs) != "" {
-		return unnumberedListing(output, filterTerm), extractNamespace(extraArgs), nil
+		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		return table, extractNamespace(extraArgs), err
 	}
 	// An -A listing has no single namespace to record on the entry; each
 	// resource carries its own instead, read from the table's NAMESPACE column.
@@ -239,7 +240,11 @@ func (c GetCommand) Execute(
 	// listing than a full one: saved, kx get pods -l app=x -o name replaced
 	// the listing behind it, where one that found pods left it alone.
 	if !tabular {
-		raw := index.Table{Raw: output, Match: filterTerm, Unnumbered: true}
+		text, err := narrowText(output, filterTerm, extraArgs)
+		if err != nil {
+			return index.Table{}, "", err
+		}
+		raw := index.Table{Raw: text, Match: filterTerm, Unnumbered: true}
 		if !raw.Empty() || !printsTable(extraArgs) {
 			return raw, namespace, nil
 		}
@@ -260,20 +265,25 @@ func (c GetCommand) Execute(
 }
 
 // unnumberedListing is output kx prints but does not index, narrowed by
-// filterTerm as a numbered listing would be. Output that is not a table, or
-// that found nothing, is carried as it came.
-func unnumberedListing(output, filterTerm string) index.Table {
+// filterTerm as a numbered listing would be — a table by its rows, -o name
+// line by line, and anything else refused (narrowText). args are what
+// kubectl was asked with, which say what format the output is in.
+func unnumberedListing(output, filterTerm string, args []string) (index.Table, error) {
 	if filterTerm == "" {
-		return index.Table{Raw: output, Unnumbered: true}
+		return index.Table{Raw: output, Unnumbered: true}, nil
 	}
 	listing, ok := index.ParseListing(output)
 	if !ok {
-		if strings.TrimSpace(output) == "" {
-			return index.Table{Match: filterTerm, Unnumbered: true}
+		text, err := narrowText(output, filterTerm, args)
+		if err != nil {
+			return index.Table{}, err
 		}
-		return index.Table{Raw: output, Unnumbered: true}
+		if strings.TrimSpace(text) == "" {
+			return index.Table{Match: filterTerm, Unnumbered: true}, nil
+		}
+		return index.Table{Raw: text, Unnumbered: true}, nil
 	}
-	return unnumbered(listing, output, filterTerm)
+	return unnumbered(listing, output, filterTerm), nil
 }
 
 // unnumbered is a parsed listing kx prints but does not index: text, as it
@@ -443,7 +453,11 @@ func (c GetCommand) ExecuteGroups(
 	// unfiltered tables, printing exactly the rows the term had excluded.
 	listing, stitched := c.Index.Stitch(tables)
 	if !tabular || !stitched {
-		return index.Table{Raw: strings.Join(raw, "\n"), Unnumbered: true}, nil
+		text, err := narrowText(strings.Join(raw, "\n"), filterTerm, extraArgs)
+		if err != nil {
+			return index.Table{}, err
+		}
+		return index.Table{Raw: text, Match: filterTerm, Unnumbered: true}, nil
 	}
 	// Rows of several kinds whose names carry no kind cannot be numbered, as
 	// in Execute — decided, as there, from every row stitched, before the term

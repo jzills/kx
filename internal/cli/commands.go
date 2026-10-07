@@ -1111,20 +1111,7 @@ func switchSuggestions(isContext bool) []string {
 
 func listSwitchTargets(services Services, isContext bool) error {
 	if isContext {
-		stop := render.Status("fetching contexts")
-		// The caption comes back with the listing rather than out of state: the
-		// listing no longer goes into history, so there is nothing there to read
-		// it from — on a fresh install nothing at all, and otherwise whatever
-		// resource listing happened to be current.
-		output, current, err := ContextsCommand{
-			Kubectl: services.Kubectl, State: services.State, Index: services.Index,
-		}.Execute()
-		stop()
-		if err != nil {
-			return err
-		}
-		render.IndexedTable(output, "Contexts", current)
-		return nil
+		return listContexts(services, "")
 	}
 
 	stop := render.Status("fetching namespaces")
@@ -1152,6 +1139,25 @@ func listSwitchTargets(services Services, isContext bool) error {
 	// number off, so the row you are on is marked as well as named in the
 	// caption — the way kx theme and kx engine mark theirs.
 	render.SwitchListing(output, "namespaces", services.Kubectl.CurrentNamespace())
+	return nil
+}
+
+// listContexts lists kubeconfig's contexts into the slot kx context N reads,
+// narrowed by match as kx get -m narrows a listing: kx get contexts -m prod.
+func listContexts(services Services, match string) error {
+	stop := render.Status("fetching contexts")
+	// The caption comes back with the listing rather than out of state: the
+	// listing no longer goes into history, so there is nothing there to read
+	// it from — on a fresh install nothing at all, and otherwise whatever
+	// resource listing happened to be current.
+	output, current, err := ContextsCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Match: match,
+	}.Execute()
+	stop()
+	if err != nil {
+		return err
+	}
+	render.IndexedTable(output, "Contexts", current)
 	return nil
 }
 
