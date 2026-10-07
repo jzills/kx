@@ -269,20 +269,25 @@ func (c GetCommand) Execute(
 }
 
 // unnumberedListing is output kx prints but does not index, narrowed by
-// filterTerm as a numbered listing would be. Output that is not a table, or
+// filterTerm as a numbered listing would be — every matching row of it, since
+// nothing here is numbered (see index.Listing). Output that is not a table, or
 // that found nothing, is carried as it came.
 func unnumberedListing(output, filterTerm string) index.Table {
 	if filterTerm == "" {
 		return index.Table{Raw: output}
 	}
-	table := index.Service{}.AddMatching(output, filterTerm)
-	if table.Empty() {
-		return index.Table{Match: filterTerm}
-	}
-	if !table.Indexable() {
+	listing, ok := index.ParseListing(output)
+	if !ok {
+		if strings.TrimSpace(output) == "" {
+			return index.Table{Match: filterTerm}
+		}
 		return index.Table{Raw: output}
 	}
-	return index.Table{Raw: table.Unnumbered()}
+	narrowed := listing.Narrow(filterTerm)
+	if narrowed.Empty() {
+		return index.Table{Match: filterTerm}
+	}
+	return index.Table{Raw: narrowed.Unnumbered()}
 }
 
 // namesCarryKinds reports whether every row of a listing of several kinds is
@@ -418,9 +423,12 @@ func (c GetCommand) ExecuteGroups(
 	// Rows of several kinds whose names carry no kind cannot be numbered, as
 	// in Execute. Here a namespace holding one of the kinds answers with bare
 	// names whenever --show-kind is not in force, and saved, every row's kind
-	// was the argument's. Printed stitched, under the namespaces put back.
+	// was the argument's. Printed stitched, under the namespaces put back —
+	// laid out from the tables, not from the numbered listing, which has
+	// already collapsed a Service named web into the Deployment named web.
 	if kinds.Several(resource) && !namesCarryKinds(indexed.Entries) {
-		return index.Table{Raw: indexed.Unnumbered()}, nil
+		listing, _ := index.ListingOf(tables)
+		return index.Table{Raw: listing.Unnumbered()}, nil
 	}
 	// Saved even when the term left nothing, as GetCommand.Execute saves an
 	// empty listing: otherwise the -A listing these indexes came from stays

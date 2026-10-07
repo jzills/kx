@@ -417,25 +417,6 @@ func (t Table) Placed() bool {
 	return false
 }
 
-// Unnumbered renders the table as kubectl would have printed it, without the
-// index column — for a listing kx narrows by --match but does not number,
-// which is all a listing from another cluster gets.
-func (t Table) Unnumbered() string {
-	sections := t.Sections
-	if len(sections) == 0 {
-		sections = []Section{{Headers: t.Headers, Rows: t.Rows}}
-	}
-	tables := make([]string, 0, len(sections))
-	for _, section := range sections {
-		rows := make([][]string, 0, len(section.Rows)+1)
-		for _, row := range append([][]string{section.Headers}, section.Rows...) {
-			rows = append(rows, row[1:])
-		}
-		tables = append(tables, Format(rows))
-	}
-	return strings.Join(tables, "\n\n")
-}
-
 // Text renders the table back to padded text. Non-tabular output comes back
 // exactly as it arrived.
 //
@@ -477,19 +458,14 @@ func (s Service) Add(output string) Table {
 // table the term empties is dropped rather than drawn as a header over
 // nothing. An empty term keeps every row.
 func (s Service) AddMatching(output, term string) Table {
-	sections, ok := parseSections(output)
+	listing, ok := ParseListing(output)
 	if !ok {
 		// Carried even here, where there are no rows for it to narrow: a
 		// listing asked for with a term that found nothing at all is still
 		// captioned with it, as every other empty listing with one is.
 		return Table{Raw: output, Match: term}
 	}
-	if term != "" {
-		for i := range sections {
-			sections[i].rows = FilterRows(sections[i].shape.Headers, sections[i].rows, term)
-		}
-	}
-	table := s.number(sections)
+	table := listing.Narrow(term).Number()
 	table.Raw = output
 	table.Match = term
 	return table
@@ -525,38 +501,119 @@ func ParseTables(output string) ([]RawTable, bool) {
 // tables of one reply: the indexes run on from one into the next, and a table
 // left with no rows is dropped. A table with no NAME column numbers nothing.
 func (s Service) AddTables(tables []RawTable) Table {
+	listing, ok := ListingOf(tables)
+	if !ok {
+		return Table{}
+	}
+	return listing.Number()
+}
+
+// Listing is kubectl table output parsed into its tables, and nothing more:
+// not narrowed, not numbered. Each of those is a step of its own, taken in
+// that order, so a listing kx prints without numbering is narrowed without
+// ever passing through the numbering.
+//
+// The two were one step. Numbering collapses a row that repeats an earlier
+// one — it has to, so that indexes stay one-to-one with saved state — and
+// output kx narrowed by numbering it lost every row that read like another:
+// kx get sa -A -o custom-columns=NAME:.metadata.name,UID:.metadata.uid -m
+// default printed one ServiceAccount where kubectl listed eight.
+type Listing struct {
+	sections []section
+}
+
+// ParseListing parses kubectl table output, reporting false for output that
+// is not a table: JSON, YAML, names, or a table with no NAME column.
+func ParseListing(output string) (Listing, bool) {
+	sections, ok := parseSections(output)
+	if !ok {
+		return Listing{}, false
+	}
+	return Listing{sections: sections}, true
+}
+
+// ListingOf is a Listing of tables already parsed — replies stitched together
+// — reporting false for none, or for one with no NAME column.
+func ListingOf(tables []RawTable) (Listing, bool) {
+	if len(tables) == 0 {
+		return Listing{}, false
+	}
 	sections := make([]section, 0, len(tables))
 	for _, table := range tables {
 		shape, ok := shapeOf(table.Headers)
 		if !ok {
-			return Table{}
+			return Listing{}, false
 		}
 		sections = append(sections, section{shape: shape, rows: table.Rows})
 	}
-	if len(sections) == 0 {
-		return Table{}
-	}
-	return s.number(sections)
+	return Listing{sections: sections}, true
 }
 
-// number numbers a listing's tables, dropping any with no rows rather than
+// Narrow keeps the rows whose name contains term, case-insensitively — every
+// such row, however alike two of them read (see FilterRows). An empty term
+// keeps them all.
+func (l Listing) Narrow(term string) Listing {
+	if term == "" {
+		return l
+	}
+	narrowed := make([]section, len(l.sections))
+	for i, section := range l.sections {
+		narrowed[i] = section
+		narrowed[i].rows = FilterRows(section.shape.Headers, section.rows, term)
+	}
+	return Listing{sections: narrowed}
+}
+
+// Empty reports whether no table holds a row.
+func (l Listing) Empty() bool {
+	for _, section := range l.sections {
+		if len(section.rows) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// Number numbers the listing's tables, dropping any with no rows rather than
 // drawing a header over nothing. When none has rows the listing is an empty
 // one under the first table's header, as one table filtered to nothing has
 // always been.
-func (s Service) number(sections []section) Table {
-	kept := sections[:0:0]
-	for _, section := range sections {
+func (l Listing) Number() Table {
+	kept := l.withRows()
+	if len(kept) == 0 {
+		if len(l.sections) == 0 {
+			return Table{}
+		}
+		kept = []section{{shape: l.sections[0].shape}}
+	}
+	if len(kept) == 1 {
+		return Service{}.AddRows(kept[0].shape.Headers, kept[0].rows)
+	}
+	return addSections(kept)
+}
+
+// Unnumbered lays the listing out as kubectl printed it, without an index
+// column: each table under its own header, a blank line between them, and a
+// table with no rows dropped. Every row is kept — nothing here numbers, so
+// nothing is collapsed.
+func (l Listing) Unnumbered() string {
+	kept := l.withRows()
+	tables := make([]string, 0, len(kept))
+	for _, section := range kept {
+		tables = append(tables, Format(append([][]string{section.shape.Headers}, section.rows...)))
+	}
+	return strings.Join(tables, "\n\n")
+}
+
+// withRows is the listing's tables that hold a row.
+func (l Listing) withRows() []section {
+	kept := make([]section, 0, len(l.sections))
+	for _, section := range l.sections {
 		if len(section.rows) > 0 {
 			kept = append(kept, section)
 		}
 	}
-	if len(kept) == 0 {
-		kept = []section{{shape: sections[0].shape}}
-	}
-	if len(kept) == 1 {
-		return s.AddRows(kept[0].shape.Headers, kept[0].rows)
-	}
-	return addSections(kept)
+	return kept
 }
 
 // addSections numbers several tables as one listing: the indexes run on from

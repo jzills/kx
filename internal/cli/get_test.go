@@ -666,3 +666,63 @@ func TestSlotListingThatFoundNothingKeepsTheSlot(t *testing.T) {
 			len(states.named))
 	}
 }
+
+// Every path that prints a listing without numbering it keeps each row the
+// term matches, however alike two of them read. The narrowing ran through
+// the numbering, whose dedupe — there to keep indexes one-to-one with state —
+// collapsed rows that share a name: kx get sa -A -o
+// custom-columns=NAME:.metadata.name,UID:.metadata.uid -m default printed one
+// ServiceAccount where kubectl listed eight, and kx get deploy,svc -o
+// custom-columns=NAME:.metadata.name,KIND:.kind -m metrics dropped the
+// Service named after the Deployment.
+func TestGetUnnumberedListingKeepsEveryMatchingRow(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resource string
+		term     string
+		args     []string
+		output   string
+		keep     []string
+		drop     string
+	}{
+		{
+			name: "-A without a NAMESPACE column", resource: "serviceaccounts", term: "default",
+			args:   []string{"-A", "-o", "custom-columns=NAME:.metadata.name,UID:.metadata.uid"},
+			output: "NAME      UID\ndefault   uid-1\nbuilder   uid-2\ndefault   uid-3\n",
+			keep:   []string{"uid-1", "uid-3"}, drop: "builder",
+		},
+		{
+			name: "several kinds without kinds in the names", resource: "deploy,svc", term: "metrics",
+			args: []string{"-o", "custom-columns=NAME:.metadata.name,KIND:.kind"},
+			output: "NAME             KIND\ncoredns          Deployment\nmetrics-server   Deployment\n" +
+				"kube-dns         Service\nmetrics-server   Service\n",
+			keep: []string{"Deployment", "Service"}, drop: "coredns",
+		},
+		{
+			name: "another cluster", resource: "serviceaccounts", term: "default",
+			args:   []string{"--context=b", "-A", "-o", "custom-columns=NAME:.metadata.name,UID:.metadata.uid"},
+			output: "NAME      UID\ndefault   uid-1\nbuilder   uid-2\ndefault   uid-3\n",
+			keep:   []string{"uid-1", "uid-3"}, drop: "builder",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := &fakeState{}
+			table, _, err := newGet(&fakeKubectl{output: tc.output}, states).Execute(tc.resource, tc.term, tc.args)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if table.Indexable() || len(states.saved) != 0 {
+				t.Fatalf("numbered or saved a listing kx cannot number:\n%s", table.Text())
+			}
+			text := table.Text()
+			for _, want := range tc.keep {
+				if !strings.Contains(text, want) {
+					t.Errorf("output dropped the row holding %q:\n%s", want, text)
+				}
+			}
+			if strings.Contains(text, tc.drop) {
+				t.Errorf("output kept %q, which the term does not match:\n%s", tc.drop, text)
+			}
+		})
+	}
+}
