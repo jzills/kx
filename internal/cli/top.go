@@ -413,6 +413,14 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	if nameIdx < 0 {
 		return nil
 	}
+	// The column an index resolves through, as the numbering read it: POD
+	// under --containers, where NAME is the container. Read off NAME alone,
+	// a document named the container and never the pod its index resolves
+	// to, nor the pod --match had matched.
+	podIdx := -1
+	if resourceIdx := index.ResourceColumn(headers); resourceIdx != nameIdx {
+		podIdx = resourceIdx
+	}
 	indexIdx := index.ColumnIndex(headers, "X")
 	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
 	cpuIdx := index.ColumnIndex(headers, "CPU(cores)")
@@ -423,6 +431,9 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	pageRows := make([]web.TopRow, len(rows))
 	for i, row := range rows {
 		pageRow := web.TopRow{Name: row[nameIdx]}
+		if podIdx >= 0 {
+			pageRow.Pod = row[podIdx]
+		}
 		if indexIdx >= 0 {
 			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
 				pageRow.Index = n

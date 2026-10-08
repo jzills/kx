@@ -79,6 +79,19 @@ func resourceIndex(headers []string, nameIdx int) int {
 	return nameIdx
 }
 
+// ResourceColumn is the position among headers of the column naming what an
+// index into a row resolves to — NAME, or POD where both appear (see
+// resourceIndex) — and -1 for headers with no NAME column. For a caller
+// reading rows the numbering already read, which has to agree with it about
+// which name a row stands for.
+func ResourceColumn(headers []string) int {
+	nameIdx := ColumnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return -1
+	}
+	return resourceIndex(headers, nameIdx)
+}
+
 // ParseHeader splits a kubectl header line into column names, and locates
 // the NAME/EVENT/NAMESPACE columns. Returns ok=false for a header with no
 // NAME column, the same "not indexable" signal parseOutput has always used.

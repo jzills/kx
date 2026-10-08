@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"strings"
@@ -974,5 +975,73 @@ func TestTopUnparseableOutputSavesNothing(t *testing.T) {
 	}
 	if !strings.Contains(table.Raw, "metrics not available") {
 		t.Errorf("table.Raw = %q, want the output passed through", table.Raw)
+	}
+}
+
+// Under --containers kubectl prints a row per container, POD naming the pod
+// and NAME the container inside it, and an index resolves to the pod (see
+// index.TableShape.ResourceIdx), as --match matches it. The rows the JSON,
+// the HTML page and the MCP tool are built from named only the container,
+// so a document held two rows called nginx, numbered 1 and 2, and never
+// the pods those numbers resolve to — nor anything the term had matched.
+func TestTopPageRowsUnderContainersCarryThePod(t *testing.T) {
+	indexed := index.Service{}.Add("POD             NAME    CPU(cores)   MEMORY(bytes)\n" +
+		"web-abc-1       nginx   1m           10Mi\n" +
+		"web-abc-1       envoy   2m           20Mi\n" +
+		"web-abc-2       nginx   1m           11Mi\n")
+	rows := topPageRows(indexed)
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for i, want := range []struct{ pod, name string }{
+		{"web-abc-1", "nginx"}, {"web-abc-1", "envoy"}, {"web-abc-2", "nginx"},
+	} {
+		if rows[i].Pod != want.pod || rows[i].Name != want.name || rows[i].Index != i+1 {
+			t.Errorf("row %d = %+v, want index %d, pod %s, container %s", i, rows[i], i+1, want.pod, want.name)
+		}
+	}
+
+	// A listing of pods names each pod as Name, and has no Pod beside it.
+	for _, row := range topPageRows(index.Service{}.Add("NAME    CPU(cores)   MEMORY(bytes)\nweb-1   5m           64Mi\n")) {
+		if row.Pod != "" || row.Name != "web-1" {
+			t.Errorf("pod row = %+v, want Name web-1 and no Pod", row)
+		}
+	}
+}
+
+// kx top --containers --json carries each row's pod, which is what its index
+// resolves to and what -m matched: kx top --containers -m 8ct8v --json
+// returned rows named coredns, holding no 8ct8v anywhere.
+func TestTopContainersJSONNamesThePodOfEachRow(t *testing.T) {
+	kube := &fakeKubectl{namespace: "prod", outputs: []string{
+		"POD          NAME    CPU(cores)   MEMORY(bytes)\n" +
+			"web-8ct8v    nginx   1m           10Mi\n" +
+			"api-rzk2k    nginx   2m           20Mi\n",
+	}}
+	services := switchServices(t, kube)
+	stdout, stderr, err := runCaptured(t, newTopCommand(services), []string{"--containers", "-m", "8ct8v", "--json"})
+	if err != nil {
+		t.Fatalf("kx top --containers -m 8ct8v --json: %v; stderr %q", err, stderr)
+	}
+	var document struct {
+		Match string `json:"match"`
+		Rows  []struct {
+			Index int    `json:"index"`
+			Pod   string `json:"pod"`
+			Name  string `json:"name"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if len(document.Rows) != 1 {
+		t.Fatalf("rows = %+v, want the one container of the pod 8ct8v matched", document.Rows)
+	}
+	if row := document.Rows[0]; row.Pod != "web-8ct8v" || row.Name != "nginx" || row.Index != 1 {
+		t.Errorf("row = %+v, want index 1, pod web-8ct8v, container nginx", row)
+	}
+	name, _, _, err := services.State.Fields(1)
+	if err != nil || name != document.Rows[0].Pod {
+		t.Errorf("index 1 resolves to %q (err %v), want the row's pod", name, err)
 	}
 }

@@ -116,10 +116,15 @@ type TopPage struct {
 	Rows  []TopRow
 }
 
-// TopRow is one pod's or node's usage.
+// TopRow is one pod's or node's usage, or one container's.
 type TopRow struct {
 	Index int
-	Name  string
+	// Pod is the pod a container's row belongs to, under kubectl top pod
+	// --containers, whose NAME is the container — and the pod is what the
+	// row's index resolves to. Empty for a row of a pod or a node, which Name
+	// names itself.
+	Pod  string
+	Name string
 	// Namespace is empty in single-namespace mode (no NAMESPACE column to
 	// read it from) — the grid only shows this column when at least one
 	// row actually has one, matching the -A-only NAMESPACE column
