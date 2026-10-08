@@ -458,3 +458,38 @@ func TestGetSeveralKindsRefusesAMarkItDoesNotList(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+// Stitched across namespaces and printed unnumbered, rows of two kinds that
+// share a name in one namespace are both kept. Rendered from the numbered
+// listing, the Service named web was collapsed into the Deployment named web
+// before it: without --show-kind, neither name says which kind it is.
+func TestGetSeveralKindsByIndexAcrossNamespacesKeepsSameNamedRows(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/web   1/1     1            1           5d\n" +
+			"stage       deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"prod        service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    1/1     1            1           5d\n" +
+			"\n" +
+			"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "all", []string{"1", "2", "3", "--show-kind=false"}, getOptions{}); err != nil {
+		t.Fatalf("kx get all 1 2 3 --show-kind=false: %v", err)
+	}
+	if !strings.Contains(out.String(), "10.0.0.12") {
+		t.Errorf("output = %q, want the Service named web beside the Deployment named web", out.String())
+	}
+	if strings.Count(out.String(), "web") != 2 {
+		t.Errorf("output = %q, want both rows named web", out.String())
+	}
+}

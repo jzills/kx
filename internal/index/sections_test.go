@@ -147,3 +147,78 @@ func TestAddTablesNumbersOnAndDropsAnEmptyTable(t *testing.T) {
 		t.Errorf("all tables empty = %+v, want an empty listing under the first header", none)
 	}
 }
+
+// A listing kx prints without numbering keeps every row the term matches,
+// however alike two of them read. Numbering collapses a row that repeats an
+// earlier one, so that indexes stay one-to-one with saved state, and narrowing
+// that ran through it printed one ServiceAccount where kubectl listed eight:
+// kx get sa -A -o custom-columns=NAME:.metadata.name,UID:.metadata.uid -m
+// default has no NAMESPACE column to hold them apart.
+func TestListingNarrowKeepsRowsNumberingWouldCollapse(t *testing.T) {
+	listing, ok := ParseListing("NAME      UID\n" +
+		"default   uid-1\n" +
+		"builder   uid-2\n" +
+		"default   uid-3\n")
+	if !ok {
+		t.Fatal("ParseListing refused a table")
+	}
+
+	text := listing.Narrow("default").Unnumbered()
+	for _, uid := range []string{"uid-1", "uid-3"} {
+		if !strings.Contains(text, uid) {
+			t.Errorf("narrowed listing dropped the row holding %s:\n%s", uid, text)
+		}
+	}
+	if strings.Contains(text, "builder") {
+		t.Errorf("narrowed listing kept a row the term does not match:\n%s", text)
+	}
+	if strings.Contains(text, "X ") || strings.HasPrefix(text, "X") {
+		t.Errorf("unnumbered listing carries an index column:\n%s", text)
+	}
+}
+
+// Unnumbered lays each of kubectl's tables out under its own header, and
+// drops a table the term emptied, as a numbered listing does.
+func TestListingUnnumberedKeepsEachTableAndDropsAnEmptyOne(t *testing.T) {
+	listing, ok := ParseListing(multiKindOutput)
+	if !ok {
+		t.Fatal("ParseListing refused a listing of several kinds")
+	}
+
+	all := listing.Unnumbered()
+	if tables := strings.Split(all, "\n\n"); len(tables) != 2 ||
+		!strings.HasPrefix(tables[1], "NAME") || !strings.Contains(tables[1], "ClusterIP") {
+		t.Errorf("unnumbered = %q, want two tables, the Service under its own header", all)
+	}
+
+	narrowed := listing.Narrow("web")
+	if text := narrowed.Unnumbered(); strings.Contains(text, "\n\n") || strings.Contains(text, "TYPE") {
+		t.Errorf("narrowed to web = %q, want the emptied Service table dropped", text)
+	}
+	if narrowed.Empty() {
+		t.Error("Empty() with deployment.apps/web left")
+	}
+	if !listing.Narrow("nothing-is-called-this").Empty() {
+		t.Error("Empty() = false after the term matched no row")
+	}
+}
+
+// ListingOf takes tables already parsed — replies stitched together — and
+// narrows and lays them out as ParseListing's do.
+func TestListingOfStitchedTables(t *testing.T) {
+	listing, ok := ListingOf([]RawTable{
+		{Headers: []string{"NAMESPACE", "NAME"}, Rows: [][]string{{"prod", "web"}, {"prod", "web"}}},
+	})
+	if !ok {
+		t.Fatal("ListingOf refused tables with a NAME column")
+	}
+	if text := listing.Unnumbered(); strings.Count(text, "web") != 2 {
+		t.Errorf("unnumbered = %q, want both rows named web", text)
+	}
+	if _, ok := ListingOf([]RawTable{{Headers: []string{"POD-ONLY"}}}); ok {
+		t.Error("ListingOf accepted a table with no NAME column")
+	}
+	if _, ok := ListingOf(nil); ok {
+		t.Error("ListingOf accepted no tables")
+	}
+}
