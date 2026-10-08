@@ -93,7 +93,7 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 	if err := validKind(target.Kind); err != nil {
 		return resolvedTarget{}, err
 	}
-	spelling := coreGroupSpelling(target.Kind)
+	spelling := target.Kind
 	if err := refuseAll(spelling); err != nil {
 		return resolvedTarget{}, err
 	}
@@ -117,26 +117,6 @@ func (d mcpDeps) resolveTarget(target mcpTarget) (resolvedTarget, error) {
 		namespace = d.Kubectl.CurrentNamespace()
 	}
 	return resolvedTarget{Kind: kind, Name: target.Name, Namespace: namespace}, nil
-}
-
-// coreGroupDotted is a kind spelled with the core API group's empty group
-// made explicit: "secrets." (resource and empty group) or "secrets.v1."
-// (resource, version v1, empty group).
-var coreGroupDotted = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*)(\.v1)?\.$`)
-
-// coreGroupSpelling reduces a core-group dotted spelling to its plain form,
-// so "secrets.v1." normalises to Secret exactly as "secrets" does.
-//
-// kubectl reads both spellings as core/v1 resources, but kinds.Normalize
-// passes them through verbatim — and every check keyed on the canonical kind
-// (Secret redaction above all, and the cluster-scope table) would then miss
-// them, and a mark would store the odd spelling. A real API group
-// (certificates.cert-manager.io, deployments.v1.apps) is left untouched.
-func coreGroupSpelling(kind string) string {
-	if match := coreGroupDotted.FindStringSubmatch(kind); match != nil {
-		return match[1]
-	}
-	return kind
 }
 
 // getArgs builds the kubectl arguments naming a resolved target, leaving -n
@@ -200,7 +180,9 @@ func validNamespace(namespace string) error {
 // refuseAll refuses kubectl's "all" category, which names many resource
 // types rather than one.
 func refuseAll(spelling string) error {
-	if strings.EqualFold(spelling, "all") {
+	// The resource is what precedes the first dot, as kubectl reads it
+	// (kinds.Normalize), so all. and all.v1. are refused with all.
+	if resource, _, _ := strings.Cut(spelling, "."); strings.EqualFold(resource, "all") {
 		return errors.New("'all' is not one resource type — give the resource's own kind.")
 	}
 	return nil
@@ -209,15 +191,16 @@ func refuseAll(spelling string) error {
 // validateResolved holds a target resolved via a mark or an index — whose
 // kind, name and namespace came from the state file rather than from the
 // caller directly — to exactly the checks a typed target gets as it is
-// parsed: the flag-injection shapes, the 'all' refusal, and the core-group
-// dotted spelling reduced before the kind is normalised. It returns the
-// canonical kind, which is what reaches argv and every kind-keyed check
-// (Secret redaction above all). Without it either path was trusted outright.
+// parsed: the flag-injection shapes, the 'all' refusal, and the kind
+// normalised — every kubectl spelling of it, secrets.v1. as much as secrets
+// (kinds.Normalize). It returns the canonical kind, which is what reaches
+// argv and every kind-keyed check (Secret redaction above all). Without it
+// either path was trusted outright.
 func validateResolved(kind, name, namespace string) (kinds.Kind, error) {
 	if err := validKind(kind); err != nil {
 		return "", err
 	}
-	spelling := coreGroupSpelling(kind)
+	spelling := kind
 	if err := refuseAll(spelling); err != nil {
 		return "", err
 	}
