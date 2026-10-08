@@ -76,7 +76,13 @@ func buildStyles(renderer *lipgloss.Renderer, specs map[string]string) map[strin
 	return styles
 }
 
+// isTerminal reports whether w is a terminal: a file that is one, or a
+// writer that says it is. The second is how a test sees what kx draws on a
+// terminal — the redrawn watch, which off a terminal draws nothing at all.
 func isTerminal(w io.Writer) bool {
+	if terminal, ok := w.(interface{ IsTerminal() bool }); ok {
+		return terminal.IsTerminal()
+	}
 	file, ok := w.(*os.File)
 	if !ok {
 		return false

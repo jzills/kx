@@ -31,6 +31,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `--json` | Print the listing as JSON instead of a table |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace |
+| `--no-headers` | Leave out the header row; kx can't number a table without one |
 | `--no-limits` | Skip the CPU%/MEM% columns (one fewer kubectl call) |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |

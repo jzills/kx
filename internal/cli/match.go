@@ -2,8 +2,11 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/jzills/kx/internal/index"
 )
 
 // matchUsage is --match's help text, the same on kx get and on every sweep,
@@ -17,6 +20,13 @@ const matchUsage = "Match by name (substring, case-insensitive)"
 var errMatchBesideIndex = errors.New(
 	"'--match' cannot be combined with an index — an index already names " +
 		"one resource. Drop the flag, or drop the index to sweep the namespace instead.")
+
+// errMatchBesideContextIndex is errMatchBesideIndex for kx get contexts,
+// whose index names the context to switch to rather than a resource in a
+// namespace to sweep.
+var errMatchBesideContextIndex = errors.New(
+	"'--match' cannot be combined with an index — the index already names the " +
+		"context to switch to. Drop the flag, or drop the index to list the contexts it matches.")
 
 // errMCPMatchBesideTarget is errMatchBesideIndex for the MCP tools, whose
 // resource argument is a target rather than an index.
@@ -59,4 +69,114 @@ func matchFlag(term string) string {
 		return ""
 	}
 	return "-m " + term
+}
+
+// A --match term narrows what kx prints, or the command is refused: a term
+// that narrowed nothing and said nothing looks as though it had checked
+// something, which is what errMatchBesideIndex refuses beside an index. It
+// used to be applied only where kx read kubectl's reply as a table, and every
+// other shape passed through untouched — kx get pods -m web -o name | xargs
+// kubectl delete deleted every pod in the namespace.
+//
+// What kx can narrow depends on the format kubectl was asked for
+// (replyFormatOf). Where the arguments alone decide it cannot, the command is
+// refused before kubectl is asked for anything (matchFormatError); a table
+// kx turns out unable to read is refused from the reply (narrowText).
+
+// replyFormat is how kx narrows kubectl's reply in the format it was asked
+// for.
+type replyFormat int
+
+const (
+	// tableFormat is a table — kubectl's own, wide or custom columns —
+	// narrowed by its rows' names, read from its NAME column.
+	tableFormat replyFormat = iota
+	// namesFormat is -o name: one kind/name a line, narrowed line by line.
+	namesFormat
+	// documentFormat is anything else — JSON, YAML, a template's text —
+	// which has no rows a term could pick.
+	documentFormat
+)
+
+// replyFormatOf reads the format kubectl's reply comes back in off args.
+func replyFormatOf(args []string) replyFormat {
+	if printsTable(args) {
+		return tableFormat
+	}
+	if outputFormat(args) == "name" {
+		return namesFormat
+	}
+	return documentFormat
+}
+
+// outputFormat is the -o format args ask for, without its argument:
+// "jsonpath" for -o jsonpath={...}.
+func outputFormat(args []string) string {
+	output, _, _ := extractString(args, "--output", "-o")
+	format, _, _ := strings.Cut(output, "=")
+	return format
+}
+
+// matchFormatError refuses a --match term beside output the arguments alone
+// say kx cannot narrow: a document, a table with no header to find the NAME
+// column by, or a watch kx streams as kubectl sends it rather than drawing it
+// itself (wantsLiveTable). nil when kx can narrow it.
+func matchFormatError(args []string) error {
+	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders && replyFormatOf(args) == tableFormat {
+		return errors.New("'--match' cannot be combined with '--no-headers' — kx finds each " +
+			"row's name under kubectl's NAME header. Drop one of them.")
+	}
+	if replyFormatOf(args) == documentFormat {
+		return fmt.Errorf("'--match' cannot be combined with '-o %s' — kx narrows a table or "+
+			"-o name by each row's name, and that output has no rows for it to pick. "+
+			"Drop the flag, or select with -l instead.", outputFormat(args))
+	}
+	if isWatch(args) && !wantsLiveTable(args) {
+		return fmt.Errorf("'--match' cannot be combined with '--watch -o %s' — kx narrows the "+
+			"live table it draws, and streams that format as kubectl sends it. "+
+			"Drop the flag, or the -o.", outputFormat(args))
+	}
+	return nil
+}
+
+// narrowText narrows by term a reply kx could not read as a table: -o name
+// line by line, and anything else refused. An empty reply has nothing to
+// narrow, and neither does an empty term.
+func narrowText(output, term string, args []string) (string, error) {
+	if term == "" || strings.TrimSpace(output) == "" {
+		return output, nil
+	}
+	if err := matchFormatError(args); err != nil {
+		return "", err
+	}
+	if replyFormatOf(args) == namesFormat {
+		return narrowNames(output, term), nil
+	}
+	// A table kx could not read has no NAME column to find names in. Custom
+	// columns can be given one; a kind's own table, as kubectl's events
+	// table, cannot.
+	if strings.HasPrefix(outputFormat(args), "custom-columns") {
+		return "", errors.New("'--match' narrows by the NAME column, and kubectl's reply has none — " +
+			"add one to the custom columns (NAME:.metadata.name), or drop the flag.")
+	}
+	return "", errors.New("'--match' narrows by the NAME column, and kubectl's table for this " +
+		"resource has none. Drop the flag.")
+}
+
+// narrowNames keeps the lines of -o name output whose name contains term, as
+// index.FilterRows keeps a table's rows: the name, not the kind/ kubectl puts
+// in front of it, since "app" is in every "deployment.apps/…".
+func narrowNames(output, term string) string {
+	matches := index.NameMatcher(term)
+	var kept []string
+	for _, line := range strings.Split(output, "\n") {
+		name := strings.TrimSpace(line)
+		if slash := strings.LastIndex(name, "/"); slash >= 0 {
+			name = name[slash+1:]
+		}
+		if name != "" && matches(name) {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }

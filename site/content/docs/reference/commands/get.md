@@ -12,6 +12,8 @@ Fetches resources with kubectl and assigns each row an index.
 
 A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace for either to name, so kx refuses them rather than listing something other than what was asked for.
 
+A `--match` term narrows the table, a watch's live table or `-o name` by each row's name. JSON, YAML and templates have no rows for it to pick, so kx refuses it beside them rather than printing everything.
+
 Unrecognized flags are passed through to kubectl.
 
 ## Usage
@@ -36,6 +38,8 @@ kx get [OPTIONS] <resource> [index]... [kubectl flags]
 | `-k, --key string` | With --decode, print only this key's value |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
+| `--no-headers` | Leave out the header row; kx can't number a table without one |
+| `-o, --output string` | Output format, as kubectl takes it; kx numbers only a table |
 | `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 

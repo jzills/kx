@@ -152,6 +152,12 @@ func newTopCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Refused before kubectl is asked, as kx get refuses it.
+			if match != "" {
+				if err := matchFormatError(rest); err != nil {
+					return err
+				}
+			}
 			noLimits, rest := extractBool(rest, "--no-limits")
 			asJSON, rest := extractBool(rest, "--json")
 			html, rest := extractBool(rest, "--html")
@@ -309,6 +315,7 @@ func newTopCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace")
+	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
 	return cmd
