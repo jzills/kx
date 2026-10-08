@@ -35,6 +35,8 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 | `-k, --key string` | With --decode, print only this key's value |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
+| `--no-headers` | Leave out the header row; kx can't number a table without one |
+| `-o, --output string` | Output format, as kubectl takes it; kx numbers only a table |
 | `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 

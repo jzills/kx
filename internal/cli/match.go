@@ -118,9 +118,14 @@ func outputFormat(args []string) string {
 }
 
 // matchFormatError refuses a --match term beside output the arguments alone
-// say kx cannot narrow: a document, or a watch kx streams as kubectl sends it
-// rather than drawing it itself (wantsLiveTable). nil when kx can narrow it.
+// say kx cannot narrow: a document, a table with no header to find the NAME
+// column by, or a watch kx streams as kubectl sends it rather than drawing it
+// itself (wantsLiveTable). nil when kx can narrow it.
 func matchFormatError(args []string) error {
+	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders && replyFormatOf(args) == tableFormat {
+		return errors.New("'--match' cannot be combined with '--no-headers' — kx finds each " +
+			"row's name under kubectl's NAME header. Drop one of them.")
+	}
 	if replyFormatOf(args) == documentFormat {
 		return fmt.Errorf("'--match' cannot be combined with '-o %s' — kx narrows a table or "+
 			"-o name by each row's name, and that output has no rows for it to pick. "+
@@ -141,20 +146,21 @@ func narrowText(output, term string, args []string) (string, error) {
 	if term == "" || strings.TrimSpace(output) == "" {
 		return output, nil
 	}
-	switch replyFormatOf(args) {
-	case namesFormat:
+	if err := matchFormatError(args); err != nil {
+		return "", err
+	}
+	if replyFormatOf(args) == namesFormat {
 		return narrowNames(output, term), nil
-	case tableFormat:
-		// A table format kx could not read: no NAME column to find names
-		// in, or no header to find the column by.
-		if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders {
-			return "", errors.New("'--match' cannot be combined with '--no-headers' — kx finds each " +
-				"row's name under kubectl's NAME header. Drop one of them.")
-		}
+	}
+	// A table kx could not read has no NAME column to find names in. Custom
+	// columns can be given one; a kind's own table, as kubectl's events
+	// table, cannot.
+	if strings.HasPrefix(outputFormat(args), "custom-columns") {
 		return "", errors.New("'--match' narrows by the NAME column, and kubectl's reply has none — " +
 			"add one to the custom columns (NAME:.metadata.name), or drop the flag.")
 	}
-	return "", matchFormatError(args)
+	return "", errors.New("'--match' narrows by the NAME column, and kubectl's table for this " +
+		"resource has none. Drop the flag.")
 }
 
 // narrowNames keeps the lines of -o name output whose name contains term, as

@@ -269,8 +269,16 @@ func newGetCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
+	registerFormatFlags(cmd)
 	registerWatchFlag(cmd)
 	return cmd
+}
+
+// registerFormatFlags declares the kubectl flags a listing command reads by
+// hand to decide what it can number and what --match can narrow.
+func registerFormatFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("output", "o", "", "Output format, as kubectl takes it; kx numbers only a table")
+	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 }
 
 // registerWatchFlag declares --watch on the listing commands that honour it.

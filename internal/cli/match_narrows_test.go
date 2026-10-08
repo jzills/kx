@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jzills/kx/internal/render"
 )
 
@@ -55,16 +57,23 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 			replies: []string{"POD\nnginx-abc-xyz\nredis-def-uvw\n"}, refused: "NAME column"},
 		{name: "--no-headers", command: "get", args: []string{"pods", "-m", "redis", "--no-headers"},
 			replies: []string{"nginx-abc-xyz   1/1   Running   0     5d\nredis-def-uvw   1/1   Running   0     3d\n"},
-			refused: "--no-headers"},
+			refused: "--no-headers", preflight: true},
+		// Refused from the arguments, so an empty namespace is refused too
+		// rather than saved as a query no refresh could replay.
+		{name: "--no-headers on an empty namespace", command: "get",
+			args: []string{"pods", "-m", "redis", "--no-headers"}, replies: []string{""},
+			refused: "--no-headers", preflight: true},
 		{name: "a watch kx streams", command: "get", args: []string{"pods", "-m", "redis", "-w", "-o", "name"},
 			refused: "--watch", preflight: true},
 		{name: "contexts", command: "get", args: []string{"contexts", "-m", "redis"},
 			replies: []string{"CURRENT   NAME        CLUSTER\n*         nginx-ctx   a\n          redis-ctx   b\n"}},
 		{name: "kx top --no-headers", command: "top", args: []string{"-m", "redis", "--no-headers"},
-			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers"},
+			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers",
+			preflight: true},
 		{name: "another cluster's kx top --no-headers", command: "top",
 			args:    []string{"--context=b", "-m", "redis", "--no-headers"},
-			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers"},
+			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers",
+			preflight: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kube := &fakeKubectl{outputs: tc.replies, namespace: "prod"}
@@ -196,5 +205,51 @@ func TestNarrowNamesMatchesTheNameNotTheKind(t *testing.T) {
 	}
 	if got := narrowNames(output, "API"); got != "deployment.apps/api-gateway\nservice/api" {
 		t.Errorf("'API' kept %q, want both resources named api, case-insensitively", got)
+	}
+}
+
+// Adding a NAME column is advice for custom columns the user wrote. A kind
+// whose own table has none, as kubectl's events table does, gets no advice
+// about columns nobody asked for.
+func TestMatchRefusalWithoutANameColumnAdvisesWhatWasAsked(t *testing.T) {
+	const events = "LAST SEEN   TYPE     REASON   OBJECT              MESSAGE\n" +
+		"5m          Normal   Pulled   pod/redis-def-uvw   ok\n"
+	for _, tc := range []struct {
+		args   []string
+		reply  string
+		advice bool
+	}{
+		{args: []string{"events", "-m", "redis"}, reply: events},
+		{args: []string{"pods", "-m", "redis", "-o", "custom-columns=POD:.metadata.name"},
+			reply: "POD\nredis-def-uvw\n", advice: true},
+	} {
+		kube := &fakeKubectl{outputs: []string{tc.reply}, namespace: "prod"}
+		_, _, err := runCaptured(t, newGetCommand(switchServices(t, kube)), tc.args)
+		if err == nil || !strings.Contains(err.Error(), "NAME column") {
+			t.Fatalf("%v: err = %v, want the NAME column refusal", tc.args, err)
+		}
+		if got := strings.Contains(err.Error(), "custom columns"); got != tc.advice {
+			t.Errorf("%v: err = %q, advises custom columns %v, want %v", tc.args, err, got, tc.advice)
+		}
+	}
+}
+
+// The flags kx get, kx secret and kx top read by hand to decide what --match can narrow
+// are registered, so they appear in --help (CLAUDE.md).
+func TestFlagsReadForMatchAreRegistered(t *testing.T) {
+	services := switchServices(t, &fakeKubectl{})
+	for _, tc := range []struct {
+		cmd   *cobra.Command
+		flags []string
+	}{
+		{cmd: newGetCommand(services), flags: []string{"output", "no-headers"}},
+		{cmd: newSecretCommand(services, "secret", nil), flags: []string{"output", "no-headers"}},
+		{cmd: newTopCommand(services), flags: []string{"no-headers"}},
+	} {
+		for _, flag := range tc.flags {
+			if tc.cmd.Flags().Lookup(flag) == nil {
+				t.Errorf("--%s is not registered on kx %s", flag, tc.cmd.Name())
+			}
+		}
 	}
 }
