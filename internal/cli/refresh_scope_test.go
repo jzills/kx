@@ -258,3 +258,38 @@ func TestAContextSwitchUnderMachineOutputNamesTheListingAsTyped(t *testing.T) {
 		t.Errorf("stderr = %q, want the listing as typed", stderr)
 	}
 }
+
+// An index fetch is taken in its listing's namespace, but the namespace is
+// the listing's, not one the user named: kx get pods 1 records the command
+// as typed. Recorded as -n prod, a context switch replayed the fetch in the
+// old context's prod and named it in the relist hint, as listingScope does
+// for a namespace that was typed.
+func TestAnIndexFetchDoesNotRecordItsListingsNamespaceAsNamed(t *testing.T) {
+	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := runGet(services, "pods", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	if err := runGet(services, "pods", []string{"1"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+
+	if want := []string{"get", "pods", "nginx-abc-xyz", "-n", "prod"}; joinArgs(kube.args) != joinArgs(want) {
+		t.Errorf("args = %v, want %v", kube.args, want)
+	}
+	entry, err := services.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if entry.Namespace != "prod" {
+		t.Errorf("entry namespace = %q, want prod", entry.Namespace)
+	}
+	if namespace, all := listingScope(entry, true); namespace != "" || all {
+		t.Errorf("listingScope elsewhere = (%q, %v), want the new context's own namespace; query %+v",
+			namespace, all, entry.Query)
+	}
+	if namespace, _ := listingScope(entry, false); namespace != "prod" {
+		t.Errorf("listingScope in its own context = %q, want prod", namespace)
+	}
+}
