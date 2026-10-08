@@ -38,13 +38,16 @@ func (r *Renderer) prompts(in io.Reader) *bufio.Reader {
 	return r.answers
 }
 
+// The prompt is written to stderr, with kx's other messages: it is a question
+// to the user, not output, and on stdout it went into a pipe unseen — kx
+// delete 1 --dry-run=server -o name | xargs ... read it as a name.
 func (r *Renderer) confirmFrom(in io.Reader, message string) error {
-	fmt.Fprint(r.out, r.emphasizePaths(message)+" "+r.style(theme.Muted, "[y/n] (n):")+" ")
+	fmt.Fprint(r.err, r.emphasizePaths(message)+" "+r.style(theme.Muted, "[y/n] (n):")+" ")
 
 	answer, err := r.prompts(in).ReadString('\n')
 	if err != nil && answer == "" {
 		// EOF (a closed or empty stdin) is not consent.
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.err)
 		return ErrAborted{}
 	}
 	switch strings.ToLower(strings.TrimSpace(answer)) {
