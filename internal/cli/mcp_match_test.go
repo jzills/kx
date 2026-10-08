@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/jzills/kx/internal/index"
+	"github.com/jzills/kx/internal/state"
 )
 
 // The diagnose sweep narrows by the same term kx diag -m does, and its
@@ -223,5 +225,27 @@ func TestMCPNamespaceIsValidatedByEveryToolThatTakesOne(t *testing.T) {
 	}
 	if _, err := deps.State.Load(); err == nil {
 		t.Error("a listing was saved under a namespace that is refused")
+	}
+}
+
+// list_resources numbers a listing by the rule kx get does, read off the
+// whole reply: an -A table with no NAMESPACE column is never saved, whether
+// or not the term left a row of it. Decided from the narrowed rows, a term
+// matching none of them left none to find unplaced, and the empty listing
+// was saved.
+func TestMCPListResourcesNumbersAlikeWithAndWithoutATerm(t *testing.T) {
+	for _, term := range []string{"", "redis", "nothing-is-called-this"} {
+		deps := writingDeps(t, &recordingKubectl{output: "NAME\nnginx-abc-xyz\nredis-def-uvw\n", namespace: "prod"})
+		var out listOutput
+		decodeStructured(t, callTool(t, connectMCP(t, deps), "list_resources",
+			map[string]any{"kind": "pods", "allNamespaces": true, "match": term}), &out)
+		history, err := deps.State.LoadHistory()
+		if err != nil && !errors.Is(err, state.ErrNoState) {
+			t.Fatalf("-m %q: LoadHistory: %v", term, err)
+		}
+		if len(history.States) != 0 {
+			t.Errorf("-m %q: saved %d entries, want none — the rows carry no namespace",
+				term, len(history.States))
+		}
 	}
 }

@@ -681,7 +681,7 @@ func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
 		{"--dry-run"}, {"--dry-run", "--force"}, {"--dry-run=true"}, {"--dry-run=unchanged"},
 	} {
 		kube := &recordingKubectl{output: ""}
-		message, err := DeleteCommand{
+		message, _, err := DeleteCommand{
 			Kubectl: kube, State: pod("nginx"), Confirm: func(string) error { return nil },
 			Status: noStatus,
 		}.Execute(state.Ref{Index: 1}, true, args)
@@ -703,7 +703,7 @@ func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
 		{"--dry-run=none"}, {"--dry-run=false"}, {"--dry-run=client", "--dry-run=none"},
 		{"--force"}, nil,
 	} {
-		message, err := DeleteCommand{
+		message, _, err := DeleteCommand{
 			Kubectl: &recordingKubectl{}, State: pod("nginx"),
 			Confirm: func(string) error { return nil }, Status: noStatus,
 		}.Execute(state.Ref{Index: 1}, true, args)

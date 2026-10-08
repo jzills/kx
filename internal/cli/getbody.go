@@ -331,13 +331,16 @@ func runGet(services Services, resource string, args []string, options getOption
 }
 
 // showListing prints what kx get fetched: the listing, and under an empty one
-// the way back to the listing it replaced.
+// it saved, the way back to the listing it replaced.
 //
 // A format another program reads gets kubectl's output and nothing of kx's
 // on stdout. An empty one is reported on stderr, where kubectl reports it,
 // with no way back offered: nothing was saved over the listing behind it (see
-// GetCommand.Execute). Nor for another cluster's listing, which is printed
-// and never saved.
+// GetCommand.Execute). Nor under any listing kx printed without numbering it
+// — another cluster's, a table it cannot place — which replaced nothing
+// either. Read off the table, which says so, rather than inferred from the
+// flags: inferred, a term emptying a table kx cannot place offered "'kx
+// state back' returns to" the entry behind the listing still current.
 func showListing(
 	services Services, output index.Table, resource, namespace, match string, extra []string,
 ) {
@@ -346,7 +349,7 @@ func showListing(
 		return
 	}
 	render.IndexedTable(output, resource, namespace)
-	if output.Empty() && clusterFlagIn(extra) == "" {
+	if output.Empty() && !output.Unnumbered {
 		render.PreviousListingNote(previousListing(services))
 	}
 }

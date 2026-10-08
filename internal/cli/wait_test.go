@@ -375,7 +375,7 @@ func waitAll(
 	err = WaitCommand{
 		Kubectl: kube, Status: noStatus, Now: func() time.Time { return kube.now },
 		Kubernetes: func() (kubernetes.Interface, error) { return client, nil },
-	}.ExecuteAll(context.Background(), targets, timeout, extra, func(target Resolved, what string) {
+	}.ExecuteAll(context.Background(), targets, timeout, extra, func(target Resolved, what, _ string) {
 		met = append(met, target.Name+" "+what)
 	})
 	return met, err

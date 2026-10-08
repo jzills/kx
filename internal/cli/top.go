@@ -97,7 +97,9 @@ func (c TopCommand) Execute(
 	// resources found" goes to stderr — and that is saved below like any other
 	// listing, so the indexes it replaces stop resolving.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)
@@ -206,7 +208,9 @@ func (c TopCommand) ExecuteNodes(
 	// Empty output is a listing that found nothing and is saved; anything else
 	// kx cannot number prints as-is. See Execute.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)
@@ -415,6 +419,14 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	if nameIdx < 0 {
 		return nil
 	}
+	// The column an index resolves through, as the numbering read it: POD
+	// under --containers, where NAME is the container. Read off NAME alone,
+	// a document named the container and never the pod its index resolves
+	// to, nor the pod --match had matched.
+	podIdx := -1
+	if resourceIdx := index.ResourceColumn(headers); resourceIdx != nameIdx {
+		podIdx = resourceIdx
+	}
 	indexIdx := index.ColumnIndex(headers, "X")
 	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
 	cpuIdx := index.ColumnIndex(headers, "CPU(cores)")
@@ -425,6 +437,9 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	pageRows := make([]web.TopRow, len(rows))
 	for i, row := range rows {
 		pageRow := web.TopRow{Name: row[nameIdx]}
+		if podIdx >= 0 {
+			pageRow.Pod = row[podIdx]
+		}
 		if indexIdx >= 0 {
 			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
 				pageRow.Index = n

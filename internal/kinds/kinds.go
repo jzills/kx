@@ -4,6 +4,7 @@ package kinds
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -61,6 +62,7 @@ var kindMap = map[string]Kind{
 	"svc":                      Service,
 	"ingress":                  Ingress,
 	"ingresses":                Ingress,
+	"ing":                      Ingress,
 	"configmap":                ConfigMap,
 	"configmaps":               ConfigMap,
 	"cm":                       ConfigMap,
@@ -70,11 +72,13 @@ var kindMap = map[string]Kind{
 	"jobs":                     Job,
 	"cronjob":                  CronJob,
 	"cronjobs":                 CronJob,
+	"cj":                       CronJob,
 	"pvc":                      PersistentVolumeClaim,
 	"persistentvolumeclaim":    PersistentVolumeClaim,
 	"persistentvolumeclaims":   PersistentVolumeClaim,
 	"node":                     Node,
 	"nodes":                    Node,
+	"no":                       Node,
 	"ns":                       Namespace,
 	"namespace":                Namespace,
 	"namespaces":               Namespace,
@@ -199,32 +203,56 @@ func Spellings() []Spelling {
 
 // IsKindSpelling reports whether token names a known resource type.
 func IsKindSpelling(token string) bool {
-	if _, ok := kindMap[strings.ToLower(token)]; ok {
+	if _, ok := builtinSpelling(token); ok {
 		return true
 	}
-	if shorthandSource != nil {
-		if _, _, ok := shorthandSource.Resolve(token); ok {
-			return true
-		}
-	}
-	return false
+	_, _, ok := discovered(token)
+	return ok
 }
 
 // Normalize maps a kubectl resource type onto its canonical kind, passing
 // unknown types through unchanged.
 func Normalize(resourceType string) Kind {
-	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
+	if kind, ok := builtinSpelling(resourceType); ok {
 		return kind
 	}
-	if kind, ok := builtinInGroup(resourceType); ok {
+	if kind, _, ok := discovered(resourceType); ok {
 		return kind
-	}
-	if shorthandSource != nil {
-		if kind, _, ok := shorthandSource.Resolve(resourceType); ok {
-			return kind
-		}
 	}
 	return Kind(resourceType)
+}
+
+// discovered asks the discovery source for a spelling kx does not name
+// itself. The cache keys a resource by its names alone, so the core group
+// spelled out — persistentvolumes. or persistentvolumes.v1., which kubectl
+// reads as persistentvolumes — is asked as the resource. Another group's
+// spelling is not reduced: the cache does not say which group a name is in,
+// and foos.example.com read as foos could be some other group's foos.
+func discovered(spelling string) (Kind, string, bool) {
+	if shorthandSource == nil {
+		return "", "", false
+	}
+	if resource, ok := coreGroupResource(spelling); ok {
+		spelling = resource
+	}
+	return shorthandSource.Resolve(spelling)
+}
+
+// coreGroupResource is the resource of a spelling naming the core group
+// outright, resource. or resource.<version>. (see builtinSpelling).
+func coreGroupResource(spelling string) (string, bool) {
+	resource, qualifier, qualified := strings.Cut(strings.ToLower(spelling), ".")
+	if !qualified || resource == "" {
+		return "", false
+	}
+	if qualifier == "" {
+		return resource, true
+	}
+	version, group, versioned := strings.Cut(qualifier, ".")
+	if versioned && group == "" && apiVersion.MatchString(version) {
+		return resource, true
+	}
+	return "", false
 }
 
 // Several reports whether a kubectl resource argument asks for more than one
@@ -256,6 +284,9 @@ var allCategory = map[Kind]bool{
 // spellings, and is let through: refusing it would turn away an index into
 // kx get certificates,issuers for being one of its own rows.
 func Covers(resourceType string, kind Kind) bool {
+	// Both sides read alike: a row saved under a kubectl spelling, by a
+	// listing taken before kx read it, is the kind the spelling names.
+	kind = Normalize(string(kind))
 	_, known := pluralDisplay[kind]
 	undecided := false
 	for _, part := range strings.Split(resourceType, ",") {
@@ -288,28 +319,42 @@ var builtinGroups = map[Kind]string{
 	Ingress:                 "networking.k8s.io",
 }
 
-// builtinInGroup reads kubectl's resource.group spelling of a kind kx names
-// itself — deployments.apps, ingresses.networking.k8s.io — as that kind.
+// apiVersion is the shape of a Kubernetes API version: v1, v2, v1beta1.
+var apiVersion = regexp.MustCompile(`^v[0-9]+((alpha|beta)[0-9]+)?$`)
+
+// builtinSpelling reads any spelling kubectl takes for a kind kx names itself
+// as that kind. The one reader of them, for everything that reads a kind:
+// Normalize, Qualified, IsKindSpelling, PluralDisplay. Each read them its own
+// way, and where one did not, a spelling kubectl took was a kind of its own
+// to kx: kx get deployments.v1.apps saved rows kx scale refused, and kx get
+// deployments.v1.apps,svc 1 was refused by the listing that produced it.
 //
-// Only in the kind's own group, for the reason Qualified gives: Knative's
-// services.serving.knative.dev is not a Service. A spelling with a version in
-// it (deployments.v1.apps) names no group kx compares, and is left alone.
-// Read as unknown, kx get deployments.apps saved every row as a kind called
-// "deployments.apps", which kx scale and kx rollout refused, while the same
-// Deployment reached through kx get all worked.
-func builtinInGroup(spelling string) (Kind, bool) {
-	resource, group, dotted := strings.Cut(strings.ToLower(spelling), ".")
-	if !dotted {
-		return "", false
-	}
+// kubectl's grammar is resource[.version][.group] — its ParseResourceArg —
+// with the resource any of the kind's names (kindMap) in any case. Two dots
+// or more are read as resource.version.group first, as kubectl reads them,
+// then as resource.group; the core group is "" there, so pods.v1. and pods.
+// are the core group spelled out. Only in the kind's own group, for the
+// reason Qualified gives: Knative's services.serving.knative.dev is not a
+// Service. And a version only where kubectl reads one: nodes.v1 is a group
+// called v1 to kubectl, which refuses it.
+func builtinSpelling(spelling string) (Kind, bool) {
+	resource, qualifier, qualified := strings.Cut(strings.ToLower(spelling), ".")
 	kind, ok := kindMap[resource]
 	if !ok {
 		return "", false
 	}
-	if want, builtin := builtinGroups[kind]; !builtin || want != group || group == "" {
-		return "", false
+	if !qualified {
+		return kind, true
 	}
-	return kind, true
+	group := builtinGroups[kind]
+	if version, rest, versioned := strings.Cut(qualifier, "."); versioned &&
+		apiVersion.MatchString(version) && rest == group {
+		return kind, true
+	}
+	if qualifier == group {
+		return kind, true
+	}
+	return "", false
 }
 
 // Qualified maps the kind kubectl prefixes a row's name with, when a listing
@@ -323,13 +368,11 @@ func builtinInGroup(spelling string) (Kind, bool) {
 // kx already keeps certificates.cert-manager.io when that is what was typed.
 // The core group has no suffix to keep, so its spellings are normalised.
 func Qualified(spelling string) Kind {
-	resource, group, _ := strings.Cut(spelling, ".")
-	kind := Normalize(resource)
-	if want, builtin := builtinGroups[kind]; builtin && want == group {
+	if kind, ok := builtinSpelling(spelling); ok {
 		return kind
 	}
-	if group == "" {
-		return kind
+	if !strings.Contains(spelling, ".") {
+		return Normalize(spelling)
 	}
 	return Kind(spelling)
 }
@@ -383,19 +426,14 @@ func PluralDisplay(resourceType string) string {
 	if kind, _, named := strings.Cut(resourceType, "/"); named {
 		return PluralDisplay(kind)
 	}
-	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
+	if kind, ok := builtinSpelling(resourceType); ok {
 		if plural, ok := pluralDisplay[kind]; ok {
 			return plural
 		}
 		return string(kind) + "s"
 	}
-	if kind, ok := builtinInGroup(resourceType); ok {
-		return PluralDisplay(string(kind))
-	}
-	if shorthandSource != nil {
-		if kind, plural, ok := shorthandSource.Resolve(resourceType); ok && kind != "" {
-			return displayPlural(kind, plural)
-		}
+	if kind, plural, ok := discovered(resourceType); ok && kind != "" {
+		return displayPlural(kind, plural)
 	}
 	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
 	// It is still named by its canonical kind in captions and errors.

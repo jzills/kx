@@ -471,8 +471,14 @@ func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
 // The percentages are numbers, not the "12%" cells the table prints, and a
 // pointer so "not known" is null rather than zero — a pod with no limit set
 // has no percentage, and reporting that as 0% would read as idle.
+//
+// Pod is the pod a container's row belongs to under --containers, whose name
+// is the container's, as kubectl's POD and NAME columns say: the pod is what
+// the row's index resolves to and what --match matches. Absent for a row of
+// a pod or a node, which name names itself.
 type jsonTopRow struct {
 	Index     int    `json:"index,omitempty"`
+	Pod       string `json:"pod,omitempty"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 	CPU       string `json:"cpu"`
@@ -510,7 +516,7 @@ func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topD
 	converted := make([]jsonTopRow, 0, len(rows))
 	for _, row := range rows {
 		converted = append(converted, jsonTopRow{
-			Index: row.Index, Name: row.Name, Namespace: row.Namespace,
+			Index: row.Index, Pod: row.Pod, Name: row.Name, Namespace: row.Namespace,
 			CPU: row.CPU, Memory: row.Memory,
 			CPUPct: percentOf(row.CPUPct), MemoryPct: percentOf(row.MemPct),
 		})

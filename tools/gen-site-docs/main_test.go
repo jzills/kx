@@ -148,8 +148,11 @@ func TestSignatureMatchesTheREADMESpelling(t *testing.T) {
 		t.Fatal("no scale command registered")
 	}
 	// The [kubectl flags...] suffix is part of the spelling now: kx scale
-	// forwards kubectl's own flags, and the Use string says so.
-	if got, want := cmddoc.Signature(cmd), "kx scale <index> <replicas> [kubectl flags...]"; got != want {
+	// forwards kubectl's own flags, and the Use string says so. The two of
+	// them kx reads as well, which change what it prints, are registered and
+	// listed.
+	if got, want := cmddoc.Signature(cmd),
+		"kx scale <index> <replicas> [--dry-run str] [--output/-o str] [kubectl flags...]"; got != want {
 		t.Errorf("Signature() = %q, want %q", got, want)
 	}
 }

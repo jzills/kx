@@ -267,12 +267,13 @@ func newTopCommand(services Services) *cobra.Command {
 				render.Raw(document)
 				return nil
 			}
-			// As for kx get: printed, not saved, so there is no way back to offer.
 			if crossCluster != "" {
 				render.Caption(crossClusterCaption(crossCluster))
 			}
 			render.IndexedTable(output, resourceLabel, namespace)
-			if output.Empty() && crossCluster == "" {
+			// As for kx get (showListing): only a listing kx saved replaced
+			// one, so only under that is there a way back to offer.
+			if output.Empty() && !output.Unnumbered {
 				render.PreviousListingNote(previousListing(services))
 			}
 			if !htmlOpts.Enabled {

@@ -543,7 +543,7 @@ func TestWriteListingsRoundTripsToTheCLIsConfirm(t *testing.T) {
 	}
 
 	var prompted string
-	if _, err := (DeleteCommand{
+	if _, _, err := (DeleteCommand{
 		Kubectl: &recordingKubectl{},
 		State:   deps.State,
 		Confirm: func(message string) error { prompted = message; return nil },

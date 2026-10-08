@@ -79,6 +79,19 @@ func resourceIndex(headers []string, nameIdx int) int {
 	return nameIdx
 }
 
+// ResourceColumn is the position among headers of the column naming what an
+// index into a row resolves to — NAME, or POD where both appear (see
+// resourceIndex) — and -1 for headers with no NAME column. For a caller
+// reading rows the numbering already read, which has to agree with it about
+// which name a row stands for.
+func ResourceColumn(headers []string) int {
+	nameIdx := ColumnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return -1
+	}
+	return resourceIndex(headers, nameIdx)
+}
+
 // ParseHeader splits a kubectl header line into column names, and locates
 // the NAME/EVENT/NAMESPACE columns. Returns ok=false for a header with no
 // NAME column, the same "not indexable" signal parseOutput has always used.
@@ -375,6 +388,12 @@ type Table struct {
 	// names the term, since "none found" would say the namespace is empty
 	// when it may be full of resources the term did not match.
 	Match string
+	// Unnumbered marks output kx printed without making a listing of it —
+	// JSON, another cluster's table, a table whose rows it cannot place — so
+	// nothing was saved over the listing behind it. It matters once the
+	// output is empty: an empty listing kx saved replaced that one and says
+	// how to get back to it, while one it only printed replaced nothing.
+	Unnumbered bool
 }
 
 // Section is one table of a listing kubectl printed as several.
@@ -387,13 +406,6 @@ type Section struct {
 // Indexable reports whether the output parsed as a table kx could number.
 func (t Table) Indexable() bool { return t.Headers != nil }
 
-// Placed reports whether the entries record where they live.
-//
-// Only meaningful for a listing that spans namespaces, where it is the
-// difference between an index that resolves to one resource and an index that
-// resolves to whichever namespace the caller is standing in. False for an
-// ordinary single-namespace listing too — its table has no NAMESPACE column
-// either — so callers ask this only when they know the scope is -A.
 // Empty reports whether the table holds nothing to show — no indexable rows,
 // and no raw output to print instead.
 //
@@ -406,34 +418,6 @@ func (t Table) Empty() bool {
 		return strings.TrimSpace(t.Raw) == ""
 	}
 	return len(t.Rows) == 0
-}
-
-func (t Table) Placed() bool {
-	for _, entry := range t.Entries {
-		if entry.Namespace != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// Unnumbered renders the table as kubectl would have printed it, without the
-// index column — for a listing kx narrows by --match but does not number,
-// which is all a listing from another cluster gets.
-func (t Table) Unnumbered() string {
-	sections := t.Sections
-	if len(sections) == 0 {
-		sections = []Section{{Headers: t.Headers, Rows: t.Rows}}
-	}
-	tables := make([]string, 0, len(sections))
-	for _, section := range sections {
-		rows := make([][]string, 0, len(section.Rows)+1)
-		for _, row := range append([][]string{section.Headers}, section.Rows...) {
-			rows = append(rows, row[1:])
-		}
-		tables = append(tables, Format(rows))
-	}
-	return strings.Join(tables, "\n\n")
 }
 
 // Text renders the table back to padded text. Non-tabular output comes back
@@ -469,31 +453,20 @@ type Service struct{}
 // A thin parse in front of AddRows, so the text and rows entry points cannot
 // disagree about numbering, deduplication or which column is which.
 func (s Service) Add(output string) Table {
-	return s.AddMatching(output, "")
-}
-
-// AddMatching is Add narrowed to the rows whose name contains term, before
-// anything is numbered, so the indexes run 1..n over the rows on screen. A
-// table the term empties is dropped rather than drawn as a header over
-// nothing. An empty term keeps every row.
-func (s Service) AddMatching(output, term string) Table {
-	sections, ok := parseSections(output)
+	listing, ok := ParseListing(output)
 	if !ok {
-		// Carried even here, where there are no rows for it to narrow: a
-		// listing asked for with a term that found nothing at all is still
-		// captioned with it, as every other empty listing with one is.
-		return Table{Raw: output, Match: term}
+		return Table{Raw: output}
 	}
-	if term != "" {
-		for i := range sections {
-			sections[i].rows = FilterRows(sections[i].shape.Headers, sections[i].rows, term)
-		}
-	}
-	table := s.number(sections)
+	table := listing.Number()
 	table.Raw = output
-	table.Match = term
 	return table
 }
+
+// Parse is ParseListing, for a caller holding a Service.
+func (Service) Parse(output string) (Listing, bool) { return ParseListing(output) }
+
+// Stitch is ListingOf, for a caller holding a Service.
+func (Service) Stitch(tables []RawTable) (Listing, bool) { return ListingOf(tables) }
 
 // RawTable is one of kubectl's tables as parsed, before anything is numbered:
 // its header and the rows under it.
@@ -521,42 +494,143 @@ func ParseTables(output string) ([]RawTable, bool) {
 	return tables, true
 }
 
-// AddTables numbers tables already parsed as one listing, as Add numbers the
-// tables of one reply: the indexes run on from one into the next, and a table
-// left with no rows is dropped. A table with no NAME column numbers nothing.
-func (s Service) AddTables(tables []RawTable) Table {
+// Listing is kubectl table output parsed into its tables, and nothing more:
+// not narrowed, not numbered. Each of those is a step of its own, taken in
+// that order, so a listing kx prints without numbering is narrowed without
+// ever passing through the numbering.
+//
+// The two were one step. Numbering collapses a row that repeats an earlier
+// one — it has to, so that indexes stay one-to-one with saved state — and
+// output kx narrowed by numbering it lost every row that read like another:
+// kx get sa -A -o custom-columns=NAME:.metadata.name,UID:.metadata.uid -m
+// default printed one ServiceAccount where kubectl listed eight.
+//
+// Apart, what the reply says about itself — Placed, Names — can be read
+// before a term narrows it, which is where a caller deciding whether to
+// number it has to read it: the rows a term leaves are no evidence of the
+// shape kubectl replied in.
+type Listing struct {
+	sections []section
+}
+
+// ParseListing parses kubectl table output, reporting false for output that
+// is not a table: JSON, YAML, names, or a table with no NAME column.
+func ParseListing(output string) (Listing, bool) {
+	sections, ok := parseSections(output)
+	if !ok {
+		return Listing{}, false
+	}
+	return Listing{sections: sections}, true
+}
+
+// ListingOf is a Listing of tables already parsed — replies stitched together
+// — reporting false for none, or for one with no NAME column.
+func ListingOf(tables []RawTable) (Listing, bool) {
+	if len(tables) == 0 {
+		return Listing{}, false
+	}
 	sections := make([]section, 0, len(tables))
 	for _, table := range tables {
 		shape, ok := shapeOf(table.Headers)
 		if !ok {
-			return Table{}
+			return Listing{}, false
 		}
 		sections = append(sections, section{shape: shape, rows: table.Rows})
 	}
-	if len(sections) == 0 {
-		return Table{}
-	}
-	return s.number(sections)
+	return Listing{sections: sections}, true
 }
 
-// number numbers a listing's tables, dropping any with no rows rather than
+// Narrow keeps the rows whose name contains term, case-insensitively — every
+// such row, however alike two of them read (see FilterRows). An empty term
+// keeps them all.
+func (l Listing) Narrow(term string) Listing {
+	if term == "" {
+		return l
+	}
+	narrowed := make([]section, len(l.sections))
+	for i, section := range l.sections {
+		narrowed[i] = section
+		narrowed[i].rows = FilterRows(section.shape.Headers, section.rows, term)
+	}
+	return Listing{sections: narrowed}
+}
+
+// Placed reports whether the listing says where its rows live: some table
+// carries a NAMESPACE column. Under -A every table of a namespaced kind does,
+// and a cluster-scoped kind's has no namespace to carry, so a listing with
+// none at all is one whose shape left the column out — custom columns — and
+// an index into it could not say which namespace it meant.
+func (l Listing) Placed() bool {
+	for _, section := range l.sections {
+		if section.shape.NamespaceIdx >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Names is every row's name, in order: what an index into the row resolves
+// to (TableShape.ResourceIdx), kind prefix and all.
+func (l Listing) Names() []string {
+	var names []string
+	for _, section := range l.sections {
+		for _, row := range section.rows {
+			names = append(names, row[section.shape.ResourceIdx])
+		}
+	}
+	return names
+}
+
+// Empty reports whether no table holds a row.
+func (l Listing) Empty() bool {
+	for _, section := range l.sections {
+		if len(section.rows) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// Number numbers the listing's tables, dropping any with no rows rather than
 // drawing a header over nothing. When none has rows the listing is an empty
 // one under the first table's header, as one table filtered to nothing has
 // always been.
-func (s Service) number(sections []section) Table {
-	kept := sections[:0:0]
-	for _, section := range sections {
+func (l Listing) Number() Table {
+	kept := l.withRows()
+	if len(kept) == 0 {
+		if len(l.sections) == 0 {
+			return Table{}
+		}
+		kept = []section{{shape: l.sections[0].shape}}
+	}
+	if len(kept) == 1 {
+		return Service{}.AddRows(kept[0].shape.Headers, kept[0].rows)
+	}
+	return addSections(kept)
+}
+
+// Unnumbered lays the listing out as kubectl printed it, without an index
+// column: each table under its own header, a blank line between them, and a
+// table with no rows dropped. Every row is kept — nothing here numbers, so
+// nothing is collapsed.
+func (l Listing) Unnumbered() string {
+	kept := l.withRows()
+	tables := make([]string, 0, len(kept))
+	for _, section := range kept {
+		tables = append(tables, Format(append([][]string{section.shape.Headers}, section.rows...)))
+	}
+	return strings.Join(tables, "\n\n")
+}
+
+// withRows is the listing's tables that hold a row.
+func (l Listing) withRows() []section {
+	kept := make([]section, 0, len(l.sections))
+	for _, section := range l.sections {
 		if len(section.rows) > 0 {
 			kept = append(kept, section)
 		}
 	}
-	if len(kept) == 0 {
-		kept = []section{{shape: sections[0].shape}}
-	}
-	if len(kept) == 1 {
-		return s.AddRows(kept[0].shape.Headers, kept[0].rows)
-	}
-	return addSections(kept)
+	return kept
 }
 
 // addSections numbers several tables as one listing: the indexes run on from

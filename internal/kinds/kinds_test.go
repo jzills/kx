@@ -409,7 +409,7 @@ func TestNormalizeRecognisesABuiltinKindInItsOwnGroup(t *testing.T) {
 		"ingresses.networking.k8s.io":          Ingress,
 		"services.serving.knative.dev":         "services.serving.knative.dev",
 		"jobs.apps":                            "jobs.apps",
-		"deployments.v1.apps":                  "deployments.v1.apps",
+		"deployments.v1.apps":                  Deployment,
 		"certificates.cert-manager.io":         "certificates.cert-manager.io",
 	} {
 		if got := Normalize(spelling); got != want {
@@ -455,6 +455,150 @@ func TestCovers(t *testing.T) {
 	for _, c := range cases {
 		if got := Covers(c.resource, c.kind); got != c.want {
 			t.Errorf("Covers(%q, %q) = %v, want %v", c.resource, c.kind, got, c.want)
+		}
+	}
+}
+
+// kubectl's names for each kind kx names itself, as kubectl api-resources
+// lists them: plural, singular, short names, and the group and a version it
+// is served at ("" for the core group).
+var kubectlNames = []struct {
+	kind             Kind
+	plural, singular string
+	short            []string
+	group, version   string
+}{
+	{Pod, "pods", "pod", []string{"po"}, "", "v1"},
+	{Service, "services", "service", []string{"svc"}, "", "v1"},
+	{ConfigMap, "configmaps", "configmap", []string{"cm"}, "", "v1"},
+	{Secret, "secrets", "secret", nil, "", "v1"},
+	{PersistentVolumeClaim, "persistentvolumeclaims", "persistentvolumeclaim", []string{"pvc"}, "", "v1"},
+	{Node, "nodes", "node", []string{"no"}, "", "v1"},
+	{Namespace, "namespaces", "namespace", []string{"ns"}, "", "v1"},
+	{Deployment, "deployments", "deployment", []string{"deploy"}, "apps", "v1"},
+	{ReplicaSet, "replicasets", "replicaset", []string{"rs"}, "apps", "v1"},
+	{StatefulSet, "statefulsets", "statefulset", []string{"sts"}, "apps", "v1"},
+	{DaemonSet, "daemonsets", "daemonset", []string{"ds"}, "apps", "v1"},
+	{Job, "jobs", "job", nil, "batch", "v1"},
+	{CronJob, "cronjobs", "cronjob", []string{"cj"}, "batch", "v1"},
+	{HorizontalPodAutoscaler, "horizontalpodautoscalers", "horizontalpodautoscaler", []string{"hpa"}, "autoscaling", "v2"},
+	{Ingress, "ingresses", "ingress", []string{"ing"}, "networking.k8s.io", "v1"},
+}
+
+// Every spelling kubectl takes for a kind kx names itself reads as that
+// kind, everywhere kx reads one: kubectl's grammar is resource[.version]
+// [.group] (its ParseResourceArg), the resource any of the kind's names, and
+// the core group spelled out as "pods.v1." or "pods.". A spelling kx read as
+// unknown was saved as a kind of its own — kx get deployments.v1.apps saved
+// rows kx scale refused — and refused by the listing that produced it: kx get
+// deployments.v1.apps,svc 1 told the user to relist with the very command
+// that had just listed the row.
+//
+// No discovery source is installed here: these are kx's own kinds, and
+// reading them must not depend on whether kubectl's cache is warm.
+func TestEveryKubectlSpellingOfABuiltinKindReadsAsIt(t *testing.T) {
+	for _, names := range kubectlNames {
+		resources := append([]string{names.plural, names.singular, string(names.kind)}, names.short...)
+		var spellings []string
+		for _, resource := range resources {
+			spellings = append(spellings, resource,
+				resource+"."+names.version+"."+names.group,
+				strings.ToUpper(resource[:1])+resource[1:]+"."+names.version+"."+names.group)
+			if names.group != "" {
+				spellings = append(spellings, resource+"."+names.group)
+			} else {
+				spellings = append(spellings, resource+".")
+			}
+		}
+		for _, spelling := range spellings {
+			if got := Normalize(spelling); got != names.kind {
+				t.Errorf("Normalize(%q) = %q, want %s", spelling, got, names.kind)
+			}
+			if !IsKindSpelling(spelling) {
+				t.Errorf("IsKindSpelling(%q) = false, want the kx %s alias to take it", spelling, names.kind)
+			}
+			if got, want := PluralDisplay(spelling), pluralDisplay[names.kind]; got != want {
+				t.Errorf("PluralDisplay(%q) = %q, want %q", spelling, got, want)
+			}
+			if !Covers(spelling+",secrets", names.kind) {
+				t.Errorf("Covers(%q, %s) = false — the listing's own row refused", spelling+",secrets", names.kind)
+			}
+		}
+		// What kubectl prefixes each row of a listing of several kinds with.
+		prefix := names.singular
+		if names.group != "" {
+			prefix += "." + names.group
+		}
+		if got := Qualified(prefix); got != names.kind {
+			t.Errorf("Qualified(%q) = %q, want %s", prefix, got, names.kind)
+		}
+	}
+}
+
+// A spelling kubectl takes for another kind is not read as one of kx's: a
+// group other than the kind's own (Knative's services.serving.knative.dev),
+// or a version where kubectl reads a group (nodes.v1, which kubectl refuses
+// as a resource in a group called v1).
+func TestSpellingsOfOtherKindsAreNotReadAsBuiltins(t *testing.T) {
+	for _, spelling := range []string{
+		"services.serving.knative.dev", "services.v1.serving.knative.dev",
+		"nodes.v1", "deployments.v1.batch", "deployments.v1", "deployments.v1alpha1.apps.example.com",
+		"deployments.foo.apps",
+	} {
+		if got := Normalize(spelling); got != Kind(spelling) {
+			t.Errorf("Normalize(%q) = %q, want it left as typed", spelling, got)
+		}
+	}
+	if got := Qualified("service.serving.knative.dev"); got != "service.serving.knative.dev" {
+		t.Errorf("Qualified(Knative's Service) = %q, want it kept as written", got)
+	}
+}
+
+// A row saved under a kubectl spelling — by a listing taken before kx read
+// that spelling — is covered as the kind the spelling names.
+func TestCoversReadsTheRowsKindAsTheResourceIsRead(t *testing.T) {
+	if !Covers("deploy,svc", Kind("deployments.v1.apps")) {
+		t.Error("Covers(deploy,svc, deployments.v1.apps) = false, want the Deployment it names covered")
+	}
+	if Covers("deploy,svc", Kind("cronjobs.v1.batch")) {
+		t.Error("Covers(deploy,svc, cronjobs.v1.batch) = true, want the CronJob refused")
+	}
+}
+
+// discoveredSource knows only the resources it is given, by their exact
+// spelling, as kubectl's discovery cache does: a resource name, never a
+// resource.version.group spelling of one.
+type discoveredSource map[string]Kind
+
+func (d discoveredSource) Resolve(spelling string) (Kind, string, bool) {
+	kind, ok := d[spelling]
+	return kind, "", ok
+}
+
+func (discoveredSource) Namespaced(Kind) (bool, bool) { return false, false }
+
+// The core group spelled out — persistentvolumes. or persistentvolumes.v1. —
+// names the same resource as persistentvolumes, for a kind kx learns from
+// discovery as much as for one it names itself. Another group's resource of
+// the same name is not that kind, and is left as typed.
+func TestTheCoreGroupSpelledOutReadsAsTheDiscoveredKind(t *testing.T) {
+	SetShorthandSource(discoveredSource{"persistentvolumes": "PersistentVolume"})
+	defer SetShorthandSource(nil)
+
+	for _, spelling := range []string{"persistentvolumes.", "persistentvolumes.v1."} {
+		if got := Normalize(spelling); got != "PersistentVolume" {
+			t.Errorf("Normalize(%q) = %q, want PersistentVolume", spelling, got)
+		}
+		if !IsKindSpelling(spelling) {
+			t.Errorf("IsKindSpelling(%q) = false, want true", spelling)
+		}
+		if got := PluralDisplay(spelling); got != "PersistentVolumes" {
+			t.Errorf("PluralDisplay(%q) = %q, want PersistentVolumes", spelling, got)
+		}
+	}
+	for _, spelling := range []string{"persistentvolumes.example.com", "persistentvolumes.v1.example.com", "persistentvolumes.v1"} {
+		if got := Normalize(spelling); got != Kind(spelling) {
+			t.Errorf("Normalize(%q) = %q, want it left as typed", spelling, got)
 		}
 	}
 }

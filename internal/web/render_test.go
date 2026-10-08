@@ -1559,3 +1559,19 @@ func TestRenderDiagEventHeadWithoutASpanIsUnchanged(t *testing.T) {
 		t.Error("a single-occurrence event grew a span segment in the HTML")
 	}
 }
+
+// A container's row carries the pod it belongs to, which is what its index
+// resolves to, and the page's grid data keeps it.
+func TestRenderTopCarriesTheContainersPod(t *testing.T) {
+	out, err := RenderTop(TopPage{
+		Meta: testMeta(t), Scope: "Pods · prod",
+		Rows: []TopRow{{Index: 1, Pod: "web-1", Name: "nginx", CPU: "1m", Memory: "10Mi"}},
+	})
+	if err != nil {
+		t.Fatalf("RenderTop returned %v", err)
+	}
+	rows := decodeTopRows(t, string(out))
+	if len(rows) != 1 || rows[0].Pod != "web-1" || rows[0].Name != "nginx" {
+		t.Fatalf("rows = %+v, want pod web-1 beside container nginx", rows)
+	}
+}

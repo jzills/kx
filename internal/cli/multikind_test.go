@@ -357,25 +357,53 @@ func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumbered(t *test
 // captioned as the kind it is. Saved as "deployments.apps", the rows were
 // refused by kx scale and kx rollout as an unsupported kind.
 func TestGetAGroupQualifiedKindSavesTheKind(t *testing.T) {
-	kube := &fakeKubectl{
-		output:    "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           3d\n",
-		namespace: "prod",
+	// The version-qualified spelling too, which kubectl reads first.
+	for _, spelling := range []string{"deployments.apps", "deployments.v1.apps", "deploy.v1.apps"} {
+		t.Run(spelling, func(t *testing.T) {
+			kube := &fakeKubectl{
+				output:    "NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    2/2     2            2           3d\n",
+				namespace: "prod",
+			}
+			services := switchServices(t, kube)
+			var out bytes.Buffer
+			render.SetOutput(&out, &out, "github-dark")
+			if err := runGet(services, spelling, nil, getOptions{}); err != nil {
+				t.Fatalf("runGet: %v", err)
+			}
+			name, _, kind, err := services.State.Fields(1)
+			if err != nil || name != "web" || kind != kinds.Deployment {
+				t.Errorf("index 1 = %s/%s (err %v), want Deployment/web", kind, name, err)
+			}
+			if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
+				t.Errorf("output = %q, want it captioned as Deployments", out.String())
+			}
+			if _, _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
+				t.Errorf("kx scale refused the row: %v", err)
+			}
+		})
 	}
+}
+
+// A row of a listing of several kinds is fetched by the resource that listed
+// it, however kubectl let that resource be spelled. kx get
+// deployments.v1.apps,svc 1 was refused as a row 'deployments.v1.apps,svc'
+// does not include, and the refusal's advice was to relist with the same
+// command, which listed the same row again.
+func TestGetSeveralKindsByIndexUnderAVersionedSpelling(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		deploySvcOutput,
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+	}, namespace: "prod"}
 	services := switchServices(t, kube)
-	var out bytes.Buffer
-	render.SetOutput(&out, &out, "github-dark")
-	if err := runGet(services, "deployments.apps", nil, getOptions{}); err != nil {
-		t.Fatalf("runGet: %v", err)
+	quietRender(t)
+	if err := runGet(services, "deployments.v1.apps,svc", nil, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
 	}
-	name, _, kind, err := services.State.Fields(1)
-	if err != nil || name != "web" || kind != kinds.Deployment {
-		t.Errorf("index 1 = %s/%s (err %v), want Deployment/web", kind, name, err)
+	if err := runGet(services, "deployments.v1.apps,svc", []string{"1"}, getOptions{}); err != nil {
+		t.Fatalf("kx get deployments.v1.apps,svc 1: %v", err)
 	}
-	if !strings.HasPrefix(out.String(), "Deployments · prod · 1 item") {
-		t.Errorf("output = %q, want it captioned as Deployments", out.String())
-	}
-	if _, _, err := (ScaleCommand{Kubectl: kube, State: services.State}).Execute(state.Ref{Index: 1}, 3, nil); err != nil {
-		t.Errorf("kx scale refused the row: %v", err)
+	if got := joinArgs(kube.calls[len(kube.calls)-1]); got != "get Deployment api -n prod" {
+		t.Errorf("kubectl %q, want the Deployment fetched", got)
 	}
 }
 
@@ -456,5 +484,70 @@ func TestGetSeveralKindsRefusesAMarkItDoesNotList(t *testing.T) {
 	want := "@db is Secret/creds, which 'all' does not include — run 'kx get secrets @db' to fetch it."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// Stitched across namespaces and printed unnumbered, rows of two kinds that
+// share a name in one namespace are both kept. Rendered from the numbered
+// listing, the Service named web was collapsed into the Deployment named web
+// before it: without --show-kind, neither name says which kind it is.
+func TestGetSeveralKindsByIndexAcrossNamespacesKeepsSameNamedRows(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/web   1/1     1            1           5d\n" +
+			"stage       deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"prod        service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\nweb    1/1     1            1           5d\n" +
+			"\n" +
+			"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	var out bytes.Buffer
+	render.SetOutput(&out, &out, "github-dark")
+	if err := runGet(services, "all", []string{"1", "2", "3", "--show-kind=false"}, getOptions{}); err != nil {
+		t.Fatalf("kx get all 1 2 3 --show-kind=false: %v", err)
+	}
+	if !strings.Contains(out.String(), "10.0.0.12") {
+		t.Errorf("output = %q, want the Service named web beside the Deployment named web", out.String())
+	}
+	if strings.Count(out.String(), "web") != 2 {
+		t.Errorf("output = %q, want both rows named web", out.String())
+	}
+}
+
+// Stitched rows of several kinds that name no kind are printed unnumbered
+// whatever the term: one that matched none of them left no row to find
+// bare, so the fetch was saved — empty, over the -A listing its indexes came
+// from — where a term that matched one was printed and left that listing
+// current.
+func TestGetSeveralKindsByIndexAcrossNamespacesWithoutKindsIsNotNumberedUnderATerm(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+			"prod        deployment.apps/api   1/1     1            1           5d\n" +
+			"\n" +
+			"NAMESPACE   NAME          TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n" +
+			"stage       service/web   ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+		"NAME   READY   UP-TO-DATE   AVAILABLE   AGE\napi    1/1     1            1           5d\n",
+		"NAME   TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\nweb    ClusterIP   10.0.0.12    <none>        80/TCP    3d\n",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "all", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+	if err := runGet(services, "all", []string{"1", "2", "--show-kind=false"},
+		getOptions{Match: "nothing-is-called-this"}); err != nil {
+		t.Fatalf("kx get all 1 2 --show-kind=false -m nothing-is-called-this: %v", err)
+	}
+	name, namespace, kind, err := services.State.Fields(1)
+	if err != nil || name != "api" || kind != kinds.Deployment || namespace != "prod" {
+		t.Errorf("index 1 = %s/%s in %s (err %v), want the -A listing still current", kind, name, namespace, err)
 	}
 }
