@@ -388,6 +388,12 @@ type Table struct {
 	// names the term, since "none found" would say the namespace is empty
 	// when it may be full of resources the term did not match.
 	Match string
+	// Unnumbered marks output kx printed without making a listing of it —
+	// JSON, another cluster's table, a table whose rows it cannot place — so
+	// nothing was saved over the listing behind it. It matters once the
+	// output is empty: an empty listing kx saved replaced that one and says
+	// how to get back to it, while one it only printed replaced nothing.
+	Unnumbered bool
 }
 
 // Section is one table of a listing kubectl printed as several.
@@ -400,13 +406,6 @@ type Section struct {
 // Indexable reports whether the output parsed as a table kx could number.
 func (t Table) Indexable() bool { return t.Headers != nil }
 
-// Placed reports whether the entries record where they live.
-//
-// Only meaningful for a listing that spans namespaces, where it is the
-// difference between an index that resolves to one resource and an index that
-// resolves to whichever namespace the caller is standing in. False for an
-// ordinary single-namespace listing too — its table has no NAMESPACE column
-// either — so callers ask this only when they know the scope is -A.
 // Empty reports whether the table holds nothing to show — no indexable rows,
 // and no raw output to print instead.
 //
@@ -419,15 +418,6 @@ func (t Table) Empty() bool {
 		return strings.TrimSpace(t.Raw) == ""
 	}
 	return len(t.Rows) == 0
-}
-
-func (t Table) Placed() bool {
-	for _, entry := range t.Entries {
-		if entry.Namespace != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // Text renders the table back to padded text. Non-tabular output comes back
@@ -463,26 +453,20 @@ type Service struct{}
 // A thin parse in front of AddRows, so the text and rows entry points cannot
 // disagree about numbering, deduplication or which column is which.
 func (s Service) Add(output string) Table {
-	return s.AddMatching(output, "")
-}
-
-// AddMatching is Add narrowed to the rows whose name contains term, before
-// anything is numbered, so the indexes run 1..n over the rows on screen. A
-// table the term empties is dropped rather than drawn as a header over
-// nothing. An empty term keeps every row.
-func (s Service) AddMatching(output, term string) Table {
 	listing, ok := ParseListing(output)
 	if !ok {
-		// Carried even here, where there are no rows for it to narrow: a
-		// listing asked for with a term that found nothing at all is still
-		// captioned with it, as every other empty listing with one is.
-		return Table{Raw: output, Match: term}
+		return Table{Raw: output}
 	}
-	table := listing.Narrow(term).Number()
+	table := listing.Number()
 	table.Raw = output
-	table.Match = term
 	return table
 }
+
+// Parse is ParseListing, for a caller holding a Service.
+func (Service) Parse(output string) (Listing, bool) { return ParseListing(output) }
+
+// Stitch is ListingOf, for a caller holding a Service.
+func (Service) Stitch(tables []RawTable) (Listing, bool) { return ListingOf(tables) }
 
 // RawTable is one of kubectl's tables as parsed, before anything is numbered:
 // its header and the rows under it.
@@ -510,17 +494,6 @@ func ParseTables(output string) ([]RawTable, bool) {
 	return tables, true
 }
 
-// AddTables numbers tables already parsed as one listing, as Add numbers the
-// tables of one reply: the indexes run on from one into the next, and a table
-// left with no rows is dropped. A table with no NAME column numbers nothing.
-func (s Service) AddTables(tables []RawTable) Table {
-	listing, ok := ListingOf(tables)
-	if !ok {
-		return Table{}
-	}
-	return listing.Number()
-}
-
 // Listing is kubectl table output parsed into its tables, and nothing more:
 // not narrowed, not numbered. Each of those is a step of its own, taken in
 // that order, so a listing kx prints without numbering is narrowed without
@@ -531,6 +504,11 @@ func (s Service) AddTables(tables []RawTable) Table {
 // output kx narrowed by numbering it lost every row that read like another:
 // kx get sa -A -o custom-columns=NAME:.metadata.name,UID:.metadata.uid -m
 // default printed one ServiceAccount where kubectl listed eight.
+//
+// Apart, what the reply says about itself — Placed, Names — can be read
+// before a term narrows it, which is where a caller deciding whether to
+// number it has to read it: the rows a term leaves are no evidence of the
+// shape kubectl replied in.
 type Listing struct {
 	sections []section
 }
@@ -575,6 +553,32 @@ func (l Listing) Narrow(term string) Listing {
 		narrowed[i].rows = FilterRows(section.shape.Headers, section.rows, term)
 	}
 	return Listing{sections: narrowed}
+}
+
+// Placed reports whether the listing says where its rows live: some table
+// carries a NAMESPACE column. Under -A every table of a namespaced kind does,
+// and a cluster-scoped kind's has no namespace to carry, so a listing with
+// none at all is one whose shape left the column out — custom columns — and
+// an index into it could not say which namespace it meant.
+func (l Listing) Placed() bool {
+	for _, section := range l.sections {
+		if section.shape.NamespaceIdx >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Names is every row's name, in order: what an index into the row resolves
+// to (TableShape.ResourceIdx), kind prefix and all.
+func (l Listing) Names() []string {
+	var names []string
+	for _, section := range l.sections {
+		for _, row := range section.rows {
+			names = append(names, row[section.shape.ResourceIdx])
+		}
+	}
+	return names
 }
 
 // Empty reports whether no table holds a row.

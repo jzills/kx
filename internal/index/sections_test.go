@@ -81,20 +81,47 @@ func TestAddPlacesEveryTableOfASpanningListing(t *testing.T) {
 // --match narrows each table, drops a table it empties rather than printing
 // its header over nothing, and matches the name, not the kind in front of it:
 // "app" is in every "deployment.apps/…".
-func TestAddMatchingNarrowsEachTableByName(t *testing.T) {
-	table := Service{}.AddMatching(multiKindOutput, "web")
+func TestListingNarrowNarrowsEachTableByName(t *testing.T) {
+	listing, ok := ParseListing(multiKindOutput)
+	if !ok {
+		t.Fatal("ParseListing refused a listing of several kinds")
+	}
+	table := listing.Narrow("web").Number()
 	if got := entryNames(table.Entries); fmt.Sprint(got) != fmt.Sprint([]string{"deployment.apps/web"}) {
 		t.Errorf("entries = %q, want deployment.apps/web alone", got)
 	}
 	if len(table.Sections) > 1 {
 		t.Errorf("kept %d sections, want the emptied Service table dropped", len(table.Sections))
 	}
-	if table.Match != "web" {
-		t.Errorf("Match = %q, want the term", table.Match)
+
+	if table := listing.Narrow("app").Number(); len(table.Entries) != 0 {
+		t.Errorf("'app' matched %q through the apps group in the kind prefix", entryNames(table.Entries))
+	}
+}
+
+// What a reply says about itself is read off the whole of it, whatever a
+// term would leave: Placed from its NAMESPACE columns, Names from every row.
+func TestListingPlacedAndNamesReadTheWholeReply(t *testing.T) {
+	spanning, _ := ParseListing("NAME                    STATUS   AGE\n" +
+		"namespace/kube-public   Active   9d\n" +
+		"\n" +
+		"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+		"prod        deployment.apps/api   1/1     1            1           5d\n")
+	if !spanning.Placed() || !spanning.Narrow("kube-public").Placed() {
+		t.Error("Placed() = false for a listing whose Deployments carry a NAMESPACE column")
+	}
+	unplaced, _ := ParseListing("NAME\nnginx-abc-xyz\nredis-def-uvw\n")
+	if unplaced.Placed() {
+		t.Error("Placed() = true for a listing with no NAMESPACE column")
 	}
 
-	if table := (Service{}).AddMatching(multiKindOutput, "app"); len(table.Entries) != 0 {
-		t.Errorf("'app' matched %q through the apps group in the kind prefix", entryNames(table.Entries))
+	listing, _ := ParseListing(multiKindOutput)
+	if got, want := listing.Names(), []string{"deployment.apps/api", "deployment.apps/web", "service/api"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("Names() = %q, want %q", got, want)
+	}
+	containers, _ := ParseListing("POD     NAME    CPU(cores)\napi-1   envoy   1m\napi-1   api     3m\n")
+	if got := containers.Names(); fmt.Sprint(got) != fmt.Sprint([]string{"api-1", "api-1"}) {
+		t.Errorf("Names() = %q under --containers, want the pod of each row", got)
 	}
 }
 
@@ -118,11 +145,19 @@ func TestParseTablesKeepsEachTableApart(t *testing.T) {
 	}
 }
 
-// AddTables numbers several tables as one listing, the indexes running on
-// from one into the next, and drops a table with no rows left rather than
-// drawing a header over nothing.
-func TestAddTablesNumbersOnAndDropsAnEmptyTable(t *testing.T) {
-	table := Service{}.AddTables([]RawTable{
+// A listing of tables stitched together numbers on from one table into the
+// next, and drops a table with no rows rather than drawing a header over
+// nothing.
+func TestListingOfNumbersOnAndDropsAnEmptyTable(t *testing.T) {
+	number := func(tables []RawTable) Table {
+		t.Helper()
+		listing, ok := ListingOf(tables)
+		if !ok {
+			t.Fatalf("ListingOf refused %v", tables)
+		}
+		return listing.Number()
+	}
+	table := number([]RawTable{
 		{Headers: []string{"NAME", "READY"}, Rows: [][]string{{"deployment.apps/api", "1/1"}}},
 		{Headers: []string{"NAME", "DATA"}},
 		{Headers: []string{"NAME", "TYPE"}, Rows: [][]string{{"service/api", "ClusterIP"}}},
@@ -137,12 +172,12 @@ func TestAddTablesNumbersOnAndDropsAnEmptyTable(t *testing.T) {
 		t.Errorf("entries = %q, want %q", got, want)
 	}
 
-	one := Service{}.AddTables([]RawTable{{Headers: []string{"NAME", "READY"}, Rows: [][]string{{"api", "1/1"}}}})
+	one := number([]RawTable{{Headers: []string{"NAME", "READY"}, Rows: [][]string{{"api", "1/1"}}}})
 	if one.Sections != nil || len(one.Rows) != 1 {
 		t.Errorf("one table = %+v, want an ordinary listing", one)
 	}
 
-	none := Service{}.AddTables([]RawTable{{Headers: []string{"NAME", "READY"}}, {Headers: []string{"NAME", "TYPE"}}})
+	none := number([]RawTable{{Headers: []string{"NAME", "READY"}}, {Headers: []string{"NAME", "TYPE"}}})
 	if !none.Indexable() || !none.Empty() {
 		t.Errorf("all tables empty = %+v, want an empty listing under the first header", none)
 	}

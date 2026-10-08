@@ -95,7 +95,9 @@ func (c TopCommand) Execute(
 	// resources found" goes to stderr — and that is saved below like any other
 	// listing, so the indexes it replaces stop resolving.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)
@@ -204,7 +206,9 @@ func (c TopCommand) ExecuteNodes(
 	// Empty output is a listing that found nothing and is saved; anything else
 	// kx cannot number prints as-is. See Execute.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)

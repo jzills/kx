@@ -325,19 +325,18 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if err != nil {
 		return nil, listOutput{}, err
 	}
-	table := index.Service{}.AddMatching(output, in.Match)
-	if !table.Indexable() && strings.TrimSpace(output) != "" {
+	listing, tabular := index.ParseListing(output)
+	if !tabular && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
+	table := listing.Narrow(in.Match).Number()
 
-	// Saved as `kx get <kind>` saves it, and under the same rules: an empty
-	// listing is saved, since it is the listing now, and an -A table whose rows
-	// cannot be placed is not — GetCommand prints that one unnumbered, and an
-	// index into it would resolve in whatever namespace the user stands in.
-	indexed := d.indexed()
-	if indexed && in.AllNamespaces && len(table.Entries) > 0 && !table.Placed() {
-		indexed = false
-	}
+	// Saved as `kx get <kind>` saves it, and under the same rules (numberable,
+	// read off the whole reply): an empty listing is saved, since it is the
+	// listing now, and an -A table whose rows cannot be placed is not —
+	// GetCommand prints that one unnumbered, and an index into it would
+	// resolve in whatever namespace the user stands in.
+	indexed := d.indexed() && numberable(listing, in.Kind, args[2:])
 	if indexed {
 		if err := d.listingSave(current)(getListing(in.Kind, in.Match, args[2:], namespace, table.Entries)); err != nil {
 			return nil, listOutput{}, err

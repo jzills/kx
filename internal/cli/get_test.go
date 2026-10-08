@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -109,7 +111,7 @@ func TestGetIndexesOutputAndSavesState(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.HasPrefix(strings.Split(output.Text(), "\n")[0], "X") {
-		t.Errorf("output is not indexed:\n%s", output)
+		t.Errorf("output is not indexed:\n%s", output.Text())
 	}
 	if len(states.saved) != 1 {
 		t.Fatalf("len(saved) = %d, want 1", len(states.saved))
@@ -190,7 +192,7 @@ func TestGetAllNamespacesIsIndexed(t *testing.T) {
 			t.Fatalf("Execute: %v", err)
 		}
 		if !strings.HasPrefix(output.Text(), "X") {
-			t.Errorf("%s output was not indexed:\n%s", flag, output)
+			t.Errorf("%s output was not indexed:\n%s", flag, output.Text())
 		}
 		if len(states.saved) != 1 {
 			t.Fatalf("%s saved %d entries, want 1", flag, len(states.saved))
@@ -307,37 +309,89 @@ func TestGetAllNamespacesWithoutANamespaceColumnIsNotIndexed(t *testing.T) {
 // An -A listing printed unnumbered is still narrowed by --match, as every
 // other listing kx prints but does not number is. Returned as kubectl gave
 // it, kx get pods -A -o custom-columns=NAME:.metadata.name -m redis printed
-// every pod; so did kx get ns,deploy -A -m kube-public, whose one matching row
-// is a Namespace and carries none.
+// every pod.
 func TestGetAllNamespacesWithoutANamespaceColumnIsStillMatched(t *testing.T) {
+	states := &fakeState{}
+	table, _, err := newGet(&fakeKubectl{output: "NAME\nnginx-abc-xyz\nredis-def-uvw\n"}, states).Execute(
+		"pods", "redis", []string{"-A"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if table.Indexable() || len(states.saved) != 0 {
+		t.Fatalf("numbered or saved a listing it cannot place:\n%s", table.Text())
+	}
+	if text := table.Text(); !strings.Contains(text, "redis-def-uvw") || strings.Contains(text, "nginx-abc-xyz") {
+		t.Errorf("output = %q, want redis kept and nginx narrowed away", text)
+	}
+}
+
+// An -A reply with no rows has nothing to place, so it is an empty listing
+// like any other, saved: kubectl prints custom columns' header over no rows
+// at all, and a listing that found nothing must retire the indexes before it.
+func TestGetAllNamespacesWithoutANamespaceColumnFindingNothingIsSaved(t *testing.T) {
+	states := &fakeState{}
+	table, _, err := newGet(&fakeKubectl{output: "NAME\n"}, states).Execute(
+		"pods", "", []string{"-A", "-o", "custom-columns=NAME:.metadata.name"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !table.Empty() || table.Unnumbered {
+		t.Errorf("table = %+v, want an empty listing kx made", table)
+	}
+	if len(states.saved) != 1 || states.saved[0].Resources.Len() != 0 {
+		t.Errorf("saved %v, want one empty listing", states.saved)
+	}
+}
+
+// Whether kx numbers a listing is a fact about kubectl's reply, not about
+// the term: the same command is numbered and saved, or printed unnumbered and
+// not, alike with -m and without. Decided from the rows the term left, it
+// was not. kx get pods -A -o custom-columns=NAME:.metadata.name -m zzz left
+// no row to find unplaced, so it was saved — empty, over the listing behind
+// it — where -m redis left that listing alone; and kx get ns,deploy -A -m
+// kube-public, whose one matching row is a Namespace and so carries no
+// namespace, was printed unnumbered where kx get ns,deploy -A was numbered.
+func TestGetNumbersAListingAlikeWithAndWithoutATerm(t *testing.T) {
 	for _, tc := range []struct {
+		name     string
 		resource string
+		args     []string
 		output   string
 		term     string
-		keep     string
-		drop     string
 	}{
-		{"pods", "NAME\nnginx-abc-xyz\nredis-def-uvw\n", "redis", "redis-def-uvw", "nginx-abc-xyz"},
-		{"ns,deploy", "NAME                 STATUS   AGE\n" +
-			"namespace/default    Active   9d\n" +
-			"namespace/kube-public   Active   9d\n" +
-			"\n" +
-			"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
-			"prod        deployment.apps/api   1/1     1            1           5d\n",
-			"kube-public", "namespace/kube-public", "deployment.apps/api"},
+		{"-A without a NAMESPACE column", "pods",
+			[]string{"-A", "-o", "custom-columns=NAME:.metadata.name"},
+			"NAME\nnginx-abc-xyz\nredis-def-uvw\n", "redis"},
+		{"-A of a cluster-scoped kind beside a namespaced one", "ns,deploy", []string{"-A"},
+			"NAME                    STATUS   AGE\n" +
+				"namespace/default       Active   9d\n" +
+				"namespace/kube-public   Active   9d\n" +
+				"\n" +
+				"NAMESPACE   NAME                  READY   UP-TO-DATE   AVAILABLE   AGE\n" +
+				"prod        deployment.apps/api   1/1     1            1           5d\n",
+			"kube-public"},
+		{"several kinds without kinds in the names", "deploy,svc",
+			[]string{"-o", "custom-columns=NAME:.metadata.name"},
+			"NAME\napi\nweb\napi\n", "web"},
+		{"several kinds named kind/name", "deploy,svc", nil, deploySvcOutput, "web"},
+		{"one kind", "pods", nil, podsOutput, "redis"},
 	} {
-		t.Run(tc.resource, func(t *testing.T) {
-			states := &fakeState{}
-			table, _, err := newGet(&fakeKubectl{output: tc.output}, states).Execute(
-				tc.resource, tc.term, []string{"-A"})
-			if err != nil {
-				t.Fatalf("Execute: %v", err)
+		t.Run(tc.name, func(t *testing.T) {
+			execute := func(term string) (numbered, saved bool) {
+				states := &fakeState{}
+				table, _, err := newGet(&fakeKubectl{output: tc.output, namespace: "prod"}, states).
+					Execute(tc.resource, term, tc.args)
+				if err != nil {
+					t.Fatalf("Execute(-m %q): %v", term, err)
+				}
+				return table.Indexable(), len(states.saved) > 0
 			}
-			if table.Indexable() || len(states.saved) != 0 {
-				t.Fatalf("numbered or saved a listing it cannot place:\n%s", table.Text())
-			}
-			if text := table.Text(); !strings.Contains(text, tc.keep) || strings.Contains(text, tc.drop) {
-				t.Errorf("output = %q, want %q kept and %q narrowed away", text, tc.keep, tc.drop)
+			numbered, saved := execute("")
+			for _, term := range []string{tc.term, "nothing-is-called-this"} {
+				if gotNumbered, gotSaved := execute(term); gotNumbered != numbered || gotSaved != saved {
+					t.Errorf("-m %s: numbered %v, saved %v; without a term numbered %v, saved %v",
+						term, gotNumbered, gotSaved, numbered, saved)
+				}
 			}
 		})
 	}
@@ -406,7 +460,7 @@ func TestGetFiltersByMatchTerm(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if strings.Contains(output.Text(), "redis") {
-		t.Errorf("filtered output still contains redis:\n%s", output)
+		t.Errorf("filtered output still contains redis:\n%s", output.Text())
 	}
 	if names := states.saved[0].Names(); len(names) != 1 || names[0] != "nginx-abc-xyz" {
 		t.Errorf("saved names = %v, want only the matching pod", names)
@@ -722,6 +776,48 @@ func TestGetUnnumberedListingKeepsEveryMatchingRow(t *testing.T) {
 			}
 			if strings.Contains(text, tc.drop) {
 				t.Errorf("output kept %q, which the term does not match:\n%s", tc.drop, text)
+			}
+		})
+	}
+}
+
+// An empty listing kx saved replaced the one behind it, and says how to get
+// back to that one. One it printed unnumbered — a term that matched none of
+// an -A table it cannot place, or of several kinds that name none — saved
+// nothing and replaced nothing, so it offers no way back: "'kx state back'
+// returns to Services" under it named the entry behind the Deployments that
+// were still current.
+func TestGetUnnumberedListingTheTermEmptiedOffersNoWayBack(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resource string
+		args     []string
+		output   string
+	}{
+		{"-A without a NAMESPACE column", "pods",
+			[]string{"-A", "-o", "custom-columns=NAME:.metadata.name"}, "NAME\nnginx-abc-xyz\n"},
+		{"several kinds without kinds in the names", "deploy,svc",
+			[]string{"-o", "custom-columns=NAME:.metadata.name"}, "NAME\napi\nweb\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &fakeKubectl{namespace: "prod"}
+			services := switchServices(t, kube)
+			saveListing(t, services, kinds.Service, "prod", false, "api")
+			saveListing(t, services, kinds.Deployment, "prod", false, "web")
+			kube.output = tc.output
+			var out bytes.Buffer
+			render.SetOutput(&out, &out, "github-dark")
+			if err := runGet(services, tc.resource, tc.args, getOptions{Match: "nothing-is-called-this"}); err != nil {
+				t.Fatalf("runGet: %v", err)
+			}
+			if !strings.Contains(out.String(), "nothing matches") {
+				t.Errorf("output = %q, want the empty listing named by its term", out.String())
+			}
+			if strings.Contains(out.String(), "kx state back") {
+				t.Errorf("output = %q, want no way back offered from a listing that replaced nothing", out.String())
+			}
+			if name, _, kind, err := services.State.Fields(1); err != nil || name != "web" || kind != kinds.Deployment {
+				t.Errorf("index 1 = %s/%s (err %v), want the Deployments still current", kind, name, err)
 			}
 		})
 	}

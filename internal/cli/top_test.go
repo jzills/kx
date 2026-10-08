@@ -155,10 +155,10 @@ func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 		t.Errorf("namespace = %q, want empty — a Node is not in a namespace", namespace)
 	}
 	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
-		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output)
+		t.Errorf("output = %q, want relabeled CPU%%/MEM%% headers", output.Text())
 	}
 	if strings.Contains(output.Text(), "CPU(%)") || strings.Contains(output.Text(), "MEMORY(%)") {
-		t.Errorf("output = %q, want kubectl's native (%%) headers gone", output)
+		t.Errorf("output = %q, want kubectl's native (%%) headers gone", output.Text())
 	}
 	if len(states.saved) != 1 {
 		t.Fatalf("saved %d state entries, want 1", len(states.saved))
@@ -181,10 +181,10 @@ func TestExecuteNodesFiltersByMatchTerm(t *testing.T) {
 		t.Fatalf("ExecuteNodes: %v", err)
 	}
 	if !strings.Contains(output.Text(), "node-a") {
-		t.Errorf("output = %q, want node-a", output)
+		t.Errorf("output = %q, want node-a", output.Text())
 	}
 	if strings.Contains(output.Text(), "node-b") {
-		t.Errorf("output = %q, want node-b filtered out", output)
+		t.Errorf("output = %q, want node-b filtered out", output.Text())
 	}
 	if len(states.saved) != 1 {
 		t.Fatalf("saved %d state entries, want 1", len(states.saved))
@@ -444,11 +444,11 @@ func TestTopAppendsUsagePercentages(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if !strings.Contains(output.Text(), "CPU%") || !strings.Contains(output.Text(), "MEM%") {
-		t.Fatalf("output has no percentage columns:\n%s", output)
+		t.Fatalf("output has no percentage columns:\n%s", output.Text())
 	}
 	// web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
 	if !strings.Contains(output.Text(), "1%") || !strings.Contains(output.Text(), "50%") {
-		t.Errorf("web-1 percentages are wrong:\n%s", output)
+		t.Errorf("web-1 percentages are wrong:\n%s", output.Text())
 	}
 }
 
@@ -486,7 +486,7 @@ func TestTopNoLimitsSkipsTheLimitsCall(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if strings.Contains(output.Text(), "CPU%") {
-		t.Errorf("--no-limits still added percentage columns:\n%s", output)
+		t.Errorf("--no-limits still added percentage columns:\n%s", output.Text())
 	}
 	if len(kubectl.calls) != 1 {
 		t.Errorf("made %d kubectl calls, want 1", len(kubectl.calls))
@@ -502,7 +502,7 @@ func TestTopContainersFlagSkipsPercentages(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if strings.Contains(output.Text(), "CPU%") {
-		t.Errorf("--containers still added percentage columns:\n%s", output)
+		t.Errorf("--containers still added percentage columns:\n%s", output.Text())
 	}
 }
 
@@ -525,7 +525,7 @@ func TestTopAllNamespacesIsIndexed(t *testing.T) {
 
 	headers, _, _ := index.ParseTable(output.Text())
 	if index.ColumnIndex(headers, "X") < 0 {
-		t.Errorf("-A output was not indexed:\n%s", output)
+		t.Errorf("-A output was not indexed:\n%s", output.Text())
 	}
 	if len(states.saved) != 1 {
 		t.Fatalf("saved %d entries, want 1", len(states.saved))
@@ -564,14 +564,14 @@ func TestTopAllNamespacesGetsPercentagesKeyedByNamespace(t *testing.T) {
 	}
 	// prod/web-1: 5m of 500m = 1%, 64Mi of 128Mi = 50%.
 	if !strings.Contains(output.Text(), "1%") || !strings.Contains(output.Text(), "50%") {
-		t.Errorf("output missing prod/web-1's percentages:\n%s", output)
+		t.Errorf("output missing prod/web-1's percentages:\n%s", output.Text())
 	}
 	// staging/web-1: 3m of 500m = 0%, 32Mi of 256Mi = 12%. Same pod name,
 	// different namespace, different limits — proves the lookup is keyed
 	// by namespace, not just name (bare-name keying would give both rows
 	// whichever limit was inserted into the map last).
 	if !strings.Contains(output.Text(), "12%") {
-		t.Errorf("output missing staging/web-1's own percentage (12%%), got same as prod's — composite key not applied:\n%s", output)
+		t.Errorf("output missing staging/web-1's own percentage (12%%), got same as prod's — composite key not applied:\n%s", output.Text())
 	}
 	if joinArgs(kubectl.calls[1]) != "get pods -A -o json" {
 		t.Errorf("limits call = %q, want \"get pods -A -o json\"", joinArgs(kubectl.calls[1]))
@@ -591,7 +591,7 @@ func TestTopAllNamespacesNoLimitsStillSkipsPercentages(t *testing.T) {
 	// that fills them.
 	headers, _, _ := index.ParseTable(output.Text())
 	if index.ColumnIndex(headers, "CPU%") >= 0 || index.ColumnIndex(headers, "MEM%") >= 0 {
-		t.Errorf("--no-limits -A gained percentage columns:\n%s", output)
+		t.Errorf("--no-limits -A gained percentage columns:\n%s", output.Text())
 	}
 	if len(kubectl.calls) != 1 {
 		t.Errorf("kubectl called %d times, want 1 (no limits lookup with --no-limits)", len(kubectl.calls))
