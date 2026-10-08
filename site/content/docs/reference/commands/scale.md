@@ -23,6 +23,13 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 | `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 | `<replicas>` | Number of replicas to scale to |
 
+## Options
+
+| Option | Description |
+|---|---|
+| `--dry-run string` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
+
 ## Global options
 
 | Option | Description |
