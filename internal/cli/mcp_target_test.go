@@ -513,3 +513,39 @@ func TestResolveTargetRefusesAllHoweverSpelled(t *testing.T) {
 		}
 	}
 }
+
+// scopedSource is a discovery cache that knows one cluster-scoped resource.
+type scopedSource struct{}
+
+func (scopedSource) Resolve(spelling string) (kinds.Kind, string, bool) {
+	if spelling == "persistentvolumes" {
+		return "PersistentVolume", "persistentvolumes", true
+	}
+	return "", "", false
+}
+
+func (scopedSource) Namespaced(kind kinds.Kind) (bool, bool) {
+	return false, kind == "PersistentVolume"
+}
+
+// A kind kx learns from discovery is read the same with the core group
+// spelled out: persistentvolumes.v1. is a PersistentVolume, refused a
+// namespace as persistentvolumes is, and resolved without one.
+func TestResolveTargetReadsADiscoveredKindsCoreGroupSpelling(t *testing.T) {
+	kinds.SetShorthandSource(scopedSource{})
+	t.Cleanup(func() { kinds.SetShorthandSource(nil) })
+	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
+
+	for _, spelling := range []string{"persistentvolumes.", "persistentvolumes.v1."} {
+		if _, err := deps.resolveTarget(mcpTarget{Kind: spelling, Name: "x", Namespace: "prod"}); err == nil {
+			t.Errorf("%s with a namespace: resolved, want the cluster-scope refusal", spelling)
+		}
+		got, err := deps.resolveTarget(mcpTarget{Kind: spelling, Name: "x"})
+		if err != nil {
+			t.Fatalf("%s: %v", spelling, err)
+		}
+		if got.Kind != "PersistentVolume" || got.Namespace != "" {
+			t.Errorf("%s: resolved %+v, want PersistentVolume with no namespace", spelling, got)
+		}
+	}
+}

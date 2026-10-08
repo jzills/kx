@@ -564,3 +564,41 @@ func TestCoversReadsTheRowsKindAsTheResourceIsRead(t *testing.T) {
 		t.Error("Covers(deploy,svc, cronjobs.v1.batch) = true, want the CronJob refused")
 	}
 }
+
+// discoveredSource knows only the resources it is given, by their exact
+// spelling, as kubectl's discovery cache does: a resource name, never a
+// resource.version.group spelling of one.
+type discoveredSource map[string]Kind
+
+func (d discoveredSource) Resolve(spelling string) (Kind, string, bool) {
+	kind, ok := d[spelling]
+	return kind, "", ok
+}
+
+func (discoveredSource) Namespaced(Kind) (bool, bool) { return false, false }
+
+// The core group spelled out — persistentvolumes. or persistentvolumes.v1. —
+// names the same resource as persistentvolumes, for a kind kx learns from
+// discovery as much as for one it names itself. Another group's resource of
+// the same name is not that kind, and is left as typed.
+func TestTheCoreGroupSpelledOutReadsAsTheDiscoveredKind(t *testing.T) {
+	SetShorthandSource(discoveredSource{"persistentvolumes": "PersistentVolume"})
+	defer SetShorthandSource(nil)
+
+	for _, spelling := range []string{"persistentvolumes.", "persistentvolumes.v1."} {
+		if got := Normalize(spelling); got != "PersistentVolume" {
+			t.Errorf("Normalize(%q) = %q, want PersistentVolume", spelling, got)
+		}
+		if !IsKindSpelling(spelling) {
+			t.Errorf("IsKindSpelling(%q) = false, want true", spelling)
+		}
+		if got := PluralDisplay(spelling); got != "PersistentVolumes" {
+			t.Errorf("PluralDisplay(%q) = %q, want PersistentVolumes", spelling, got)
+		}
+	}
+	for _, spelling := range []string{"persistentvolumes.example.com", "persistentvolumes.v1.example.com", "persistentvolumes.v1"} {
+		if got := Normalize(spelling); got != Kind(spelling) {
+			t.Errorf("Normalize(%q) = %q, want it left as typed", spelling, got)
+		}
+	}
+}

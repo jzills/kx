@@ -206,12 +206,8 @@ func IsKindSpelling(token string) bool {
 	if _, ok := builtinSpelling(token); ok {
 		return true
 	}
-	if shorthandSource != nil {
-		if _, _, ok := shorthandSource.Resolve(token); ok {
-			return true
-		}
-	}
-	return false
+	_, _, ok := discovered(token)
+	return ok
 }
 
 // Normalize maps a kubectl resource type onto its canonical kind, passing
@@ -220,12 +216,43 @@ func Normalize(resourceType string) Kind {
 	if kind, ok := builtinSpelling(resourceType); ok {
 		return kind
 	}
-	if shorthandSource != nil {
-		if kind, _, ok := shorthandSource.Resolve(resourceType); ok {
-			return kind
-		}
+	if kind, _, ok := discovered(resourceType); ok {
+		return kind
 	}
 	return Kind(resourceType)
+}
+
+// discovered asks the discovery source for a spelling kx does not name
+// itself. The cache keys a resource by its names alone, so the core group
+// spelled out — persistentvolumes. or persistentvolumes.v1., which kubectl
+// reads as persistentvolumes — is asked as the resource. Another group's
+// spelling is not reduced: the cache does not say which group a name is in,
+// and foos.example.com read as foos could be some other group's foos.
+func discovered(spelling string) (Kind, string, bool) {
+	if shorthandSource == nil {
+		return "", "", false
+	}
+	if resource, ok := coreGroupResource(spelling); ok {
+		spelling = resource
+	}
+	return shorthandSource.Resolve(spelling)
+}
+
+// coreGroupResource is the resource of a spelling naming the core group
+// outright, resource. or resource.<version>. (see builtinSpelling).
+func coreGroupResource(spelling string) (string, bool) {
+	resource, qualifier, qualified := strings.Cut(strings.ToLower(spelling), ".")
+	if !qualified || resource == "" {
+		return "", false
+	}
+	if qualifier == "" {
+		return resource, true
+	}
+	version, group, versioned := strings.Cut(qualifier, ".")
+	if versioned && group == "" && apiVersion.MatchString(version) {
+		return resource, true
+	}
+	return "", false
 }
 
 // Several reports whether a kubectl resource argument asks for more than one
@@ -405,10 +432,8 @@ func PluralDisplay(resourceType string) string {
 		}
 		return string(kind) + "s"
 	}
-	if shorthandSource != nil {
-		if kind, plural, ok := shorthandSource.Resolve(resourceType); ok && kind != "" {
-			return displayPlural(kind, plural)
-		}
+	if kind, plural, ok := discovered(resourceType); ok && kind != "" {
+		return displayPlural(kind, plural)
 	}
 	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
 	// It is still named by its canonical kind in captions and errors.
