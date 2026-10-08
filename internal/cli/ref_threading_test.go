@@ -92,7 +92,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 			kind: kinds.Pod,
 			run: func(resolver fakeResolver) error {
 				command := DeleteCommand{Kubectl: &recordingKubectl{}, State: resolver, Status: noStatus}
-				_, err := command.Execute(mark, true, nil)
+				_, _, err := command.Execute(mark, true, nil)
 				return err
 			},
 		},

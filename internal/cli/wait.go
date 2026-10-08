@@ -62,9 +62,12 @@ type WaitCommand struct {
 // --timeout of its own. A target reached with none left times out without
 // kubectl being asked. A zero timeout has no deadline to share — it means
 // check once — so every target is checked once.
+//
+// report is given what was met and kubectl's own output, which an output
+// format asks for in place of kx's line (reportChange).
 func (c WaitCommand) ExecuteAll(
 	ctx context.Context, targets []Resolved, timeout time.Duration, extraArgs []string,
-	report func(target Resolved, met string),
+	report func(target Resolved, met, output string),
 ) error {
 	now := c.Now
 	if now == nil {
@@ -91,7 +94,7 @@ func (c WaitCommand) ExecuteAll(
 			}
 			args = withWaitTimeout(extraArgs, remaining)
 		}
-		met, err := c.wait(ctx, target, plans[i], remaining, args)
+		met, output, err := c.wait(ctx, target, plans[i], remaining, args)
 		// A later target waits on what was left, but the deadline it missed
 		// is the whole --timeout, the number the caller typed.
 		var expired waitTimedOut
@@ -102,7 +105,7 @@ func (c WaitCommand) ExecuteAll(
 		if err != nil {
 			return err
 		}
-		report(target, met)
+		report(target, met, output)
 	}
 	return nil
 }
@@ -127,7 +130,8 @@ func (c WaitCommand) Execute(
 	if err != nil {
 		return "", err
 	}
-	return c.wait(ctx, target, plan, timeout, extraArgs)
+	met, _, err := c.wait(ctx, target, plan, timeout, extraArgs)
+	return met, err
 }
 
 // waitPlan is how one target is waited for: by kx's own Job watch, or by
@@ -147,6 +151,16 @@ func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []stri
 	}
 	switch {
 	case target.Kind == kinds.Job:
+		// kubectl prints nothing for a wait kx carries out itself, so an
+		// output format has nothing to shape — refused, not left to print
+		// nothing where the Job was asked for.
+		if askedForOutput(extraArgs) {
+			return waitPlan{}, fmt.Errorf(
+				"'-o' cannot be combined with waiting on %s/%s — kx watches a Job itself, since "+
+					"kubectl wait cannot wait for Complete or Failed, so there is no kubectl "+
+					"output to format. Drop -o, or pass --for=condition=Complete to have kubectl "+
+					"wait and print it.", target.Kind, target.Name)
+		}
 		return waitPlan{job: true}, nil
 	case target.Kind == kinds.Service:
 		return c.planService(ctx, target)
@@ -166,31 +180,37 @@ func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []stri
 	return waitPlan{forArgs: []string{"--for=" + condition.For}, label: condition.Label}, nil
 }
 
-// wait carries out a plan for one target.
+// wait carries out a plan for one target, returning what was met and
+// kubectl's output — none for a Job, which kx watches itself.
 func (c WaitCommand) wait(
 	ctx context.Context, target Resolved, plan waitPlan, timeout time.Duration, extraArgs []string,
-) (string, error) {
+) (met, output string, err error) {
 	stop := c.Status("waiting for " + string(target.Kind) + "/" + target.Name)
 	defer stop()
 	if plan.job {
-		return c.waitJob(ctx, target, timeout)
+		met, err = c.waitJob(ctx, target, timeout)
+		return met, "", err
 	}
 	return c.kubectlWait(target, plan.forArgs, extraArgs, plan.label)
 }
 
 // kubectlWait runs kubectl wait and reports label once it returns. kubectl's
 // own "condition met" line is replaced by kx's, so it is captured, not
-// streamed; kubectl prints nothing worth seeing while it waits.
-func (c WaitCommand) kubectlWait(target Resolved, forArgs, extraArgs []string, label string) (string, error) {
+// streamed; kubectl prints nothing worth seeing while it waits. What it does
+// print comes back, for an output format that asked for it.
+func (c WaitCommand) kubectlWait(
+	target Resolved, forArgs, extraArgs []string, label string,
+) (met, output string, err error) {
 	args := []string{"wait", string(target.Kind) + "/" + target.Name}
 	if target.Namespace != "" {
 		args = append(args, "-n", target.Namespace)
 	}
 	args = append(append(args, forArgs...), extraArgs...)
-	if _, err := c.Kubectl.Run(args); err != nil {
-		return "", err
+	output, err = c.Kubectl.Run(args)
+	if err != nil {
+		return "", "", err
 	}
-	return label, nil
+	return label, output, nil
 }
 
 // forLabel names what a caller's own --for waited on: "deleted" for delete,
@@ -414,8 +434,8 @@ func newWaitCommand(services Services) *cobra.Command {
 				Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
 			}
 			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
-				func(target Resolved, met string) {
-					render.Success(scopeCaption(
+				func(target Resolved, met, output string) {
+					reportChange(extra, output, scopeCaption(
 						string(target.Kind)+"/"+target.Name, target.Namespace, met))
 				})
 		},
@@ -427,6 +447,7 @@ func newWaitCommand(services Services) *cobra.Command {
 		"Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable")
 	cmd.Flags().Duration("timeout", defaultWaitTimeout,
 		"How long to wait for every index together (default 30s); 0 checks once")
+	registerOutputFlag(cmd)
 	return cmd
 }
 

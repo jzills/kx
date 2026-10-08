@@ -570,11 +570,11 @@ func newDeleteCommand(services Services) *cobra.Command {
 			// Confirmed and reported one at a time, so declining one resource
 			// doesn't silently take the rest with it.
 			for _, target := range resolved {
-				message, err := command.Execute(target.Ref, yes, extra)
+				message, output, err := command.Execute(target.Ref, yes, extra)
 				if err != nil {
 					return err
 				}
-				render.Success(message)
+				reportChange(extra, output, message)
 			}
 			return nil
 		},
@@ -582,11 +582,12 @@ func newDeleteCommand(services Services) *cobra.Command {
 	// Parsed by hand, registered only so it appears in --help instead of
 	// vanishing.
 	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	registerChangeFlags(cmd)
 	return cmd
 }
 
 func newScaleCommand(services Services) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "scale <index> <replicas> [kubectl flags]",
 		Short: "Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.",
 		Long: "Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. " +
@@ -644,6 +645,8 @@ func newScaleCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	registerChangeFlags(cmd)
+	return cmd
 }
 
 func newRolloutCommand(services Services) *cobra.Command {
@@ -991,7 +994,26 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 	// vanishing.
 	cmd.Flags().StringArray("remove", nil, "Key to remove (repeatable)")
 	cmd.Flags().Bool("overwrite", false, "Allow replacing an existing key")
+	registerChangeFlags(cmd)
 	return cmd
+}
+
+// registerChangeFlags registers the kubectl flags a command that changes a
+// resource reads by hand as well as forwarding: an output format, which
+// reportChange prints in place of kx's lines, and --dry-run, which kx's line
+// reports (isDryRun). Read from argv, they work unregistered, and vanish
+// from --help.
+func registerChangeFlags(cmd *cobra.Command) {
+	registerOutputFlag(cmd)
+	cmd.Flags().String("dry-run", "none",
+		"client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed")
+}
+
+// registerOutputFlag registers -o for a command that prints kubectl's output
+// in place of its own lines when one is asked for (reportChange).
+func registerOutputFlag(cmd *cobra.Command) {
+	cmd.Flags().StringP("output", "o", "",
+		"Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr")
 }
 
 // askedForOutput reports whether kubectl was given an output format, which a
