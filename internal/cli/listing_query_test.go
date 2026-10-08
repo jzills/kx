@@ -34,9 +34,10 @@ func wantQuery(command, resource string, args []string, match string) string {
 // A sweep's entry records how it was swept, as a kx get listing records its
 // query. Without one, the term that emptied a sweep could not be named, the
 // listing could not be refreshed, and kx state --json reported "query":
-// null. The scope is recorded as resolved — the namespace swept, not
-// whether -n was typed — and --since as typed, so the window comes from the
-// configuration in force when it is re-run, as it would typed again.
+// null. The scope is recorded as kx get records it — a namespace in the
+// query only when one was named, the entry holding where it was swept
+// either way (listingScope) — and --since as typed, so the window comes from
+// the configuration in force when it is re-run, as it would typed again.
 func TestTriageRecordsTheSweepThatMadeIt(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -46,14 +47,16 @@ func TestTriageRecordsTheSweepThatMadeIt(t *testing.T) {
 		full          bool
 		want          string
 	}{
-		{"namespace", TriageCommand{}, "prod", false, false,
+		{"the context's namespace", TriageCommand{}, "prod", false, false,
+			wantQuery("diag", "", []string{}, "")},
+		{"a named namespace", TriageCommand{NamedNamespace: true}, "prod", false, false,
 			wantQuery("diag", "", []string{"-n", "prod"}, "")},
 		{"every namespace, narrowed", TriageCommand{Match: "api"}, "prod", true, false,
 			wantQuery("diag", "", []string{"-A"}, "api")},
 		// --full decides only what the table prints; the listing saved is
 		// every resource swept either way.
 		{"a window, and --full left out", TriageCommand{Since: "7d"}, "prod", false, true,
-			wantQuery("diag", "", []string{"-n", "prod", "--since", "7d"}, "")},
+			wantQuery("diag", "", []string{"--since", "7d"}, "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var saved []state.State
@@ -67,6 +70,9 @@ func TestTriageRecordsTheSweepThatMadeIt(t *testing.T) {
 			}
 			if got := queryString(saved[0].Query); got != tc.want {
 				t.Errorf("query = %s\n  want %s", got, tc.want)
+			}
+			if !tc.allNamespaces && saved[0].Namespace != tc.namespace {
+				t.Errorf("entry namespace = %q, want the namespace swept, %q", saved[0].Namespace, tc.namespace)
 			}
 		})
 	}

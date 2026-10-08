@@ -227,6 +227,8 @@ func runGet(services Services, resource string, args []string, options getOption
 		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
+	// The namespace an index fetch is taken in when the user named none.
+	var scope string
 	if len(refs) > 0 {
 		// resolveRefsExpecting resolves every index before any of them is
 		// acted on, so an out-of-range index late in the batch is caught
@@ -290,14 +292,17 @@ func runGet(services Services, resource string, args []string, options getOption
 		for _, entry := range resolved {
 			names = append(names, entry.Name)
 		}
-		// The listing's own namespace, unless the user named one.
-		if groups[0].Namespace != "" && extractNamespace(extra) == "" {
-			extra = append(extra, "-n", groups[0].Namespace)
+		// The listing's own namespace, unless the user named one. It is the
+		// listing's, not the command's, so it is the fetch's Scope rather
+		// than a -n in the recorded query (listingScope).
+		if extractNamespace(extra) == "" {
+			scope = groups[0].Namespace
 		}
 		extra = append(names, extra...)
 	}
 
 	if isWatch(extra) {
+		extra = append(extra, replayScope(scope, extra)...)
 		// A watch stream never completes, so there is no finished table to
 		// index or save (Run() would otherwise block forever, since kubectl
 		// get --watch never exits on its own). For the default/wide,
@@ -318,7 +323,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		return err
 	}
 
-	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()

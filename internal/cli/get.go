@@ -69,9 +69,10 @@ type GetCommand struct {
 	State   StateWriter
 	Index   Indexer
 	// Scope is the namespace a listing whose arguments name none is taken
-	// in: a refresh's, which replays a listing where it was first taken.
-	// Empty takes it in the current namespace, as kx get does. The query is
-	// saved as typed either way, so the refresh replaces the stale entry.
+	// in, without naming it in the query saved: a refresh's (listingScope),
+	// which replays a listing where it was first taken. Empty takes it in the
+	// current namespace, as kx get does. The query is saved as typed either
+	// way, so the refresh replaces the stale entry.
 	Scope string
 }
 

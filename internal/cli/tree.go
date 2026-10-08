@@ -32,6 +32,10 @@ type TreeCommand struct {
 	// here — kx tree with errMatchBesideIndex, the MCP tool with
 	// errMCPMatchBesideTarget.
 	Match string
+	// NamedNamespace is whether a namespace walk's namespace was named — -n,
+	// an agent's namespace, a Namespace index — rather than the context's
+	// own. Only a named one is recorded in the query (see save).
+	NamedNamespace bool
 }
 
 // Execute graphs the resource an index names. A Namespace row graphs that
@@ -54,6 +58,7 @@ func (c TreeCommand) ExecuteResource(
 	ctx context.Context, kind kinds.Kind, name, namespace string, indexed bool,
 ) (*tree.Node, error) {
 	if kind == kinds.Namespace {
+		c.NamedNamespace = true
 		return c.ExecuteNamespace(ctx, name, indexed)
 	}
 	node, resources, err := c.Builder.BuildResource(ctx, kind, name, namespace, indexed)
@@ -144,11 +149,17 @@ func (c TreeCommand) save(
 			Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
 		})
 	}
+	// The scope as named: -A, or -n for a namespace that was named. A tree of
+	// one resource records the namespace that resource lives in, which is
+	// part of naming it. A walk of the namespace the context gave it records
+	// none, and the entry where it was walked, as kx get's does — so that a
+	// refresh after a context switch walks the new context's namespace, not
+	// this one's (listingScope).
 	query := &state.Query{Command: state.CommandTree, Resource: root, Args: []string{}}
 	switch {
 	case allNamespaces:
 		query.Args = []string{"-A"}
-	case namespace != "":
+	case namespace != "" && (root != "" || c.NamedNamespace):
 		query.Args = []string{"-n", namespace}
 	}
 	if root == "" {
@@ -278,10 +289,11 @@ func newTreeCommand(services Services) *cobra.Command {
 				return err
 			}
 			command := TreeCommand{
-				Builder: graph.Builder{Client: client},
-				State:   services.State,
-				Save:    services.State.Save,
-				Match:   match,
+				Builder:        graph.Builder{Client: client},
+				State:          services.State,
+				Save:           services.State.Save,
+				Match:          match,
+				NamedNamespace: namespaceFlag != "",
 			}
 			ctx := cmd.Context()
 
