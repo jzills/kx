@@ -622,6 +622,21 @@ func (l Listing) Unnumbered() string {
 	return strings.Join(tables, "\n\n")
 }
 
+// UnnumberedRows is Unnumbered for a caller who asked for --no-headers: the
+// same rows, laid out the same way, with no header row above them.
+//
+// kx asks kubectl for the header whatever the caller wanted, because that is
+// where --match finds the NAME column, and drops it here instead. Widths come
+// from the rows alone, as kubectl's own --no-headers lays them out.
+func (l Listing) UnnumberedRows() string {
+	kept := l.withRows()
+	tables := make([]string, 0, len(kept))
+	for _, section := range kept {
+		tables = append(tables, Format(section.rows))
+	}
+	return strings.Join(tables, "\n\n")
+}
+
 // withRows is the listing's tables that hold a row.
 func (l Listing) withRows() []section {
 	kept := make([]section, 0, len(l.sections))

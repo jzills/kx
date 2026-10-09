@@ -122,10 +122,6 @@ func outputFormat(args []string) string {
 // column by, or a watch kx streams as kubectl sends it rather than drawing it
 // itself (wantsLiveTable). nil when kx can narrow it.
 func matchFormatError(args []string) error {
-	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders && replyFormatOf(args) == tableFormat {
-		return errors.New("'--match' cannot be combined with '--no-headers' — kx finds each " +
-			"row's name under kubectl's NAME header. Drop one of them.")
-	}
 	if replyFormatOf(args) == documentFormat {
 		return fmt.Errorf("'--match' cannot be combined with '-o %s' — kx narrows a table or "+
 			"-o name by each row's name, and that output has no rows for it to pick. "+

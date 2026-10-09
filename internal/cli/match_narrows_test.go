@@ -31,6 +31,9 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 		refused string
 		// preflight refusals come before kubectl is asked for anything.
 		preflight bool
+		// headerless expects a narrowed reply printed without its header,
+		// which is what --no-headers asks for.
+		headerless bool
 	}{
 		{name: "-o name", command: "get", args: []string{"pods", "-m", "redis", "-o", "name"},
 			replies: []string{nameReply}},
@@ -55,25 +58,31 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 		{name: "custom columns with no NAME", command: "get",
 			args:    []string{"pods", "-m", "redis", "-o", "custom-columns=POD:.metadata.name"},
 			replies: []string{"POD\nnginx-abc-xyz\nredis-def-uvw\n"}, refused: "NAME column"},
+		// --no-headers composes with --match: kx withholds the flag from the
+		// kubectl call so the NAME header comes back to narrow by, and drops
+		// it on the way out. The reply here carries a header for that reason.
 		{name: "--no-headers", command: "get", args: []string{"pods", "-m", "redis", "--no-headers"},
-			replies: []string{"nginx-abc-xyz   1/1   Running   0     5d\nredis-def-uvw   1/1   Running   0     3d\n"},
-			refused: "--no-headers", preflight: true},
-		// Refused from the arguments, so an empty namespace is refused too
-		// rather than saved as a query no refresh could replay.
+			replies:    []string{podsOutput},
+			headerless: true},
 		{name: "--no-headers on an empty namespace", command: "get",
-			args: []string{"pods", "-m", "redis", "--no-headers"}, replies: []string{""},
-			refused: "--no-headers", preflight: true},
+			args: []string{"pods", "-m", "redis", "--no-headers"}, replies: []string{""}},
 		{name: "a watch kx streams", command: "get", args: []string{"pods", "-m", "redis", "-w", "-o", "name"},
 			refused: "--watch", preflight: true},
 		{name: "contexts", command: "get", args: []string{"contexts", "-m", "redis"},
 			replies: []string{"CURRENT   NAME        CLUSTER\n*         nginx-ctx   a\n          redis-ctx   b\n"}},
 		{name: "kx top --no-headers", command: "top", args: []string{"-m", "redis", "--no-headers"},
-			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers",
-			preflight: true},
+			replies: []string{"NAME            CPU(cores)   MEMORY(bytes)\n" +
+				"nginx-abc-xyz   1m           10Mi\nredis-def-uvw   2m           20Mi\n"},
+			headerless: true},
+		{name: "another cluster's --no-headers", command: "get",
+			args:       []string{"pods", "--context=b", "-m", "redis", "--no-headers"},
+			replies:    []string{podsOutput},
+			headerless: true},
 		{name: "another cluster's kx top --no-headers", command: "top",
-			args:    []string{"--context=b", "-m", "redis", "--no-headers"},
-			replies: []string{"nginx-abc-xyz   1m   10Mi\nredis-def-uvw   2m   20Mi\n"}, refused: "--no-headers",
-			preflight: true},
+			args: []string{"--context=b", "-m", "redis", "--no-headers"},
+			replies: []string{"NAME            CPU(cores)   MEMORY(bytes)\n" +
+				"nginx-abc-xyz   1m           10Mi\nredis-def-uvw   2m           20Mi\n"},
+			headerless: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kube := &fakeKubectl{outputs: tc.replies, namespace: "prod"}
@@ -104,6 +113,9 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 			}
 			if !strings.Contains(stdout, "redis") || strings.Contains(stdout, "nginx") {
 				t.Errorf("stdout = %q, want redis kept and nginx narrowed away", stdout)
+			}
+			if tc.headerless && strings.Contains(stdout, "NAME") {
+				t.Errorf("stdout = %q, want no header row — --no-headers asked for none", stdout)
 			}
 		})
 	}

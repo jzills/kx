@@ -182,7 +182,14 @@ func (c GetCommand) Execute(
 	if clusterScoped(string(listingKind(resource))) {
 		scope = nil
 	}
-	args := append(getArgs(resource, extraArgs), extraArgs...)
+	// --no-headers describes the output the caller wants, not the reply kx
+	// has to read to produce it: --match finds each row's name under the NAME
+	// header, so the header is asked for regardless and dropped on the way
+	// out (see index.Listing.UnnumberedRows). Withheld only when there is a
+	// term to narrow by — without one kx reads nothing, so there is nothing
+	// to withhold.
+	kubectlArgs, headerless := withheldNoHeaders(extraArgs, filterTerm)
+	args := append(getArgs(resource, kubectlArgs), kubectlArgs...)
 	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
@@ -193,6 +200,13 @@ func (c GetCommand) Execute(
 	// namespace is only the one named, if any: the current one is this
 	// cluster's, not that one's.
 	if clusterFlagIn(extraArgs) != "" {
+		// Headerless rows are headerless whichever cluster they came from:
+		// the flag was withheld to find the NAME column, so it is dropped
+		// here too and not only on the indexable path below.
+		if headerless {
+			listing, _ := index.ParseListing(output)
+			return headerlessRows(listing, filterTerm), extractNamespace(extraArgs), nil
+		}
 		table, err := unnumberedListing(output, filterTerm, extraArgs)
 		return table, extractNamespace(extraArgs), err
 	}
@@ -221,6 +235,12 @@ func (c GetCommand) Execute(
 	}
 
 	listing, tabular := c.Index.Parse(output)
+	// Rows the caller asked for without a header are for a program, so they
+	// are narrowed and printed bare — never numbered, since an index column
+	// would corrupt what they asked for.
+	if tabular && headerless {
+		return headerlessRows(listing, filterTerm), namespace, nil
+	}
 	// A table kx cannot number is printed unnumbered, narrowed by the term
 	// all the same (see numberable).
 	if tabular && !numberable(listing, resource, extraArgs) {
@@ -617,4 +637,34 @@ func numericResourceError(services Services, args []string) error {
 	return fmt.Errorf(
 		"'%s' names a row, not a resource type — kx get takes the kind first: '%s %s'.",
 		args[0], suggestion, strings.Join(args, " "))
+}
+
+// headerlessRows is the narrowed rows of a listing the caller asked for with
+// --no-headers: the rows alone, or an empty listing naming the term when it
+// matched none, so the caption and its reason go to stderr rather than into
+// output a program is reading.
+func headerlessRows(listing index.Listing, filterTerm string) index.Table {
+	narrowed := listing.Narrow(filterTerm)
+	if narrowed.Empty() {
+		return index.Table{Match: filterTerm, Unnumbered: true}
+	}
+	return index.Table{Raw: narrowed.UnnumberedRows(), Unnumbered: true}
+}
+
+// withheldNoHeaders removes --no-headers from the arguments kx sends kubectl
+// when there is a term to narrow by, reporting that the output must be
+// printed without a header.
+//
+// --no-headers describes what the caller wants printed, not the reply kx has
+// to read to produce it: --match finds each row's name under the NAME header,
+// so kx asks for the header regardless and drops it on the way out. Without a
+// term kx reads nothing, so the flag is forwarded as it always was.
+func withheldNoHeaders(extraArgs []string, filterTerm string) (args []string, headerless bool) {
+	if filterTerm == "" {
+		return extraArgs, false
+	}
+	if noHeaders, rest := extractBool(extraArgs, "--no-headers"); noHeaders {
+		return rest, true
+	}
+	return extraArgs, false
 }
