@@ -197,6 +197,19 @@ func runGet(services Services, resource string, args []string, options getOption
 	if flag := clusterFlagIn(extra); flag != "" && len(refs) > 0 {
 		return clusterFlagBesideIndexError(flag)
 	}
+	// And its namespace, for the same reason. Without this the flag was
+	// forwarded into a by-name fetch: `kx get pods 1 -A` became a by-name
+	// lookup across all namespaces, which kubectl forbids, and `kx get pods
+	// 1 -n other` looked for one namespace's pod in another and reported a
+	// NotFound naming the right pod and the wrong namespace. kx get was the
+	// only index command without this check — kx describe, kx tree, kx diag
+	// and kx scan all refuse it.
+	//
+	// After the cluster-scoped branch above, which is the more specific
+	// answer for a kind that has no namespace at all.
+	if flag := scopeFlagIn(extra); flag != "" && len(refs) > 0 {
+		return scopeFlagBesideIndexError(flag, "")
+	}
 
 	// A term kx could not apply to the format asked for is refused before
 	// anything is fetched (see narrowText). --decode reads Secrets itself, in
