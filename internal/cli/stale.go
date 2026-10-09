@@ -40,17 +40,45 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 	return cmd
 }
 
-// machineOutput reports whether an invocation asked for output a program
-// reads rather than a person: kx's own --json, one Secret value written raw
-// by --decode --key, or a kubectl -o format that is not a table (see
+// documentAnnotation marks a command whose stdout is a document a program
+// reads however it was invoked — a manifest, a log stream, whatever ran
+// inside a container — rather than a table for a person. Those commands
+// produce one without anyone typing a format, so machineOutput cannot infer
+// it from the arguments the way it can for -o or --json.
+//
+// kx cp does not carry it: kubectl cp writes files, and its stdout is its
+// own progress, not the copy.
+const documentAnnotation = "kx.document"
+
+// documentAnnotations is the Command.Annotations value for a document
+// command, and mutatingDocumentAnnotations for one that also spends its index
+// on the cluster. Shared maps, for the reason mutatingAnnotations is one:
+// nothing writes to a command's Annotations after construction.
+var (
+	documentAnnotations         = map[string]string{documentAnnotation: "true"}
+	mutatingDocumentAnnotations = map[string]string{
+		mutatingAnnotation: "true", documentAnnotation: "true",
+	}
+)
+
+// machineOutput reports whether an invocation's stdout is read by a program
+// rather than a person: a command whose output is always a document
+// (documentAnnotation), kx's own --json, one Secret value written raw by
+// --decode --key, or a kubectl -o format that is not a table (see
 // printsTable). A refreshed listing is a table for a person to pick from, and
 // it goes to stdout, where a script reading the document fails to parse it —
-// or, under $(kx secret 1 --decode -k token), exports it as the credential.
+// `OUT=$(kx exec 3 -- cat /etc/hostname)` captured the table — or, under
+// $(kx secret 1 --decode -k token), exports it as the credential.
 //
 // A command that parses its own flags has them in argv. Only those before a
-// "--" are read: what follows is a command for a container, and an -o there
-// is that command's.
+// "--" are read: what follows is a trailing command, and an -o there is that
+// command's. kx exec and kx debug, which are what put one there, are
+// documents outright and never reach it — the trim guards any other
+// passthrough command whose argv carries a "--".
 func machineOutput(c *cobra.Command, args []string) bool {
+	if c.Annotations[documentAnnotation] == "true" {
+		return true
+	}
 	if flag := c.Flags().Lookup("json"); flag != nil && flag.Changed {
 		return true
 	}

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -112,14 +113,80 @@ func TestAStaleIndexUnderMachineOutputIsNotRefreshed(t *testing.T) {
 	}
 }
 
-// A "--" ends the flags kx and kubectl read: what follows is a command for a
-// container, and its -o is that command's.
-func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
-	cmd := newExecCommand(argvServices(t))
-	if machineOutput(cmd, []string{"1", "--", "jq", "-o", "json"}) {
-		t.Error("a container command's -o read as kx's output format")
+// Some commands write a document to stdout without anyone typing -o: kx yaml
+// prints a manifest, kx logs a log stream, kx exec whatever ran in the
+// container. The refreshed listing landed in the middle of each of those —
+// `OUT=$(kx exec 3 -- cat /etc/hostname)` captured a table instead of a
+// hostname — so for them stdout is a document whether or not a format was
+// asked for, and a stale index reports on stderr and refreshes nothing.
+func TestAStaleIndexLeavesADocumentOnStdoutAlone(t *testing.T) {
+	const notFound = `Error from server (NotFound): pods "api-old" not found`
+	for _, tc := range []struct {
+		name string
+		args []string
+		// kube answers the way a vanished resource makes each command fail:
+		// yaml captures kubectl's not-found, while logs and exec stream and
+		// learn it from the probe behind their non-zero exit.
+		kube *recordingKubectl
+	}{
+		{"yaml", []string{"yaml", "1"}, &recordingKubectl{
+			errs: []error{kubectl.Error{Stderr: notFound}}, output: podsOutput,
+		}},
+		{"logs", []string{"logs", "1"}, &recordingKubectl{
+			output: podsOutput, exitCode: 1, probeCode: 1,
+		}},
+		{"exec", []string{"exec", "1", "--", "cat", "/etc/hostname"}, &recordingKubectl{
+			output: podsOutput, exitCode: 1, probeCode: 1,
+		}},
+		{"debug", []string{"debug", "1", "--", "ls", "/proc/1/root"}, &recordingKubectl{
+			output: podsOutput, exitCode: 1, probeCode: 1,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr := splitRender(t)
+			services := staleServices(t, tc.kube, &state.Query{Resource: "pods", Args: []string{}})
+
+			if err := Execute(NewRoot(services, "test"), tc.args); err == nil {
+				t.Fatal("a stale index succeeded")
+			}
+			// Neither the listing nor the instruction that stands in for it
+			// when the replay fails: both are for a person to read.
+			for _, unwanted := range []string{"State was stale", "to refresh the list"} {
+				if strings.Contains(stdout.String(), unwanted) {
+					t.Errorf("stdout carries %q, where the document belongs:\n%s",
+						unwanted, stdout.String())
+				}
+			}
+			// The instruction is the proof reportStale ran; what names the
+			// failure above it is kx's own message or kubectl's, depending on
+			// which of the two found the resource gone.
+			if want := "Run 'kx get pods -n prod' to refresh the list."; !strings.Contains(
+				stderr.String(), want,
+			) {
+				t.Errorf("stderr = %q, want %q", stderr.String(), want)
+			}
+			// Nothing run again: a listing nobody sees would replace the one
+			// the user's indexes come from.
+			if replays := slices.IndexFunc(tc.kube.runs, func(args []string) bool {
+				return len(args) > 0 && args[0] == "get" && args[1] == "pods"
+			}); replays >= 0 {
+				t.Errorf("the listing was replayed: %v", tc.kube.runs)
+			}
+		})
 	}
-	if !machineOutput(cmd, []string{"1", "-o", "json", "--", "sh"}) {
+}
+
+// A "--" ends the flags kx and kubectl read: an -o after it is the trailing
+// command's, not kx's. kx exec and kx debug, which are what put a command
+// there, no longer reach this — they carry documentAnnotation and are machine
+// output whatever their arguments say — so the rule is pinned on a
+// passthrough command that still reads its argv.
+func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
+	cmd := newCopyCommand(argvServices(t))
+	if machineOutput(cmd, []string{"1:/etc/hosts", "./hosts", "--", "-o", "json"}) {
+		t.Error("an -o past the separator read as kx's output format")
+	}
+	if !machineOutput(cmd, []string{"1:/etc/hosts", "./hosts", "-o", "json", "--", "x"}) {
 		t.Error("an -o before the separator was not read")
 	}
 }
@@ -129,7 +196,7 @@ func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
 // table for a person, which a stale index refreshes.
 func TestMachineOutputReadsKeyOnlyBesideDecode(t *testing.T) {
 	services := argvServices(t)
-	if machineOutput(newYamlCommand(services), []string{"1", "-k", "overlays/prod", "-o", "wide"}) {
+	if machineOutput(newDescribeCommand(services), []string{"1", "-k", "overlays/prod", "-o", "wide"}) {
 		t.Error("kubectl's -k read as --decode's key")
 	}
 	if !machineOutput(newSecretCommand(services, "secret", nil), []string{"1", "--decode", "-k", "token"}) {
