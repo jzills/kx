@@ -263,6 +263,7 @@ func newLogsCommand(services Services) *cobra.Command {
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
 		Example:            "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:               minArgs(1),
+		Annotations:        documentAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest, handled, err := passthrough(cmd, args, nil)
@@ -414,7 +415,7 @@ func newExecCommand(services Services) *cobra.Command {
 			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:            "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:               minArgs(1),
-		Annotations:        mutatingAnnotations,
+		Annotations:        mutatingDocumentAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -470,7 +471,7 @@ func newDebugCommand(services Services) *cobra.Command {
 		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
 			"  kx debug 1 -- ls /proc/1/root\n  kx debug 1 -- ls /host/var/log",
 		Args:               minArgs(1),
-		Annotations:        mutatingAnnotations,
+		Annotations:        mutatingDocumentAnnotations,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			before, command := splitAtDoubleDash(args)
@@ -809,6 +810,7 @@ func newYamlCommand(services Services) *cobra.Command {
 			"JSON. --show cannot be combined with one: it parses the YAML it narrows.",
 		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
 			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
+		Annotations: documentAnnotations,
 		// No Args validator: cobra's arity check runs against the
 		// unstripped argv, which counts forwarded kubectl flags as
 		// positional arguments — and `--help` is a single argument that a
