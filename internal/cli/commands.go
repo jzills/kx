@@ -207,9 +207,12 @@ func newDescribeCommand(services Services) *cobra.Command {
 			// non-numeric one is reported rather than quietly forwarded —
 			// otherwise `kx describe abc` would describe nothing and succeed.
 			indexArgs, extra := splitLeadingIndexes(rest)
-			if len(indexArgs) == 0 && len(rest) > 0 {
-				return fmt.Errorf(
-					"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+			if len(indexArgs) == 0 {
+				if len(rest) > 0 {
+					return fmt.Errorf(
+						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
+				}
+				return requiredArgsError(cmd)
 			}
 			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
@@ -275,7 +278,7 @@ func newLogsCommand(services Services) *cobra.Command {
 					return fmt.Errorf(
 						"Invalid value for 'indexes': '%s' is not a valid int.", rest[0])
 				}
-				return fmt.Errorf("Missing argument 'indexes'.")
+				return requiredArgsError(cmd)
 			}
 			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
 			if err != nil {
@@ -381,7 +384,7 @@ func newEditCommand(services Services) *cobra.Command {
 			// Cobra's arity check ran against the unstripped argv, so an
 			// argument list of nothing but kx's own flags reaches here empty.
 			if len(rest) == 0 {
-				return fmt.Errorf("edit requires an index")
+				return requiredArgsError(cmd)
 			}
 			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
@@ -420,7 +423,7 @@ func newExecCommand(services Services) *cobra.Command {
 				return err
 			}
 			if len(rest) == 0 {
-				return fmt.Errorf("exec requires an index")
+				return requiredArgsError(cmd)
 			}
 			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
@@ -482,7 +485,7 @@ func newDebugCommand(services Services) *cobra.Command {
 			// candidate, and reports it as one. That is exec's behaviour too,
 			// and the two should not diverge on the same mistake.
 			if len(rest) == 0 {
-				return fmt.Errorf("debug requires an index")
+				return requiredArgsError(cmd)
 			}
 			installAgentIndexNotice(services)
 			ref, err := parseRef("index", rest[0])
@@ -734,7 +737,7 @@ func newPortForwardCommand(services Services) *cobra.Command {
 				return err
 			}
 			if len(rest) < 2 {
-				return fmt.Errorf("port-forward requires an index and a port")
+				return requiredArgsError(cmd)
 			}
 			ref, err := parseRef("index", rest[0])
 			if err != nil {
@@ -777,7 +780,7 @@ func newCopyCommand(services Services) *cobra.Command {
 				return err
 			}
 			if len(rest) < 2 {
-				return fmt.Errorf("cp requires a source and a destination")
+				return requiredArgsError(cmd)
 			}
 			installAgentIndexNotice(services)
 			return CopyCommand{Kubectl: services.Kubectl, State: services.State}.

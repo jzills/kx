@@ -198,6 +198,62 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 	}
 }
 
+// One missing-argument answer, whichever command was asked and whichever of
+// the two gates caught it.
+//
+// cobra's Args validator only sees the unstripped argv, so a command given
+// nothing but kx's own flags clears it and reaches RunE empty — `kx drain
+// --yes`, `kx edit --no-color`, `kx debug --`. Six commands answered that
+// shape in their own words, naming no --help and dropping the kx prefix
+// ("drain requires an index"), while the other eleven answered the same
+// mistake with requiredArgsError's sentence. A pattern rather than a literal
+// per command: what matters is that nobody writes a second wording, and the
+// arguments each names are already pinned by the test below.
+func TestEveryCommandNamesItsMissingArgumentsTheSameWay(t *testing.T) {
+	shape := regexp.MustCompile(`^kx [a-z-]+(?: [a-z]+)? requires <[^—]+ — see 'kx [a-z- ]+ --help' for usage\.$`)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		// Each argv is only flags kx itself registers, so passthrough strips
+		// it to nothing before the index lookup.
+		{"describe", []string{"describe", "--no-color"}},
+		{"logs", []string{"logs", "--no-color"}},
+		{"edit", []string{"edit", "--no-color"}},
+		{"exec", []string{"exec", "--no-color"}},
+		{"debug", []string{"debug", "--"}},
+		{"delete", []string{"delete", "--yes"}},
+		{"drain", []string{"drain", "--yes"}},
+		{"scale", []string{"scale", "--no-color"}},
+		{"wait", []string{"wait", "--no-color"}},
+		{"rollout", []string{"rollout", "--no-color"}},
+		{"port-forward", []string{"port-forward", "--no-color"}},
+		{"cp", []string{"cp", "--no-color"}},
+		{"yaml", []string{"yaml", "--no-color"}},
+		{"label", []string{"label", "--no-color"}},
+		{"annotate", []string{"annotate", "--no-color"}},
+		{"labels", []string{"labels", "--no-color"}},
+		{"annotations", []string{"annotations", "--no-color"}},
+		{"events", []string{"events", "--no-color"}},
+		{"ref", []string{"ref", "--no-color"}},
+		{"cordon", []string{"cordon", "--no-color"}},
+		{"uncordon", []string{"uncordon", "--no-color"}},
+		{"set image", []string{"set", "image", "--no-color"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Execute(NewRoot(argvServices(t), "test"), tc.args)
+			if err == nil {
+				t.Fatalf("kx %s with no arguments succeeded", strings.Join(tc.args, " "))
+			}
+			if !shape.MatchString(err.Error()) {
+				t.Errorf("err = %q,\nwant requiredArgsError's shape: "+
+					"kx <command> requires <args> — see 'kx <command> --help' for usage.",
+					err)
+			}
+		})
+	}
+}
+
 // requiredArgsError is generated from a command's own Use string, so its
 // wording is exercised here directly rather than through a full command tree
 // — only the required prefix is named, an optional trailing argument (exec's
