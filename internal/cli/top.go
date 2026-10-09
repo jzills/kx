@@ -61,12 +61,20 @@ func (c TopCommand) Execute(
 		}
 	}
 	scope := replayScope(c.Scope, extraArgs)
-	args := append([]string{"top", "pods"}, extraArgs...)
+	kubectlArgs, headerless := withheldNoHeaders(extraArgs, filterTerm)
+	args := append([]string{"top", "pods"}, kubectlArgs...)
 	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
 	if crossCluster {
+		// Headerless rows are headerless whichever cluster they came from:
+		// the flag was withheld to find the NAME column, so it is dropped
+		// here too rather than only on the indexable path.
+		if headerless {
+			listing, _ := index.ParseListing(output)
+			return headerlessRows(listing, filterTerm), extractNamespace(extraArgs), nil
+		}
 		table, err := unnumberedListing(output, filterTerm, extraArgs)
 		return table, extractNamespace(extraArgs), err
 	}
@@ -97,10 +105,16 @@ func (c TopCommand) Execute(
 	// — which is what kubectl top prints for an empty namespace, since "No
 	// resources found" goes to stderr — and that is saved below like any other
 	// listing, so the indexes it replaces stop resolving.
+	if headerless {
+		listing, _ := index.ParseListing(output)
+		return headerlessRows(listing, filterTerm), namespace, nil
+	}
 	if headers == nil && strings.TrimSpace(output) != "" {
 		// A term cannot narrow what kx cannot read (narrowText), and is
 		// refused rather than printed past: kx top --no-headers -m web
-		// listed every pod.
+		// listed every pod. --no-headers is the exception and never reaches
+		// here with a term — it is withheld from the kubectl call so the
+		// header comes back to narrow by, and dropped on the way out.
 		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
 			return index.Table{}, "", err
 		}
@@ -197,7 +211,8 @@ func (c TopCommand) ExecuteNodes(
 			return index.Table{}, "", err
 		}
 	}
-	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
+	kubectlArgs, headerless := withheldNoHeaders(extraArgs, filterTerm)
+	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, kubectlArgs...))
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -215,10 +230,16 @@ func (c TopCommand) ExecuteNodes(
 	headers, rows, _ := index.ParseTable(output)
 	// Empty output is a listing that found nothing and is saved; anything else
 	// kx cannot number prints as-is. See Execute.
+	if headerless {
+		listing, _ := index.ParseListing(output)
+		return headerlessRows(listing, filterTerm), namespace, nil
+	}
 	if headers == nil && strings.TrimSpace(output) != "" {
 		// A term cannot narrow what kx cannot read (narrowText), and is
 		// refused rather than printed past: kx top --no-headers -m web
-		// listed every pod.
+		// listed every pod. --no-headers is the exception and never reaches
+		// here with a term — it is withheld from the kubectl call so the
+		// header comes back to narrow by, and dropped on the way out.
 		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
 			return index.Table{}, "", err
 		}
