@@ -914,7 +914,10 @@ func TestDebugWithoutAnIndexSaysSo(t *testing.T) {
 	if err == nil {
 		t.Fatal("debug with no index succeeded")
 	}
-	if !strings.Contains(err.Error(), "requires an index") {
+	// requiredArgsError's wording, from debug's own Use string. The "kx "
+	// prefix is missing because CommandPath climbs the parent chain and this
+	// command has no root — the full sentence is pinned in help_test.go.
+	if !strings.Contains(err.Error(), "requires <index>") {
 		t.Errorf("err = %q, want it to name the missing index", err)
 	}
 }
