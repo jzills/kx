@@ -231,6 +231,12 @@ func (r *Renderer) Caption(parts ...string) {
 	r.line(r.style(theme.Muted, strings.Join(captionParts(parts...), " · ")))
 }
 
+// CaptionErr is Caption on stderr, for the callers whose stdout carries a
+// document a program reads rather than lines for a person.
+func (r *Renderer) CaptionErr(parts ...string) {
+	fmt.Fprintln(r.err, r.style(theme.Muted, strings.Join(captionParts(parts...), " · ")))
+}
+
 // captionParts drops the empty segments and leaves the rest in order, which is
 // what lets a caller pass a namespace that may not exist without deciding
 // whether to include it. Shared with the callers that need the joined text
@@ -262,6 +268,7 @@ func Error(msg string)                      { current.Error(msg) }
 func Notice(msg string)                     { current.Notice(msg) }
 func Warning(line string)                   { current.Warning(line) }
 func Caption(parts ...string)               { current.Caption(parts...) }
+func CaptionErr(parts ...string)            { current.CaptionErr(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }
 func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
