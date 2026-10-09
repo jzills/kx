@@ -592,3 +592,29 @@ func clusterScoped(resource string) bool {
 	namespaced, known := kinds.Namespaced(kinds.Normalize(resource))
 	return known && !namespaced
 }
+
+// numericResourceError refuses a number where kx get expects a kind.
+//
+// `kx get pods 1 2` re-fetches rows 1 and 2, so `kx get 1 2` is what someone
+// who knows `kx describe 1 2` types. Read as typed, the number went through
+// as the resource: kubectl was asked for a resource type called "1", or —
+// with a listing saved — kx reported a kind mismatch against that "1" and
+// suggested `kx get 1`, which is the same mistake again rather than a command
+// that can work. No Kubernetes kind is spelled as a number, so nothing is
+// given up by refusing one here; kx already refuses the mirror of it, a
+// number where a mark name belongs.
+//
+// The suggestion names the current listing's own kind, since that is the
+// command the caller wanted. A listing spanning kinds, or none at all, has no
+// kind to name, so it teaches the shape instead.
+func numericResourceError(services Services, args []string) error {
+	suggestion := "kx get <resource>"
+	if entry, err := services.State.Load(); err == nil {
+		if kind := entry.SoleKind(); kind != "" {
+			suggestion = kinds.ListCommand(kind)
+		}
+	}
+	return fmt.Errorf(
+		"'%s' names a row, not a resource type — kx get takes the kind first: '%s %s'.",
+		args[0], suggestion, strings.Join(args, " "))
+}

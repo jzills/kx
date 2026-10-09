@@ -1473,6 +1473,13 @@ func clusterScopedEntry(entry State) bool {
 	return known && !namespaced
 }
 
+// SoleKind returns the kind every resource in this entry shares, or "" when
+// it spans several or holds nothing. Exported for the callers outside this
+// package that need it — kx get's refusal of a numeric resource names the
+// current listing's kind — rather than let a second copy of the rule drift
+// from this one.
+func (s State) SoleKind() kinds.Kind { return soleKind(s) }
+
 // soleKind returns the kind every resource in an entry shares, or "" when the
 // entry spans several — a namespace-wide tree, a triage sweep.
 func soleKind(entry State) kinds.Kind {

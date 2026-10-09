@@ -2,7 +2,7 @@
 package cli
 
 import (
-	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/jzills/kx/internal/buildinfo"
@@ -253,7 +253,12 @@ func newGetCommand(services Services) *cobra.Command {
 				return err
 			}
 			if len(rest) == 0 {
-				return fmt.Errorf("get requires a resource type, e.g. 'kx get pods'")
+				return requiredArgsError(cmd)
+			}
+			// A number here is a row, not a kind — the indexes follow the
+			// resource, they do not replace it.
+			if _, err := strconv.Atoi(rest[0]); err == nil {
+				return numericResourceError(services, rest)
 			}
 			// The resource type leads; everything after is indexes or kubectl's.
 			return runGet(services, rest[0], rest[1:], options)
