@@ -217,6 +217,12 @@ func TestEveryCommandNamesItsMissingArgumentsTheSameWay(t *testing.T) {
 	}{
 		// Each argv is only flags kx itself registers, so passthrough strips
 		// it to nothing before the index lookup.
+		// kx get's required argument is a resource rather than an index, and
+		// its own flags are what strip to nothing: -A, -n and -o are
+		// forwarded, so they reach kubectl as the resource instead.
+		{"get", []string{"get", "--no-color"}},
+		{"get -m", []string{"get", "-m", "web"}},
+		{"get --decode", []string{"get", "--decode"}},
 		{"describe", []string{"describe", "--no-color"}},
 		{"logs", []string{"logs", "--no-color"}},
 		{"edit", []string{"edit", "--no-color"}},
