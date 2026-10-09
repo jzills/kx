@@ -176,7 +176,7 @@ func (r *Renderer) indexedTable(
 	table index.Table, resourceType, namespace string, available int,
 ) {
 	if table.Empty() {
-		r.emptyListing(resourceType, namespace)
+		r.emptyListing(resourceType, namespace, table.Match)
 		return
 	}
 	if !table.Indexable() {
@@ -184,6 +184,11 @@ func (r *Renderer) indexedTable(
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
 		// stderr) takes the empty caption above instead of silence.
 		r.Raw(table.Raw)
+		return
+	}
+
+	if len(table.Sections) > 1 {
+		r.sectionedTable(table, resourceType, namespace, available)
 		return
 	}
 
@@ -202,6 +207,24 @@ func (r *Renderer) indexedTable(
 
 	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
 	r.table(columns, cells, available)
+}
+
+// sectionedTable draws a listing of several kinds the way kubectl prints one:
+// a table per kind under its own header, a blank line between, each sized to
+// its own columns. One caption heads them all, counting every row, since the
+// indexes run on from one table into the next.
+func (r *Renderer) sectionedTable(
+	table index.Table, resourceType, namespace string, available int,
+) {
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
+	for i, section := range table.Sections {
+		if i > 0 {
+			r.line("")
+		}
+		columns, cells := styledColumnsAndCells(section.Headers, section.Rows)
+		enableNameFlex(section.Headers, columns)
+		r.table(columns, cells, available)
+	}
 }
 
 // SwitchListing renders the listing a switch command indexes into — kx ns —
@@ -228,7 +251,7 @@ func (r *Renderer) switchListing(
 	table index.Table, resourceType, current string, available int,
 ) {
 	if table.Empty() {
-		r.emptyListing(resourceType, current)
+		r.emptyListing(resourceType, current, table.Match)
 		return
 	}
 	columns, cells := styledColumnsAndCells(table.Headers, table.Rows)
@@ -260,8 +283,30 @@ func (r *Renderer) switchListing(
 // where kubectl's own "No resources found in X namespace" at least says
 // nothing was there — this says the same thing without repeating the
 // namespace the caption already carries a segment for.
-func (r *Renderer) emptyListing(resourceType, namespace string) {
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, noneFound)
+//
+// A listing a --match term emptied says so instead, in the words the sweeps
+// use: "Pods · prod · none found" claims prod has no pods.
+func (r *Renderer) emptyListing(resourceType, namespace, match string) {
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, emptyLabel(match))
+}
+
+// EmptyListingNotice is the empty listing's caption on stderr, for a listing
+// asked for in a format another program reads — names, a template — whose
+// stdout must hold nothing of kx's: "Pods · prod · none found" ahead of
+// | xargs is a line the reader takes for a name. kubectl reports an empty
+// listing on stderr for the same reason.
+func (r *Renderer) EmptyListingNotice(resourceType, namespace, match string) {
+	fmt.Fprintln(r.err, r.style(theme.Muted, strings.Join(captionParts(
+		kinds.PluralDisplay(resourceType), namespace, emptyLabel(match)), " · ")))
+}
+
+// emptyLabel is what stands where a count would for a listing that holds
+// nothing: the term that emptied it, or noneFound.
+func emptyLabel(match string) string {
+	if match != "" {
+		return NothingMatches(match)
+	}
+	return noneFound
 }
 
 // noneFound is how kx says a listing held nothing, wherever a count would

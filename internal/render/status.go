@@ -135,6 +135,14 @@ func (r *Renderer) Banner(kind, name, namespace string, extra ...string) {
 	r.Caption(append([]string{kind + "/" + name, namespace}, extra...)...)
 }
 
+// BannerErr is Banner on stderr, for a command whose stdout is the document
+// the banner introduces rather than text for a person — see
+// documentAnnotation. The person watching still reads it; `> pod.yaml` and
+// `| yq` no longer receive it.
+func (r *Renderer) BannerErr(kind, name, namespace string, extra ...string) {
+	r.CaptionErr(append([]string{kind + "/" + name, namespace}, extra...)...)
+}
+
 // ScopeBanner is the caption for a cross-kind sweep, matching kx diag's
 // "Mixed · …" header for namespace-spanning listings.
 func (r *Renderer) ScopeBanner(label, namespace, extra string) {
@@ -167,6 +175,9 @@ func Progress(label string, total int) (advance func(), stop func()) {
 
 func Banner(kind, name, namespace string, extra ...string) {
 	current.Banner(kind, name, namespace, extra...)
+}
+func BannerErr(kind, name, namespace string, extra ...string) {
+	current.BannerErr(kind, name, namespace, extra...)
 }
 func ScopeBanner(label, namespace, extra string) { current.ScopeBanner(label, namespace, extra) }
 func Blank()                                     { current.Blank() }

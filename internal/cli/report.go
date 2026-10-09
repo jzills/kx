@@ -166,7 +166,11 @@ type diagnosticDocument struct {
 	// gate the same window governs. Two runs of the same command differ
 	// otherwise with nothing to say whether the cluster got better or the
 	// window got narrower.
-	Window    string       `json:"window,omitempty"`
+	Window string `json:"window,omitempty"`
+	// Match is the --match term the sweep was narrowed by, absent for none —
+	// for the same reason Window is here: without it, a narrowed sweep and a
+	// quiet namespace are two documents a consumer cannot tell apart.
+	Match     string       `json:"match,omitempty"`
 	Checked   int          `json:"checked"`
 	Healthy   int          `json:"healthy"`
 	Resources []jsonReport `json:"resources"`
@@ -205,6 +209,7 @@ func triageDocument(result render.TriageResult, indexed bool) diagnosticDocument
 		Namespace:     result.Namespace,
 		AllNamespaces: result.AllNamespaces,
 		Window:        windowLabel(result.Window),
+		Match:         result.Match,
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
 		Resources:     resources,
@@ -244,6 +249,8 @@ type scanSubject struct {
 	Name          string
 	Namespace     string
 	AllNamespaces bool
+	// Match is the --match term a sweep was narrowed by, empty for none.
+	Match string
 }
 
 // scanDocument is the one shape kx scan --json emits, and what the MCP
@@ -254,6 +261,7 @@ type scanDocument struct {
 	Name          string      `json:"name,omitempty"`
 	Namespace     string      `json:"namespace,omitempty"`
 	AllNamespaces bool        `json:"allNamespaces,omitempty"`
+	Match         string      `json:"match,omitempty"`
 	Images        []jsonImage `json:"images"`
 }
 
@@ -280,7 +288,8 @@ func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument 
 	}
 	return scanDocument{
 		SchemaVersion: reportSchemaVersion, Kind: subject.Kind, Name: subject.Name,
-		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces, Images: images,
+		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
+		Match: subject.Match, Images: images,
 	}
 }
 
@@ -425,6 +434,7 @@ type treeDocument struct {
 	Name          string         `json:"name,omitempty"`
 	Namespace     string         `json:"namespace,omitempty"`
 	AllNamespaces bool           `json:"allNamespaces,omitempty"`
+	Match         string         `json:"match,omitempty"`
 	Roots         []jsonTreeNode `json:"roots"`
 }
 
@@ -445,6 +455,7 @@ func treeDocumentOf(subject scanSubject, roots []*tree.Node) treeDocument {
 		Name:          subject.Name,
 		Namespace:     subject.Namespace,
 		AllNamespaces: subject.AllNamespaces,
+		Match:         subject.Match,
 		Roots:         converted,
 	}
 }
@@ -460,8 +471,14 @@ func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
 // The percentages are numbers, not the "12%" cells the table prints, and a
 // pointer so "not known" is null rather than zero — a pod with no limit set
 // has no percentage, and reporting that as 0% would read as idle.
+//
+// Pod is the pod a container's row belongs to under --containers, whose name
+// is the container's, as kubectl's POD and NAME columns say: the pod is what
+// the row's index resolves to and what --match matches. Absent for a row of
+// a pod or a node, which name names itself.
 type jsonTopRow struct {
 	Index     int    `json:"index,omitempty"`
+	Pod       string `json:"pod,omitempty"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 	CPU       string `json:"cpu"`
@@ -478,12 +495,15 @@ type jsonTopRow struct {
 // here rather than as a second type, matching how treeDocument carries a
 // Truncated only tree's caller ever sets.
 type topDocument struct {
-	SchemaVersion int          `json:"schemaVersion"`
-	Resource      string       `json:"resource"`
-	Namespace     string       `json:"namespace,omitempty"`
-	AllNamespaces bool         `json:"allNamespaces,omitempty"`
-	Rows          []jsonTopRow `json:"rows"`
-	Truncated     int          `json:"truncated,omitempty"`
+	SchemaVersion int    `json:"schemaVersion"`
+	Resource      string `json:"resource"`
+	Namespace     string `json:"namespace,omitempty"`
+	AllNamespaces bool   `json:"allNamespaces,omitempty"`
+	// Match is the --match term the rows were narrowed by, absent for none,
+	// as the sweeps' documents carry theirs.
+	Match     string       `json:"match,omitempty"`
+	Rows      []jsonTopRow `json:"rows"`
+	Truncated int          `json:"truncated,omitempty"`
 }
 
 // topDocumentOf converts a usage listing's rows into topJSON's document,
@@ -496,7 +516,7 @@ func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topD
 	converted := make([]jsonTopRow, 0, len(rows))
 	for _, row := range rows {
 		converted = append(converted, jsonTopRow{
-			Index: row.Index, Name: row.Name, Namespace: row.Namespace,
+			Index: row.Index, Pod: row.Pod, Name: row.Name, Namespace: row.Namespace,
 			CPU: row.CPU, Memory: row.Memory,
 			CPUPct: percentOf(row.CPUPct), MemoryPct: percentOf(row.MemPct),
 		})
@@ -504,7 +524,7 @@ func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topD
 	return topDocument{
 		SchemaVersion: reportSchemaVersion, Resource: resource,
 		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
-		Rows: converted,
+		Match: subject.Match, Rows: converted,
 	}
 }
 

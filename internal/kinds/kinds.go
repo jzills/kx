@@ -4,6 +4,7 @@ package kinds
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -61,6 +62,7 @@ var kindMap = map[string]Kind{
 	"svc":                      Service,
 	"ingress":                  Ingress,
 	"ingresses":                Ingress,
+	"ing":                      Ingress,
 	"configmap":                ConfigMap,
 	"configmaps":               ConfigMap,
 	"cm":                       ConfigMap,
@@ -70,11 +72,13 @@ var kindMap = map[string]Kind{
 	"jobs":                     Job,
 	"cronjob":                  CronJob,
 	"cronjobs":                 CronJob,
+	"cj":                       CronJob,
 	"pvc":                      PersistentVolumeClaim,
 	"persistentvolumeclaim":    PersistentVolumeClaim,
 	"persistentvolumeclaims":   PersistentVolumeClaim,
 	"node":                     Node,
 	"nodes":                    Node,
+	"no":                       Node,
 	"ns":                       Namespace,
 	"namespace":                Namespace,
 	"namespaces":               Namespace,
@@ -199,29 +203,178 @@ func Spellings() []Spelling {
 
 // IsKindSpelling reports whether token names a known resource type.
 func IsKindSpelling(token string) bool {
-	if _, ok := kindMap[strings.ToLower(token)]; ok {
+	if _, ok := builtinSpelling(token); ok {
 		return true
 	}
-	if shorthandSource != nil {
-		if _, _, ok := shorthandSource.Resolve(token); ok {
-			return true
-		}
-	}
-	return false
+	_, _, ok := discovered(token)
+	return ok
 }
 
 // Normalize maps a kubectl resource type onto its canonical kind, passing
 // unknown types through unchanged.
 func Normalize(resourceType string) Kind {
-	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
+	if kind, ok := builtinSpelling(resourceType); ok {
 		return kind
 	}
-	if shorthandSource != nil {
-		if kind, _, ok := shorthandSource.Resolve(resourceType); ok {
-			return kind
-		}
+	if kind, _, ok := discovered(resourceType); ok {
+		return kind
 	}
 	return Kind(resourceType)
+}
+
+// discovered asks the discovery source for a spelling kx does not name
+// itself. The cache keys a resource by its names alone, so the core group
+// spelled out — persistentvolumes. or persistentvolumes.v1., which kubectl
+// reads as persistentvolumes — is asked as the resource. Another group's
+// spelling is not reduced: the cache does not say which group a name is in,
+// and foos.example.com read as foos could be some other group's foos.
+func discovered(spelling string) (Kind, string, bool) {
+	if shorthandSource == nil {
+		return "", "", false
+	}
+	if resource, ok := coreGroupResource(spelling); ok {
+		spelling = resource
+	}
+	return shorthandSource.Resolve(spelling)
+}
+
+// coreGroupResource is the resource of a spelling naming the core group
+// outright, resource. or resource.<version>. (see builtinSpelling).
+func coreGroupResource(spelling string) (string, bool) {
+	resource, qualifier, qualified := strings.Cut(strings.ToLower(spelling), ".")
+	if !qualified || resource == "" {
+		return "", false
+	}
+	if qualifier == "" {
+		return resource, true
+	}
+	version, group, versioned := strings.Cut(qualifier, ".")
+	if versioned && group == "" && apiVersion.MatchString(version) {
+		return resource, true
+	}
+	return "", false
+}
+
+// Several reports whether a kubectl resource argument asks for more than one
+// kind: a list ("deploy,svc") or the "all" category. kubectl prints such a
+// listing as a table per kind and names every row kind/name, so what each row
+// is comes from the row (see Qualified), not from the argument.
+func Several(resourceType string) bool {
+	return strings.Contains(resourceType, ",") || strings.EqualFold(resourceType, "all")
+}
+
+// allCategory is kubectl's "all" category as the API server defines it, of the
+// kinds kx names itself: the workloads and the Services in front of them.
+// ReplicationController is in it too, but kx has no kind for it. A CRD can
+// join the category, and only discovery knows which do.
+var allCategory = map[Kind]bool{
+	Pod: true, Service: true, Deployment: true, ReplicaSet: true, StatefulSet: true,
+	DaemonSet: true, Job: true, CronJob: true, HorizontalPodAutoscaler: true,
+}
+
+// Covers reports whether a resource argument naming several kinds — a list,
+// or the "all" category — lists rows of kind, so an index of that kind can be
+// fetched under it.
+//
+// False only when kx can tell. A kind kx names itself is saved under one
+// spelling, so it is compared exactly, and it is in "all" or it is not. A kind
+// kx does not name — a CRD, which a listing of several kinds records as
+// kubectl prefixed it (certificate.cert-manager.io) — compared with a
+// spelling kx does not recognize either, could be the same kind under two
+// spellings, and is let through: refusing it would turn away an index into
+// kx get certificates,issuers for being one of its own rows.
+func Covers(resourceType string, kind Kind) bool {
+	// Both sides read alike: a row saved under a kubectl spelling, by a
+	// listing taken before kx read it, is the kind the spelling names.
+	kind = Normalize(string(kind))
+	_, known := pluralDisplay[kind]
+	undecided := false
+	for _, part := range strings.Split(resourceType, ",") {
+		if strings.EqualFold(part, "all") {
+			if allCategory[kind] {
+				return true
+			}
+			undecided = undecided || !known
+			continue
+		}
+		listed := Normalize(part)
+		if listed == kind {
+			return true
+		}
+		if _, listedKnown := pluralDisplay[listed]; !listedKnown && !known {
+			undecided = true
+		}
+	}
+	return undecided
+}
+
+// builtinGroups is the API group each kind kx names itself is served from, ""
+// for the core group.
+var builtinGroups = map[Kind]string{
+	Pod: "", Service: "", ConfigMap: "", Secret: "", PersistentVolumeClaim: "",
+	Node: "", Namespace: "",
+	Deployment: "apps", ReplicaSet: "apps", StatefulSet: "apps", DaemonSet: "apps",
+	Job: "batch", CronJob: "batch",
+	HorizontalPodAutoscaler: "autoscaling",
+	Ingress:                 "networking.k8s.io",
+}
+
+// apiVersion is the shape of a Kubernetes API version: v1, v2, v1beta1.
+var apiVersion = regexp.MustCompile(`^v[0-9]+((alpha|beta)[0-9]+)?$`)
+
+// builtinSpelling reads any spelling kubectl takes for a kind kx names itself
+// as that kind. The one reader of them, for everything that reads a kind:
+// Normalize, Qualified, IsKindSpelling, PluralDisplay. Each read them its own
+// way, and where one did not, a spelling kubectl took was a kind of its own
+// to kx: kx get deployments.v1.apps saved rows kx scale refused, and kx get
+// deployments.v1.apps,svc 1 was refused by the listing that produced it.
+//
+// kubectl's grammar is resource[.version][.group] — its ParseResourceArg —
+// with the resource any of the kind's names (kindMap) in any case. Two dots
+// or more are read as resource.version.group first, as kubectl reads them,
+// then as resource.group; the core group is "" there, so pods.v1. and pods.
+// are the core group spelled out. Only in the kind's own group, for the
+// reason Qualified gives: Knative's services.serving.knative.dev is not a
+// Service. And a version only where kubectl reads one: nodes.v1 is a group
+// called v1 to kubectl, which refuses it.
+func builtinSpelling(spelling string) (Kind, bool) {
+	resource, qualifier, qualified := strings.Cut(strings.ToLower(spelling), ".")
+	kind, ok := kindMap[resource]
+	if !ok {
+		return "", false
+	}
+	if !qualified {
+		return kind, true
+	}
+	group := builtinGroups[kind]
+	if version, rest, versioned := strings.Cut(qualifier, "."); versioned &&
+		apiVersion.MatchString(version) && rest == group {
+		return kind, true
+	}
+	if qualifier == group {
+		return kind, true
+	}
+	return "", false
+}
+
+// Qualified maps the kind kubectl prefixes a row's name with, when a listing
+// spans kinds — "pod", "deployment.apps", "lease.coordination.k8s.io" — onto
+// a kind.
+//
+// A kind kx names itself is recognised only in its own API group: Knative's
+// service.serving.knative.dev is not a Service, and resolving it as one would
+// send kx describe to a core Service that happens to share the name. Any
+// other group is kept as written, which kubectl takes back as it gave it, as
+// kx already keeps certificates.cert-manager.io when that is what was typed.
+// The core group has no suffix to keep, so its spellings are normalised.
+func Qualified(spelling string) Kind {
+	if kind, ok := builtinSpelling(spelling); ok {
+		return kind
+	}
+	if !strings.Contains(spelling, ".") {
+		return Normalize(spelling)
+	}
+	return Kind(spelling)
 }
 
 // displayPlural builds a caption plural from a kind and the API's own plural
@@ -255,19 +408,32 @@ func displayPlural(kind Kind, apiPlural string) string {
 	return string(kind) + "s"
 }
 
+// Mixed is how kx captions a listing that spans kinds — a sweep, a tree, kx
+// get all — in place of the one kind a listing is otherwise named by.
+const Mixed = "Mixed"
+
 // PluralDisplay renders a resource type for captions ("pods" -> "Pods"),
 // passing unknown types through unchanged.
+//
+// A request for several kinds is "Mixed", the label kx gives any listing that
+// spans kinds, rather than the argument as typed ("deploy,svc · prod"). One
+// naming a resource as type/name is captioned by its type, not by the one
+// resource ("pod/nginx · prod").
 func PluralDisplay(resourceType string) string {
-	if kind, ok := kindMap[strings.ToLower(resourceType)]; ok {
+	if Several(resourceType) {
+		return Mixed
+	}
+	if kind, _, named := strings.Cut(resourceType, "/"); named {
+		return PluralDisplay(kind)
+	}
+	if kind, ok := builtinSpelling(resourceType); ok {
 		if plural, ok := pluralDisplay[kind]; ok {
 			return plural
 		}
 		return string(kind) + "s"
 	}
-	if shorthandSource != nil {
-		if kind, plural, ok := shorthandSource.Resolve(resourceType); ok && kind != "" {
-			return displayPlural(kind, plural)
-		}
+	if kind, plural, ok := discovered(resourceType); ok && kind != "" {
+		return displayPlural(kind, plural)
 	}
 	// A pseudo-kind has no kubectl spelling, so it never appears in kindMap.
 	// It is still named by its canonical kind in captions and errors.
@@ -297,6 +463,11 @@ type PreviousLister interface {
 // through discovery, so this is a lowering of a spelling kx already computes
 // rather than a second rule that would have to learn the same exceptions.
 func ListCommand(kind Kind) string {
+	// Captioned "Mixed", which is no kind kubectl knows; the argument itself
+	// is what lists it again.
+	if Several(string(kind)) {
+		return "kx get " + string(kind)
+	}
 	return "kx get " + strings.ToLower(PluralDisplay(string(kind)))
 }
 

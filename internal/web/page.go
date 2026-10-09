@@ -61,6 +61,10 @@ type DiagPage struct {
 	// place that decides how a window reads, and a page that spelled it
 	// differently from the terminal caption beside it would be its own bug.
 	Window string
+	// Match is the --match term the sweep was narrowed by, empty for none.
+	// Only a sweep it emptied shows it: there, "0 checked" would read as an
+	// empty namespace, which it may well not be.
+	Match string
 	// Reports are every swept resource, most severe first, healthy included —
 	// or exactly one resource when Single is set, healthy or not.
 	Reports []diagnostics.Report
@@ -69,7 +73,10 @@ type DiagPage struct {
 // ScanPage is one image-scan sweep.
 type ScanPage struct {
 	Meta
-	Scope  string
+	Scope string
+	// Match is the --match term the sweep was narrowed by, empty for none —
+	// named on the page when it left no images, as DiagPage's is.
+	Match  string
 	Images []scanner.ImageScan
 }
 
@@ -103,13 +110,21 @@ type TreePage struct {
 type TopPage struct {
 	Meta
 	Scope string
+	// Match is the --match term the listing was narrowed by, empty for none —
+	// named on the page when it left no rows, as ScanPage's is.
+	Match string
 	Rows  []TopRow
 }
 
-// TopRow is one pod's or node's usage.
+// TopRow is one pod's or node's usage, or one container's.
 type TopRow struct {
 	Index int
-	Name  string
+	// Pod is the pod a container's row belongs to, under kubectl top pod
+	// --containers, whose NAME is the container — and the pod is what the
+	// row's index resolves to. Empty for a row of a pod or a node, which Name
+	// names itself.
+	Pod  string
+	Name string
 	// Namespace is empty in single-namespace mode (no NAMESPACE column to
 	// read it from) — the grid only shows this column when at least one
 	// row actually has one, matching the -A-only NAMESPACE column
@@ -454,6 +469,9 @@ var funcs = template.FuncMap{
 	// window spells a report's own window — "last 24h" — so the page says
 	// what it was allowed to see, the way the terminal banner does.
 	"window": render.WindowLabel,
+	// nothingMatches captions a sweep a --match term emptied, in the words
+	// the terminal uses for it.
+	"nothingMatches": render.NothingMatches,
 	"cpuUsage": func(c diagnostics.ContainerDiagnostic) Usage {
 		return usageOf(c.CPUUsage, c.CPULimit, "cpu")
 	},

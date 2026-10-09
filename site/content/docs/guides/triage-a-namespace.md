@@ -42,6 +42,7 @@ With an index, `kx diag` diagnoses a single resource and prints, on one screen:
 - warning events
 
 The findings it looks for include CrashLoopBackOff, image pull failures, OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints, Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that don't exist.
+Each problem is reported once, on the row it belongs to: a Service's row is about the Service — its endpoints — while the pods behind it are reported under the workload that owns them.
 
 ## Now, not once
 
@@ -96,9 +97,13 @@ See [taking a node out of service](../take-a-node-out-of-service/).
 ```bash
 kx diag -n prod    # a namespace you aren't in
 kx diag -A         # every namespace
+kx diag -A -m api  # only what's called api, wherever it is
 ```
 
 With `-A`, the sweep is indexed too, and adds a `NAMESPACE` column beside the numbers, so `kx logs 7` reaches whichever namespace row 7 came from.
+
+The `-m` flag narrows any sweep by name, the way it narrows `kx get`: a case-insensitive substring.
+Everything the sweep produces covers only what matched — the count, the rows and their numbers, `--json`, `--html`, and the `--fail-on` gate.
 
 ## As a check
 

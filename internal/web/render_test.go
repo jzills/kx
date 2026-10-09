@@ -798,6 +798,31 @@ func TestRenderScanCaptionRendersScopeVerbatim(t *testing.T) {
 	}
 }
 
+// A --match term is named only when it left nothing to scan. A sweep it
+// narrowed to some images counts them like any other, since there is no empty
+// namespace for the count to be mistaken for.
+func TestRenderScanNamesATermOnlyWhenItLeftNoImages(t *testing.T) {
+	page := scanPage(t)
+	page.Match = "api"
+	page.Images = page.Images[:1]
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if html := string(out); !strings.Contains(html, "· 1 image</p>") || strings.Contains(html, "nothing matches") {
+		t.Error("a sweep the term matched did not caption its image count")
+	}
+
+	page.Images = nil
+	out, err = RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if !strings.Contains(string(out), "· nothing matches &#39;api&#39;</p>") {
+		t.Error("a sweep the term emptied did not say nothing matched")
+	}
+}
+
 func TestRenderScanListsImagesAndCVEs(t *testing.T) {
 	out, err := RenderScan(scanPage(t))
 	if err != nil {
@@ -1532,5 +1557,21 @@ func TestRenderDiagEventHeadWithoutASpanIsUnchanged(t *testing.T) {
 	}
 	if strings.Contains(string(out), " over ") {
 		t.Error("a single-occurrence event grew a span segment in the HTML")
+	}
+}
+
+// A container's row carries the pod it belongs to, which is what its index
+// resolves to, and the page's grid data keeps it.
+func TestRenderTopCarriesTheContainersPod(t *testing.T) {
+	out, err := RenderTop(TopPage{
+		Meta: testMeta(t), Scope: "Pods · prod",
+		Rows: []TopRow{{Index: 1, Pod: "web-1", Name: "nginx", CPU: "1m", Memory: "10Mi"}},
+	})
+	if err != nil {
+		t.Fatalf("RenderTop returned %v", err)
+	}
+	rows := decodeTopRows(t, string(out))
+	if len(rows) != 1 || rows[0].Pod != "web-1" || rows[0].Name != "nginx" {
+		t.Fatalf("rows = %+v, want pod web-1 beside container nginx", rows)
 	}
 }

@@ -106,8 +106,12 @@ func TestGetWatchNonTabularOutputKeepsPassthrough(t *testing.T) {
 	if joinArgs(kube.interactive[0]) != joinArgs(want) {
 		t.Errorf("interactive args = %v, want %v", kube.interactive[0], want)
 	}
-	if !strings.Contains(out.String(), "can't be indexed") {
-		t.Errorf("output = %q, want a note that watch listings aren't indexed", out.String())
+	// No note ahead of it: a line of prose breaks a stream another program
+	// reads (#432), and JSON is never numbered, watched or not, so there is
+	// nothing for the note to say. TestWatchStreamLeavesMachineOutputAlone
+	// shows a table stream keeps it.
+	if out.String() != "" {
+		t.Errorf("output = %q, want kubectl's stream alone", out.String())
 	}
 }
 
@@ -710,5 +714,64 @@ func TestFirstListingBeingEmptyOffersNoWayBack(t *testing.T) {
 
 	if strings.Contains(out.String(), "kx state back") {
 		t.Errorf("output = %q, want no way back offered with no previous listing", out.String())
+	}
+}
+
+// An empty reply in a format another program reads is not an empty listing.
+// Saved as one, kx get pods -l app=x -o name replaced the listing behind it,
+// though a non-empty -o name leaves it alone; and the caption and the way
+// back went to stdout, so | xargs kubectl delete was handed prose. Reported on
+// stderr instead, where kubectl reports it.
+func TestEmptyMachineReadableReplyIsNotAListing(t *testing.T) {
+	for _, format := range []string{"name", "jsonpath={.items[*].metadata.name}", "go-template={{range .items}}{{end}}"} {
+		t.Run(format, func(t *testing.T) {
+			kube := &fakeKubectl{outputs: []string{servicesOutput, ""}, namespace: "prod"}
+			services := switchServices(t, kube)
+			quietRender(t)
+			if err := runGet(services, "services", nil, getOptions{}); err != nil {
+				t.Fatalf("seed listing: %v", err)
+			}
+
+			stdout, stderr := splitRender(t)
+			if err := runGet(services, "pods", []string{"-l", "app=x", "-o", format}, getOptions{}); err != nil {
+				t.Fatalf("runGet: %v", err)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing ahead of a reader expecting names", stdout.String())
+			}
+			if want := "Pods · prod · none found"; !strings.Contains(stderr.String(), want) {
+				t.Errorf("stderr = %q, want %q", stderr.String(), want)
+			}
+			if name, _, kind, err := services.State.Fields(1); err != nil || kind != kinds.Service || name != "api" {
+				t.Errorf("index 1 = %s/%s (err %v), want the Services listing still current", kind, name, err)
+			}
+		})
+	}
+}
+
+// The same holds for rows fetched across namespaces, whose replies are
+// stitched: all of them empty is not a listing to caption on stdout.
+func TestEmptyMachineReadableFetchAcrossNamespacesPrintsNothing(t *testing.T) {
+	kube := &fakeKubectl{outputs: []string{
+		"NAMESPACE   NAME            READY   STATUS    RESTARTS   AGE\n" +
+			"prod        nginx-abc-xyz   1/1     Running   0          5d\n" +
+			"stage       redis-def-uvw   1/1     Running   0          3d\n",
+		"", "",
+	}, namespace: "prod"}
+	services := switchServices(t, kube)
+	quietRender(t)
+	if err := runGet(services, "pods", []string{"-A"}, getOptions{}); err != nil {
+		t.Fatalf("seed listing: %v", err)
+	}
+
+	stdout, stderr := splitRender(t)
+	if err := runGet(services, "pods", []string{"1", "2", "-o", "name"}, getOptions{}); err != nil {
+		t.Fatalf("runGet: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing", stdout.String())
+	}
+	if want := "Pods · all namespaces · none found"; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
 	}
 }

@@ -23,6 +23,22 @@ kx scan 1 --full
 streams the scanner's own output instead — the per-image CVE list, unabridged.
 Because that is the scanner's own formatting rather than something kx parses, `--full` cannot be combined with `--json`, `--html` or `--fail-on`; kx refuses those pairings rather than quietly dropping one side.
 
+## Patching what it finds
+
+Once a scan names a fixed version, the `kx set image` command puts it in place on the same index:
+
+```bash
+kx scan 1                      # nginx:1.27.1 · 3 critical
+kx set image 1 nginx:1.27.3    # nginx: nginx:1.27.1 → nginx:1.27.3
+kx rollout status 1
+kx scan 1                      # the new image, scanned again
+```
+
+A bare image sets the workload's only container.
+With more than one, init containers included, name the one to change — `kx set image 1 api=api:v2` — and kx lists the names if you don't.
+The line it prints shows the image it replaced, which is what to type to put it back.
+In a cluster managed by Argo CD or Flux, change the image in Git instead; a manual change there is reverted.
+
 ## Engines
 
 Scanning drives an external scanner, so its CLI must be installed.
@@ -45,7 +61,10 @@ The default is stored in [`~/.kx/config.toml`](../../concepts/configuration/); `
 ```bash
 kx scan -n prod
 kx scan -A
+kx scan -A -m payments   # only workloads called payments
 ```
+
+The `-m` flag narrows the sweep by workload name before any image is resolved, so a workload it leaves out never costs a scan.
 
 Images are scanned two at a time.
 The bound is memory rather than cores — a scanner unpacks an image and walks every package in it — so a wide sweep stays steady on a small machine instead of thrashing it.

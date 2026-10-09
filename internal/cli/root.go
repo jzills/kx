@@ -2,7 +2,7 @@
 package cli
 
 import (
-	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/jzills/kx/internal/buildinfo"
@@ -63,6 +63,7 @@ func (s Services) scannerService() scanner.Service {
 // NewServices builds the production service set from the loaded config.
 func NewServices(cfg config.Config) Services {
 	client := kubectl.New()
+	client.Warn = render.Warning
 	states := state.NewService(cfg.MaxHistory)
 	// Every entry the state service writes records the context it was listed
 	// against. Wired here, as a hook rather than a value, because the state
@@ -145,6 +146,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newDropCommand(services),
 	)
 	root.AddCommand(withoutRefresh(stateCmd))
+	root.AddCommand(withoutRefresh(newSetCommand(services)))
 
 	for _, cmd := range []*cobra.Command{
 		newDescribeCommand(services),
@@ -157,6 +159,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newDeleteCommand(services),
 		newDrainCommand(services),
 		newScaleCommand(services),
+		newWaitCommand(services),
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
 		newCopyCommand(services),
@@ -230,7 +233,10 @@ func newGetCommand(services Services) *cobra.Command {
 			"A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a " +
 			"cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace " +
 			"for either to name, so kx refuses them rather than listing something " +
-			"other than what was asked for.",
+			"other than what was asked for.\n\n" +
+			"A `--match` term narrows the table, a watch's live table or `-o name` by " +
+			"each row's name. JSON, YAML and templates have no rows for it to pick, so " +
+			"kx refuses it beside them rather than printing everything.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch",
 		Args:    minArgs(1),
 		// Everything after `get` belongs to kubectl unless it is one of kx's
@@ -247,13 +253,18 @@ func newGetCommand(services Services) *cobra.Command {
 				return err
 			}
 			if len(rest) == 0 {
-				return fmt.Errorf("get requires a resource type, e.g. 'kx get pods'")
+				return requiredArgsError(cmd)
+			}
+			// A number here is a row, not a kind — the indexes follow the
+			// resource, they do not replace it.
+			if _, err := strconv.Atoi(rest[0]); err == nil {
+				return numericResourceError(services, rest)
 			}
 			// The resource type leads; everything after is indexes or kubectl's.
 			return runGet(services, rest[0], rest[1:], options)
 		},
 	}
-	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
@@ -263,8 +274,16 @@ func newGetCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
+	registerFormatFlags(cmd)
 	registerWatchFlag(cmd)
 	return cmd
+}
+
+// registerFormatFlags declares the kubectl flags a listing command reads by
+// hand to decide what it can number and what --match can narrow.
+func registerFormatFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("output", "o", "", "Output format, as kubectl takes it; kx numbers only a table")
+	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 }
 
 // registerWatchFlag declares --watch on the listing commands that honour it.

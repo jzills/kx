@@ -76,7 +76,13 @@ func buildStyles(renderer *lipgloss.Renderer, specs map[string]string) map[strin
 	return styles
 }
 
+// isTerminal reports whether w is a terminal: a file that is one, or a
+// writer that says it is. The second is how a test sees what kx draws on a
+// terminal — the redrawn watch, which off a terminal draws nothing at all.
 func isTerminal(w io.Writer) bool {
+	if terminal, ok := w.(interface{ IsTerminal() bool }); ok {
+		return terminal.IsTerminal()
+	}
 	file, ok := w.(*os.File)
 	if !ok {
 		return false
@@ -126,6 +132,30 @@ func (r *Renderer) Error(msg string) {
 // Quoted fragments are accented the same way Error's are, via emphasizeQuoted.
 func (r *Renderer) Notice(msg string) {
 	fmt.Fprintln(r.err, r.emphasizeQuoted(msg, theme.Muted))
+}
+
+// Warning prints a warning kubectl wrote on a call that succeeded, worded as
+// kubectl worded it, on stderr where kubectl would have put it. The word
+// "Warning" takes the style kx gives a Warning event's TYPE.
+func (r *Renderer) Warning(line string) {
+	r.warning(line, isTerminal(r.out))
+}
+
+// warning is Warning with the terminal check injected, as status takes it.
+//
+// It runs while the call that produced it is still under its spinner, whose
+// frame sits on the error stream with no newline after it, so on a terminal —
+// the only place a spinner paints — the line is cleared first. The next frame
+// paints on the line below, and stopping clears that one as it always does.
+func (r *Renderer) warning(line string, terminal bool) {
+	text := line
+	if rest, ok := strings.CutPrefix(line, "Warning:"); ok {
+		text = r.style(theme.Warn, "Warning:") + rest
+	}
+	if terminal {
+		text = clearLine + text
+	}
+	fmt.Fprintln(r.err, text)
 }
 
 // emphasizeQuoted accents 'single-quoted' fragments within an otherwise
@@ -201,6 +231,12 @@ func (r *Renderer) Caption(parts ...string) {
 	r.line(r.style(theme.Muted, strings.Join(captionParts(parts...), " · ")))
 }
 
+// CaptionErr is Caption on stderr, for the callers whose stdout carries a
+// document a program reads rather than lines for a person.
+func (r *Renderer) CaptionErr(parts ...string) {
+	fmt.Fprintln(r.err, r.style(theme.Muted, strings.Join(captionParts(parts...), " · ")))
+}
+
 // captionParts drops the empty segments and leaves the rest in order, which is
 // what lets a caller pass a namespace that may not exist without deciding
 // whether to include it. Shared with the callers that need the joined text
@@ -230,7 +266,9 @@ func (r *Renderer) Raw(text string) { r.line(text) }
 func Success(msg string)                    { current.Success(msg) }
 func Error(msg string)                      { current.Error(msg) }
 func Notice(msg string)                     { current.Notice(msg) }
+func Warning(line string)                   { current.Warning(line) }
 func Caption(parts ...string)               { current.Caption(parts...) }
+func CaptionErr(parts ...string)            { current.CaptionErr(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }
 func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
@@ -240,6 +278,10 @@ func IndexedTable(table index.Table, resourceType, namespace string) {
 }
 
 func PreviousListingNote(previous state.State) { current.PreviousListingNote(previous) }
+
+func EmptyListingNotice(resourceType, namespace, match string) {
+	current.EmptyListingNotice(resourceType, namespace, match)
+}
 
 // active rather than current: the package-level renderer is named current, and
 // shadowing it inside a wrapper whose whole job is to call it invites exactly

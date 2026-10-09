@@ -275,12 +275,7 @@ type topOutput struct {
 }
 
 func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*mcp.CallToolResult, topOutput, error) {
-	if in.Namespace != "" {
-		if err := validNamespace(in.Namespace); err != nil {
-			return nil, topOutput{}, err
-		}
-	}
-	if err := scopeConflict(in.Namespace, in.AllNamespaces); err != nil {
+	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, topOutput{}, err
 	}
 	if in.Nodes {
@@ -308,13 +303,16 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 	case in.AllNamespaces:
 		indexed, _, err = command.Execute("", []string{"-A"}, false)
 		subject.AllNamespaces = true
+	case in.Namespace != "":
+		indexed, _, err = command.Execute("", []string{"-n", in.Namespace}, false)
+		subject.Namespace = in.Namespace
 	default:
-		namespace := in.Namespace
-		if namespace == "" {
-			namespace = d.Kubectl.CurrentNamespace()
-		}
-		indexed, _, err = command.Execute("", []string{"-n", namespace}, false)
-		subject.Namespace = namespace
+		// The namespace the context gives it, taken as Scope rather than
+		// typed, so the saved listing records it as kx top's own does
+		// (listingScope).
+		command.Scope = d.Kubectl.CurrentNamespace()
+		indexed, _, err = command.Execute("", nil, false)
+		subject.Namespace = command.Scope
 	}
 	if err != nil {
 		return nil, topOutput{}, err

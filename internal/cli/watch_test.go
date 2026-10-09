@@ -35,7 +35,7 @@ func TestWatchRowsHandlesColumnWidthDriftAcrossEvents(t *testing.T) {
 	if !ok {
 		t.Fatal("ParseHeader: ok=false")
 	}
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      waypoint-5d84f566ff-hb8rk   1/1     Running   0          106s"))
 	rows.Apply(shape, shape.Row("MODIFIED   waypoint-5d84f566ff-hb8rk   1/1     Terminating   0          107s"))
 
@@ -56,7 +56,7 @@ func TestWatchRowsHandlesColumnWidthDriftAcrossEvents(t *testing.T) {
 // same name in different namespaces would clobber each other's row.
 func TestWatchRowsKeysByNamespaceAndNameForAllNamespaces(t *testing.T) {
 	shape := watchAllNamespacesShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      prod        worker-0         Running"))
 	rows.Apply(shape, shape.Row("ADDED      staging     worker-0         Running"))
 
@@ -86,9 +86,31 @@ func TestWatchNamespaceFallsBackToCurrentNamespace(t *testing.T) {
 	}
 }
 
+// Another cluster's watch is not standing in this cluster's namespace:
+// `kx get pods -w --kubeconfig=b.yaml` streamed b's kube-system pods under
+// "Pods · default". It names only a namespace given with -n, as kx get does
+// for another cluster's listing (#436).
+func TestWatchNamespaceFromAnotherCluster(t *testing.T) {
+	kube := &fakeKubectl{namespace: "prod"}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--context=b"}, ""},
+		{[]string{"--kubeconfig", "/tmp/b.yaml"}, ""},
+		{[]string{"-s", "https://b:6443"}, ""},
+		{[]string{"--context=b", "-n", "staging"}, "staging"},
+		{[]string{"--context=b", "-A"}, "all namespaces"},
+	} {
+		if got := watchNamespace(tc.args, kube); got != tc.want {
+			t.Errorf("watchNamespace(%q) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestWatchRowsDeletedOnlyRemovesMatchingNamespace(t *testing.T) {
 	shape := watchAllNamespacesShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      prod        worker-0         Running"))
 	rows.Apply(shape, shape.Row("ADDED      staging     worker-0         Running"))
 	rows.Apply(shape, shape.Row("DELETED    prod        worker-0         Terminating"))
@@ -102,7 +124,7 @@ func TestWatchRowsDeletedOnlyRemovesMatchingNamespace(t *testing.T) {
 
 func TestWatchRowsAddedUpsertsInOrder(t *testing.T) {
 	shape := watchShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      nginx            Running"))
 	rows.Apply(shape, shape.Row("ADDED      redis            Running"))
 
@@ -115,7 +137,7 @@ func TestWatchRowsAddedUpsertsInOrder(t *testing.T) {
 
 func TestWatchRowsModifiedUpdatesInPlace(t *testing.T) {
 	shape := watchShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      nginx            Pending"))
 	rows.Apply(shape, shape.Row("ADDED      redis            Running"))
 	rows.Apply(shape, shape.Row("MODIFIED   nginx            Running"))
@@ -129,7 +151,7 @@ func TestWatchRowsModifiedUpdatesInPlace(t *testing.T) {
 
 func TestWatchRowsDeletedRemoves(t *testing.T) {
 	shape := watchShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      nginx            Running"))
 	rows.Apply(shape, shape.Row("ADDED      redis            Running"))
 	rows.Apply(shape, shape.Row("DELETED    nginx            Terminating"))
@@ -143,7 +165,7 @@ func TestWatchRowsDeletedRemoves(t *testing.T) {
 
 func TestWatchRowsReaddAfterDeleteAppendsAtEnd(t *testing.T) {
 	shape := watchShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      nginx            Running"))
 	rows.Apply(shape, shape.Row("ADDED      redis            Running"))
 	rows.Apply(shape, shape.Row("DELETED    nginx            Terminating"))
@@ -161,7 +183,7 @@ func TestWatchRowsReaddAfterDeleteAppendsAtEnd(t *testing.T) {
 // has stored, or every redraw would compound the previous one's padding.
 func TestWatchRowsSnapshotReturnsIndependentCopies(t *testing.T) {
 	shape := watchShape(t)
-	rows := newWatchRows()
+	rows := newWatchRows("")
 	rows.Apply(shape, shape.Row("ADDED      nginx            Running"))
 
 	snap := rows.Snapshot()
@@ -170,5 +192,24 @@ func TestWatchRowsSnapshotReturnsIndependentCopies(t *testing.T) {
 	again := rows.Snapshot()
 	if again[0][1] != "Running" {
 		t.Errorf("second Snapshot = %v, want the mutation not to have leaked into stored state", again)
+	}
+}
+
+// A term keeps out every row whose name it does not contain, whatever the
+// event: a MODIFIED or DELETED for a row it never kept changes nothing.
+func TestWatchRowsKeepOnlyWhatTheTermMatches(t *testing.T) {
+	shape, _ := index.ParseHeader("EVENT    NAME            READY")
+	rows := newWatchRows("REDIS")
+	for _, line := range []string{
+		"ADDED    nginx-abc-xyz   1/1",
+		"ADDED    redis-def-uvw   1/1",
+		"MODIFIED nginx-abc-xyz   0/1",
+		"DELETED  nginx-abc-xyz   0/1",
+	} {
+		rows.Apply(shape, shape.Row(line))
+	}
+	snapshot := rows.Snapshot()
+	if len(snapshot) != 1 || snapshot[0][0] != "redis-def-uvw" {
+		t.Errorf("rows = %q, want redis-def-uvw alone", snapshot)
 	}
 }

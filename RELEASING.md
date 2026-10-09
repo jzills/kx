@@ -172,6 +172,11 @@ tar xzf kx.tgz && ./kx/kx --version && test -f kx/LICENSE && echo "LICENSE ok"
 # the version-free URL now points at this release
 curl -sL https://github.com/jzills/kx/releases/latest/download/kx_linux_amd64.tar.gz \
   | tar xzO kx/kx > kx-latest && chmod +x kx-latest && ./kx-latest --version
+
+# the install script, from the live site, installs this release
+tmp=$(mktemp -d)
+curl -fsSL https://jzills.github.io/kx/install.sh | KX_INSTALL_DIR="$tmp" sh
+"$tmp/kx" --version    # expect this release's version
 ```
 
 ## Why the pipeline is shaped the way it is

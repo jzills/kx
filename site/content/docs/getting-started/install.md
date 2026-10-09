@@ -1,11 +1,32 @@
 ---
 title: Install
-description: krew, uv, pipx, pip, or a standalone binary — all the same build.
+description: The install script, krew, uv, pipx, pip, or a standalone binary — all the same build.
 weight: 1
 ---
 
 The only requirement is `kubectl` on your `PATH`.
 Every method below installs the same prebuilt Go binary.
+
+## With the install script
+
+On Linux or macOS, one command downloads the newest kx, checks it against the release's `SHA256SUMS`, and installs it to `~/.local/bin`:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | sh
+```
+
+It never uses `sudo`, and it tells you if the install directory isn't on your `PATH`.
+Two environment variables change what it does:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | KX_VERSION=v0.7.0 sh
+curl -fsSL https://jzills.github.io/kx/install.sh \
+  | sudo KX_INSTALL_DIR=/usr/local/bin sh
+```
+
+The first installs a specific release, and the second installs system-wide.
+Rerunning the script upgrades kx in place.
+Piping to a shell is a trust decision, so [read the script](https://jzills.github.io/kx/install.sh) first if you'd rather.
 
 ## As a kubectl plugin
 
@@ -31,6 +52,19 @@ uv tool install kx-cli
 
 Builds for Linux, macOS and Windows on both amd64 and arm64 are attached to every [GitHub Release](https://github.com/jzills/kx/releases), with checksums in `SHA256SUMS`.
 Download, verify, and drop the binary somewhere on your `PATH`.
+
+The newest build is always at the same URL, so on Linux or macOS installing it is one command.
+Swap `linux_amd64` for `linux_arm64`, `darwin_arm64` or `darwin_amd64` to match your machine:
+
+```bash
+curl -sSL \
+  https://github.com/jzills/kx/releases/latest/download/kx_linux_amd64.tar.gz \
+  | tar xz
+sudo install kx/kx /usr/local/bin/kx
+```
+
+That one-liner skips the checksum check.
+The [install script](#with-the-install-script) runs it for you, or you can check the archive against `SHA256SUMS` by hand before installing.
 
 ## With pipx or pip
 

@@ -110,6 +110,20 @@ body {
   padding: 0.9rem 1rem;
 }
 
+/* The install script leads: one command for every Linux and macOS machine, so
+   it takes the first row on its own, above the per-tool cards. */
+.kx-install__card--lead {
+  grid-column: 1 / -1;
+}
+
+/* On a phone the command would otherwise scroll inside its card, hiding the
+   half that matters. It wraps at its spaces instead, and the <wbr> after each
+   slash in the URL is a last resort; neither adds text to the copy. */
+.kx-install__card--lead .kx-install__command {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 .kx-install__label {
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -133,6 +147,72 @@ body {
 .kx-install__command::before {
   content: "$ ";
   color: var(--kx-accent);
+}
+
+/* The label and its copy button share a row. The button ships with the hidden
+   attribute and is revealed by assets/js/kx-install.js, so a reader without
+   JavaScript never sees a control that does nothing. The theme's base styles
+   hide [hidden] with !important, so the display rules here cannot override
+   it. */
+.kx-install__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.kx-install__head .kx-install__label {
+  margin-bottom: 0;
+}
+
+.kx-install__copy {
+  display: inline-flex;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: none;
+  color: var(--kx-muted);
+  cursor: pointer;
+}
+
+.kx-install__copy:hover,
+.kx-install__copy:focus-visible {
+  color: var(--kx-accent);
+  border-color: var(--kx-border);
+}
+
+.kx-install__copy.is-done {
+  color: var(--kx-status-ok);
+}
+
+.kx-install__icon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kx-install__icon--done,
+.kx-install__copy.is-done .kx-install__icon--copy {
+  display: none;
+}
+
+.kx-install__copy.is-done .kx-install__icon--done {
+  display: block;
+}
+
+/* Announced to screen readers, never shown. */
+.kx-install__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* Feature cards

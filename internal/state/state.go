@@ -115,26 +115,51 @@ func (r *Resources) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &r.entries)
 }
 
-// Query is the `kx get` invocation that produced a state entry, kept so a
-// stale entry can be re-run. Nil for entries not created by `kx get`
-// (tree --index, pre-existing state files).
+// Query is the kx invocation that produced a state entry — kx get, kx top, or
+// a kx diag or kx tree — kept so a stale entry can be re-run. Nil for an
+// entry saved before its command recorded one, and for one that is not a
+// listing of the cluster at all.
 type Query struct {
 	Resource string   `json:"resource"`
 	Args     []string `json:"args"`
 	Match    *string  `json:"match"`
-	// Command is the kx command the listing came from, empty for `kx get`.
+	// Command is the kx command the listing came from, empty for `kx get`:
+	// CommandTop, CommandDiag or CommandTree otherwise. A stale listing is
+	// refreshed by running it again, so it decides what runs, and two entries
+	// from different commands are different views whatever they hold.
 	//
-	// It exists to tell two entries apart, not to be replayed: `kx top`
-	// records a `get pods` query precisely so a stale entry refreshes into a
-	// listing, and that made its entry indistinguishable from the `kx get
-	// pods` before it — so it replaced that listing rather than pushing
-	// beside it, and `kx state back` could not reach it. The two hold
-	// different resources in a different order, which is what an index
-	// resolves against.
+	// Resource and Args mean what that command takes. A sweep — kx diag or
+	// kx tree with no index — has no Resource, and its Args are its scope as
+	// swept (-n with the namespace, or -A) with any --since or --full; a tree
+	// of one resource names that resource, Kind/name, as its Resource.
 	//
 	// Absent from files written before it existed, which read as `kx get` —
 	// the command that wrote all but a handful of them.
 	Command string `json:"command,omitempty"`
+}
+
+// The commands a listing can come from, as Query.Command records them. kx get
+// is the empty one.
+const (
+	CommandTop  = "top"
+	CommandDiag = "diag"
+	CommandTree = "tree"
+	// CommandFetch is kx get fetching indexes of an -A listing that span
+	// namespaces: one kubectl call per namespace, stitched together, which no
+	// one invocation runs again. Recorded for the kind it names and the term
+	// it was narrowed by, which an empty one is captioned with; never
+	// replayed.
+	CommandFetch = "fetch"
+)
+
+// Subject names what a listing was asked for, in a caption: the kind kx get
+// or kx top listed, or Mixed for a sweep, which spans kinds and has no
+// resource to be named by.
+func (q Query) Subject() string {
+	if q.Resource == "" {
+		return kinds.Mixed
+	}
+	return kinds.PluralDisplay(q.Resource)
 }
 
 // Ref is what a command's resource argument resolves through: a position in
@@ -732,11 +757,12 @@ func (s *Service) save(state State, maxHistory int) error {
 // can replace the older rather than pushing beside it.
 //
 // The query decides it when both have one: it is what produced the listing,
-// and two runs of it are one view whose contents moved. Entries saved without
-// a query — a tree walk, a triage sweep — have only what they hold to compare,
-// so an identical walk repeated is one view and a walk of somewhere else is
-// not. A queried entry and a queryless one are never the same view, whatever
-// they hold: one can be re-run and the other cannot.
+// and two runs of it are one view whose contents moved — except a fetch's,
+// which does not record what it fetched. Entries saved without a query — a
+// tree walk or a triage sweep from before they recorded one — have only what
+// they hold to compare, so an identical walk repeated is one view and a walk
+// of somewhere else is not. A queried entry and a queryless one are never the
+// same view, whatever they hold: one can be re-run and the other cannot.
 func sameListing(current, next State) bool {
 	if (current.Query == nil) != (next.Query == nil) {
 		return false
@@ -745,7 +771,18 @@ func sameListing(current, next State) bool {
 		return false
 	}
 	if current.Query != nil {
-		return sameQuery(*current.Query, *next.Query)
+		if !sameQuery(*current.Query, *next.Query) {
+			return false
+		}
+		// A fetch's query records its kind and term but not the rows it was
+		// asked for, which were indexes into another listing. Two fetches of
+		// pods are one view only when they hold the same pods: compared by
+		// query alone, kx get pods 1 2 against a fetch replaced that fetch,
+		// and kx state back skipped the listing its indexes came from.
+		if current.Query.Command == CommandFetch {
+			return sameResources(current.Resources, next.Resources)
+		}
+		return true
 	}
 	return sameResources(current.Resources, next.Resources)
 }
@@ -999,6 +1036,13 @@ func positionOutOfRange(position, count int) error {
 // relist that a generic one cannot.
 func emptyListing(entry State, where string) error {
 	if label := listingLabel(entry); label != "" {
+		// A listing asked for with a term is named by it, as its caption was:
+		// "found none" would say the scope is empty, which a term leaving
+		// nothing does not show.
+		if match := entry.Query.Match; match != nil && *match != "" {
+			return fmt.Errorf("The current listing is empty — nothing in %s matches '%s'. %s",
+				label, *match, where)
+		}
 		return fmt.Errorf("The current listing is empty — %s found none. %s", label, where)
 	}
 	return fmt.Errorf("The current listing is empty. %s", where)
@@ -1006,8 +1050,8 @@ func emptyListing(entry State, where string) error {
 
 // listingLabel names an empty listing the way its caption did, from the query
 // that produced it — the resources are gone, so they cannot name themselves.
-// Empty when there is no query to read (a tree walk or a triage sweep), which
-// drops the segment rather than inventing one.
+// Empty when there is no query to read (an entry from before every listing
+// recorded one), which drops the segment rather than inventing one.
 //
 // A spanning listing keeps the kind alone. "all namespaces" is
 // render.AllNamespaces, deliberately spelled in exactly one place, and render
@@ -1017,7 +1061,7 @@ func listingLabel(entry State) string {
 	if entry.Query == nil {
 		return ""
 	}
-	plural := kinds.PluralDisplay(entry.Query.Resource)
+	plural := entry.Query.Subject()
 	if entry.AllNamespaces || entry.Namespace == "" {
 		return plural
 	}
@@ -1228,18 +1272,18 @@ func (s *Service) dropAll() error {
 	return s.saveHistory(History{Marks: history.Marks})
 }
 
-// namespaceAt reports the namespace the resource at a 1-based index lives in.
+// NamespaceAt reports the namespace the resource at a 1-based index lives in.
 //
 // The resource's own namespace wins, falling back to the entry's. Both shapes
 // are legitimate and neither can be dropped: a listing that spans namespaces
 // (`kx get -A`) has no single entry namespace to fall back to, and an ordinary
 // single-namespace listing records nothing per resource, so a lookup that only
 // consulted the resource would resolve every index to the empty namespace.
-func namespaceAt(entry State, idx int) string {
-	if resource, ok := entry.Resources.At(idx); ok && resource.Namespace != "" {
+func (s State) NamespaceAt(idx int) string {
+	if resource, ok := s.Resources.At(idx); ok && resource.Namespace != "" {
 		return resource.Namespace
 	}
-	return entry.Namespace
+	return s.Namespace
 }
 
 // checkContext refuses an index counted against a listing from another cluster.
@@ -1293,7 +1337,7 @@ func (s *Service) fieldsWithSource(idx int) (name, namespace string, kind kinds.
 	if entry, ok := current.Resources.At(idx); ok {
 		kind = entry.Kind
 	}
-	namespace = namespaceAt(current, idx)
+	namespace = current.NamespaceAt(idx)
 	if current.Source == SourceMCP && s.OnAgentIndex != nil {
 		s.OnAgentIndex(idx, kind, name, namespace)
 	}
@@ -1429,6 +1473,13 @@ func clusterScopedEntry(entry State) bool {
 	return known && !namespaced
 }
 
+// SoleKind returns the kind every resource in this entry shares, or "" when
+// it spans several or holds nothing. Exported for the callers outside this
+// package that need it — kx get's refusal of a numeric resource names the
+// current listing's kind — rather than let a second copy of the rule drift
+// from this one.
+func (s State) SoleKind() kinds.Kind { return soleKind(s) }
+
 // soleKind returns the kind every resource in an entry shares, or "" when the
 // entry spans several — a namespace-wide tree, a triage sweep.
 func soleKind(entry State) kinds.Kind {
@@ -1513,7 +1564,7 @@ func (s *Service) FieldsExpecting(
 	if err := kinds.EnsureKind(idx, name, kind, expected, s); err != nil {
 		return "", "", err
 	}
-	return name, namespaceAt(current, idx), nil
+	return name, current.NamespaceAt(idx), nil
 }
 
 // backHint offers `kx state back` when the entry one step back lists the kind asked
@@ -1647,7 +1698,7 @@ func (s *Service) FieldsNamed(idx int, kind kinds.Kind) (name, namespace string,
 			"Index %d is out of range — the last listing had %s. Run '%s' to relist.",
 			idx, describeCurrent(entry), relist)
 	}
-	return name, namespaceAt(entry, idx), nil
+	return name, entry.NamespaceAt(idx), nil
 }
 
 // compile-time checks that the service satisfies the interfaces its consumers

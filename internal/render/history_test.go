@@ -592,6 +592,41 @@ func TestStateNamesAnEmptyListingFromItsQuery(t *testing.T) {
 	}
 }
 
+// An entry a --match term emptied names the term, as its caption did when it
+// was listed: "none found" would say kube-public has no pods.
+func TestStateNamesTheTermThatEmptiedAListing(t *testing.T) {
+	term := "zzz"
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Namespace: "kube-public",
+			Query:     &state.Query{Resource: "pods", Match: &term},
+		})
+	})
+
+	if want := "Pods · kube-public · nothing matches 'zzz'"; !strings.Contains(out, want) {
+		t.Errorf("output = %q\n  missing %q", out, want)
+	}
+	if strings.Contains(out, "none found") {
+		t.Errorf("output = %q, says none found for a listing a term emptied", out)
+	}
+}
+
+// A sweep records its query too, with no resource to name it by: what it
+// spans is several kinds, so it is captioned Mixed, as a populated sweep
+// is, and the term that emptied it is named like any other.
+func TestStateNamesAnEmptySweepAndItsTerm(t *testing.T) {
+	term := "zzz"
+	out := capture(func(r *Renderer) {
+		r.State(state.State{
+			Namespace: "prod",
+			Query:     &state.Query{Command: "diag", Args: []string{"-n", "prod"}, Match: &term},
+		})
+	})
+	if want := "Mixed · prod · nothing matches 'zzz'"; !strings.Contains(out, want) {
+		t.Errorf("output = %q\n  missing %q", out, want)
+	}
+}
+
 // With no query there is nothing to name it with, so the kind segment drops
 // out rather than being invented. A tree walk and a triage sweep save entries
 // this shape.

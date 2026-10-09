@@ -142,5 +142,13 @@ With a non-tabular output format, kx streams kubectl's own watch output straight
 ## When an index has gone stale
 
 Resources get deleted.
-When a command fails because the resource behind an index is gone, kx re-runs the query that produced the listing and prints a fresh one, so there are usable numbers on the screen rather than an error and a dead end.
+When a command fails because the resource behind an index is gone, kx runs the command that produced the listing again and prints a fresh one, so there are usable numbers on the screen rather than an error and a dead end.
 The failure is reported first — the refresh is the recovery, not a retry of what you asked for.
+
+Each listing comes back as it was made.
+A `kx top` listing is a usage table again, a `kx diag` sweep is swept again with the same scope, window and `-m` term, and a `kx tree` is walked again.
+The refresh only ever prints the table, even when the listing was first sent to a browser or a script.
+If the listing cannot be made again — a tree whose root is the resource that went, say — kx names the command to run instead.
+
+A command whose output a script reads is not refreshed.
+Under `--json`, or a kubectl `-o` format other than a table, kx reports the failure and the command to run on stderr, so nothing reaches stdout but the output that was asked for.

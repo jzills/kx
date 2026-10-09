@@ -21,6 +21,9 @@ import (
 type noEventsService struct{}
 
 func (noEventsService) Get(context.Context, string) ([]corev1.Event, error) { return nil, nil }
+func (noEventsService) Warnings(context.Context, string) ([]corev1.Event, error) {
+	return nil, nil
+}
 func (noEventsService) Filter([]corev1.Event, string, kinds.Kind) []corev1.Event {
 	return nil
 }
@@ -89,7 +92,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 			kind: kinds.Pod,
 			run: func(resolver fakeResolver) error {
 				command := DeleteCommand{Kubectl: &recordingKubectl{}, State: resolver, Status: noStatus}
-				_, err := command.Execute(mark, true, nil)
+				_, _, err := command.Execute(mark, true, nil)
 				return err
 			},
 		},
@@ -119,7 +122,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 			kind: kinds.Deployment,
 			run: func(resolver fakeResolver) error {
 				command := ScaleCommand{Kubectl: &recordingKubectl{}, State: resolver}
-				_, err := command.Execute(mark, 3, nil)
+				_, _, err := command.Execute(mark, 3, nil)
 				return err
 			},
 		},
@@ -193,7 +196,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 					Kubectl: &recordingKubectl{output: `{"metadata":{"name":"target"}}`},
 					State:   resolver, Verb: "label", Field: "labels",
 				}
-				_, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
+				_, _, err := command.Execute(mark, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
 				return err
 			},
 		},

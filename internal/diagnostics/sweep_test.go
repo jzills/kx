@@ -221,10 +221,10 @@ func TestSweepStandaloneJobIsReported(t *testing.T) {
 	}
 }
 
-// A Service matches pods by label, not ownership. Those pods are owned (or
-// genuinely unowned) elsewhere, so a Service must not claim them out of the
-// orphan pass — otherwise a bare pod behind a Service would vanish from triage.
-func TestSweepServiceMatchesPodsWithoutClaimingThem(t *testing.T) {
+// A Service's row in a sweep carries none of the pods it selects: they have
+// rows of their own, and here a bare pod behind a Service keeps its orphan
+// row rather than being counted under the Service as well.
+func TestSweepServiceLeavesItsPodsToTheirOwnRows(t *testing.T) {
 	bare := podWith("solo", "p1", corev1.PodRunning, nil)
 	bare.Labels = map[string]string{"app": "api"}
 
@@ -236,26 +236,65 @@ func TestSweepServiceMatchesPodsWithoutClaimingThem(t *testing.T) {
 		bare,
 	))
 
-	if got := podNames(indexed["Service/api"]); len(got) != 1 || got[0] != "solo" {
-		t.Errorf("service pods = %v, want [solo]", got)
+	if got := podNames(indexed["Service/api"]); len(got) != 0 {
+		t.Errorf("service pods = %v, want none — the pod has its own row", got)
 	}
 	if _, ok := indexed["Pod/solo"]; !ok {
-		t.Errorf("a Service claimed a bare pod out of the orphan pass: %s", keys(indexed))
+		t.Errorf("the bare pod behind the Service lost its row: %s", keys(indexed))
 	}
 }
 
-// A selectorless Service matches nothing rather than everything, which is what
-// an unguarded label match would do.
-func TestSweepSelectorlessServiceMatchesNoPods(t *testing.T) {
-	labelled := podWith("solo", "p1", corev1.PodRunning, nil)
-	labelled.Labels = map[string]string{"app": "api"}
+// The regression: a crash-looping Deployment behind a Service used to put the
+// pod's CrashLoopBackOff on both rows, the Service's copy outranking its own
+// finding. The Service now leads with the one thing that is about it — no
+// ready endpoints — and stays critical, since nothing can reach it.
+func TestSweepServiceRowIsAboutTheService(t *testing.T) {
+	labels := map[string]string{"app": "worker"}
+	crashing := podWith("worker-abc", "p1", corev1.PodRunning, []corev1.ContainerStatus{{
+		Name: "worker", RestartCount: 40,
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+	}}, owner("rs1"))
+	crashing.Labels = labels
 
 	indexed := mustSweep(t, service(
-		&corev1.Service{ObjectMeta: meta("headless", "s1")},
-		labelled,
+		&appsv1.Deployment{
+			ObjectMeta: meta("worker", "d1"),
+			Spec:       appsv1.DeploymentSpec{Replicas: i32(1)},
+		},
+		&appsv1.ReplicaSet{ObjectMeta: meta("worker-rs", "rs1", owner("d1"))},
+		crashing,
+		&corev1.Service{
+			ObjectMeta: meta("worker", "s1"),
+			Spec:       corev1.ServiceSpec{Selector: labels},
+		},
+		&corev1.Event{
+			ObjectMeta:     meta("worker-abc.backoff", "ev1"),
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "worker-abc", Namespace: ns},
+			Reason:         "BackOff", Type: "Warning", Count: 12,
+		},
+		&corev1.Endpoints{
+			ObjectMeta: meta("worker", "e1"),
+			Subsets: []corev1.EndpointSubset{{
+				NotReadyAddresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}},
+			}},
+		},
 	))
-	if got := podNames(indexed["Service/headless"]); len(got) != 0 {
-		t.Errorf("selectorless service matched %v, want nothing", got)
+
+	deployment := BuildReport(indexed["Deployment/worker"])
+	svc := BuildReport(indexed["Service/worker"])
+	if !hasFinding(deployment, "BackOff ×12") {
+		t.Fatalf("Deployment findings = %+v, want its pod's BackOff event", deployment.Findings)
+	}
+	if !strings.Contains(deployment.Findings[0].Summary, "CrashLoopBackOff") {
+		t.Fatalf("Deployment's top finding = %q, want the crash loop", deployment.Findings[0].Summary)
+	}
+	for _, finding := range svc.Findings {
+		if strings.Contains(finding.Summary, "CrashLoopBackOff") || strings.Contains(finding.Summary, "BackOff ×") {
+			t.Errorf("Service repeats its backend's finding: %q", finding.Summary)
+		}
+	}
+	if svc.Verdict != Critical || svc.Findings[0].Summary != "1 endpoint(s) not ready, 0 ready" {
+		t.Errorf("Service report = %s, %+v; want critical, led by its own endpoints", svc.Verdict, svc.Findings)
 	}
 }
 
@@ -458,33 +497,6 @@ func TestSweepAcrossAllNamespacesPairsEachServiceWithItsOwnEndpoints(t *testing.
 	}
 }
 
-// A Service selects pods within its own namespace — label sets are not unique
-// across a cluster, and app=web means something different in every namespace.
-// Unscoped, a cluster-wide sweep hands a Service the foreign pods that happen
-// to share its labels, and their findings land on its row.
-func TestSweepAcrossAllNamespacesMatchesOnlyPodsInTheServiceNamespace(t *testing.T) {
-	labels := map[string]string{"app": "web"}
-	local := podWith("web-prod", "p1", corev1.PodRunning, nil)
-	local.Labels = labels
-	foreign := &corev1.Pod{
-		ObjectMeta: metaIn("staging", "web-staging", "p2"),
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	foreign.Labels = labels
-
-	indexed := sweptCluster(t, service(
-		&corev1.Service{
-			ObjectMeta: meta("web", "s1"),
-			Spec:       corev1.ServiceSpec{Selector: labels},
-		},
-		local, foreign,
-	))
-
-	if got := podNames(indexed[ns+"/Service/web"]); len(got) != 1 || got[0] != "web-prod" {
-		t.Errorf("service pods = %v, want only [web-prod]", got)
-	}
-}
-
 // End to end through the analysis layer: the sweep is only useful if its rows
 // carry enough for BuildReport to reach a verdict.
 func TestSweepRowsProduceVerdicts(t *testing.T) {
@@ -548,4 +560,13 @@ func TestSupportedKindsCoversEveryKindSweepEmits(t *testing.T) {
 	if len(indexed) != 8 {
 		t.Errorf("swept %d rows (%s), want 8", len(indexed), keys(indexed))
 	}
+}
+
+func hasFinding(report Report, substring string) bool {
+	for _, finding := range report.Findings {
+		if strings.Contains(finding.Summary, substring) {
+			return true
+		}
+	}
+	return false
 }

@@ -73,3 +73,20 @@ func TestConfirmShowsTheQuestionAndDefault(t *testing.T) {
 		t.Errorf("prompt = %q, want the default shown as n", out)
 	}
 }
+
+// The prompt is a question to the user, not output: it goes to stderr, so
+// kx delete 1 --dry-run=server -o name | xargs ... still shows it and pipes
+// only kubectl's names. On stdout it went into the pipe, unseen.
+func TestConfirmAsksOnStderr(t *testing.T) {
+	for _, answer := range []string{"y\n", ""} {
+		var out, errOut bytes.Buffer
+		renderer := New(&out, &errOut, "github-dark", false)
+		_ = renderer.confirmFrom(strings.NewReader(answer), "Delete Pod/a in prod?")
+		if out.Len() != 0 {
+			t.Errorf("answer %q: stdout = %q, want nothing", answer, out.String())
+		}
+		if !strings.Contains(errOut.String(), "Delete Pod/a in prod?") {
+			t.Errorf("answer %q: stderr = %q, want the prompt", answer, errOut.String())
+		}
+	}
+}

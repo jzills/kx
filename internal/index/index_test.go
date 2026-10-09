@@ -2,6 +2,7 @@ package index
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -748,10 +749,70 @@ func TestFilterRowsNarrowsByName(t *testing.T) {
 	}
 }
 
+// A --match term selects what the index resolves to. Under kubectl top pod
+// --containers that is the pod in POD, not the container in NAME: -m frontend
+// found nothing beside two frontend pods, and -m nginx, a container, returned
+// every pod running one.
+func TestFilterRowsMatchesTheColumnAnIndexResolvesTo(t *testing.T) {
+	containers := "POD             NAME          CPU(cores)   MEMORY(bytes)\n" +
+		"frontend-abc    nginx         1m           2Mi\n" +
+		"frontend-abc    istio-proxy   1m           2Mi\n" +
+		"web-xyz         nginx         1m           2Mi\n"
+	headers, rows, _ := ParseTable(containers)
+
+	kept := FilterRows(headers, rows, "frontend")
+	if len(kept) != 2 || kept[0][0] != "frontend-abc" || kept[1][0] != "frontend-abc" {
+		t.Errorf("-m frontend kept %q, want both of frontend-abc's containers", kept)
+	}
+	if kept := FilterRows(headers, rows, "istio"); len(kept) != 0 {
+		t.Errorf("-m istio kept %q, want none: istio-proxy is a container, not a pod", kept)
+	}
+}
+
 func TestFilterRowsKeepsNothingWhenNothingMatches(t *testing.T) {
 	headers, rows, _ := ParseTable(podsOutput)
 
 	if kept := FilterRows(headers, rows, "absent"); len(kept) != 0 {
 		t.Errorf("kept %q, want none", kept)
+	}
+}
+
+// MatchesName is the one definition of --match: a case-insensitive substring,
+// with an empty term matching everything. NameMatcher, the same test with the
+// term fixed for a loop, must agree with it on every case.
+func TestMatchesName(t *testing.T) {
+	for _, tc := range []struct {
+		name, term string
+		want       bool
+	}{
+		{"api-7f9", "API", true},
+		{"API-7f9", "api", true},
+		{"api-7f9", "7f", true},
+		{"worker", "api", false},
+		{"worker", "", true},
+	} {
+		if got := MatchesName(tc.name, tc.term); got != tc.want {
+			t.Errorf("MatchesName(%q, %q) = %v, want %v", tc.name, tc.term, got, tc.want)
+		}
+		if got := NameMatcher(tc.term)(tc.name); got != tc.want {
+			t.Errorf("NameMatcher(%q)(%q) = %v, want %v", tc.term, tc.name, got, tc.want)
+		}
+	}
+}
+
+// A term is lowercased once per filter, not once per row: MatchesName
+// lowered it on every call, so `kx get pods -A -m API` over a large listing
+// allocated a fresh copy of "api" for each row. The names here are already
+// lowercase, which strings.ToLower returns without copying, so whatever is
+// left scaling with the rows is the term.
+func TestFilterRowsLowersTheTermOnce(t *testing.T) {
+	headers := []string{"NAME", "STATUS"}
+	rows := make([][]string, 200)
+	for i := range rows {
+		rows[i] = []string{"pod-" + strconv.Itoa(i), "Running"}
+	}
+	allocs := testing.AllocsPerRun(20, func() { FilterRows(headers, rows, "POD-1") })
+	if allocs > 10 {
+		t.Errorf("FilterRows over %d rows made %.0f allocations, want a handful", len(rows), allocs)
 	}
 }

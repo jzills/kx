@@ -45,6 +45,7 @@ var argCompleters = map[string]completer{
 	"engine.name":     completeEngine,
 	"unmark.name":     completeMarkNames,
 	"replicas":        nil, // A number kx cannot guess.
+	"image":           nil, // A registry reference kx has no list of.
 	"port":            nil, // Likewise, and it is a mapping, not a port.
 	"key=value":       nil,
 	"command":         nil, // Runs in the pod; local paths would be wrong.
@@ -398,7 +399,17 @@ func completePosition(services Services, _ string) []string {
 	for position, entry := range history.States {
 		label := entry.Namespace
 		if entry.Query != nil {
+			// A sweep has no resource to name; its command says what it was.
+			// A fetch's is no command anyone types, and one of rows spanning
+			// kinds saved before it recorded its listing names none: Mixed,
+			// as kx state calls it.
 			label = entry.Query.Resource
+			if label == "" && entry.Query.Command != state.CommandFetch {
+				label = entry.Query.Command
+			}
+			if label == "" {
+				label = kinds.Mixed
+			}
 			if entry.Namespace != "" {
 				label += " in " + entry.Namespace
 			}

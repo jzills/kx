@@ -1,0 +1,40 @@
+name: Install script
+
+# The installer is served from the docs site, which deploys on every merge
+# to develop, so a change to it is live without a release. These checks are
+# what stand between a PR and that. Linux runs the same tests inside
+# pr.yml's go test ./...; macOS is here because its shasum, uname, BSD tar
+# and mktemp are what the script meets on a Mac.
+on:
+  pull_request:
+    paths:
+      - site/static/install.sh
+      - tools/installscript/**
+      - .github/workflows/install-script.yml
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck (POSIX sh)
+        run: shellcheck -s sh site/static/install.sh
+
+  macos:
+    name: Install script on macOS
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./tools/installscript/ -v

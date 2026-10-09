@@ -185,7 +185,7 @@ func newDrainCommand(services Services) *cobra.Command {
 				installAgentIndexNotice(services)
 			}
 			if len(rest) == 0 {
-				return fmt.Errorf("drain requires an index")
+				return requiredArgsError(cmd)
 			}
 			ref, err := parseRef("index", rest[0])
 			if err != nil {

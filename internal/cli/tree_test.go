@@ -22,6 +22,12 @@ import (
 )
 
 func treeFixture() graph.Builder {
+	return graph.Builder{Client: fake.NewSimpleClientset(treeObjects()...)}
+}
+
+// treeObjects is the fixture's cluster: a Deployment owning a ReplicaSet
+// owning a Pod, in prod.
+func treeObjects() []runtime.Object {
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
 		Name: "web", Namespace: "prod", UID: types.UID("d1"),
@@ -39,7 +45,7 @@ func treeFixture() graph.Builder {
 	// actual Namespace objects, and the fake clientset does not synthesize one
 	// from a workload's namespace field. Without it, an -A sweep of this
 	// fixture would see no namespaces at all and walk nothing.
-	return graph.Builder{Client: fake.NewSimpleClientset(namespace, deployment, replicaSet, pod)}
+	return []runtime.Object{namespace, deployment, replicaSet, pod}
 }
 
 func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {
@@ -70,21 +76,6 @@ func TestTreeSavesIndexedNodesInWalkOrder(t *testing.T) {
 	}
 	if kind, _ := states.saved[0].Resources.Kind("web-abc"); kind != kinds.ReplicaSet {
 		t.Errorf("kind = %q, want ReplicaSet", kind)
-	}
-}
-
-// A tree entry has no Query: it wasn't produced by `kx get`, so there is
-// nothing to re-run if it goes stale.
-func TestTreeSavesWithoutQuery(t *testing.T) {
-	states := &fakeState{}
-	command := TreeCommand{
-		Builder: treeFixture(), State: workload("web", kinds.Deployment), Save: states.Save,
-	}
-	if _, err := command.Execute(context.Background(), state.Ref{Index: 1}, true); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if states.saved[0].Query != nil {
-		t.Errorf("Query = %+v, want nil", states.saved[0].Query)
 	}
 }
 
@@ -346,7 +337,7 @@ func TestTreeExecuteAllNamespacesIndexes(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}},
 	)
-	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: (&fakeState{}).Save}
 
 	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {
@@ -374,7 +365,7 @@ func TestTreeExecuteAllNamespacesNumbersContinuouslyAcrossNamespaces(t *testing.
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "alpha"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "beta"}},
 	)
-	command := TreeCommand{Builder: graph.Builder{Client: client}}
+	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: (&fakeState{}).Save}
 
 	roots, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
 	if err != nil {
@@ -589,7 +580,7 @@ func TestTreeAllNamespacesCommandSavesTheWalk(t *testing.T) {
 // all three of tree's invocation lines, so they cannot drift again.
 func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
 	for _, scope := range []string{scopeArgs("", true), scopeArgs("prod", false), "1"} {
-		line := treeInvocation(scope, false, 0)
+		line := treeInvocation(scope, "", false, 0)
 		if !strings.Contains(line, "--no-index") {
 			t.Errorf("invocation for scope %q = %q, want it to name --no-index", scope, line)
 		}
@@ -598,7 +589,7 @@ func TestTreeInvocationNamesNoIndexInEveryScope(t *testing.T) {
 
 // Indexing is the default, so the common case renders no flag at all.
 func TestTreeInvocationOmitsTheFlagWhenIndexing(t *testing.T) {
-	if line := treeInvocation(scopeArgs("", true), true, 0); strings.Contains(line, "--no-index") {
+	if line := treeInvocation(scopeArgs("", true), "", true, 0); strings.Contains(line, "--no-index") {
 		t.Errorf("invocation = %q, want no --no-index when indexing", line)
 	}
 }

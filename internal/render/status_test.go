@@ -138,3 +138,25 @@ func lastRunes(s string, n int) string {
 	}
 	return string(runes[len(runes)-n:])
 }
+
+// A kubectl warning arrives while the call that produced it is still under
+// its spinner, whose frame sits on the error stream with no newline after it.
+// Written plainly, the warning ran on from the frame — "⠋ fetching…Warning:
+// …" — so on a terminal it clears the line first, and the next frame paints
+// on the line below. Off one there is no frame to clear, and no escape code
+// belongs in a redirected stream.
+func TestWarningClearsASpinnerLineOnlyOnATerminal(t *testing.T) {
+	const line = "Warning: policy/v1beta1 PodSecurityPolicy is deprecated"
+
+	r, errOut := spinnerRenderer()
+	r.warning(line, true)
+	if got, want := errOut.String(), clearLine+line+"\n"; got != want {
+		t.Errorf("on a terminal wrote %q, want %q", got, want)
+	}
+
+	r, errOut = spinnerRenderer()
+	r.warning(line, false)
+	if got, want := errOut.String(), line+"\n"; got != want {
+		t.Errorf("off a terminal wrote %q, want %q", got, want)
+	}
+}

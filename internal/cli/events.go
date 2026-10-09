@@ -10,7 +10,6 @@ import (
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
-	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -153,6 +152,12 @@ func newTopCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Refused before kubectl is asked, as kx get refuses it.
+			if match != "" {
+				if err := matchFormatError(rest); err != nil {
+					return err
+				}
+			}
 			noLimits, rest := extractBool(rest, "--no-limits")
 			asJSON, rest := extractBool(rest, "--json")
 			html, rest := extractBool(rest, "--html")
@@ -182,6 +187,19 @@ func newTopCommand(services Services) *cobra.Command {
 				return fmt.Errorf(
 					"'--json' cannot be combined with '%s' — one is for a "+
 						"machine and the other for a browser.", htmlFlagName(html))
+			}
+			// Both are built from the numbered rows, and another cluster's
+			// listing has none: the document would report an empty namespace.
+			crossCluster := clusterFlagIn(rest)
+			if crossCluster != "" && (asJSON || wantsHTML) {
+				flag := "--json"
+				if wantsHTML {
+					flag = htmlFlagName(html)
+				}
+				return fmt.Errorf(
+					"'%s' cannot be combined with '%s' — kx can't index another "+
+						"cluster's listing, and the report is built from the indexed one.",
+					flag, crossCluster)
 			}
 
 			// A leading non-flag token names the resource type, mirroring
@@ -227,26 +245,8 @@ func newTopCommand(services Services) *cobra.Command {
 				}
 			}
 
-			command := TopCommand{
-				Kubectl: services.Kubectl, State: services.State, Index: services.Index,
-			}
-			resourceLabel := "pods"
-			scopedAllNamespaces := false
-			var output index.Table
-			var namespace string
-			if nodes {
-				resourceLabel = "nodes"
-				output, namespace, err = command.ExecuteNodes(match, rest)
-			} else {
-				scopedAllNamespaces = allNamespaces(rest)
-				output, namespace, err = command.Execute(match, rest, noLimits)
-				if scopedAllNamespaces {
-					// Matches kx get -A's own caption override (getbody.go):
-					// many namespaces span the listing, so there is no
-					// single one to name.
-					namespace = render.AllNamespaces
-				}
-			}
+			output, resourceLabel, namespace, scopedAllNamespaces, err :=
+				topListing(services, nodes, match, rest, noLimits, "")
 			if err != nil {
 				return err
 			}
@@ -261,7 +261,7 @@ func newTopCommand(services Services) *cobra.Command {
 				// returns an empty namespace because a Node is cluster-scoped,
 				// so there is nothing here to blank.
 				subject := scanSubject{
-					Namespace: namespace, AllNamespaces: scopedAllNamespaces,
+					Namespace: namespace, AllNamespaces: scopedAllNamespaces, Match: match,
 				}
 				if scopedAllNamespaces {
 					subject.Namespace = ""
@@ -273,8 +273,13 @@ func newTopCommand(services Services) *cobra.Command {
 				render.Raw(document)
 				return nil
 			}
+			if crossCluster != "" {
+				render.Caption(crossClusterCaption(crossCluster))
+			}
 			render.IndexedTable(output, resourceLabel, namespace)
-			if output.Empty() {
+			// As for kx get (showListing): only a listing kx saved replaced
+			// one, so only under that is there a way back to offer.
+			if output.Empty() && !output.Unnumbered {
 				render.PreviousListingNote(previousListing(services))
 			}
 			if !htmlOpts.Enabled {
@@ -283,12 +288,13 @@ func newTopCommand(services Services) *cobra.Command {
 
 			label := kinds.PluralDisplay(resourceLabel)
 			meta, err := pageMeta(services.Config.Theme, "top · "+label,
-				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), portFlag(port)))
+				invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), matchFlag(match), portFlag(port)))
 			if err != nil {
 				return err
 			}
 			page, err := web.RenderTop(web.TopPage{
-				Meta: meta, Scope: scopeCaption(label, namespace), Rows: topPageRows(output),
+				Meta: meta, Scope: scopeCaption(label, namespace), Match: match,
+				Rows: topPageRows(output),
 			})
 			if err != nil {
 				return err
@@ -297,7 +303,7 @@ func newTopCommand(services Services) *cobra.Command {
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
-	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
 	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")
@@ -309,6 +315,7 @@ func newTopCommand(services Services) *cobra.Command {
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace")
+	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
 	return cmd

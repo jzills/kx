@@ -320,6 +320,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"scale": true, "rollout": true, "cordon": true, "uncordon": true,
 		"debug": true, "edit": true, "exec": true, "label": true,
 		"annotate": true, "cp": true, "delete": true, "drain": true,
+		"set": true,
 	}
 	nonMutating := map[string]bool{
 		"annotations": true, "completion": true, "context": true, "describe": true,
@@ -327,7 +328,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"labels": true, "logs": true, "mark": true, "mcp": true,
 		"namespace": true, "port-forward": true, "ref": true, "scan": true,
 		"secret": true, "state": true, "theme": true, "top": true,
-		"tree": true, "unmark": true, "yaml": true,
+		"tree": true, "unmark": true, "wait": true, "yaml": true,
 	}
 
 	root := NewRoot(NewServices(config.Default()), "test")

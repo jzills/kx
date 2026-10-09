@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -190,7 +191,13 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 
 	command := SecretCommand{Kubectl: services.Kubectl, State: services.State}
 	if len(resolved) == 0 {
-		return decodeNamespace(services, command, extra, options.Yes)
+		return decodeNamespace(services, command, extra, options.Match, options.Yes)
+	}
+	// Refused rather than ignored: the index already names the Secret, and a
+	// term that narrowed nothing on a command printing credentials would look
+	// as though it had.
+	if options.Match != "" {
+		return errMatchBesideIndex
 	}
 
 	for position, target := range resolved {
@@ -224,13 +231,14 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 	return nil
 }
 
-// decodeNamespace prints every Secret in the namespace, stacked.
+// decodeNamespace prints every Secret in the namespace whose name contains
+// match, stacked — every Secret when match is empty.
 //
 // Confirms first unless --yes: unlike an indexed decode this prints every
 // credential in the namespace, and it sits one flag away from the `kx secret`
 // listing people run by reflex. Fetching before prompting costs nothing and
 // discloses nothing, and lets the prompt name the blast radius.
-func decodeNamespace(services Services, command SecretCommand, extra []string, yes bool) error {
+func decodeNamespace(services Services, command SecretCommand, extra []string, match string, yes bool) error {
 	stop := render.Status("fetching secrets")
 	secrets, err := command.ExecuteAll(extra)
 	stop()
@@ -238,18 +246,42 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, y
 		return err
 	}
 
-	namespace := ""
-	if len(secrets) > 0 {
-		namespace = secrets[0].Namespace
-	}
-	if namespace == "" {
-		if namespace = extractNamespace(extra); namespace == "" {
-			namespace = services.Kubectl.CurrentNamespace()
+	// The scope the banner and the prompt name is the reach of the decode.
+	// Under -A that is every namespace, and each Secret carries its own: read
+	// off the first one, "Decode 9 Secrets in diagnostics?" guarded Secrets
+	// from three.
+	spanning := allNamespaces(extra)
+	namespace := render.AllNamespaces
+	if !spanning {
+		namespace = ""
+		if len(secrets) > 0 {
+			namespace = secrets[0].Namespace
+		}
+		if namespace == "" {
+			if namespace = extractNamespace(extra); namespace == "" {
+				namespace = services.Kubectl.CurrentNamespace()
+			}
 		}
 	}
 
+	// Narrowed before anything is counted or printed, as the listing is: the
+	// term is how a decode leaves credentials out, so the prompt must count
+	// only what it will print.
+	matches := index.NameMatcher(match)
+	kept := secrets[:0:0]
+	for _, secret := range secrets {
+		if matches(secret.Name) {
+			kept = append(kept, secret)
+		}
+	}
+	secrets = kept
+
 	count := len(secrets)
-	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, itemCount(count))
+	label := itemCount(count)
+	if count == 0 && match != "" {
+		label = render.NothingMatches(match)
+	}
+	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, label)
 	if count == 0 {
 		return nil
 	}
@@ -267,8 +299,13 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, y
 	}
 	for _, secret := range secrets {
 		render.Raw("")
-		// The namespace is left to the scope banner rather than repeated.
-		renderSecret(secret, "")
+		// The namespace is left to the scope banner rather than repeated,
+		// unless the banner spans them.
+		where := ""
+		if spanning {
+			where = secret.Namespace
+		}
+		renderSecret(secret, where)
 	}
 	return nil
 }
@@ -322,7 +359,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
-	cmd.Flags().StringP("match", "m", "", "Match by name (substring, case-insensitive)")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
@@ -332,6 +369,7 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 	// registered only so they appear in --help instead of vanishing.
 	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
+	registerFormatFlags(cmd)
 	registerWatchFlag(cmd)
 	return cmd
 }

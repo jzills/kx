@@ -627,6 +627,14 @@
     // NAMESPACE column to populate it from, so every row's field is empty
     // there) — the column only earns its place when it would actually say
     // something.
+    // Pod only exists under --containers, where each row is a container and
+    // Name is the container's — the pod is what the row's index resolves to,
+    // so it sits beside the index, ahead of the container, as kubectl's own
+    // POD column does.
+    var hasPod = data.some(function (row) { return !!row.Pod; });
+    if (hasPod) {
+      columns.splice(1, 0, { title: "Pod", field: "Pod", widthGrow: 3, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" });
+    }
     var hasNamespace = data.some(function (row) { return !!row.Namespace; });
     if (hasNamespace) {
       columns.splice(1, 0, { title: "Namespace", field: "Namespace", width: 140, headerFilter: "input", headerFilterPlaceholder: "Type to filter…" });

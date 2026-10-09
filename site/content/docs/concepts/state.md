@@ -32,7 +32,7 @@ Jumping does not re-run anything: the entry already holds the listing, so the in
 The `--all` flag only clears what accumulates on its own, one `kx get` at a time.
 [A mark](../marks/) is named on purpose, not accumulated, so it takes a command that says so: `kx unmark --all`.
 
-Re-running the listing you are already on refreshes that entry instead of pushing another copy of it.
+Re-running the listing you are already on refreshes that entry instead of pushing another copy of it, whether it came from `kx get`, `kx top`, a `kx diag` sweep or a `kx tree`.
 Re-running `kx get` is how you see what changed, so without that the stack filled with one listing — five runs of `kx get pods` around a single `kx get deploy` left nine entries, eight of them the same, and `kx state back` could not reach the Deployments listing.
 The same session now leaves three: pods, deployments, pods.
 
@@ -52,6 +52,11 @@ The `--name`, `--namespace` and `--kind` flags print a single field for tools th
 
 Nothing about `kx ref` contacts the cluster.
 It reports what the index means, not what still exists, so it answers instantly — and a stale index prints the name it was assigned, leaving the command you spend it on to discover the resource is gone.
+
+For the whole listing at once, `kx state --json` prints the current entry as a document, and `kx state --all --json` prints the stack.
+Each row carries its index, kind, name and namespace — the fields `kx ref` would give it — and each entry carries the context it was listed in, the query that produced it, and `byAgent` when `kx mcp` saved it for an agent.
+The document also names the context you are in now, so a script can tell an entry from another cluster, whose indexes kx will refuse.
+Like `kx ref`, it never contacts the cluster, and with nothing listed yet it prints an empty document rather than failing.
 
 ## A listing that found nothing is still a listing
 

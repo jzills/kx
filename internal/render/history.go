@@ -14,9 +14,9 @@ import (
 //
 // An empty listing has no resource to read a kind off, and "Mixed" is the
 // wrong answer for it: it reads as a listing of several kinds that lost its
-// rows. An entry saved by `kx get` still records what was asked for, and that
-// is what the listing is called. Entries saved without a query — a tree walk,
-// a triage sweep — have nothing to name and keep "Mixed".
+// rows. Its query still records what was asked for, and that is what the
+// listing is called — Mixed again only for a sweep, which asked for every
+// kind, and for an entry from before sweeps recorded a query.
 func kindLabel(entry state.State) string {
 	var seen kinds.Kind
 	for i, resource := range entry.Resources.Entries() {
@@ -25,14 +25,14 @@ func kindLabel(entry state.State) string {
 			continue
 		}
 		if resource.Kind != seen {
-			return "Mixed"
+			return kinds.Mixed
 		}
 	}
 	if seen == "" {
 		if entry.Resources.Len() == 0 && entry.Query != nil {
-			return kinds.PluralDisplay(entry.Query.Resource)
+			return entry.Query.Subject()
 		}
-		return "Mixed"
+		return kinds.Mixed
 	}
 	return kinds.PluralDisplay(string(seen))
 }
@@ -357,8 +357,12 @@ func (r *Renderer) State(entry state.State) {
 // the entry's caption already names the one namespace they are all in.
 func (r *Renderer) listing(entry state.State, scope, context, via string) {
 	count := entry.Resources.Len()
+	label := countLabel(count)
+	if count == 0 && entry.Query != nil && entry.Query.Match != nil {
+		label = emptyLabel(*entry.Query.Match)
+	}
 	// The context sits beside the scope, and Caption drops either when empty.
-	r.Caption(kindLabel(entry), scope, context, via, countLabel(count))
+	r.Caption(kindLabel(entry), scope, context, via, label)
 	// A header row over no rows is noise: the caption has already said the
 	// listing found nothing, which is what emptyListing does for kx get.
 	if count == 0 {

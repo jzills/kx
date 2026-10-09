@@ -8,7 +8,7 @@ weight: 9
 
 Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
 
-With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.
+With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
@@ -45,6 +45,7 @@ kx diagnostic [OPTIONS] [index]
 | `--full` | Include healthy resources in the terminal table; the HTML report always includes them |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
+| `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
@@ -64,6 +65,7 @@ kx diagnostic [OPTIONS] [index]
 kx diagnostic
 kx diagnostic 1
 kx diagnostic -n prod
+kx diagnostic -m api
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json

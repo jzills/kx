@@ -70,51 +70,78 @@ type DeleteCommand struct {
 	Status func(string) func()
 }
 
-func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (string, error) {
+// Execute deletes the resource, returning kx's line for it and kubectl's own
+// output, which reportChange prints in its place when an output format was
+// asked for.
+func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (message, output string, err error) {
 	// Resolved once, target and provenance together — see resolveWithProvenance
 	// for why a second, independent read of the listing's Source is refused.
 	name, namespace, kind, source, err := resolveWithProvenance(c.State, ref)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// The prompt must stay outside the spinner: a prompt underneath a
 	// repainting status line cannot be read.
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
 			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	stop := c.Status("deleting")
-	_, err = c.Kubectl.Run(append(
+	output, err = c.Kubectl.Run(append(
 		[]string{"delete", string(kind), name, "-n", namespace}, extraArgs...))
 	stop()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if isDryRun(extraArgs) {
-		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), nil
+		return fmt.Sprintf("Deleted %s/%s (dry run — nothing was removed)", kind, name), output, nil
 	}
-	return fmt.Sprintf("Deleted %s/%s", kind, name), nil
+	return fmt.Sprintf("Deleted %s/%s", kind, name), output, nil
 }
 
 // isDryRun reports whether extraArgs ask kubectl for a dry run, so kx's own
-// success line does not claim a deletion that did not happen — it replaces
-// kubectl's output ("pod \"x\" deleted (dry run)") with its own, so the
-// distinction is only there if kx puts it there.
+// success line does not claim a change that did not happen — delete, scale,
+// label, annotate and set image replace kubectl's output ("pod \"x\" deleted
+// (dry run)") with their own, so the distinction is only there if kx puts it
+// there.
 //
-// Deliberately narrow: only the two values that mean a dry run are recognised.
-// --dry-run=none is a real delete, and a spelling kubectl adds later is
-// unlabelled rather than guessed at — a missing "(dry run)" on a dry run is a
-// smaller failure than the label on a real one. This is the only place kx
+// Deliberately narrow: only the spellings kubectl itself runs as a dry run are
+// recognised — client and server, plus the deprecated ones it still accepts
+// and warns about, a bare --dry-run and a boolean true, both client dry runs.
+// --dry-run=none (or false) is a real delete, and a spelling kubectl adds later
+// is unlabelled rather than guessed at — a missing "(dry run)" on a dry run is
+// a smaller failure than the label on a real one. This is the only place kx
 // reads a forwarded flag's meaning; the confirmation prompt deliberately does
 // not, since getting that wrong skips a safety step rather than a label.
+//
+// Read by hand rather than through extractString: the flag has an optional
+// value, so a bare --dry-run never takes the argument after it, and the last
+// occurrence wins, as it does for kubectl.
 func isDryRun(extraArgs []string) bool {
-	value, _, err := extractString(extraArgs, "--dry-run", "")
-	if err != nil {
-		return false
+	dryRun := false
+	for _, arg := range extraArgs {
+		switch {
+		case arg == "--dry-run":
+			dryRun = true
+		case strings.HasPrefix(arg, "--dry-run="):
+			dryRun = dryRunValue(strings.TrimPrefix(arg, "--dry-run="))
+		}
 	}
-	return value == "client" || value == "server"
+	return dryRun
+}
+
+// dryRunValue reports whether kubectl runs --dry-run=value as a dry run.
+// "unchanged" is the value kubectl gives a bare --dry-run, so spelling it out
+// means the same thing.
+func dryRunValue(value string) bool {
+	switch value {
+	case "client", "server", "unchanged":
+		return true
+	}
+	enabled, err := strconv.ParseBool(value)
+	return err == nil && enabled
 }
 
 var scalableKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet}
@@ -125,26 +152,35 @@ type ScaleCommand struct {
 	State   IndexResolver
 }
 
-func (c ScaleCommand) Execute(ref state.Ref, replicas int, extraArgs []string) (string, error) {
+// Execute scales the workload, returning kx's line for it and kubectl's own
+// output, which reportChange prints in its place when an output format was
+// asked for.
+func (c ScaleCommand) Execute(
+	ref state.Ref, replicas int, extraArgs []string,
+) (message, output string, err error) {
 	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !scalableKinds.Has(kind) {
-		return "", unsupportedKindError("scale", kind, scalableKinds)
+		return "", "", unsupportedKindError("scale", kind, scalableKinds)
 	}
-	_, err = c.Kubectl.Run(append([]string{
+	output, err = c.Kubectl.Run(append([]string{
 		"scale", string(kind) + "/" + name,
 		"--replicas=" + strconv.Itoa(replicas), "-n", namespace,
 	}, extraArgs...))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	noun := "replicas"
 	if replicas == 1 {
 		noun = "replica"
 	}
-	return fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun), nil
+	message = fmt.Sprintf("Scaled %s/%s to %d %s", kind, name, replicas, noun)
+	if isDryRun(extraArgs) {
+		message += " (dry run — nothing was changed)"
+	}
+	return message, output, nil
 }
 
 var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}
@@ -713,6 +749,9 @@ type ContextsCommand struct {
 	Kubectl kubectl.Service
 	State   NamedStateWriter
 	Index   Indexer
+	// Match narrows the contexts by name, as kx get -m narrows a listing;
+	// empty keeps them all.
+	Match string
 }
 
 // Execute lists the contexts and returns the indexed table along with the active
@@ -735,7 +774,11 @@ func (c ContextsCommand) Execute() (table index.Table, context string, err error
 	// re-parsed the padded text, where an empty cell and column padding are the
 	// same run of spaces. Rows reach the renderer intact now, so the marker
 	// kubectl prints is the marker kx prints.
-	indexed := c.Index.Add(output)
+	indexed := index.Table{Raw: output}
+	if listing, ok := c.Index.Parse(output); ok {
+		indexed = listing.Narrow(c.Match).Number()
+		indexed.Raw, indexed.Match = output, c.Match
+	}
 	if len(indexed.Entries) > 0 {
 		if err := c.State.SaveNamed(state.State{
 			Resources: contextResources(indexed.Entries),

@@ -3,16 +3,12 @@
 title: "kx yaml"
 linkTitle: "yaml"
 description: "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields."
-weight: 30
+weight: 32
 ---
 
 Prints the raw YAML manifest for one or more indexed resources. --show fetches the same full manifest and narrows it client-side to the named top-level fields, so it works with anything kubectl's own YAML output has.
 
 kubectl's own flags pass through. Naming an output format yourself replaces kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints JSON. --show cannot be combined with one: it parses the YAML it narrows.
-
-Unrecognized flags are passed through to kubectl.
-
-Unrecognized flags are passed through to kubectl.
 
 ## Usage
 

@@ -792,6 +792,66 @@ func TestFieldsRefusesAnIndexAgainstAnEmptyListing(t *testing.T) {
 	}
 }
 
+// A listing a --match term emptied found pods, just none it kept, so the
+// refusal names the term rather than saying kube-public has none.
+func TestEmptyListingRefusalNamesTheTerm(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})
+	term := "zzz"
+	save(t, service, State{
+		Namespace: "kube-public",
+		Query:     &Query{Resource: "pods", Match: &term},
+	})
+
+	_, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatal("Fields(1) resolved against an empty listing, want an error")
+	}
+	if want := "nothing in Pods · kube-public matches 'zzz'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q\n  missing %q", err, want)
+	}
+	if strings.Contains(err.Error(), "found none") {
+		t.Errorf("err = %q, says found none for a listing a term emptied", err)
+	}
+}
+
+// An emptied sweep is refused like an emptied listing, named as kx state
+// names it.
+func TestEmptySweepRefusalNamesTheTerm(t *testing.T) {
+	service := newTestService(t, 10)
+	save(t, service, State{Resources: pods("api"), Namespace: "prod"})
+	term := "zzz"
+	save(t, service, State{
+		Namespace: "prod",
+		Query:     &Query{Command: "tree", Args: []string{"-n", "prod"}, Match: &term},
+	})
+	_, _, _, err := service.Fields(1)
+	if err == nil {
+		t.Fatal("Fields(1) resolved against an empty sweep, want an error")
+	}
+	if want := "nothing in Mixed · prod matches 'zzz'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q\n  missing %q", err, want)
+	}
+}
+
+// A sweep run again replaces its entry, as a kx get run again does, rather
+// than pushing beside it because what it found moved. Before sweeps recorded
+// a query they were compared by contents, so a sweep that found anything
+// different was a new view.
+func TestRepeatingASweepReplacesItsEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	query := func() *Query { return &Query{Command: "diag", Args: []string{"-n", "prod"}} }
+	save(t, service, State{Resources: pods("api"), Namespace: "prod", Query: query()})
+	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod", Query: query()})
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 1 {
+		t.Errorf("history holds %d entries, want the sweep replaced in place", len(history.States))
+	}
+}
+
 // The kind-checking path is the one kx scale, kx rollout and kx cordon take —
 // the destructive half of the command set — so it needs the same refusal, and
 // it keeps its own relist clause the way its out-of-range sibling does.
@@ -2078,6 +2138,42 @@ func TestSaveKeepsDifferentQuerylessEntriesApart(t *testing.T) {
 	}
 	if len(history.States) != 3 {
 		t.Errorf("len(States) = %d, want 3", len(history.States))
+	}
+}
+
+// A fetch's query records its kind and term but not the rows it was asked
+// for, so two fetches of pods are one view only when they hold the same pods.
+// Compared by query alone, kx get pods 1 2 against a fetch replaced that
+// fetch, and kx state back skipped the listing its indexes came from.
+func TestSaveKeepsFetchesOfDifferentRowsApart(t *testing.T) {
+	service := newTestService(t, 10)
+	fetch := func(names ...string) State {
+		return State{Resources: pods(names...), AllNamespaces: true,
+			Query: &Query{Command: CommandFetch, Resource: "pods", Args: []string{}}}
+	}
+	save(t, service, State{Resources: pods("api", "web", "db"), AllNamespaces: true,
+		Query: &Query{Resource: "pods", Args: []string{"-A"}}})
+	save(t, service, fetch("api", "web", "db"))
+	save(t, service, fetch("api", "web"))
+
+	history, err := service.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Fatalf("len(States) = %d, want 3 — the -A listing and two fetches", len(history.States))
+	}
+	if names := history.States[1].Resources.Names(); len(names) != 3 {
+		t.Errorf("first fetch holds %v, want its three rows", names)
+	}
+
+	// The same rows fetched again are the same view, refreshed in place.
+	save(t, service, fetch("api", "web"))
+	if history, err = service.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(history.States) != 3 {
+		t.Errorf("len(States) = %d, want 3 — the same fetch twice is one view", len(history.States))
 	}
 }
 

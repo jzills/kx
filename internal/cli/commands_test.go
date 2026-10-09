@@ -914,7 +914,10 @@ func TestDebugWithoutAnIndexSaysSo(t *testing.T) {
 	if err == nil {
 		t.Fatal("debug with no index succeeded")
 	}
-	if !strings.Contains(err.Error(), "requires an index") {
+	// requiredArgsError's wording, from debug's own Use string. The "kx "
+	// prefix is missing because CommandPath climbs the parent chain and this
+	// command has no root — the full sentence is pinned in help_test.go.
+	if !strings.Contains(err.Error(), "requires <index>") {
 		t.Errorf("err = %q, want it to name the missing index", err)
 	}
 }
@@ -1228,4 +1231,18 @@ func TestNamespaceListingMarksTheCurrentNamespace(t *testing.T) {
 		}
 	}
 	t.Errorf("output = %q, want a row for the current namespace", out.String())
+}
+
+// The real kubectl service hands kubectl's warnings to the renderer. Every
+// command test builds Services with a fake, so without this the wiring could
+// be dropped and nothing else would notice.
+func TestNewServicesForwardsKubectlWarnings(t *testing.T) {
+	t.Setenv("KX_STATE", filepath.Join(t.TempDir(), "state.json"))
+	client, ok := NewServices(config.Default()).Kubectl.(*kubectl.Exec)
+	if !ok {
+		t.Fatalf("Kubectl is %T, want *kubectl.Exec", NewServices(config.Default()).Kubectl)
+	}
+	if client.Warn == nil {
+		t.Error("kubectl.Exec.Warn is nil; kubectl's warnings are dropped")
+	}
 }

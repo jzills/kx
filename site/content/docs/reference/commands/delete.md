@@ -10,10 +10,6 @@ Deletes one or more indexed resources, confirming each one individually — so d
 
 kubectl's own flags pass through: --force --grace-period=0 for a pod that will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still prompts — kx does not read kubectl's flag semantics, and reading --dry-run=none as a dry run would skip the prompt on a real delete.
 
-Unrecognized flags are passed through to kubectl.
-
-Unrecognized flags are passed through to kubectl.
-
 ## Usage
 
 ```text
@@ -30,6 +26,8 @@ kx delete [OPTIONS] <index>... [kubectl flags]
 
 | Option | Description |
 |---|---|
+| `--dry-run string` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `-y, --yes` | Skip the confirmation prompt |
 
 ## Global options

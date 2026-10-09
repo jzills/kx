@@ -38,7 +38,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	if err != nil {
 		return nil, err
 	}
-	allEvents, err := s.Events.Get(ctx, namespace)
+	allEvents, err := s.Events.Warnings(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -200,32 +200,22 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A Service in a sweep reports what is about the Service alone: its
+	// endpoints and its own warning events. Not the pods it selects — those
+	// already have a row of their own, under the workload that owns them or
+	// as an orphan Pod, and reporting them here too put every broken workload
+	// that sits behind a Service on screen twice, the Service's copy of the
+	// pod's finding outranking its own "0 ready". kx diag on one Service is
+	// different: there it is the only row, and Gather still reads its pods.
 	for i := range services.Items {
 		service := &services.Items[i]
-		var matched []corev1.Pod
-		if len(service.Spec.Selector) > 0 {
-			for j := range pods.Items {
-				// A selector reaches only its own namespace: app=web means
-				// something different in each one, so a cluster-wide sweep must
-				// not hand this Service another namespace's pods.
-				if pods.Items[j].Namespace != service.Namespace {
-					continue
-				}
-				if graph.MatchesSelector(pods.Items[j], service.Spec.Selector) {
-					matched = append(matched, pods.Items[j])
-				}
-			}
-		}
-		data := Data{
+		results = append(results, Data{
 			Kind: kinds.Service, Name: service.Name, Namespace: service.Namespace,
 			Service: serviceHealthFrom(
 				service, endpointsFor[endpointsKey{service.Namespace, service.Name}]),
-			Pods: diagnoseAll(matched),
-		}
-		attachUsage(data.Pods, data.Namespace, usage)
-		data.WarningEvents = s.warningEvents(since,
-			kinds.Service, service.Name, service.Namespace, matched, allEvents)
-		results = append(results, data)
+			WarningEvents: s.warningEvents(since,
+				kinds.Service, service.Name, service.Namespace, nil, allEvents),
+		})
 	}
 
 	// PVCs have no pods and no ownership — just a listing and a phase check.

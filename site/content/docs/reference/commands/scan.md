@@ -8,12 +8,14 @@ weight: 24
 
 Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.
 
+With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows the sweep to the workloads whose name matches.
+
 Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/
 Trivy is available via --engine trivy: https://trivy.dev/
 Grype is available via --engine grype: https://github.com/anchore/grype
 Run 'kx engine' to see or change the default.
 
-Unrecognized flags are passed through to kubectl.
+Unrecognized flags are passed through to the scanner.
 
 ## Usage
 
@@ -37,6 +39,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 | `--full` | Stream the scanner's full output instead of the summary table |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the severity counts and every finding as JSON instead of a table |
+| `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
@@ -55,6 +58,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 kx scan
 kx scan 1
 kx scan -n prod
+kx scan -m api
 kx scan 1 --full
 kx scan --html
 kx scan -A --json

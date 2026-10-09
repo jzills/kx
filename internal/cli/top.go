@@ -11,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/web"
 )
@@ -21,6 +22,11 @@ type TopCommand struct {
 	Kubectl kubectl.Service
 	State   StateWriter
 	Index   Indexer
+	// Scope is GetCommand.Scope for kx top's pods: the namespace a listing
+	// whose arguments name none is taken in, without naming it in the query
+	// saved — a refresh's (listingScope), or the one the context gives an
+	// agent's top call.
+	Scope string
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -44,12 +50,25 @@ func (c TopCommand) EnsureAvailable() error {
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table index.Table, namespace string, err error) {
-	if err := c.EnsureAvailable(); err != nil {
-		return index.Table{}, "", err
+	// Another cluster's usage is printed as kubectl gives it and never saved,
+	// as kx get prints another cluster's listing. The metrics probe and the
+	// pod limits the percentages come from both read the current cluster, so
+	// neither runs: kubectl's own error says if b has no metrics-server.
+	crossCluster := clusterFlagIn(extraArgs) != ""
+	if !crossCluster {
+		if err := c.EnsureAvailable(); err != nil {
+			return index.Table{}, "", err
+		}
 	}
-	output, err := c.Kubectl.Run(append([]string{"top", "pods"}, extraArgs...))
+	scope := replayScope(c.Scope, extraArgs)
+	args := append([]string{"top", "pods"}, extraArgs...)
+	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
+	}
+	if crossCluster {
+		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
 	// --containers is a different table shape entirely, so it never gets
@@ -63,6 +82,9 @@ func (c TopCommand) Execute(
 	}
 
 	namespace = extractNamespace(extraArgs)
+	if namespace == "" && scope != nil {
+		namespace = c.Scope
+	}
 	if namespace == "" {
 		namespace = c.Kubectl.CurrentNamespace()
 	}
@@ -76,7 +98,15 @@ func (c TopCommand) Execute(
 	// resources found" goes to stderr — and that is saved below like any other
 	// listing, so the indexes it replaces stop resolving.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		// A term cannot narrow what kx cannot read (narrowText), and is
+		// refused rather than printed past: kx top --no-headers -m web
+		// listed every pod.
+		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)
@@ -89,12 +119,9 @@ func (c TopCommand) Execute(
 	}
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -105,23 +132,52 @@ func (c TopCommand) Execute(
 	if allNamespaces {
 		entryNamespace = ""
 	}
+	// --no-limits is kx's flag, not kubectl's, and recorded beside them: it
+	// decides the columns the listing was read from.
+	recorded := extraArgs
+	if noLimits {
+		recorded = append(append([]string{}, extraArgs...), "--no-limits")
+	}
 	if err := c.State.Save(state.State{
 		Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
 		Namespace:     entryNamespace,
 		AllNamespaces: allNamespaces,
-		// Recorded as a `get pods` query so a stale entry refreshes into a
-		// listing, which is what the indexes were assigned against. Command
-		// keeps it from *being* that listing: top omits pods no metrics have
-		// arrived for and orders by usage, so the two hold different
-		// resources in a different order, and an entry that replaced the get
-		// listing put those numbers where the get listing's had been.
+		// Command keeps it from being a `kx get pods` listing, which it is
+		// not: top omits pods no metrics have arrived for and orders by
+		// usage, so the two hold different resources in a different order.
+		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
-			Resource: "pods", Args: extraArgs, Match: match, Command: "top",
+			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
+}
+
+// topListing runs kx top's listing, of pods or of nodes, and returns it with
+// the label and scope its caption takes: "all namespaces" for an -A listing,
+// which spanning then reports. Shared by the command and by a refresh, so a
+// stale kx top listing is listed again exactly as it was — in the namespace
+// it was taken in, which a refresh passes as scope (TopCommand.Scope).
+func topListing(
+	services Services, nodes bool, match string, rest []string, noLimits bool, scope string,
+) (table index.Table, label, namespace string, spanning bool, err error) {
+	command := TopCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+	}
+	if nodes {
+		table, namespace, err = command.ExecuteNodes(match, rest)
+		return table, "nodes", namespace, false, err
+	}
+	spanning = allNamespaces(rest)
+	table, namespace, err = command.Execute(match, rest, noLimits)
+	if spanning {
+		// Matches kx get -A's own caption override (getbody.go): many
+		// namespaces span the listing, so there is no single one to name.
+		namespace = render.AllNamespaces
+	}
+	return table, "pods", namespace, spanning, err
 }
 
 // ExecuteNodes lists node CPU/memory usage, indexed like kx get nodes.
@@ -134,12 +190,20 @@ func (c TopCommand) Execute(
 func (c TopCommand) ExecuteNodes(
 	filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	if err := c.EnsureAvailable(); err != nil {
-		return index.Table{}, "", err
+	// Another cluster's nodes print unnumbered and unsaved; see Execute.
+	crossCluster := clusterFlagIn(extraArgs) != ""
+	if !crossCluster {
+		if err := c.EnsureAvailable(); err != nil {
+			return index.Table{}, "", err
+		}
 	}
 	output, err := c.Kubectl.Run(append([]string{"top", "nodes"}, extraArgs...))
 	if err != nil {
 		return index.Table{}, "", err
+	}
+	if crossCluster {
+		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
 	// This is the rule #271 gave kx get nodes, and kx top nodes is the other way
@@ -152,7 +216,15 @@ func (c TopCommand) ExecuteNodes(
 	// Empty output is a listing that found nothing and is saved; anything else
 	// kx cannot number prints as-is. See Execute.
 	if headers == nil && strings.TrimSpace(output) != "" {
-		return c.Index.Add(output), namespace, nil
+		// A term cannot narrow what kx cannot read (narrowText), and is
+		// refused rather than printed past: kx top --no-headers -m web
+		// listed every pod.
+		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
+		raw := c.Index.Add(output)
+		raw.Unnumbered = true
+		return raw, namespace, nil
 	}
 	if filterTerm != "" {
 		rows = index.FilterRows(headers, rows, filterTerm)
@@ -160,23 +232,18 @@ func (c TopCommand) ExecuteNodes(
 	headers = relabelPercentColumns(headers)
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Match = filterTerm
 	// Saved even when nothing was listed; see Execute above.
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
-	var match *string
-	if filterTerm != "" {
-		match = &filterTerm
-	}
 	if err := c.State.Save(state.State{
 		Resources: resourcesFrom(indexed.Entries, kinds.Node),
 		Namespace: namespace,
-		// Recorded as a `get nodes` query, matching kx get nodes' own
-		// convention, so a stale entry refreshes into the same listing
-		// shape the indexes were assigned against — and carrying the command
-		// that produced it, for the same reason Execute's entry does.
+		// Carrying the command that produced it, for the same reasons
+		// Execute's entry does.
 		Query: &state.Query{
-			Resource: "nodes", Args: extraArgs, Match: match, Command: "top",
+			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -366,6 +433,14 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	if nameIdx < 0 {
 		return nil
 	}
+	// The column an index resolves through, as the numbering read it: POD
+	// under --containers, where NAME is the container. Read off NAME alone,
+	// a document named the container and never the pod its index resolves
+	// to, nor the pod --match had matched.
+	podIdx := -1
+	if resourceIdx := index.ResourceColumn(headers); resourceIdx != nameIdx {
+		podIdx = resourceIdx
+	}
 	indexIdx := index.ColumnIndex(headers, "X")
 	namespaceIdx := index.ColumnIndex(headers, "NAMESPACE")
 	cpuIdx := index.ColumnIndex(headers, "CPU(cores)")
@@ -376,6 +451,9 @@ func topPageRows(indexed index.Table) []web.TopRow {
 	pageRows := make([]web.TopRow, len(rows))
 	for i, row := range rows {
 		pageRow := web.TopRow{Name: row[nameIdx]}
+		if podIdx >= 0 {
+			pageRow.Pod = row[podIdx]
+		}
 		if indexIdx >= 0 {
 			if n, err := strconv.Atoi(row[indexIdx]); err == nil {
 				pageRow.Index = n

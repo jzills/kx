@@ -9,6 +9,7 @@ import (
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
@@ -33,7 +34,11 @@ func (c DiagnosticCommand) Execute(ctx context.Context, ref state.Ref) (diagnost
 	if err != nil {
 		return diagnostics.Report{}, err
 	}
-	return c.ExecuteResource(ctx, kind, name, namespace)
+	report, err := c.ExecuteResource(ctx, kind, name, namespace)
+	if err != nil {
+		return diagnostics.Report{}, staleIfMissing(err, kind, name, namespace, ref)
+	}
+	return report, nil
 }
 
 // ExecuteResource diagnoses a resource that is already resolved — from an
@@ -63,6 +68,19 @@ type TriageCommand struct {
 	// most: "0 checked · all healthy" would otherwise be indistinguishable
 	// from a cluster that is genuinely quiet.
 	Window time.Duration
+	// Match narrows the sweep to the resources whose name contains it,
+	// case-insensitively — kx diag -m. Empty sweeps everything.
+	Match string
+	// Since is --since as it was typed, empty when it was not. Only recorded:
+	// Window is what the sweep used. A refresh runs the sweep again with this
+	// and resolves the window afresh, as typing the command again would.
+	Since string
+	// NamedNamespace is whether the namespace swept was named — -n, or an
+	// agent's namespace — rather than the context's own. Only a named one is
+	// recorded in the query; the entry records where the sweep was taken
+	// either way, and a refresh after a context switch tells the two apart
+	// (listingScope).
+	NamedNamespace bool
 }
 
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
@@ -88,8 +106,17 @@ func (c TriageCommand) Execute(
 		return render.TriageResult{}, err
 	}
 
+	// Narrowed here, on the rows the sweep produced, and never inside it: the
+	// sweep claims every pod for its owner across the whole namespace, so a
+	// term that removed a Deployment before its pods were claimed would turn
+	// them loose as orphan rows of their own. Before anything is counted,
+	// sorted or saved, so a matched sweep is the sweep of what matched.
 	reports := make([]diagnostics.Report, 0, len(all))
+	matches := index.NameMatcher(c.Match)
 	for _, data := range all {
+		if !matches(data.Name) {
+			continue
+		}
 		reports = append(reports, diagnostics.BuildReport(data))
 	}
 	// Most severe first, stable so the sweep's order survives within a
@@ -118,6 +145,7 @@ func (c TriageCommand) Execute(
 		Healthy:       len(reports) - len(unhealthy),
 		Full:          full,
 		Window:        c.Window,
+		Match:         c.Match,
 	}
 
 	// Every swept resource is indexed, not just the unhealthy ones printed by
@@ -143,11 +171,69 @@ func (c TriageCommand) Execute(
 		Resources:     state.NewOrderedResources(entries),
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
+		Query:         c.query(namespace, allNamespaces),
 	}); err != nil {
 		return render.TriageResult{}, err
 	}
 
 	return result, nil
+}
+
+// query records the sweep so it can be run again: its scope as named —
+// -A, or -n when the namespace was named, the entry recording where it was
+// swept either way (see NamedNamespace) — and the flags that decide what it
+// saves. --full, --json, --html and --fail-on decide only what is done with
+// the sweep: the saved listing is every resource swept either way, so they
+// are left out, and a sweep with --full is the same view as one without. A
+// refresh prints the default table.
+func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query {
+	args := []string{}
+	switch {
+	case allNamespaces:
+		args = []string{"-A"}
+	case c.NamedNamespace:
+		args = []string{"-n", namespace}
+	}
+	if c.Since != "" {
+		args = append(args, "--since", c.Since)
+	}
+	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match)}
+}
+
+// runSweep sweeps a namespace, or every namespace, under a spinner, and saves
+// it as the current listing. Shared by kx diag and by the refresh of a stale
+// sweep, so the two cannot sweep differently. window is since resolved
+// against diag_max_age; since is recorded as typed.
+// sweepScope is what a sweep sweeps: one namespace, or every one, and
+// whether the namespace was named rather than the context's own
+// (TriageCommand.NamedNamespace).
+type sweepScope struct {
+	Namespace string
+	All       bool
+	Named     bool
+}
+
+func runSweep(
+	ctx context.Context, services Services, scope sweepScope, full bool,
+	window time.Duration, since, match string,
+) (render.TriageResult, error) {
+	client, err := services.Kubernetes()
+	if err != nil {
+		return render.TriageResult{}, err
+	}
+	service := diagnostics.New(client)
+	service.MaxAge = window
+	sweeping := "sweeping namespace"
+	if scope.All {
+		sweeping = "sweeping all namespaces"
+	}
+	stop := render.Status(sweeping)
+	result, err := TriageCommand{
+		Diagnostics: service, Save: services.State.Save, Window: window,
+		Match: match, Since: since, NamedNamespace: scope.Named,
+	}.Execute(ctx, scope.Namespace, scope.All, full)
+	stop()
+	return result, err
 }
 
 // sweepPage builds the HTML page for a namespace sweep from the same
@@ -169,6 +255,7 @@ func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 		AllNamespaces: result.AllNamespaces,
 		Checked:       result.Checked,
 		Window:        render.WindowLabel(result.Window),
+		Match:         result.Match,
 		Reports:       result.All,
 	}
 }
@@ -232,13 +319,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases:    aliases,
 		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
-			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
 			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
 			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
 			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
+			"  kx " + use + " -m api\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
@@ -254,6 +342,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			asJSON, _ := cmd.Flags().GetBool("json")
 			failOn, _ := cmd.Flags().GetString("fail-on")
 			since, _ := cmd.Flags().GetString("since")
+			match, _ := cmd.Flags().GetString("match")
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -313,6 +402,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"carries the namespace it was listed from. Drop the flag, "+
 						"or drop the index to sweep the namespace instead.", scopeFlag)
 			}
+			if len(args) > 0 && match != "" {
+				return errMatchBesideIndex
+			}
 			// --full only changes what a sweep's terminal table includes; a single
 			// indexed resource has nothing to include or leave out.
 			if len(args) > 0 && cmd.Flags().Changed("full") {
@@ -322,27 +414,16 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"the namespace instead.")
 			}
 
-			client, err := services.Kubernetes()
-			if err != nil {
-				return err
-			}
-			service := diagnostics.New(client)
-			service.MaxAge = window
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
+				named := namespace != ""
 				if namespace == "" {
 					namespace = services.Kubectl.CurrentNamespace()
 				}
-				sweeping := "sweeping namespace"
-				if allNamespaces {
-					sweeping = "sweeping all namespaces"
-				}
-				stop := render.Status(sweeping)
-				result, err := TriageCommand{
-					Diagnostics: service, Save: services.State.Save, Window: window,
-				}.Execute(ctx, namespace, allNamespaces, full)
-				stop()
+				result, err := runSweep(ctx, services,
+					sweepScope{Namespace: namespace, All: allNamespaces, Named: named},
+					full, window, since, match)
 				if err != nil {
 					return err
 				}
@@ -366,7 +447,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 						invocation(use, scopeArgs(namespace, allNamespaces),
-							sinceFlag(window), portFlag(port)))
+							matchFlag(match), sinceFlag(window), portFlag(port)))
 					if err != nil {
 						return err
 					}
@@ -387,6 +468,12 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
+			client, err := services.Kubernetes()
+			if err != nil {
+				return err
+			}
+			service := diagnostics.New(client)
+			service.MaxAge = window
 			stop := render.Status("gathering diagnostics")
 			report, err := DiagnosticCommand{
 				State: services.State, Diagnostics: service,
@@ -426,6 +513,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace; each row is indexed and carries its own namespace")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,

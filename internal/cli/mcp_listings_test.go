@@ -124,7 +124,8 @@ func TestWriteListingsListResourcesSavesLikeKxGet(t *testing.T) {
 		resource string
 		cliArgs  []string
 	}{
-		{"namespace", podsOutput, map[string]any{"kind": "pods"}, "pods", []string{"-n", "prod"}},
+		{"namespace", podsOutput, map[string]any{"kind": "pods"}, "pods", nil},
+		{"a named namespace", podsOutput, map[string]any{"kind": "pods", "namespace": "prod"}, "pods", []string{"-n", "prod"}},
 		{"all namespaces", allOutput, map[string]any{"kind": "pods", "allNamespaces": true}, "pods", []string{"-A"}},
 		{"cluster-scoped", nodes, map[string]any{"kind": "nodes"}, "nodes", nil},
 	} {
@@ -228,7 +229,7 @@ func TestWriteListingsSameQueryReplacesTheCursorEntryAndTagsIt(t *testing.T) {
 	deps := writingDeps(t, &recordingKubectl{output: podsOutput, namespace: "prod"})
 	if _, _, err := (GetCommand{
 		Kubectl: &recordingKubectl{output: podsOutput, namespace: "prod"}, State: deps.State, Index: index.Service{},
-	}).Execute("pods", "", []string{"-n", "prod"}); err != nil {
+	}).Execute("pods", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if entry, err := deps.State.Load(); err != nil || entry.Source != "" {
@@ -412,11 +413,7 @@ func TestWriteListingsTreeAcrossNamespacesSavesLikeKxTreeA(t *testing.T) {
 	}
 	cli := cliState(t)
 	command := TreeCommand{Builder: graph.Builder{Client: client}, Save: cli.Save}
-	_, resources, err := command.ExecuteAllNamespaces(context.Background(), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := command.save(resources, "", true, true); err != nil {
+	if _, _, err := command.ExecuteAllNamespaces(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	assertSavedLikeTheCLI(t, entry, cli)
@@ -477,9 +474,14 @@ func TestWriteListingsTopSavesLikeKxTop(t *testing.T) {
 		run     func(TopCommand) error
 	}{
 		{"pods", []string{topPodsFixture, podsJSON}, map[string]any{}, kinds.Pod, func(c TopCommand) error {
-			_, _, err := c.Execute("", []string{"-n", "prod"}, false)
+			_, _, err := c.Execute("", nil, false)
 			return err
 		}},
+		{"pods in a named namespace", []string{topPodsFixture, podsJSON}, map[string]any{"namespace": "prod"},
+			kinds.Pod, func(c TopCommand) error {
+				_, _, err := c.Execute("", []string{"-n", "prod"}, false)
+				return err
+			}},
 		{"nodes", []string{nodesOutput}, map[string]any{"nodes": true}, kinds.Node, func(c TopCommand) error {
 			_, _, err := c.ExecuteNodes("", nil)
 			return err
@@ -541,7 +543,7 @@ func TestWriteListingsRoundTripsToTheCLIsConfirm(t *testing.T) {
 	}
 
 	var prompted string
-	if _, err := (DeleteCommand{
+	if _, _, err := (DeleteCommand{
 		Kubectl: &recordingKubectl{},
 		State:   deps.State,
 		Confirm: func(message string) error { prompted = message; return nil },
@@ -811,7 +813,7 @@ func TestWriteListingsUsersRefreshOverATaggedEntryIsUntagged(t *testing.T) {
 
 	if _, _, err := (GetCommand{
 		Kubectl: &recordingKubectl{output: podsOutput, namespace: "prod"}, State: deps.State, Index: index.Service{},
-	}).Execute("pods", "", []string{"-n", "prod"}); err != nil {
+	}).Execute("pods", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	history, err := deps.State.LoadHistory()
@@ -967,6 +969,64 @@ func TestListResourcesRefusesTheContextPseudoKind(t *testing.T) {
 			}
 			if _, err := deps.State.LoadHistory(); !errors.Is(err, state.ErrNoState) {
 				t.Errorf("LoadHistory = %v, want nothing saved", err)
+			}
+		})
+	}
+}
+
+// An agent's listing records a namespace in its query only when the agent
+// named one, as kx get, kx diag and kx tree do when -n is typed: the
+// namespace the context gave it is the entry's, so that a refresh after the
+// user switches context lists the new context's namespace (listingScope).
+func TestWriteListingsRecordANamespaceOnlyWhenTheAgentNamedOne(t *testing.T) {
+	for _, tc := range []struct {
+		tool  string
+		deps  func(t *testing.T) mcpDeps
+		input map[string]any
+		want  string
+	}{
+		{"list_resources", func(t *testing.T) mcpDeps {
+			return writingDeps(t, &recordingKubectl{output: podsOutput, namespace: "prod"})
+		}, map[string]any{"kind": "pods"}, ""},
+		{"list_resources", func(t *testing.T) mcpDeps {
+			return writingDeps(t, &recordingKubectl{output: podsOutput, namespace: "prod"})
+		}, map[string]any{"kind": "pods", "namespace": "prod"}, "-n prod"},
+		{"top", func(t *testing.T) mcpDeps {
+			return writingDeps(t, &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}, namespace: "prod"})
+		}, map[string]any{}, ""},
+		{"top", func(t *testing.T) mcpDeps {
+			return writingDeps(t, &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}, namespace: "prod"})
+		}, map[string]any{"namespace": "prod"}, "-n prod"},
+		{"diagnose", func(t *testing.T) mcpDeps {
+			deps := mcpDiagDeps(t, &recordingKubectl{namespace: "prod"}, brokenDeployment("api", "prod"))
+			deps.WriteListings = true
+			return deps
+		}, map[string]any{}, ""},
+		{"diagnose", func(t *testing.T) mcpDeps {
+			deps := mcpDiagDeps(t, &recordingKubectl{namespace: "prod"}, brokenDeployment("api", "prod"))
+			deps.WriteListings = true
+			return deps
+		}, map[string]any{"namespace": "prod"}, "-n prod"},
+		{"tree", func(t *testing.T) mcpDeps {
+			deps := mcpTreeDeps(t)
+			deps.WriteListings = true
+			return deps
+		}, map[string]any{}, ""},
+		{"tree", func(t *testing.T) mcpDeps {
+			deps := mcpTreeDeps(t)
+			deps.WriteListings = true
+			return deps
+		}, map[string]any{"namespace": "prod"}, "-n prod"},
+	} {
+		t.Run(fmt.Sprintf("%s %v", tc.tool, tc.input), func(t *testing.T) {
+			deps := tc.deps(t)
+			callTool(t, connectMCP(t, deps), tc.tool, tc.input)
+			entry := onlyTaggedEntry(t, deps.State)
+			if entry.Query == nil || strings.Join(entry.Query.Args, " ") != tc.want {
+				t.Errorf("query = %+v, want args %q", entry.Query, tc.want)
+			}
+			if entry.Namespace != "prod" {
+				t.Errorf("entry namespace = %q, want prod, where it was listed", entry.Namespace)
 			}
 		})
 	}

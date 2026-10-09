@@ -10,7 +10,7 @@ import (
 
 func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{}}}`}
-	message, err := MetadataWriteCommand{
+	message, _, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
 	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, []string{"old"}, false, nil)
 	if err != nil {
@@ -32,7 +32,7 @@ func TestMetadataWriteSetsAndRemoves(t *testing.T) {
 
 func TestAnnotateUsesItsOwnVerb(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"annotations":{}}}`}
-	message, err := MetadataWriteCommand{
+	message, _, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "annotate", Field: "annotations",
 	}.Execute(state.Ref{Index: 1}, []string{"note"}, map[string]string{"note": "hi"}, nil, false, nil)
 	if err != nil {
@@ -47,7 +47,7 @@ func TestAnnotateUsesItsOwnVerb(t *testing.T) {
 // every conflict rather than just the first.
 func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev","app":"web"}}}`}
-	_, err := MetadataWriteCommand{
+	_, _, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
 	}.Execute(state.Ref{Index: 1}, []string{"env", "app"}, map[string]string{"env": "prod", "app": "api"}, nil, false, nil)
 	if err == nil {
@@ -62,7 +62,7 @@ func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 
 func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 	kubectl := &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev"}}}`}
-	_, err := MetadataWriteCommand{
+	_, _, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
 	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, true, nil)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestMetadataWriteAllowsOverwrite(t *testing.T) {
 // remedy, no closing period, alone among kx's refusals in that respect.
 func TestMetadataWriteRejectsEmptyChange(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := MetadataWriteCommand{
+	_, _, err := MetadataWriteCommand{
 		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
 	}.Execute(state.Ref{Index: 1}, nil, nil, nil, false, nil)
 	if err == nil {

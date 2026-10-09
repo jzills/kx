@@ -1,0 +1,496 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/state"
+)
+
+// runWait runs kx wait over a listing of kind in namespace.
+func runWait(
+	t *testing.T, kube *recordingKubectl, kind kinds.Kind, namespace string, names []string,
+	objects []runtime.Object, args ...string,
+) (stdout string, err error) {
+	t.Helper()
+	services := switchServices(t, kube)
+	services.Kubernetes = func() (kubernetes.Interface, error) {
+		return fake.NewSimpleClientset(objects...), nil
+	}
+	saveListing(t, services, kind, namespace, false, names...)
+	stdout, _, err = runCaptured(t, newWaitCommand(services), args)
+	return stdout, err
+}
+
+// Each kind with one unambiguous meaning of "ready" is waited for without a
+// --for, and the line names what was met.
+func TestWaitDefaultsByKind(t *testing.T) {
+	for _, tc := range []struct {
+		kind      kinds.Kind
+		namespace string
+		wantArgv  string
+		wantLine  string
+	}{
+		{kinds.Pod, "prod", "wait Pod/api -n prod --for=condition=Ready", "✓ Pod/api · prod · Ready"},
+		{kinds.Node, "", "wait Node/api --for=condition=Ready", "✓ Node/api · Ready"},
+		{kinds.PersistentVolumeClaim, "prod",
+			"wait PersistentVolumeClaim/api -n prod --for=jsonpath={.status.phase}=Bound",
+			"✓ PersistentVolumeClaim/api · prod · Bound"},
+	} {
+		kube := &recordingKubectl{}
+		stdout, err := runWait(t, kube, tc.kind, tc.namespace, []string{"api"}, nil, "1")
+		if err != nil {
+			t.Fatalf("kx wait on a %s: %v", tc.kind, err)
+		}
+		if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != tc.wantArgv {
+			t.Errorf("%s: kubectl = %q, want %q", tc.kind, kube.runs, tc.wantArgv)
+		}
+		if !strings.Contains(stdout, tc.wantLine) {
+			t.Errorf("%s: stdout = %q, want %q", tc.kind, stdout, tc.wantLine)
+		}
+	}
+}
+
+// A --for is the caller's, for any kind — a rollout kind included — and
+// replaces the default rather than joining it.
+func TestWaitForOverridesTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		kind     kinds.Kind
+		args     []string
+		wantArgv string
+		wantLine string
+	}{
+		{kinds.Deployment, []string{"1", "--for=condition=Available"},
+			"wait Deployment/api -n prod --for=condition=Available", "· condition=Available"},
+		{kinds.Pod, []string{"1", "--for=delete", "--timeout=2m"},
+			"wait Pod/api -n prod --for=delete --timeout=2m", "· deleted"},
+		// kubectl requires every --for, so the line names each one, in either
+		// spelling. It named only the last: the flag was read with the
+		// helper that keeps the final occurrence.
+		{kinds.Pod, []string{"1", "--for=condition=Ready", "--for", "condition=Initialized"},
+			"wait Pod/api -n prod --for=condition=Ready --for condition=Initialized",
+			"· condition=Ready, condition=Initialized"},
+	} {
+		kube := &recordingKubectl{}
+		stdout, err := runWait(t, kube, tc.kind, "prod", []string{"api"}, nil, tc.args...)
+		if err != nil {
+			t.Fatalf("kx wait %v: %v", tc.args, err)
+		}
+		if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != tc.wantArgv {
+			t.Errorf("kubectl = %q, want %q", kube.runs, tc.wantArgv)
+		}
+		if !strings.Contains(stdout, tc.wantLine) {
+			t.Errorf("stdout = %q, want %q", stdout, tc.wantLine)
+		}
+	}
+}
+
+// Without a --for, a kind with no single meaning of ready is refused before
+// kubectl runs: a rollout kind points at the command that knows, anything
+// else asks for a condition.
+func TestWaitRefusesKindsWithoutADefault(t *testing.T) {
+	for _, tc := range []struct {
+		kind kinds.Kind
+		want string
+	}{
+		{kinds.Deployment, "waited for with 'kx rollout status 1'"},
+		{kinds.StatefulSet, "waited for with 'kx rollout status 1'"},
+		{kinds.ConfigMap, "no default condition for a ConfigMap — pass one with --for"},
+	} {
+		kube := &recordingKubectl{}
+		_, err := runWait(t, kube, tc.kind, "prod", []string{"api"}, nil, "1")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.kind, err, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: kubectl ran %q", tc.kind, kube.runs)
+		}
+	}
+}
+
+// Every index is resolved before anything waits, so a bad one late in the
+// list costs no waiting; then they are waited for in order, and the first
+// failure ends the command.
+func TestWaitResolvesAllThenStopsAtTheFirstFailure(t *testing.T) {
+	kube := &recordingKubectl{}
+	if _, err := runWait(t, kube, kinds.Pod, "prod", []string{"a", "b"}, nil, "1", "99"); err == nil {
+		t.Error("kx wait 1 99 on a two-row listing succeeded")
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("waited on %q before the bad index was refused", kube.runs)
+	}
+
+	kube = &recordingKubectl{errs: []error{kubectl.Error{Stderr: "timed out waiting for the condition"}}}
+	if _, err := runWait(t, kube, kinds.Pod, "prod", []string{"a", "b"}, nil, "1..2"); err == nil {
+		t.Error("kx wait 1..2 succeeded with the first wait failing")
+	}
+	if len(kube.runs) != 1 {
+		t.Errorf("kubectl ran %d times, want 1 — the wait after a failure must not start", len(kube.runs))
+	}
+}
+
+func TestWaitRefusesAnInvalidTimeout(t *testing.T) {
+	kube := &recordingKubectl{}
+	_, err := runWait(t, kube, kinds.Pod, "prod", []string{"api"}, nil, "1", "--timeout=soon")
+	if err == nil || !strings.Contains(err.Error(), "'soon' is not a duration") {
+		t.Errorf("err = %v, want the timeout refusal", err)
+	}
+}
+
+// Only a LoadBalancer is ever given an address; any other Service type would
+// only time out, so it is refused naming the type.
+func TestWaitOnAService(t *testing.T) {
+	service := func(kind corev1.ServiceType) runtime.Object {
+		return &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+			Spec:       corev1.ServiceSpec{Type: kind},
+		}
+	}
+	kube := &recordingKubectl{}
+	stdout, err := runWait(t, kube, kinds.Service, "prod", []string{"api"},
+		[]runtime.Object{service(corev1.ServiceTypeLoadBalancer)}, "1")
+	if err != nil {
+		t.Fatalf("kx wait on a LoadBalancer: %v", err)
+	}
+	if want := "wait Service/api -n prod --for=jsonpath={.status.loadBalancer.ingress}"; len(kube.runs) != 1 ||
+		joinArgs(kube.runs[0]) != want {
+		t.Errorf("kubectl = %q, want %q", kube.runs, want)
+	}
+	if !strings.Contains(stdout, "Service/api · prod · has an address") {
+		t.Errorf("stdout = %q", stdout)
+	}
+
+	kube = &recordingKubectl{}
+	_, err = runWait(t, kube, kinds.Service, "prod", []string{"api"},
+		[]runtime.Object{service(corev1.ServiceTypeClusterIP)}, "1")
+	if err == nil || !strings.Contains(err.Error(), "is a ClusterIP Service") {
+		t.Errorf("err = %v, want the ClusterIP refusal", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %q for a ClusterIP Service", kube.runs)
+	}
+}
+
+func job(conditions ...batchv1.JobCondition) *batchv1.Job {
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "migrate", Namespace: "prod"},
+		Status:     batchv1.JobStatus{Conditions: conditions},
+	}
+}
+
+func jobCondition(kind batchv1.JobConditionType, reason, message string) batchv1.JobCondition {
+	return batchv1.JobCondition{Type: kind, Status: corev1.ConditionTrue, Reason: reason, Message: message}
+}
+
+var jobTarget = Resolved{Ref: state.Ref{Index: 1}, Kind: kinds.Job, Name: "migrate", Namespace: "prod"}
+
+// waitForJob runs the Job wait against client, with watcher standing in for
+// the API's watch when given.
+func waitForJob(t *testing.T, client *fake.Clientset, watcher watch.Interface, timeout time.Duration) (string, error) {
+	t.Helper()
+	if watcher != nil {
+		client.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, watcher, nil
+		})
+	}
+	command := WaitCommand{
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+	}
+	return command.Execute(context.Background(), jobTarget, timeout, nil)
+}
+
+// A Job that already finished returns at once, either way it finished; a
+// failed one says why, rather than waiting out the timeout for a Complete
+// that will never come.
+func TestWaitForAJobThatAlreadyFinished(t *testing.T) {
+	met, err := waitForJob(t, fake.NewSimpleClientset(job(jobCondition(batchv1.JobComplete, "", ""))), nil, time.Second)
+	if err != nil || met != "Complete" {
+		t.Errorf("complete Job: met=%q err=%v, want Complete", met, err)
+	}
+	_, err = waitForJob(t, fake.NewSimpleClientset(job(
+		jobCondition(batchv1.JobFailed, "BackoffLimitExceeded", "Job has reached the specified backoff limit"))),
+		nil, time.Second)
+	if want := "Job/migrate failed: BackoffLimitExceeded — Job has reached the specified backoff limit"; err == nil ||
+		err.Error() != want {
+		t.Errorf("failed Job: err = %v, want %q", err, want)
+	}
+}
+
+// A Job still running is watched until it finishes — here, fails — and the
+// failure ends the wait as soon as it is seen.
+func TestWaitWatchesARunningJobUntilItFinishes(t *testing.T) {
+	watcher := watch.NewFake()
+	go watcher.Modify(job(jobCondition(batchv1.JobFailed, "DeadlineExceeded", "")))
+	_, err := waitForJob(t, fake.NewSimpleClientset(job()), watcher, 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "failed: DeadlineExceeded") {
+		t.Errorf("err = %v, want the failure the watch delivered", err)
+	}
+}
+
+// A Job that never finishes runs out the timeout, and says so.
+func TestWaitForAJobTimesOut(t *testing.T) {
+	watcher := watch.NewFake()
+	_, err := waitForJob(t, fake.NewSimpleClientset(job()), watcher, 50*time.Millisecond)
+	if err == nil || err.Error() != "Timed out after 50ms waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout message", err)
+	}
+}
+
+// A Job deleted while it is watched is gone now, not later: the wait ends on
+// the delete with the stale-index error, as it does for a Job already gone
+// when the wait began. It ran out the whole timeout instead, then said it had
+// timed out on a Job that no longer existed.
+func TestWaitForAJobDeletedMidWaitIsStale(t *testing.T) {
+	watcher := watch.NewFake()
+	go watcher.Delete(job())
+	_, err := waitForJob(t, fake.NewSimpleClientset(job()), watcher, 5*time.Second)
+	var stale StaleResourceError
+	if !errors.As(err, &stale) || !isStale(err) {
+		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
+// A Job that is gone is the stale-index error withRefresh relists on.
+func TestWaitForAVanishedJobIsStale(t *testing.T) {
+	_, err := waitForJob(t, fake.NewSimpleClientset(), nil, time.Second)
+	var stale StaleResourceError
+	if !errors.As(err, &stale) || !isStale(err) {
+		t.Errorf("err = %v, want a refreshable StaleResourceError", err)
+	}
+}
+
+// jobServer serves one Job to a real client-go client, and counts the
+// requests that are anything but a read of it.
+//
+// A real client rather than the fake, because the fake ignores its context:
+// the bug this guards was a context already past its deadline, which a real
+// request refuses before it is sent, and the fake answers regardless.
+func jobServer(t *testing.T, served *batchv1.Job) (kubernetes.Interface, *atomic.Int32) {
+	t.Helper()
+	var others atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/apis/batch/v1/namespaces/prod/jobs/migrate" {
+			others.Add(1)
+			http.NotFound(w, r)
+			return
+		}
+		served.APIVersion, served.Kind = "batch/v1", "Job"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(served)
+	}))
+	t.Cleanup(server.Close)
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("client for %s: %v", server.URL, err)
+	}
+	return client, &others
+}
+
+// kubectl reads --timeout=0 as "check once" and a negative one as a week. kx's
+// own Job wait handed either straight to context.WithTimeout, whose deadline
+// had then already passed, so the Job's first read failed before it was sent:
+// `kx wait 1 --timeout=0` on a Job that had finished said "Timed out after 0s".
+func TestWaitForAFinishedJobWithAZeroOrNegativeTimeout(t *testing.T) {
+	for _, value := range []string{"0", "0s", "-1s"} {
+		client, _ := jobServer(t, job(jobCondition(batchv1.JobComplete, "", "")))
+		timeout, err := waitTimeout([]string{"--timeout=" + value})
+		if err != nil {
+			t.Fatalf("waitTimeout(%s): %v", value, err)
+		}
+		met, err := WaitCommand{
+			Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+		}.Execute(context.Background(), jobTarget, timeout, nil)
+		if err != nil || met != "Complete" {
+			t.Errorf("--timeout=%s on a complete Job: met=%q err=%v, want Complete", value, met, err)
+		}
+	}
+}
+
+// Checking once means exactly that: a Job still running is reported as not
+// finished at once, without a watch being opened for it.
+func TestWaitForARunningJobWithAZeroTimeoutChecksOnce(t *testing.T) {
+	client, others := jobServer(t, job())
+	_, err := WaitCommand{
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil }, Status: noStatus,
+	}.Execute(context.Background(), jobTarget, 0, nil)
+	if err == nil || err.Error() != "Timed out after 0s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout message", err)
+	}
+	if n := others.Load(); n != 0 {
+		t.Errorf("made %d requests besides the one read, want none", n)
+	}
+}
+
+// clockKubectl is recordingKubectl on a fake clock that each kubectl call
+// moves forward by the next of steps, standing in for how long that wait took.
+type clockKubectl struct {
+	*recordingKubectl
+	now   time.Time
+	steps []time.Duration
+}
+
+func (k *clockKubectl) Run(args []string) (string, error) {
+	if len(k.steps) > 0 {
+		k.now = k.now.Add(k.steps[0])
+		k.steps = k.steps[1:]
+	}
+	return k.recordingKubectl.Run(args)
+}
+
+func podTarget(index int, name string) Resolved {
+	return Resolved{Ref: state.Ref{Index: index}, Kind: kinds.Pod, Name: name, Namespace: "prod"}
+}
+
+// waitAll runs ExecuteAll over targets on kube's clock and returns the lines
+// it reported.
+func waitAll(
+	t *testing.T, kube *clockKubectl, client kubernetes.Interface, targets []Resolved,
+	extra ...string,
+) ([]string, error) {
+	t.Helper()
+	timeout, err := waitTimeout(extra)
+	if err != nil {
+		t.Fatalf("waitTimeout(%v): %v", extra, err)
+	}
+	var met []string
+	err = WaitCommand{
+		Kubectl: kube, Status: noStatus, Now: func() time.Time { return kube.now },
+		Kubernetes: func() (kubernetes.Interface, error) { return client, nil },
+	}.ExecuteAll(context.Background(), targets, timeout, extra, func(target Resolved, what, _ string) {
+		met = append(met, target.Name+" "+what)
+	})
+	return met, err
+}
+
+// kubectl wait keeps one deadline for everything it waits on; kx waited on
+// each index with the whole --timeout, so three pods that each came up just
+// before their own could take three times as long as the caller allowed. The
+// first wait gets the flags as typed, and each after it what is left.
+func TestWaitSharesOneDeadlineAcrossIndexes(t *testing.T) {
+	for _, tc := range []struct {
+		extra      []string
+		wantFirst  string
+		wantSecond string
+	}{
+		{[]string{"--timeout=1m"},
+			"wait Pod/a -n prod --for=condition=Ready --timeout=1m",
+			"wait Pod/b -n prod --for=condition=Ready --timeout=15s"},
+		// No --timeout is kubectl's 30s, which is kx's too.
+		{nil,
+			"wait Pod/a -n prod --for=condition=Ready",
+			"wait Pod/b -n prod --for=condition=Ready --timeout=0s"},
+	} {
+		kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{45 * time.Second}}
+		if tc.extra == nil {
+			kube.steps = []time.Duration{30 * time.Second}
+		}
+		_, err := waitAll(t, kube, nil, []Resolved{podTarget(1, "a"), podTarget(2, "b")}, tc.extra...)
+		if tc.extra == nil {
+			// All 30s spent on the first: the second is out of time before
+			// it starts, and kubectl is not asked.
+			if err == nil || err.Error() != "Timed out after 30s waiting for Pod/b." {
+				t.Errorf("err = %v, want the second to time out unasked", err)
+			}
+			if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != tc.wantFirst {
+				t.Errorf("kubectl = %q, want only %q", kube.runs, tc.wantFirst)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ExecuteAll(%v): %v", tc.extra, err)
+		}
+		if len(kube.runs) != 2 || joinArgs(kube.runs[0]) != tc.wantFirst ||
+			joinArgs(kube.runs[1]) != tc.wantSecond {
+			t.Errorf("kubectl = %q, want %q then %q", kube.runs, tc.wantFirst, tc.wantSecond)
+		}
+	}
+}
+
+// --timeout=0 checks each index once, however long the checks take: there is
+// no deadline to run out, so every one is asked.
+func TestWaitWithAZeroTimeoutChecksEveryIndexOnce(t *testing.T) {
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{time.Second}}
+	met, err := waitAll(t, kube, nil,
+		[]Resolved{podTarget(1, "a"), podTarget(2, "b")}, "--timeout=0")
+	if err != nil || len(met) != 2 {
+		t.Fatalf("met=%q err=%v, want both checked", met, err)
+	}
+	if got := joinArgs(kube.runs[1]); got != "wait Pod/b -n prod --for=condition=Ready --timeout=0s" {
+		t.Errorf("second kubectl = %q, want --timeout=0s", got)
+	}
+}
+
+// A Job kx waits on itself gets what is left too, not the whole timeout —
+// which the wall clock shows: the Job's watch never answers, so the wait ends
+// only at its deadline, 50ms after it starts rather than 10s.
+//
+// The message names the whole --timeout all the same. It named the 50ms left,
+// a number the caller never typed, where a target reached with nothing left
+// named the 10s (#439).
+func TestWaitGivesALaterJobWhatIsLeft(t *testing.T) {
+	kube := &clockKubectl{recordingKubectl: &recordingKubectl{}, steps: []time.Duration{10*time.Second - 50*time.Millisecond}}
+	client := fake.NewSimpleClientset(job())
+	client.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+		return true, watch.NewFake(), nil
+	})
+	began := time.Now()
+	_, err := waitAll(t, kube, client, []Resolved{podTarget(1, "a"), jobTarget}, "--timeout=10s")
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("the Job waited %s, want the 50ms left", took)
+	}
+	if err == nil || err.Error() != "Timed out after 10s waiting for Job/migrate." {
+		t.Errorf("err = %v, want the timeout named as the 10s given", err)
+	}
+}
+
+// A refusal kx can make from the target alone is made before anything waits.
+// It was made only when the loop reached the target, so on a mixed listing
+// `kx wait 3 1`, a pod still coming up then a Deployment, waited out the pod
+// first — up to the whole timeout — and the refusal arrived after it, or not
+// at all (#433).
+func TestWaitRefusesEveryTargetBeforeTheFirstWait(t *testing.T) {
+	clusterIP := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP},
+	}
+	for _, tc := range []struct {
+		later Resolved
+		want  string
+	}{
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Deployment, Name: "web", Namespace: "prod"},
+			"waited for with 'kx rollout status 2'"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.ConfigMap, Name: "settings", Namespace: "prod"},
+			"no default condition for a ConfigMap"},
+		{Resolved{Ref: state.Ref{Index: 2}, Kind: kinds.Service, Name: "api", Namespace: "prod"},
+			"is a ClusterIP Service"},
+	} {
+		kube := &clockKubectl{recordingKubectl: &recordingKubectl{}}
+		_, err := waitAll(t, kube, fake.NewSimpleClientset(clusterIP),
+			[]Resolved{podTarget(1, "a"), tc.later}, "--timeout=10m")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.later.Kind, err, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: waited on %q before the refusal", tc.later.Kind, kube.runs)
+		}
+	}
+}

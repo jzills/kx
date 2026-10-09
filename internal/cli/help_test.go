@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -194,6 +195,68 @@ func TestPositionalArgsReadsTheUseSpec(t *testing.T) {
 		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
 			t.Errorf("positionalArgs(%q) = %v, want %v", tc.use, got, tc.want)
 		}
+	}
+}
+
+// One missing-argument answer, whichever command was asked and whichever of
+// the two gates caught it.
+//
+// cobra's Args validator only sees the unstripped argv, so a command given
+// nothing but kx's own flags clears it and reaches RunE empty — `kx drain
+// --yes`, `kx edit --no-color`, `kx debug --`. Six commands answered that
+// shape in their own words, naming no --help and dropping the kx prefix
+// ("drain requires an index"), while the other eleven answered the same
+// mistake with requiredArgsError's sentence. A pattern rather than a literal
+// per command: what matters is that nobody writes a second wording, and the
+// arguments each names are already pinned by the test below.
+func TestEveryCommandNamesItsMissingArgumentsTheSameWay(t *testing.T) {
+	shape := regexp.MustCompile(`^kx [a-z-]+(?: [a-z]+)? requires <[^—]+ — see 'kx [a-z- ]+ --help' for usage\.$`)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		// Each argv is only flags kx itself registers, so passthrough strips
+		// it to nothing before the index lookup.
+		// kx get's required argument is a resource rather than an index, and
+		// its own flags are what strip to nothing: -A, -n and -o are
+		// forwarded, so they reach kubectl as the resource instead.
+		{"get", []string{"get", "--no-color"}},
+		{"get -m", []string{"get", "-m", "web"}},
+		{"get --decode", []string{"get", "--decode"}},
+		{"describe", []string{"describe", "--no-color"}},
+		{"logs", []string{"logs", "--no-color"}},
+		{"edit", []string{"edit", "--no-color"}},
+		{"exec", []string{"exec", "--no-color"}},
+		{"debug", []string{"debug", "--"}},
+		{"delete", []string{"delete", "--yes"}},
+		{"drain", []string{"drain", "--yes"}},
+		{"scale", []string{"scale", "--no-color"}},
+		{"wait", []string{"wait", "--no-color"}},
+		{"rollout", []string{"rollout", "--no-color"}},
+		{"port-forward", []string{"port-forward", "--no-color"}},
+		{"cp", []string{"cp", "--no-color"}},
+		{"yaml", []string{"yaml", "--no-color"}},
+		{"label", []string{"label", "--no-color"}},
+		{"annotate", []string{"annotate", "--no-color"}},
+		{"labels", []string{"labels", "--no-color"}},
+		{"annotations", []string{"annotations", "--no-color"}},
+		{"events", []string{"events", "--no-color"}},
+		{"ref", []string{"ref", "--no-color"}},
+		{"cordon", []string{"cordon", "--no-color"}},
+		{"uncordon", []string{"uncordon", "--no-color"}},
+		{"set image", []string{"set", "image", "--no-color"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Execute(NewRoot(argvServices(t), "test"), tc.args)
+			if err == nil {
+				t.Fatalf("kx %s with no arguments succeeded", strings.Join(tc.args, " "))
+			}
+			if !shape.MatchString(err.Error()) {
+				t.Errorf("err = %q,\nwant requiredArgsError's shape: "+
+					"kx <command> requires <args> — see 'kx <command> --help' for usage.",
+					err)
+			}
+		})
 	}
 }
 
@@ -407,6 +470,135 @@ func TestListingCommandsDocumentWatch(t *testing.T) {
 		if !strings.Contains(joined, "--watch") {
 			t.Errorf("kx %s --help Options = %q, missing --watch", name, joined)
 		}
+	}
+}
+
+// kx wait reads --for and --timeout by hand and acts on both — --for replaces
+// the kind's default, --timeout bounds kx's own Job wait and the deadline every
+// index shares — yet neither was registered, so `kx wait --help` showed no
+// Options at all. Registered, they appear with the kind of value each takes.
+func TestWaitHelpListsTheFlagsItReads(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	cmd, _, err := root.Find([]string{"wait"})
+	if err != nil {
+		t.Fatalf("root.Find(wait): %v", err)
+	}
+	var options []string
+	for _, option := range commandHelp(cmd).Options {
+		options = append(options, option.Name)
+	}
+	joined := strings.Join(options, "\n")
+	for _, want := range []string{"--for strings", "--timeout duration"} {
+		if !strings.Contains("\n"+joined+"\n", "\n"+want+"\n") {
+			t.Errorf("kx wait --help Options = %q, missing %q", options, want)
+		}
+	}
+}
+
+// A command that forwards flags says so once. commandHelp closes the
+// description with a note for any command whose Use declares the flags it
+// forwards, and most of those Longs already open a paragraph with "kubectl's
+// own flags pass through — …" and the flags worth knowing, so the note
+// restated the paragraph a few lines below it on delete, drain, logs, scale,
+// yaml and set image. rollout forwards flags without declaring them in its
+// Use, and wrote the note into its Long by hand to make up for it.
+func TestPassthroughIsDescribedOnce(t *testing.T) {
+	mention := regexp.MustCompile(`(?i)\bpass(ed|es)? through\b`)
+	root := NewRoot(Services{}, "test")
+	forwarding := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if cmd.DisableFlagParsing && cmd != root {
+			forwarding++
+			if ParseUse(cmd.Use).Passthrough == "" {
+				t.Errorf("%s forwards flags, but its Use %q does not declare them",
+					cmd.CommandPath(), cmd.Use)
+			}
+			if got := len(mention.FindAllString(commandHelp(cmd).Doc, -1)); got != 1 {
+				t.Errorf("%s --help says flags pass through %d times, want once:\n%s",
+					cmd.CommandPath(), got, commandHelp(cmd).Doc)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if forwarding == 0 {
+		t.Fatal("found no command that forwards flags; the walk checked nothing")
+	}
+}
+
+// kx scan forwards what it does not recognise to the scanner, and its help
+// said they went to kubectl — the note was one sentence for every
+// placeholder, whatever the placeholder named.
+func TestPassthroughNoteNamesWhereFlagsGo(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	scan, _, err := root.Find([]string{"scan"})
+	if err != nil || scan.Name() != "scan" {
+		t.Fatalf("Find(scan) = %v, %v", scan, err)
+	}
+	doc := commandHelp(scan).Doc
+	if !strings.Contains(doc, "Unrecognized flags are passed through to the scanner.") {
+		t.Errorf("kx scan --help = %q, want its flags passed through to the scanner", doc)
+	}
+	if strings.Contains(doc, "to kubectl") {
+		t.Errorf("kx scan --help = %q, still says its flags go to kubectl", doc)
+	}
+}
+
+// A description that writes a flag as code writes every flag as code. kx
+// state's Long formats its own (`--all`, `--targets`), and the paragraph added
+// for --json formatted `--json` and then "or the stack with --all" a few words
+// later — one sentence, two conventions, both in --help and on the reference
+// page generated from it.
+func TestLongFormatsFlagsOneWay(t *testing.T) {
+	flag := regexp.MustCompile("`[^`]*`|--[a-z][a-z-]*")
+	root := NewRoot(Services{}, "test")
+	checked := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if strings.Contains(cmd.Long, "`--") {
+			checked++
+			for _, match := range flag.FindAllString(cmd.Long, -1) {
+				if strings.HasPrefix(match, "--") {
+					t.Errorf("%s --help writes flags as code but leaves %s bare",
+						cmd.CommandPath(), match)
+				}
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if checked == 0 {
+		t.Fatal("no Long writes a flag as code; the walk checked nothing")
+	}
+}
+
+// --match means one thing everywhere it is registered — index.MatchesName —
+// so it is described by the one constant. kx top and kx secret spelled the
+// text out, and matched only until matchUsage is next reworded.
+func TestMatchIsDescribedTheSameWayEverywhere(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	seen := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		if flag := cmd.LocalFlags().Lookup("match"); flag != nil {
+			seen++
+			if flag.Usage != matchUsage {
+				t.Errorf("%s --match is described %q, want matchUsage (%q)",
+					cmd.CommandPath(), flag.Usage, matchUsage)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
+	if seen < 6 {
+		t.Errorf("found --match on %d commands, want get, secret, top, diag, scan and tree at least", seen)
 	}
 }
 

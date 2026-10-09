@@ -12,42 +12,44 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 
 | Command | Description |
 |---|---|
-| [`kx annotate <index> [<key=value>...] [--overwrite] [--remove str] [kubectl flags...]`](annotate/) | Set or remove annotations on an indexed resource. |
+| [`kx annotate <index> [<key=value>...] [--dry-run str] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](annotate/) | Set or remove annotations on an indexed resource. |
 | [`kx annotations <index>...`](annotations/) | Show annotations for one or more indexed resources. |
 | [`kx context [<index>]`](context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | [`kx cordon <index>...`](cordon/) | Mark one or more indexed Nodes unschedulable. |
 | [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](cp/) | Copy files to or from an indexed pod via kubectl cp. |
 | [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
-| [`kx delete <index>... [--yes/-y] [kubectl flags...]`](delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
+| [`kx delete <index>... [--dry-run str] [--output/-o str] [--yes/-y] [kubectl flags...]`](delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int] [--since str]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--full] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--since str]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](drain/) | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>... [--since str]`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
-| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
-| [`kx label <index> [<key=value>...] [--overwrite] [--remove str] [kubectl flags...]`](label/) | Set or remove labels on an indexed resource. |
+| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
+| [`kx label <index> [<key=value>...] [--dry-run str] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | [`kx mark [<name>] [<index>]`](mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | [`kx namespace [<index>]`](namespace/) | List namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx ref <index>... [--kind] [--name] [--namespace]`](ref/) | Print what an index refers to, for commands kx doesn't wrap. |
-| [`kx rollout <action> <index>`](rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
-| [`kx scale <index> <replicas> [kubectl flags...]`](scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--namespace/-n str] [--no-open] [--out str] [--port int] [scanner flags...]`](scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
-| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--watch/-w] [--yes/-y] [kubectl flags...]`](secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
-| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-limits] [--no-open] [--out str] [--port int] [kubectl flags...]`](top/) | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
-| [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](tree/) | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
+| [`kx rollout <action> <index> [kubectl flags...]`](rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
+| [`kx scale <index> <replicas> [--dry-run str] [--output/-o str] [kubectl flags...]`](scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
+| [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [scanner flags...]`](scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--watch/-w] [--yes/-y] [kubectl flags...]`](secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| [`kx set`](set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
+| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [kubectl flags...]`](top/) | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
+| [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](tree/) | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | [`kx uncordon <index>...`](uncordon/) | Mark one or more indexed Nodes schedulable again. |
 | [`kx unmark [<name>...] [--all]`](unmark/) | Remove marks by name; --all removes every mark. |
+| [`kx wait <index>... [--for str] [--output/-o str] [--timeout duration] [kubectl flags...]`](wait/) | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
 | [`kx yaml <index>... [--show str] [kubectl flags...]`](yaml/) | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 
 ## History
 
 | Command | Description |
 |---|---|
-| [`kx state [<position>] [--all/-a] [--targets/-t]`](state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
+| [`kx state [<position>] [--all/-a] [--json] [--targets/-t]`](state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 
 ## Configuration
 

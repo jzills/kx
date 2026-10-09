@@ -79,6 +79,19 @@ func resourceIndex(headers []string, nameIdx int) int {
 	return nameIdx
 }
 
+// ResourceColumn is the position among headers of the column naming what an
+// index into a row resolves to — NAME, or POD where both appear (see
+// resourceIndex) — and -1 for headers with no NAME column. For a caller
+// reading rows the numbering already read, which has to agree with it about
+// which name a row stands for.
+func ResourceColumn(headers []string) int {
+	nameIdx := ColumnIndex(headers, "NAME")
+	if nameIdx < 0 {
+		return -1
+	}
+	return resourceIndex(headers, nameIdx)
+}
+
 // ParseHeader splits a kubectl header line into column names, and locates
 // the NAME/EVENT/NAMESPACE columns. Returns ok=false for a header with no
 // NAME column, the same "not indexable" signal parseOutput has always used.
@@ -187,24 +200,62 @@ func (s TableShape) Row(line string) []string {
 // Returns the whole TableShape rather than the three loose values the exported
 // wrapper hands back, because Add needs NamespaceIdx as well and rebuilding the
 // shape from a []string of headers would mean locating those columns twice.
+//
+// A listing of several kinds is several tables; their rows come back together
+// under the first one's shape, each split by its own. Callers that draw or
+// number a listing read the tables apart through parseSections.
 func parseTable(output string) (shape TableShape, rows [][]string, ok bool) {
-	lines := strings.Split(output, "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return TableShape{}, nil, false
-	}
-
-	shape, ok = ParseHeader(lines[0])
+	sections, ok := parseSections(output)
 	if !ok {
 		return TableShape{}, nil, false
 	}
+	for _, section := range sections {
+		rows = append(rows, section.rows...)
+	}
+	return sections[0].shape, rows, true
+}
 
+// section is one table of kubectl's output: a header and the rows under it.
+type section struct {
+	shape TableShape
+	rows  [][]string
+}
+
+// parseSections splits kubectl table output into its tables.
+//
+// kubectl prints one table per kind when a listing names several — `kubectl
+// get all`, `kubectl get deploy,svc` — each under its own header, a blank line
+// before each. Read as one table, the second header became a row: numbered,
+// saved, and resolving to a resource called "NAME", while every later header
+// was deduplicated away as another "NAME" and its rows were laid out under
+// the first table's columns, a Service's TYPE under a Deployment's READY.
+//
+// A header is a line after a blank one that parses as a header. kubectl puts
+// no blank line inside a table, so only a new table follows one.
+func parseSections(output string) ([]section, bool) {
+	lines := strings.Split(output, "\n")
+	shape, ok := ParseHeader(lines[0])
+	if !ok {
+		return nil, false
+	}
+	sections := []section{{shape: shape}}
+	afterBlank := false
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "" {
+			afterBlank = true
 			continue
 		}
-		rows = append(rows, shape.Row(line))
+		if afterBlank {
+			afterBlank = false
+			if shape, ok := ParseHeader(line); ok {
+				sections = append(sections, section{shape: shape})
+				continue
+			}
+		}
+		current := &sections[len(sections)-1]
+		current.rows = append(current.rows, current.shape.Row(line))
 	}
-	return shape, rows, true
+	return sections, true
 }
 
 // parseOutput splits kubectl table output into headers, rows and the position
@@ -325,18 +376,36 @@ type Table struct {
 	// Raw is the untouched output, carried for the shapes kx cannot index —
 	// JSON, YAML, a table with no NAME column.
 	Raw string
+	// Sections is the listing table by table when kubectl printed more than
+	// one — a listing of several kinds — and nil otherwise. Each carries its
+	// own header and its own rows, numbered on from the table before it.
+	// Headers is then the first table's and Rows every table's, so a caller
+	// counting rows or asking whether anything was found reads them as for
+	// any listing; only drawing one needs the tables apart.
+	Sections []Section
+	// Match is the --match term the rows were narrowed by, empty for none.
+	// It matters only once the narrowing leaves nothing: the caption then
+	// names the term, since "none found" would say the namespace is empty
+	// when it may be full of resources the term did not match.
+	Match string
+	// Unnumbered marks output kx printed without making a listing of it —
+	// JSON, another cluster's table, a table whose rows it cannot place — so
+	// nothing was saved over the listing behind it. It matters once the
+	// output is empty: an empty listing kx saved replaced that one and says
+	// how to get back to it, while one it only printed replaced nothing.
+	Unnumbered bool
+}
+
+// Section is one table of a listing kubectl printed as several.
+type Section struct {
+	// Headers include "X", as Table.Headers does.
+	Headers []string
+	Rows    [][]string
 }
 
 // Indexable reports whether the output parsed as a table kx could number.
 func (t Table) Indexable() bool { return t.Headers != nil }
 
-// Placed reports whether the entries record where they live.
-//
-// Only meaningful for a listing that spans namespaces, where it is the
-// difference between an index that resolves to one resource and an index that
-// resolves to whichever namespace the caller is standing in. False for an
-// ordinary single-namespace listing too — its table has no NAMESPACE column
-// either — so callers ask this only when they know the scope is -A.
 // Empty reports whether the table holds nothing to show — no indexable rows,
 // and no raw output to print instead.
 //
@@ -349,15 +418,6 @@ func (t Table) Empty() bool {
 		return strings.TrimSpace(t.Raw) == ""
 	}
 	return len(t.Rows) == 0
-}
-
-func (t Table) Placed() bool {
-	for _, entry := range t.Entries {
-		if entry.Namespace != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // Text renders the table back to padded text. Non-tabular output comes back
@@ -375,6 +435,13 @@ func (t Table) Text() string {
 	if !t.Indexable() {
 		return t.Raw
 	}
+	if len(t.Sections) > 1 {
+		tables := make([]string, 0, len(t.Sections))
+		for _, section := range t.Sections {
+			tables = append(tables, Format(append([][]string{section.Headers}, section.Rows...)))
+		}
+		return strings.Join(tables, "\n\n")
+	}
 	return Format(append([][]string{t.Headers}, t.Rows...))
 }
 
@@ -386,12 +453,200 @@ type Service struct{}
 // A thin parse in front of AddRows, so the text and rows entry points cannot
 // disagree about numbering, deduplication or which column is which.
 func (s Service) Add(output string) Table {
-	shape, rows, ok := parseTable(output)
+	listing, ok := ParseListing(output)
 	if !ok {
 		return Table{Raw: output}
 	}
-	table := s.AddRows(shape.Headers, rows)
+	table := listing.Number()
 	table.Raw = output
+	return table
+}
+
+// Parse is ParseListing, for a caller holding a Service.
+func (Service) Parse(output string) (Listing, bool) { return ParseListing(output) }
+
+// Stitch is ListingOf, for a caller holding a Service.
+func (Service) Stitch(tables []RawTable) (Listing, bool) { return ListingOf(tables) }
+
+// RawTable is one of kubectl's tables as parsed, before anything is numbered:
+// its header and the rows under it.
+type RawTable struct {
+	Headers []string
+	Rows    [][]string
+}
+
+// ParseTables splits kubectl table output into its tables — one for a listing
+// of one kind, one per kind for a listing of several — and reports false for
+// output that is not a table.
+//
+// For a caller stitching several replies into one listing, which has to keep
+// each kind's rows under that kind's own columns: ParseTable lays every
+// table's rows under the first one's.
+func ParseTables(output string) ([]RawTable, bool) {
+	sections, ok := parseSections(output)
+	if !ok {
+		return nil, false
+	}
+	tables := make([]RawTable, 0, len(sections))
+	for _, section := range sections {
+		tables = append(tables, RawTable{Headers: section.shape.Headers, Rows: section.rows})
+	}
+	return tables, true
+}
+
+// Listing is kubectl table output parsed into its tables, and nothing more:
+// not narrowed, not numbered. Each of those is a step of its own, taken in
+// that order, so a listing kx prints without numbering is narrowed without
+// ever passing through the numbering.
+//
+// The two were one step. Numbering collapses a row that repeats an earlier
+// one — it has to, so that indexes stay one-to-one with saved state — and
+// output kx narrowed by numbering it lost every row that read like another:
+// kx get sa -A -o custom-columns=NAME:.metadata.name,UID:.metadata.uid -m
+// default printed one ServiceAccount where kubectl listed eight.
+//
+// Apart, what the reply says about itself — Placed, Names — can be read
+// before a term narrows it, which is where a caller deciding whether to
+// number it has to read it: the rows a term leaves are no evidence of the
+// shape kubectl replied in.
+type Listing struct {
+	sections []section
+}
+
+// ParseListing parses kubectl table output, reporting false for output that
+// is not a table: JSON, YAML, names, or a table with no NAME column.
+func ParseListing(output string) (Listing, bool) {
+	sections, ok := parseSections(output)
+	if !ok {
+		return Listing{}, false
+	}
+	return Listing{sections: sections}, true
+}
+
+// ListingOf is a Listing of tables already parsed — replies stitched together
+// — reporting false for none, or for one with no NAME column.
+func ListingOf(tables []RawTable) (Listing, bool) {
+	if len(tables) == 0 {
+		return Listing{}, false
+	}
+	sections := make([]section, 0, len(tables))
+	for _, table := range tables {
+		shape, ok := shapeOf(table.Headers)
+		if !ok {
+			return Listing{}, false
+		}
+		sections = append(sections, section{shape: shape, rows: table.Rows})
+	}
+	return Listing{sections: sections}, true
+}
+
+// Narrow keeps the rows whose name contains term, case-insensitively — every
+// such row, however alike two of them read (see FilterRows). An empty term
+// keeps them all.
+func (l Listing) Narrow(term string) Listing {
+	if term == "" {
+		return l
+	}
+	narrowed := make([]section, len(l.sections))
+	for i, section := range l.sections {
+		narrowed[i] = section
+		narrowed[i].rows = FilterRows(section.shape.Headers, section.rows, term)
+	}
+	return Listing{sections: narrowed}
+}
+
+// Placed reports whether the listing says where its rows live: some table
+// carries a NAMESPACE column. Under -A every table of a namespaced kind does,
+// and a cluster-scoped kind's has no namespace to carry, so a listing with
+// none at all is one whose shape left the column out — custom columns — and
+// an index into it could not say which namespace it meant.
+func (l Listing) Placed() bool {
+	for _, section := range l.sections {
+		if section.shape.NamespaceIdx >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Names is every row's name, in order: what an index into the row resolves
+// to (TableShape.ResourceIdx), kind prefix and all.
+func (l Listing) Names() []string {
+	var names []string
+	for _, section := range l.sections {
+		for _, row := range section.rows {
+			names = append(names, row[section.shape.ResourceIdx])
+		}
+	}
+	return names
+}
+
+// Empty reports whether no table holds a row.
+func (l Listing) Empty() bool {
+	for _, section := range l.sections {
+		if len(section.rows) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// Number numbers the listing's tables, dropping any with no rows rather than
+// drawing a header over nothing. When none has rows the listing is an empty
+// one under the first table's header, as one table filtered to nothing has
+// always been.
+func (l Listing) Number() Table {
+	kept := l.withRows()
+	if len(kept) == 0 {
+		if len(l.sections) == 0 {
+			return Table{}
+		}
+		kept = []section{{shape: l.sections[0].shape}}
+	}
+	if len(kept) == 1 {
+		return Service{}.AddRows(kept[0].shape.Headers, kept[0].rows)
+	}
+	return addSections(kept)
+}
+
+// Unnumbered lays the listing out as kubectl printed it, without an index
+// column: each table under its own header, a blank line between them, and a
+// table with no rows dropped. Every row is kept — nothing here numbers, so
+// nothing is collapsed.
+func (l Listing) Unnumbered() string {
+	kept := l.withRows()
+	tables := make([]string, 0, len(kept))
+	for _, section := range kept {
+		tables = append(tables, Format(append([][]string{section.shape.Headers}, section.rows...)))
+	}
+	return strings.Join(tables, "\n\n")
+}
+
+// withRows is the listing's tables that hold a row.
+func (l Listing) withRows() []section {
+	kept := make([]section, 0, len(l.sections))
+	for _, section := range l.sections {
+		if len(section.rows) > 0 {
+			kept = append(kept, section)
+		}
+	}
+	return kept
+}
+
+// addSections numbers several tables as one listing: the indexes run on from
+// one table into the next, as the saved entry they resolve against does.
+func addSections(sections []section) Table {
+	var numbering numberer
+	table := Table{Sections: make([]Section, 0, len(sections))}
+	for _, section := range sections {
+		rows := numbering.add(section.shape, section.rows)
+		table.Sections = append(table.Sections, Section{
+			Headers: append([]string{"X"}, section.shape.Headers...), Rows: rows,
+		})
+		table.Rows = append(table.Rows, rows...)
+	}
+	table.Headers = table.Sections[0].Headers
+	table.Entries = numbering.entries
 	return table
 }
 
@@ -407,6 +662,27 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	if !ok {
 		return Table{}
 	}
+	var numbering numberer
+	indexed := numbering.add(shape, rows)
+	return Table{
+		Headers: append([]string{"X"}, shape.Headers...),
+		Rows:    indexed,
+		Entries: numbering.entries,
+	}
+}
+
+// numberer assigns indexes across one or more tables, collapsing a row that
+// repeats an earlier one.
+type numberer struct {
+	seen    map[rowKey]bool
+	entries []Entry
+}
+
+// add numbers rows of one shape, continuing from whatever was numbered before.
+func (n *numberer) add(shape TableShape, rows [][]string) [][]string {
+	if n.seen == nil {
+		n.seen = make(map[rowKey]bool, len(rows))
+	}
 
 	// Index numbers must map 1:1 to saved state, so a row that is
 	// indistinguishable from an earlier one is collapsed (first-seen wins) —
@@ -420,9 +696,7 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 	// `kubectl top pod --containers` prints one per container — which are
 	// different rows however identical their Entry is. Collapsing on the Entry
 	// dropped every container after the first, rendering six rows as three.
-	seen := make(map[rowKey]bool, len(rows))
 	indexed := make([][]string, 0, len(rows))
-	entries := make([]Entry, 0, len(rows))
 	for _, row := range rows {
 		entry := Entry{Name: row[shape.ResourceIdx]}
 		if shape.NamespaceIdx >= 0 {
@@ -432,31 +706,59 @@ func (Service) AddRows(headers []string, rows [][]string) Table {
 		if shape.ResourceIdx != shape.NameIdx {
 			key.Label = row[shape.NameIdx]
 		}
-		if seen[key] {
+		if n.seen[key] {
 			continue
 		}
-		seen[key] = true
-		entries = append(entries, entry)
-		indexed = append(indexed, append([]string{strconv.Itoa(len(entries))}, row...))
+		n.seen[key] = true
+		n.entries = append(n.entries, entry)
+		indexed = append(indexed, append([]string{strconv.Itoa(len(n.entries))}, row...))
 	}
+	return indexed
+}
 
-	return Table{
-		Headers: append([]string{"X"}, shape.Headers...),
-		Rows:    indexed,
-		Entries: entries,
+// MatchesName reports whether name contains term, case-insensitively — what
+// --match means everywhere it is accepted. An empty term matches everything,
+// so a caller with no term can pass it straight through.
+//
+// One definition, so kx get -m and the sweeps' -m can never disagree about
+// which names a term selects.
+func MatchesName(name, term string) bool {
+	return NameMatcher(term)(name)
+}
+
+// NameMatcher is MatchesName with the term fixed, for a caller testing one
+// term against many names: the term is lowercased once, where MatchesName in
+// a loop lowercased it for every name.
+func NameMatcher(term string) func(name string) bool {
+	term = strings.ToLower(term)
+	return func(name string) bool {
+		return strings.Contains(strings.ToLower(name), term)
 	}
 }
 
-// FilterRows keeps the rows whose NAME contains term, case-insensitively.
+// FilterRows keeps the rows whose name contains term, case-insensitively.
+//
+// The name of what an index resolves to (TableShape.ResourceIdx): NAME, but
+// POD under kubectl top pod --containers, whose NAME is the container. A term
+// read off NAME there selected containers under a caption about pods, and
+// missed the pods it named.
+//
+// The name, not the kind kubectl puts in front of it in a listing of several
+// kinds: "app" is in every "deployment.apps/…". A name never holds a "/", so
+// whatever precedes the last one is that prefix.
 func FilterRows(headers []string, rows [][]string, term string) [][]string {
 	shape, ok := shapeOf(headers)
 	if !ok {
 		return rows
 	}
-	lower := strings.ToLower(term)
+	matches := NameMatcher(term)
 	kept := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row[shape.NameIdx]), lower) {
+		name := row[shape.ResourceIdx]
+		if slash := strings.LastIndex(name, "/"); slash >= 0 {
+			name = name[slash+1:]
+		}
+		if matches(name) {
 			kept = append(kept, row)
 		}
 	}

@@ -3,7 +3,7 @@
 title: "kx state"
 linkTitle: "state"
 description: "Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets."
-weight: 31
+weight: 33
 ---
 
 Shows the listing that indexes currently resolve against.
@@ -13,6 +13,8 @@ kx keeps a stack of recent `kx get` results — `max_history` of them, 10 by def
 Re-running the listing you are already on refreshes that entry rather than pushing another copy, so the stack holds distinct views and `back` reaches the one before.
 
 Namespaces and contexts sit in slots of their own, outside that stack: `kx ns 2` counts against the namespaces you last listed however much you have listed since, and switching namespace never pushes work off the stack. `--targets` expands both slots, so you can pick a number without listing again.
+
+`--json` prints the current entry, or the stack with `--all`, as a document for a script: each row's index, kind, name and namespace, and each entry's context, query and provenance. Like `kx ref`, it never contacts the cluster.
 
 To act on a namespace rather than switch to it, list it with `kx get ns`. That stacks it like any other listing — `kx describe 2`, `kx label 2` — and refreshes the slot too, so the two spellings never disagree about what 2 means.
 
@@ -41,6 +43,7 @@ kx state [OPTIONS] [position]
 | Option | Description |
 |---|---|
 | `-a, --all` | Show the full history stack |
+| `--json` | Print the current entry, or the stack with --all, as JSON instead of a table |
 | `-t, --targets` | Show the namespace and context listings the switch commands index into |
 
 ## Global options
@@ -57,4 +60,5 @@ kx state
 kx state --all
 kx state --targets
 kx state 2
+kx state --all --json
 ```

@@ -192,7 +192,7 @@ func TestStaleRefreshStillHintsWhenTheReplayFails(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("stale command returned no error")
 	}
-	if !strings.Contains(out.String(), "Run 'kx get <resource>' to refresh the list.") {
+	if !strings.Contains(out.String(), "Run 'kx get pods -n prod' to refresh the list.") {
 		t.Errorf("a failed replay left the user with no instruction:\n%s", out.String())
 	}
 }
@@ -213,8 +213,8 @@ func TestStaleRefreshDoesNotHintWhenTheReplaySucceeds(t *testing.T) {
 	}
 }
 
-// An entry that no `kx get` produced — a tree walk, or a triage sweep — has no
-// query to replay, and running one is genuinely the way forward.
+// An entry that records no command — saved before every listing recorded
+// one — has nothing to replay, and running a listing is the way forward.
 func TestStaleRefreshHintsWhenThereIsNoQueryToReplay(t *testing.T) {
 	out := captureRender(t)
 	services := staleServices(t, &fakeKubectl{output: podsOutput}, nil)

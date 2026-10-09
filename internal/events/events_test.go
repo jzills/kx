@@ -2,12 +2,16 @@ package events
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/jzills/kx/internal/kinds"
 )
@@ -197,5 +201,120 @@ func TestFirstTimestampReadsTheAPIField(t *testing.T) {
 	event := corev1.Event{FirstTimestamp: metav1.NewTime(first)}
 	if got := FirstTimestamp(event); !got.Equal(first) {
 		t.Errorf("FirstTimestamp = %v, want %v", got, first)
+	}
+}
+
+// pagedClient answers event lists from pages in order, recording the options
+// each request carried — the fake clientset ignores field selectors and
+// paging, so what was asked for has to be read off the request itself.
+func pagedClient(pages ...[]corev1.Event) (*fake.Clientset, *[]metav1.ListOptions) {
+	client := fake.NewSimpleClientset()
+	var requests []metav1.ListOptions
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		options := action.(k8stesting.ListActionImpl).ListOptions
+		requests = append(requests, options)
+		page := len(requests) - 1
+		list := &corev1.EventList{Items: pages[page]}
+		if page+1 < len(pages) {
+			list.Continue = fmt.Sprintf("page-%d", page+1)
+		}
+		return true, list, nil
+	})
+	return client, &requests
+}
+
+// The diagnostics read Warning events alone, so that is all they ask the API
+// server for: filtered there, not after every event in the cluster arrived.
+func TestWarningsAsksTheServerForWarningsOnly(t *testing.T) {
+	client, requests := pagedClient([]corev1.Event{event("api", "Pod", "BackOff")})
+	if _, err := (APIService{Client: client}).Warnings(context.Background(), ""); err != nil {
+		t.Fatalf("Warnings: %v", err)
+	}
+	if got := (*requests)[0].FieldSelector; got != "type=Warning" {
+		t.Errorf("FieldSelector = %q, want type=Warning", got)
+	}
+}
+
+// kx events shows Normal events too, so Get asks for everything.
+func TestGetAsksForEveryType(t *testing.T) {
+	client, requests := pagedClient([]corev1.Event{event("api", "Pod", "Pulled")})
+	if _, err := (APIService{Client: client}).Get(context.Background(), "prod"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got := (*requests)[0].FieldSelector; got != "" {
+		t.Errorf("FieldSelector = %q, want none", got)
+	}
+}
+
+// Both read in bounded pages, following the continue token until the server
+// stops giving one, and return every page's events in order.
+func TestEventListingsFollowEveryPage(t *testing.T) {
+	for name, read := range map[string]func(APIService) ([]corev1.Event, error){
+		"Get":      func(s APIService) ([]corev1.Event, error) { return s.Get(context.Background(), "") },
+		"Warnings": func(s APIService) ([]corev1.Event, error) { return s.Warnings(context.Background(), "") },
+	} {
+		client, requests := pagedClient(
+			[]corev1.Event{event("a", "Pod", "BackOff")},
+			[]corev1.Event{event("b", "Pod", "BackOff")},
+			[]corev1.Event{event("c", "Pod", "BackOff")},
+		)
+		got, err := read(APIService{Client: client})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(got) != 3 || got[0].InvolvedObject.Name != "a" || got[2].InvolvedObject.Name != "c" {
+			t.Errorf("%s returned %d events, want a, b, c in order", name, len(got))
+		}
+		if len(*requests) != 3 {
+			t.Fatalf("%s made %d requests, want 3", name, len(*requests))
+		}
+		for i, options := range *requests {
+			if options.Limit != eventPageSize {
+				t.Errorf("%s request %d Limit = %d, want %d", name, i, options.Limit, eventPageSize)
+			}
+			if want := map[int]string{0: "", 1: "page-1", 2: "page-2"}[i]; options.Continue != want {
+				t.Errorf("%s request %d Continue = %q, want %q", name, i, options.Continue, want)
+			}
+		}
+	}
+}
+
+// A continue token lapses once the version it was issued at is compacted, and
+// the next page then fails with 410 Gone. The paging loop returned that error,
+// failing a whole kx diag sweep, where the single list before paging could not
+// meet it (#438). The read falls back to one full list instead, as client-go's
+// pager does — still asking for Warnings alone, and without the events of the
+// page it had already read appearing twice.
+func TestAnExpiredContinueTokenFallsBackToAFullList(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	var requests []metav1.ListOptions
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		options := action.(k8stesting.ListActionImpl).ListOptions
+		requests = append(requests, options)
+		switch {
+		case options.Continue == "page-1":
+			return true, nil, apierrors.NewResourceExpired("the continue token has expired")
+		case options.Limit == 0:
+			return true, &corev1.EventList{Items: []corev1.Event{
+				event("a", "Pod", "BackOff"), event("b", "Pod", "BackOff"), event("c", "Pod", "BackOff"),
+			}}, nil
+		}
+		return true, &corev1.EventList{
+			ListMeta: metav1.ListMeta{Continue: "page-1"},
+			Items:    []corev1.Event{event("a", "Pod", "BackOff")},
+		}, nil
+	})
+	got, err := (APIService{Client: client}).Warnings(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Warnings: %v", err)
+	}
+	if len(got) != 3 || got[0].InvolvedObject.Name != "a" || got[2].InvolvedObject.Name != "c" {
+		t.Errorf("Warnings returned %d events, want a, b, c from the full list", len(got))
+	}
+	if len(requests) != 3 {
+		t.Fatalf("made %d requests, want a page, the expired page, then a full list", len(requests))
+	}
+	if full := requests[2]; full.FieldSelector != "type=Warning" || full.Continue != "" {
+		t.Errorf("full list asked with %+v, want Warnings and no continue token", full)
 	}
 }

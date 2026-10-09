@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -38,6 +39,9 @@ const namespaceScanKinds = "deployments,statefulsets,daemonsets,cronjobs,jobs,po
 type scanScope struct {
 	Namespace string
 	All       bool
+	// Match narrows the sweep to the workloads whose name contains it,
+	// case-insensitively — kx scan -m. Empty sweeps everything.
+	Match string
 }
 
 func (s scanScope) selector() []string {
@@ -115,7 +119,14 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 	}
 
 	stop := c.Status("resolving images in " + scope.label())
-	args := []string{"get", namespaceScanKinds}
+	listed := namespaceScanKinds
+	if scope.Match != "" {
+		// Listed to reach a pod's Deployment, which a term is matched against
+		// (see workloadNames) — never scanned themselves: one left from a
+		// rollout holds the images its Deployment has moved on from.
+		listed += ",replicasets"
+	}
+	args := []string{"get", listed}
 	args = append(args, scope.selector()...)
 	args = append(args, "-o", "json")
 	raw, err := c.Kubectl.Run(args)
@@ -131,10 +142,70 @@ func (c ScanCommand) Collect(scope scanScope, engine string) ([]string, error) {
 		return nil, err
 	}
 	var images []string
-	for _, item := range list.Items {
+	matches := index.NameMatcher(scope.Match)
+	workloads := workloadNames(list.Items)
+	for i, item := range list.Items {
+		// Before the images are read, so a workload the term leaves out
+		// never costs a scanner run.
+		if !matches(workloads[i]) || kindOf(item) == string(kinds.ReplicaSet) {
+			continue
+		}
 		images = append(images, imagesOf(item)...)
 	}
 	return dedupe(images), nil
+}
+
+// listedObject is what Collect reads off an item's metadata to place it.
+type listedObject struct {
+	Name   string `json:"name"`
+	UID    string `json:"uid"`
+	Owners []struct {
+		UID        string `json:"uid"`
+		Controller *bool  `json:"controller"`
+	} `json:"ownerReferences"`
+}
+
+// workloadNames gives each listed item the name of the workload it belongs
+// to: its controller's, and that one's, as far up as the list goes — a pod's
+// ReplicaSet's Deployment — or its own when nothing listed owns it.
+//
+// What a --match term is matched against, as kx tree -m matches the roots of
+// a walk. Matched against every name kubectl lists, a term found the
+// generated ones too: "db" is in the pod web-7fdb9-dbx2k, which pulled web's
+// images into a sweep of db.
+func workloadNames(items []map[string]json.RawMessage) []string {
+	objects := make([]listedObject, len(items))
+	byUID := make(map[string]int, len(items))
+	for i, item := range items {
+		_ = json.Unmarshal(item["metadata"], &objects[i])
+		if objects[i].UID != "" {
+			byUID[objects[i].UID] = i
+		}
+	}
+	names := make([]string, len(items))
+	for i := range items {
+		at := i
+		// Bounded by the list, so owners that name each other cannot loop.
+		for range items {
+			owner, listed := byUID[controllerOf(objects[at])]
+			if !listed || owner == at {
+				break
+			}
+			at = owner
+		}
+		names[i] = objects[at].Name
+	}
+	return names
+}
+
+// controllerOf is the UID of the owner that controls object, empty for none.
+func controllerOf(object listedObject) string {
+	for _, owner := range object.Owners {
+		if owner.Controller != nil && *owner.Controller {
+			return owner.UID
+		}
+	}
+	return ""
 }
 
 // EnsureAvailable resolves the engine and confirms the scanner is installed, so
@@ -478,9 +549,10 @@ func imagesNoun(count int) string {
 }
 
 // scanPage builds the HTML page from the same rows the terminal summary
-// renders, so the two views cannot drift apart.
-func scanPage(scope string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
-	return web.ScanPage{Meta: meta, Scope: scope, Images: rows}
+// renders, so the two views cannot drift apart. match is the sweep's --match
+// term, empty for none, so a sweep it emptied says so as the terminal does.
+func scanPage(scope, match string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
+	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Images: rows}
 }
 
 // sweepPageScope captions a namespace sweep's page with the same "Mixed · "
@@ -504,11 +576,12 @@ func newScanCommand(services Services) *cobra.Command {
 			"selected scan engine (Docker Scout by default; Trivy or Grype via " +
 			"--engine — see kx engine).",
 		Long: "Resolves the unique container images of a workload and scans each for vulnerabilities, printing a severity summary table.\n\n" +
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows the sweep to the workloads whose name matches.\n\n" +
 			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
 			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
 			"Run 'kx engine' to see or change the default.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan 1 --full\n" +
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
@@ -595,6 +668,10 @@ func newScanCommand(services Services) *cobra.Command {
 				return err
 			}
 			all, rest := extractBool(rest, "--all-namespaces", "-A")
+			match, rest, err := extractString(rest, "--match", "-m")
+			if err != nil {
+				return err
+			}
 			if hasNamespace && all {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
@@ -630,6 +707,9 @@ func newScanCommand(services Services) *cobra.Command {
 			if len(indexArgs) > 0 && scopeFlag != "" {
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
+			if len(indexArgs) > 0 && match != "" {
+				return errMatchBesideIndex
+			}
 			// pageScope captions the HTML page. Captured in each branch
 			// because an indexed scan is scoped by the workload it resolved
 			// rather than by the namespace being swept.
@@ -646,7 +726,7 @@ func newScanCommand(services Services) *cobra.Command {
 			var subject scanSubject
 			var images []string
 			if len(indexArgs) == 0 {
-				scope := scanScope{Namespace: namespace, All: all}
+				scope := scanScope{Namespace: namespace, All: all, Match: match}
 				if !scope.All && scope.Namespace == "" {
 					scope.Namespace = services.Kubectl.CurrentNamespace()
 				}
@@ -662,11 +742,18 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				if !asJSON {
-					render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+					// A term that matched nothing says so, rather than
+					// "0 images" — which reads as a namespace with nothing
+					// running in it.
+					count := imagesNoun(len(images))
+					if match != "" && len(images) == 0 {
+						count = render.NothingMatches(match)
+					}
+					render.ScopeBanner("Mixed", scope.label(), count)
 				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()
-				subject = scanSubject{AllNamespaces: scope.All}
+				subject = scanSubject{AllNamespaces: scope.All, Match: match}
 				if !scope.All {
 					subject.Namespace = scope.Namespace
 				}
@@ -740,11 +827,12 @@ func newScanCommand(services Services) *cobra.Command {
 					indexArg = indexArgs[0]
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-					invocation("scan", indexArg, scopeArgs(namespace, all), portFlag(port)))
+					invocation("scan", indexArg, scopeArgs(namespace, all),
+						matchFlag(match), portFlag(port)))
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderScan(scanPage(pageScope, rows, meta))
+				page, err := web.RenderScan(scanPage(pageScope, match, rows, meta))
 				if err != nil {
 					return err
 				}
@@ -766,6 +854,7 @@ func newScanCommand(services Services) *cobra.Command {
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace")
+	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().Bool("html", false,
 		"Render the report as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,

@@ -30,7 +30,13 @@ Run `kx get <resource>` once, then reference any result by number instead of typ
 Requires `kubectl` on your PATH.
 Every install method delivers the same prebuilt binary.
 
-As a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
+On Linux or macOS, the install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | sh
+```
+
+Or as a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is published as `idx`:
 
 ```bash
 kubectl krew install idx
@@ -90,6 +96,7 @@ kx get pods -n prod -l app=api  # anything else passes through to kubectl
 
 - kubectl's own flags pass through — `kx delete 3 --force --grace-period=0`, `kx logs 3 -f --tail=100`.
   Passing `-n` with an index is refused, since the index already carries the namespace it was listed from.
+  So is `--context`, `--kubeconfig`, `--cluster` or `--server`, for the cluster, and a listing taken with one prints unnumbered.
 - Listings made with `-A` are indexed too, each row with its own namespace.
 - Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` — kubectl's shorthands and your CRDs included.
 - The `--watch`/`-w` flag redraws the table in place rather than appending lines.
@@ -237,6 +244,7 @@ Recent `kx get` results are kept as a history — 10 by default, configurable �
 ```bash
 kx state              # the listing indexes currently resolve against
 kx state --all        # the whole history, with positions
+kx state --all --json # the same, as JSON for a script
 kx state 2            # jump to position 2
 kx state back         # step back one (forward steps the other way)
 kx state drop 2       # remove position 2 (--all clears the history; marks stay)
@@ -303,10 +311,12 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx scale <index> <replicas>` | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | `kx secret [<index>...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| `kx set` | Change an indexed workload's container images with kx set image, printing each one before and after. |
 | `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
 | `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |
+| `kx wait <index>...` | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
 | `kx yaml <index>...` | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 | `kx state [<position>]` | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |

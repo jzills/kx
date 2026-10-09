@@ -468,7 +468,7 @@ func TestCopyFailureWithNoIndexIsABareExitCode(t *testing.T) {
 func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	message, err := DeleteCommand{
+	message, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -491,7 +491,7 @@ func TestDeleteConfirmsBeforeDeleting(t *testing.T) {
 // Declining the prompt must delete nothing.
 func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(string) error { return errors.New("aborted") },
@@ -508,7 +508,7 @@ func TestDeleteAbortsWithoutConfirmation(t *testing.T) {
 func TestDeleteSkipsPromptWithYes(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	prompted := false
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   pod("nginx"),
 		Confirm: func(string) error { prompted = true; return nil },
@@ -527,7 +527,7 @@ func TestDeleteSkipsPromptWithYes(t *testing.T) {
 func TestDeleteConfirmNamesAnMCPListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -545,7 +545,7 @@ func TestDeleteConfirmNamesAnMCPListing(t *testing.T) {
 func TestDeleteConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: ""},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -564,7 +564,7 @@ func TestDeleteConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 func TestDeleteConfirmOmitsProvenanceForAMarkRef(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   sourcedResolver{fakeResolver: pod("nginx"), source: "mcp"},
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -587,7 +587,7 @@ func TestDeleteResolvesTargetAndProvenanceInOneRead(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	resolver := &singleReadResolver{fakeResolver: pod("nginx"), source: state.SourceMCP}
 	var prompted string
-	_, err := DeleteCommand{
+	_, _, err := DeleteCommand{
 		Kubectl: kubectl,
 		State:   resolver,
 		Confirm: func(m string) error { prompted = m; return nil },
@@ -607,7 +607,7 @@ func TestDeleteResolvesTargetAndProvenanceInOneRead(t *testing.T) {
 func TestScaleSupportedKinds(t *testing.T) {
 	for _, kind := range []kinds.Kind{kinds.Deployment, kinds.StatefulSet, kinds.ReplicaSet} {
 		kubectl := &recordingKubectl{}
-		message, err := ScaleCommand{Kubectl: kubectl, State: workload("api", kind)}.Execute(state.Ref{Index: 1}, 3, nil)
+		message, _, err := ScaleCommand{Kubectl: kubectl, State: workload("api", kind)}.Execute(state.Ref{Index: 1}, 3, nil)
 		if err != nil {
 			t.Fatalf("Execute(%s): %v", kind, err)
 		}
@@ -622,7 +622,7 @@ func TestScaleSupportedKinds(t *testing.T) {
 }
 
 func TestScaleSingularReplica(t *testing.T) {
-	message, err := ScaleCommand{
+	message, _, err := ScaleCommand{
 		Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment),
 	}.Execute(state.Ref{Index: 1}, 1, nil)
 	if err != nil {
@@ -633,9 +633,35 @@ func TestScaleSingularReplica(t *testing.T) {
 	}
 }
 
+// kx scale prints its own line in place of kubectl's "scaled (server dry
+// run)", so a dry run read "✓ Scaled Deployment/api to 3 replicas" — a change
+// that never happened. The same spellings delete and label recognise count
+// here, and a real scale stays unlabelled.
+func TestScaleSaysWhenItWasADryRun(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--dry-run=server"}, "Scaled Deployment/api to 3 replicas (dry run — nothing was changed)"},
+		{[]string{"--dry-run"}, "Scaled Deployment/api to 3 replicas (dry run — nothing was changed)"},
+		{[]string{"--dry-run=none"}, "Scaled Deployment/api to 3 replicas"},
+		{nil, "Scaled Deployment/api to 3 replicas"},
+	} {
+		message, _, err := ScaleCommand{
+			Kubectl: &recordingKubectl{}, State: workload("api", kinds.Deployment),
+		}.Execute(state.Ref{Index: 1}, 3, tc.args)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", tc.args, err)
+		}
+		if message != tc.want {
+			t.Errorf("message = %q for %v, want %q", message, tc.args, tc.want)
+		}
+	}
+}
+
 func TestScaleRejectsUnsupportedKind(t *testing.T) {
 	kubectl := &recordingKubectl{}
-	_, err := ScaleCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, 3, nil)
+	_, _, err := ScaleCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, 3, nil)
 	if err == nil {
 		t.Fatal("scaled a Pod, want an error")
 	}
@@ -1551,7 +1577,7 @@ func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T
 	const wrong = kinds.ConfigMap
 	refusals := map[string]func() error{
 		"scale": func() error {
-			_, err := ScaleCommand{State: workload("cm", wrong)}.Execute(state.Ref{Index: 1}, 2, nil)
+			_, _, err := ScaleCommand{State: workload("cm", wrong)}.Execute(state.Ref{Index: 1}, 2, nil)
 			return err
 		},
 		"rollout": func() error {
@@ -1598,7 +1624,7 @@ func TestUnsupportedKindMessagesNameBothTheKindAndTheSupportedKinds(t *testing.T
 // The supported list is generated from the same set the guard checks, so a
 // kind can never be advertised as supported and then refused.
 func TestUnsupportedKindMessageListsTheSetTheGuardUses(t *testing.T) {
-	_, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(state.Ref{Index: 1}, 2, nil)
+	_, _, err := ScaleCommand{State: workload("cm", kinds.ConfigMap)}.Execute(state.Ref{Index: 1}, 2, nil)
 	if err == nil {
 		t.Fatal("scale accepted a ConfigMap")
 	}
