@@ -609,6 +609,35 @@ func TestScanOnAnEmptyNamespaceSucceeds(t *testing.T) {
 	}
 }
 
+// A sweep a --match term emptied keeps "0 images" in the banner and names the
+// term in a row beneath, rather than putting the term where the count goes —
+// see render.EmptyMatch. Without a term the banner still says "no images
+// found", which the test above pins.
+func TestScanEmptiedByAMatchKeepsItsCount(t *testing.T) {
+	sink := captureRender(t)
+	services := Services{
+		Kubectl: &fakeKubectl{namespace: "prod", output: `{"items":[]}`},
+		State:   &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		Config:  config.Default(),
+		Scanner: &fakeScanner{},
+	}
+	cmd := newScanCommand(services)
+
+	if err := cmd.RunE(cmd, []string{"--namespace", "prod", "--match", "cron"}); err != nil {
+		t.Fatalf("kx scan -n prod -m cron: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(sink.String(), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("got %d lines, want a banner and a row:\n%s", len(lines), sink.String())
+	}
+	if !strings.Contains(lines[0], "0 images") {
+		t.Errorf("banner = %q, want it to keep the count", lines[0])
+	}
+	if !strings.Contains(lines[1], render.NothingMatches("cron")) {
+		t.Errorf("row = %q, want it to name the term", lines[1])
+	}
+}
+
 // An index resolves a name from one namespace's listing; scanning that name
 // somewhere else finds a different resource or nothing at all.
 func TestScanRejectsANamespaceFlagAlongsideAnIndex(t *testing.T) {

@@ -540,6 +540,11 @@ func imagesNoun(count int) string {
 		// Matches the "none found"/"nothing to check" register kx get, kx
 		// top, and kx diag use for an empty result, rather than a bare "0
 		// images" that reads as silence with a number attached.
+		//
+		// A sweep emptied by a --match term does not come through here: it
+		// keeps "0 images" in the banner and names the term in a row
+		// beneath, where the number cannot be read as silence because the
+		// next line says why it is zero. See render.EmptyMatch.
 		return "no images found"
 	case 1:
 		return "1 image"
@@ -742,14 +747,17 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				if !asJSON {
-					// A term that matched nothing says so, rather than
-					// "0 images" — which reads as a namespace with nothing
-					// running in it.
-					count := imagesNoun(len(images))
+					// A term that matched nothing keeps the count and
+					// names the term in a row beneath, so the banner's
+					// shape does not change with the result; without a
+					// term, "no images found" still stands where the count
+					// would, since a bare "0 images" reads as a namespace
+					// with nothing running in it. See render.EmptyMatch.
 					if match != "" && len(images) == 0 {
-						count = render.NothingMatches(match)
+						render.EmptyMatch("Mixed", scope.label(), "0 images", match)
+					} else {
+						render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
 					}
-					render.ScopeBanner("Mixed", scope.label(), count)
 				}
 				pageScope = sweepPageScope(scope.label())
 				pageTitle = scope.label()

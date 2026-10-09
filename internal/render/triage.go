@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"time"
 
 	"strconv"
@@ -65,7 +66,7 @@ func (r *Renderer) Triage(result TriageResult) {
 	}
 	if result.Checked == 0 {
 		if result.Match != "" {
-			r.Caption("Mixed", scope, NothingMatches(result.Match))
+			r.EmptyMatch("Mixed", scope, "0 checked", result.Match)
 			return
 		}
 		r.Caption("Mixed", scope, "nothing to check")
@@ -188,3 +189,37 @@ func widestNamespace(reports []diagnostics.Report) int {
 
 // Triage renders through the package-level renderer.
 func Triage(result TriageResult) { current.Triage(result) }
+
+// EmptyMatch renders a listing a --match term narrowed to nothing: the
+// caption keeps the count label its command uses when it has results, at
+// zero, and a single row beneath names the term that emptied it.
+//
+// The caption used to carry the explanation in place of the count, which made
+// its shape depend on the result — the segment that holds a number held a
+// sentence instead. The count belongs in the caption, where a reader scans
+// for it; the reason belongs under it, where the rows would be.
+//
+// zeroCount is the caller's own noun at zero — "0 items", "0 checked",
+// "0 images" — because each command already has one. kx tree prints no count
+// when it has results, so it passes none and Caption drops the segment.
+//
+// A listing emptied with no --match term is not this: it has no term to name,
+// so nothing would go in the row, and its caption keeps saying "none found".
+func (r *Renderer) EmptyMatch(kind, scope, zeroCount, term string) {
+	r.Caption(kind, scope, zeroCount)
+	r.line(cellPad + r.style(theme.Muted, NothingMatches(term)))
+}
+
+// EmptyMatchErr is EmptyMatch on stderr, for a listing asked for in a format
+// another program reads — see EmptyListingNotice for why.
+func (r *Renderer) EmptyMatchErr(kind, scope, zeroCount, term string) {
+	r.CaptionErr(kind, scope, zeroCount)
+	fmt.Fprintln(r.err, cellPad+r.style(theme.Muted, NothingMatches(term)))
+}
+
+func EmptyMatch(kind, scope, zeroCount, term string) {
+	current.EmptyMatch(kind, scope, zeroCount, term)
+}
+func EmptyMatchErr(kind, scope, zeroCount, term string) {
+	current.EmptyMatchErr(kind, scope, zeroCount, term)
+}
