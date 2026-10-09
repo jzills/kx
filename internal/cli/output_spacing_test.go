@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -32,20 +33,28 @@ func TestRolloutPrintsKubectlsOutputAsItCame(t *testing.T) {
 	}
 }
 
-// Manifests are separated by one blank line and the last is followed by
-// none. kx yaml kept each manifest's trailing newline and added a blank line
-// between them besides, so two came between every pair and one after the
-// last.
-func TestYamlSeparatesManifestsByOneBlankLine(t *testing.T) {
+// Manifests are separated by exactly one "---" and the last is followed by
+// nothing. kx yaml kept each manifest's trailing newline and added a
+// separator besides, so two blank lines came between every pair and one
+// after the last; the separator itself then became YAML's own, since a blank
+// line does not end a document and the concatenation parsed as one.
+//
+// The banners are on stderr, so stdout is the stream and nothing else —
+// which is what makes `kx yaml 1 2 > pods.yaml` readable.
+func TestYamlSeparatesManifestsByOneDocumentMarker(t *testing.T) {
 	const manifest = "apiVersion: v1\nkind: Pod\n"
 	services := switchServices(t, &recordingKubectl{output: manifest})
 	saveListing(t, services, kinds.Pod, "prod", false, "a", "b")
-	stdout, _, err := runCaptured(t, newYamlCommand(services), []string{"1", "2"})
+	stdout, stderr, err := runCaptured(t, newYamlCommand(services), []string{"1", "2"})
 	if err != nil {
 		t.Fatalf("kx yaml 1 2: %v", err)
 	}
-	want := "Pod/a · prod\n" + manifest + "\nPod/b · prod\n" + manifest
-	if stdout != want {
+	if want := manifest + "---\n" + manifest; stdout != want {
 		t.Errorf("stdout = %q\n  want %q", stdout, want)
+	}
+	for _, name := range []string{"Pod/a · prod", "Pod/b · prod"} {
+		if !strings.Contains(stderr, name) {
+			t.Errorf("stderr = %q, want %q", stderr, name)
+		}
 	}
 }

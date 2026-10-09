@@ -223,7 +223,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 			}
 			command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
 			return runEach(resolved, func(target Resolved) error {
-				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				banner(cmd, target, "")
 				return command.Execute(target.Ref, extra)
 			})
 		},
@@ -306,7 +306,7 @@ func newLogsCommand(services Services) *cobra.Command {
 					render.Blank()
 				}
 				first = false
-				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				banner(cmd, target, "")
 				return command.Execute(target.Ref, extra)
 			})
 		},
@@ -862,12 +862,16 @@ func newYamlCommand(services Services) *cobra.Command {
 			first := true
 			return runEach(resolved, func(target Resolved) error {
 				if !first {
-					render.Raw("")
+					// YAML's own document separator, not a blank line:
+					// several manifests on stdout are one stream, and
+					// separated by a blank line they parsed as a single
+					// document with every key repeated.
+					render.Raw("---")
 				}
 				first = false
-				// Banner per manifest: without it, several manifests run
-				// together with nothing saying which is which.
-				render.Banner(string(target.Kind), target.Name, target.Namespace, "")
+				// Banner per manifest, on stderr: without it, several
+				// manifests run together with nothing saying which is which.
+				banner(cmd, target, "")
 				stop := render.Status("fetching manifest")
 				output, err := command.Execute(target.Ref, fields, extra)
 				stop()
