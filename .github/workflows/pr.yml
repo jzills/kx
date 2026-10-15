@@ -39,6 +39,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Every job runs on Linux or macOS, so nothing else compiles the tests
+      # for Windows, which kx ships a binary for. Vet builds them without
+      # running anything.
+      - name: Vet for Windows
+        run: GOOS=windows go vet ./...
+
       # -race because the spinner is the one thing in kx that runs concurrently,
       # and a data race there would otherwise only ever show up on a user's
       # terminal.

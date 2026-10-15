@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -81,7 +80,7 @@ func TestWatchKillsSubprocessOnOnLineError(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if err := syscall.Kill(pid, 0); err != nil {
+		if !processAlive(pid) {
 			return // gone, as expected
 		}
 		if time.Now().After(deadline) {
