@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"runtime"
 	"sync"
+	"weak"
 
 	"github.com/spf13/cobra"
 
@@ -86,12 +88,14 @@ func clientText(client kubectl.Client) string {
 // calls kxVersion, which renders the text only when --version is given.
 //
 // Keyed by root because a template function is registered once, process-wide,
-// while tests build many roots with different services.
-var versionTexts sync.Map
+// while tests build many roots with different services. Weakly, and dropped
+// when the root is collected: a strong key kept every root a test built, and
+// its whole command tree, reachable for the rest of the run.
+var versionTexts sync.Map // weak.Pointer[cobra.Command] → func() string
 
 func init() {
 	cobra.AddTemplateFunc("kxVersion", func(cmd *cobra.Command) string {
-		text, ok := versionTexts.Load(cmd.Root())
+		text, ok := versionTexts.Load(weak.Make(cmd.Root()))
 		if !ok {
 			return ""
 		}
@@ -108,6 +112,8 @@ func installVersion(root *cobra.Command, info buildinfo.Info, detect func() kube
 	if detect == nil {
 		detect = kubectl.DetectClient
 	}
-	versionTexts.Store(root, func() string { return versionText(info, detect()) })
+	key := weak.Make(root)
+	versionTexts.Store(key, func() string { return versionText(info, detect()) })
+	runtime.AddCleanup(root, func(key weak.Pointer[cobra.Command]) { versionTexts.Delete(key) }, key)
 	root.SetVersionTemplate("{{kxVersion .}}")
 }
