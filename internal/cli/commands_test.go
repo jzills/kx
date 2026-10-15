@@ -1631,6 +1631,8 @@ func TestRolloutParsesEachActionsFlags(t *testing.T) {
 	}{
 		{[]string{"status", "1", "--to-revision=2"}, "'--to-revision' cannot be combined with 'status' — it is a flag of kubectl rollout undo."},
 		{[]string{"restart", "1", "--revision", "3"}, "it is a flag of kubectl rollout status and kubectl rollout history."},
+		// The first flag as typed, not the first alphabetically.
+		{[]string{"restart", "1", "--to-revision=2", "--revision=3"}, "'--to-revision' cannot be combined with 'restart'"},
 		{[]string{"-n", "other", "undo", "1"}, "'--namespace' cannot be combined with an index"},
 		{[]string{"undo", "1", "--bogus"}, "'--bogus' isn't a flag of kubectl rollout status, restart, pause, resume, history or undo as of"},
 		{[]string{"undo", "--timeout=1m"}, "requires <action> <index>"},

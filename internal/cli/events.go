@@ -234,7 +234,7 @@ func newTopCommand(services Services) *cobra.Command {
 		if nodes {
 			subcommand, resource = "top node", "nodes"
 		}
-		if flag := kubectlFlags.outside(flags, subcommand); flag != "" {
+		if flag := kubectlFlags.outside(subcommand); flag != "" {
 			return fmt.Errorf(
 				"'%s' cannot be combined with '%s' — it is a flag of kubectl %s only.",
 				flag, resource, otherTopSubcommand(subcommand))
