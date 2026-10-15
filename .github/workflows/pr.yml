@@ -24,6 +24,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # The generator is its own module, so its go.sum keys the cache too.
+          cache-dependency-path: |
+            go.sum
+            tools/gen-kubectl-flags/go.sum
 
       - name: Check formatting
         run: |
@@ -40,6 +44,12 @@ jobs:
       # terminal.
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
+
+      # tools/gen-kubectl-flags is its own module, so the ./... above never
+      # reaches it, and pre-commit only vets it. Kept out of the coverage
+      # profile: the floor is the root module's number.
+      - name: Test kubectl flag generator
+        run: go -C tools/gen-kubectl-flags test -race ./...
 
       # A ratchet, not a target. Raise it when coverage rises; never lower it to
       # make a change fit. The floor is deliberately just under the current
