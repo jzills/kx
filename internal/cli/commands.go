@@ -938,6 +938,12 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 // from --help.
 func registerChangeFlags(cmd *cobra.Command) {
 	registerOutputFlag(cmd)
+	registerDryRunFlag(cmd)
+}
+
+// registerDryRunFlag registers --dry-run, which kx's line reports (isDryRun),
+// for a command that changes a resource.
+func registerDryRunFlag(cmd *cobra.Command) {
 	cmd.Flags().String("dry-run", "none",
 		"client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed")
 }

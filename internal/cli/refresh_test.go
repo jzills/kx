@@ -455,7 +455,7 @@ func TestNodeCommandCarriesAMarkOntoAStaleResourceError(t *testing.T) {
 		err: kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`},
 	}
 	_, err := NodeCommand{Kubectl: kube, State: node("node-a"), Verb: "cordon"}.
-		Execute(state.Ref{Mark: "worker"})
+		Execute(state.Ref{Mark: "worker"}, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
