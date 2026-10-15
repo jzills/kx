@@ -304,6 +304,9 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().Int("port", 0, "Port to serve the HTML report on; 0 picks a free one")
 	cmd.Flags().Bool("no-open", false, "Serve the HTML report without opening a browser")
 	cmd.Flags().String("out", "", "Write the HTML report to this file instead of serving it in a browser")
+	// A path, on a command that parses kubectl's flags: unmarked, completion
+	// would take it for a plain value and offer no files (takesPlainValue).
+	_ = cmd.MarkFlagFilename("out")
 	// kubectl's flags that kx also reads, registered first so they keep kx's
 	// own usage; registerKubectlFlags gives them kubectl's shape.
 	cmd.Flags().StringP("namespace", "n", "",

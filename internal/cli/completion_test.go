@@ -373,6 +373,8 @@ func TestKubectlFlagValuesOfferNoFilenames(t *testing.T) {
 		{[]string{"logs", "1", "-c", ""}, cobra.ShellCompDirectiveNoFileComp},
 		// kx's own value flag on a converted command, as it was before.
 		{[]string{"label", "1", "--remove", ""}, cobra.ShellCompDirectiveNoFileComp},
+		// kx's own path flag on a converted command offers files.
+		{[]string{"top", "--out", ""}, cobra.ShellCompDirectiveDefault},
 		{[]string{"get", "pods", "-f", ""}, cobra.ShellCompDirectiveFilterFileExt},
 		// A file of any extension: the shell's own filenames.
 		{[]string{"get", "pods", "--template", ""}, cobra.ShellCompDirectiveDefault},
