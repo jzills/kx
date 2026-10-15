@@ -591,7 +591,7 @@ func newScanCommand(services Services) *cobra.Command {
 			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rest, handled, err := passthrough(cmd, args, nil)
+			rest, handled, err := passthrough(cmd, args)
 			if err != nil || handled {
 				return err
 			}
