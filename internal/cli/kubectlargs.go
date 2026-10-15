@@ -6,7 +6,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -180,7 +179,6 @@ func registerKubectlFlags(cmd *cobra.Command, subcommands ...string) *kubectlArg
 	annotations[kubectlCommandAnnotation] = strings.Join(subcommands, ",")
 	cmd.Annotations = annotations
 	cmd.SetFlagErrorFunc(flagError)
-	recorders.Store(cmd, args)
 	return args
 }
 
@@ -220,20 +218,25 @@ func registerKubectlFlag(flags *pflag.FlagSet, args *kubectlArgs, flag kubectlfl
 	}
 }
 
-// recorders maps each command that registered kubectl's flags to the argv
-// they record, for code that sees the command but not its RunE's closure:
-// machineOutput, deciding from the argv kubectl will get whether a failure may
-// print a listing to stdout.
-var recorders sync.Map
-
-// recordedKubectlArgs is cmd's recorder, or nil for a command that still
-// splits its argv by hand.
+// recordedKubectlArgs is cmd's recorder, for code that sees the command but
+// not its RunE's closure — machineOutput, deciding from the argv kubectl will
+// get whether a failure may print a listing to stdout — or nil for a command
+// that still splits its argv by hand.
+//
+// Read from cmd's own flags, each of which points at the recorder, rather than
+// from a process-wide map keyed by command, which kept every root ever built
+// reachable.
 func recordedKubectlArgs(cmd *cobra.Command) *kubectlArgs {
-	recorded, ok := recorders.Load(cmd)
-	if !ok {
+	if cmd.Annotations[kubectlCommandAnnotation] == "" {
 		return nil
 	}
-	return recorded.(*kubectlArgs)
+	var recorded *kubectlArgs
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if value, ok := flag.Value.(*kubectlValue); ok && recorded == nil {
+			recorded = value.args
+		}
+	})
+	return recorded
 }
 
 // kxOwnedAnnotation marks a flag kx registered under one of kubectl's names
