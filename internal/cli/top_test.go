@@ -1103,6 +1103,8 @@ func TestTopRefusesTheOtherSubcommandsFlags(t *testing.T) {
 	}{
 		{[]string{"nodes", "--containers"}, "'--containers' cannot be combined with 'nodes' — it is a flag of kubectl top pod only."},
 		{[]string{"nodes", "--sum"}, "'--sum' cannot be combined with 'nodes'"},
+		// The first flag as typed, not the first alphabetically.
+		{[]string{"nodes", "--sum", "--containers"}, "'--sum' cannot be combined with 'nodes'"},
 		{[]string{"--show-capacity"}, "'--show-capacity' cannot be combined with 'pods' — it is a flag of kubectl top node only."},
 		{[]string{"pods", "--show-capacity"}, "'--show-capacity' cannot be combined with 'pods'"},
 	} {

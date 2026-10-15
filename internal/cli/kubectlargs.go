@@ -71,16 +71,17 @@ func (a *kubectlArgs) definers(flag string) []string {
 // does not define, by its long name, or "" when there is none. A command that
 // registered the flags of several subcommands calls it once it knows which
 // one it will run, so a flag of the other is refused in kx's words rather than
-// kubectl's.
-func (a *kubectlArgs) outside(flags *pflag.FlagSet, subcommand string) string {
-	found := ""
-	flags.Visit(func(flag *pflag.Flag) {
-		definers, ok := a.definedBy[flag.Name]
-		if found == "" && ok && !slices.Contains(definers, subcommand) {
-			found = "--" + flag.Name
+// kubectl's. First as typed: the recorded tokens keep the order given, where
+// FlagSet.Visit walks the flags alphabetically.
+func (a *kubectlArgs) outside(subcommand string) string {
+	for _, token := range a.tokens {
+		name, _, _ := strings.Cut(strings.TrimPrefix(token, "--"), "=")
+		definers, ok := a.definedBy[name]
+		if ok && !slices.Contains(definers, subcommand) {
+			return "--" + name
 		}
-	})
-	return found
+	}
+	return ""
 }
 
 // add records one occurrence of flag with value, spelled the way kx forwards

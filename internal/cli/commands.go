@@ -641,7 +641,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 		// An unknown action is RolloutCommand's to report; until the
 		// action is known there is no table to hold its flags against.
 		if isRolloutAction(action) {
-			if flag := kubectlFlags.outside(cmd.Flags(), "rollout "+action); flag != "" {
+			if flag := kubectlFlags.outside("rollout " + action); flag != "" {
 				return fmt.Errorf("'%s' cannot be combined with '%s' — it is a flag of %s.",
 					flag, action, joinAnd(kubectlFlags.definers(flag)))
 			}
