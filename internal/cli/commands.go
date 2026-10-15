@@ -160,23 +160,6 @@ func itemCount(count int) string {
 	return strconv.Itoa(count) + " items"
 }
 
-// passthrough splits a command's arguments into the ones kx consumes and the
-// ones forwarded to kubectl. See passthrough.go for why this is done by hand.
-func passthrough(cmd *cobra.Command, args []string, flags func([]string) ([]string, error)) ([]string, bool, error) {
-	if help, _ := extractBool(args, "-h", "--help"); help {
-		return nil, true, cmd.Help()
-	}
-	_, rest := extractBool(args, "--no-color")
-	if flags != nil {
-		var err error
-		rest, err = flags(rest)
-		if err != nil {
-			return nil, false, err
-		}
-	}
-	return rest, false, nil
-}
-
 func newDescribeCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "describe <index>... [kubectl flags]",
@@ -934,8 +917,10 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 // registerChangeFlags registers the kubectl flags a command that changes a
 // resource reads by hand as well as forwarding: an output format, which
 // reportChange prints in place of kx's lines, and --dry-run, which kx's line
-// reports (isDryRun). Read from argv, they work unregistered, and vanish
-// from --help.
+// reports (isDryRun). kx registers them itself, ahead of the kubectl flag
+// table, so they keep kx's usage text and type while taking kubectl's shape;
+// left to the table, -o and --dry-run would still parse, but describe only
+// what kubectl does with them.
 func registerChangeFlags(cmd *cobra.Command) {
 	registerOutputFlag(cmd)
 	cmd.Flags().String("dry-run", "none",

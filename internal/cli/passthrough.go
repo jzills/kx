@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 // The helpers below read flags out of an argv by hand.
@@ -20,6 +22,17 @@ import (
 // to the vulnerability scanner, whose flags kx has no table for. It sets
 // DisableFlagParsing, and these helpers remove kx's own flags from the argv
 // and leave the scanner's untouched.
+
+// passthrough answers -h/--help for a DisableFlagParsing command and drops
+// --no-color, which main has already applied from the raw arguments, returning
+// the rest to forward.
+func passthrough(cmd *cobra.Command, args []string) ([]string, bool, error) {
+	if help, _ := extractBool(args, "-h", "--help"); help {
+		return nil, true, cmd.Help()
+	}
+	_, rest := extractBool(args, "--no-color")
+	return rest, false, nil
+}
 
 // extractString removes a string flag and its value from args, accepting
 // "--long value", "--long=value", "-s value", "-s=value" and the attached
