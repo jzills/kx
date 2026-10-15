@@ -100,7 +100,7 @@ func TestExecuteMethodsPassTheirRefUnchangedToResolve(t *testing.T) {
 			kind: kinds.Node,
 			run: func(resolver fakeResolver) error {
 				command := NodeCommand{Kubectl: &recordingKubectl{}, State: resolver, Verb: "cordon"}
-				_, err := command.Execute(mark)
+				_, err := command.Execute(mark, nil)
 				return err
 			},
 		},

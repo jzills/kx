@@ -13,6 +13,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/spf13/cobra"
 )
 
 func node(name string) fakeResolver {
@@ -27,7 +28,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 		command := NodeCommand{
 			Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment), Verb: verb,
 		}
-		_, err := command.Execute(state.Ref{Index: 1})
+		_, err := command.Execute(state.Ref{Index: 1}, nil)
 		if err == nil {
 			t.Fatalf("%s: succeeded on a Deployment", verb)
 		}
@@ -45,7 +46,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	message, err := command.Execute(state.Ref{Index: 1})
+	message, err := command.Execute(state.Ref{Index: 1}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 func TestCordonReportsAVanishedNodeAsStale(t *testing.T) {
 	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}, probeCode: 1}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	_, err := command.Execute(state.Ref{Index: 1})
+	_, err := command.Execute(state.Ref{Index: 1}, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -455,6 +456,64 @@ func TestDrainParsesKubectlFlags(t *testing.T) {
 		}
 		if len(kube.runs)+len(kube.interactive) > 0 {
 			t.Errorf("kx drain %s: kubectl was called", joinArgs(tc.args))
+		}
+	}
+}
+
+// kx cordon and uncordon parse their kubectl flags from the table, as drain
+// does: before, cobra refused --dry-run with a bare "unknown flag", and -- had
+// no way through. Every node in the batch gets the same flags.
+func TestCordonParsesKubectlFlags(t *testing.T) {
+	for _, verb := range []string{"cordon", "uncordon"} {
+		build := func(s Services) *cobra.Command { return newCordonCommand(s, verb) }
+		kube, err := indexCommandOn(t, kinds.Node, build, "--dry-run=server", "1", "2")
+		if err != nil {
+			t.Fatalf("kx %s --dry-run=server 1 2: %v", verb, err)
+		}
+		want := []string{verb + " nginx --dry-run=server", verb + " redis --dry-run=server"}
+		if got := []string{}; len(kube.runs) != 2 ||
+			!slices.Equal(append(got, joinArgs(kube.runs[0]), joinArgs(kube.runs[1])), want) {
+			t.Errorf("kx %s: kubectl = %q, want %q", verb, kube.runs, want)
+		}
+		for _, tc := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"1", "--bogus"}, "'--bogus' isn't a flag of kubectl " + verb},
+			{[]string{"1", "node-b"}, "'node-b' isn't an argument of"},
+			{[]string{"--dry-run=server"}, "requires <index>"},
+			{[]string{"1", "--context", "other"}, "'--context'"},
+		} {
+			kube, err := indexCommandOn(t, kinds.Node, build, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("kx %s %s: err = %v, want %q", verb, joinArgs(tc.args), err, tc.want)
+			}
+			if len(kube.runs)+len(kube.interactive) > 0 {
+				t.Errorf("kx %s %s: kubectl was called: %q", verb, joinArgs(tc.args), kube.runs)
+			}
+		}
+	}
+}
+
+// kx's line replaces kubectl's "(server dry run)", so a dry run has to say so
+// itself; --dry-run=none is a real cordon and claims nothing.
+func TestCordonDryRunSaysNothingChanged(t *testing.T) {
+	for _, tc := range []struct {
+		extra  []string
+		dryRun bool
+	}{
+		{[]string{"--dry-run=server"}, true},
+		{[]string{"--dry-run"}, true},
+		{[]string{"--dry-run=none"}, false},
+		{nil, false},
+	} {
+		command := NodeCommand{Kubectl: &recordingKubectl{}, State: node("node-a"), Verb: "uncordon"}
+		message, err := command.Execute(state.Ref{Index: 1}, tc.extra)
+		if err != nil {
+			t.Fatalf("Execute(%q): %v", tc.extra, err)
+		}
+		if got := strings.Contains(message, "(dry run — nothing was changed)"); got != tc.dryRun {
+			t.Errorf("Execute(%q) = %q, want dry run labelled: %v", tc.extra, message, tc.dryRun)
 		}
 	}
 }

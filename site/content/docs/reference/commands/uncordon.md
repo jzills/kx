@@ -8,10 +8,14 @@ weight: 29
 
 Reverses kx cordon, letting the scheduler place pods on the node again.
 
+kubectl's own uncordon flags pass through, --dry-run among them.
+
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
-kx uncordon [OPTIONS] <index>...
+kx uncordon [OPTIONS] <index>... [kubectl flags]
 ```
 
 ## Arguments
@@ -19,6 +23,19 @@ kx uncordon [OPTIONS] <index>...
 | Argument | Description |
 |---|---|
 | `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 
@@ -33,4 +50,5 @@ kx uncordon [OPTIONS] <index>...
 kx uncordon 1
 kx uncordon 1 3
 kx uncordon 1..3
+kx uncordon 1 --dry-run=server
 ```
