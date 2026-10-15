@@ -144,33 +144,7 @@ func registerKubectlFlags(cmd *cobra.Command, subcommands ...string) *kubectlArg
 	flags := cmd.Flags()
 	flags.SetNormalizeFunc(wordSepNormalize)
 	register := func(flag kubectlflags.Flag, where string) {
-		value := &kubectlValue{args: args, flag: flag}
-		if existing := flags.Lookup(flag.Name); existing != nil {
-			// kx's alone (ownFlag): kx builds it into the argv itself, so
-			// it is neither forwarded as given nor listed as kubectl's.
-			if len(existing.Annotations[kxOwnedAnnotation]) > 0 {
-				return
-			}
-			value.kxType = existing.Value.Type()
-			existing.Value = value
-			existing.NoOptDefVal = flag.NoOptDefVal
-			existing.DefValue = ""
-			return
-		}
-		shorthand := flag.Shorthand
-		if shorthand != "" && flags.ShorthandLookup(shorthand) != nil {
-			shorthand = ""
-		}
-		registered := flags.VarPF(value, flag.Name, shorthand, flag.Usage)
-		registered.NoOptDefVal = flag.NoOptDefVal
-		registered.Deprecated = flag.Deprecated
-		registered.Hidden = flag.Hidden
-		registered.Annotations = map[string][]string{kubectlFlagAnnotation: {where}}
-		// kubectl's mark for a flag that takes a file, which cobra's
-		// completion reads to offer files, narrowed to the extensions.
-		if flag.Filename {
-			registered.Annotations[cobra.BashCompFilenameExt] = flag.Extensions
-		}
+		registerKubectlFlag(flags, args, flag, where)
 	}
 	for _, subcommand := range subcommands {
 		own, ok := kubectlflags.Command(subcommand)
@@ -207,6 +181,42 @@ func registerKubectlFlags(cmd *cobra.Command, subcommands ...string) *kubectlArg
 	cmd.SetFlagErrorFunc(flagError)
 	recorders.Store(cmd, args)
 	return args
+}
+
+// registerKubectlFlag adds one flag from kubectl's table to a cobra flag set.
+// A shorthand collision keeps the long flag but not the shorthand, as before.
+func registerKubectlFlag(flags *pflag.FlagSet, args *kubectlArgs, flag kubectlflags.Flag, where string) {
+	value := &kubectlValue{args: args, flag: flag}
+	if existing := flags.Lookup(flag.Name); existing != nil {
+		// kx's alone (ownFlag): kx builds it into the argv itself, so
+		// it is neither forwarded as given nor listed as kubectl's.
+		if len(existing.Annotations[kxOwnedAnnotation]) > 0 {
+			return
+		}
+		value.kxType = existing.Value.Type()
+		existing.Value = value
+		existing.NoOptDefVal = flag.NoOptDefVal
+		existing.DefValue = ""
+		if existing.Shorthand == flag.Shorthand {
+			existing.ShorthandDeprecated = flag.ShorthandDeprecated
+		}
+		return
+	}
+	shorthand := flag.Shorthand
+	if shorthand != "" && flags.ShorthandLookup(shorthand) != nil {
+		shorthand = ""
+	}
+	registered := flags.VarPF(value, flag.Name, shorthand, flag.Usage)
+	registered.NoOptDefVal = flag.NoOptDefVal
+	registered.Deprecated = flag.Deprecated
+	registered.ShorthandDeprecated = flag.ShorthandDeprecated
+	registered.Hidden = flag.Hidden
+	registered.Annotations = map[string][]string{kubectlFlagAnnotation: {where}}
+	// kubectl's mark for a flag that takes a file, which cobra's
+	// completion reads to offer files, narrowed to the extensions.
+	if flag.Filename {
+		registered.Annotations[cobra.BashCompFilenameExt] = flag.Extensions
+	}
 }
 
 // recorders maps each command that registered kubectl's flags to the argv

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/jzills/kx/internal/kubectlflags"
 	"github.com/jzills/kx/internal/state"
@@ -184,6 +185,74 @@ func TestSharedFlagsTakeKubectlsShape(t *testing.T) {
 		if strings.Contains(flag.Usage, table[name].Usage) {
 			t.Errorf("--%s has kubectl's usage, want kx's own", name)
 		}
+	}
+}
+
+func TestRegisterKubectlFlagPreservesDeprecatedShorthand(t *testing.T) {
+	const warning = "use --filename instead"
+	source := kubectlflags.Flag{
+		Name:                "filename",
+		Shorthand:           "f",
+		Type:                "string",
+		Usage:               "file to read",
+		ShorthandDeprecated: warning,
+	}
+	for _, tc := range []struct {
+		name        string
+		preexisting bool
+	}{
+		{name: "new flag"},
+		{name: "shared flag", preexisting: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			if tc.preexisting {
+				flags.StringP("filename", "f", "", "kx option")
+			}
+			args := &kubectlArgs{definedBy: map[string][]string{}}
+			registerKubectlFlag(flags, args, source, kubectlFlagCommand)
+
+			var output strings.Builder
+			flags.SetOutput(&output)
+			if err := flags.Parse([]string{"-f", "input.yaml"}); err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if !strings.Contains(output.String(), warning) {
+				t.Errorf("shorthand warning = %q, want %q", output.String(), warning)
+			}
+		})
+	}
+}
+
+func TestRegisterKubectlFlagDoesNotDeprecateDifferentKxShorthand(t *testing.T) {
+	const warning = "use --filename instead"
+	source := kubectlflags.Flag{
+		Name:                "filename",
+		Shorthand:           "f",
+		Type:                "string",
+		Usage:               "file to read",
+		ShorthandDeprecated: warning,
+	}
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.StringP("filename", "x", "", "kx option")
+	args := &kubectlArgs{definedBy: map[string][]string{}}
+	registerKubectlFlag(flags, args, source, kubectlFlagCommand)
+
+	flag := flags.Lookup("filename")
+	if flag.Shorthand != "x" {
+		t.Fatalf("shorthand = %q, want kx's -x", flag.Shorthand)
+	}
+	if flag.ShorthandDeprecated != "" {
+		t.Fatalf("ShorthandDeprecated = %q, want empty for kx's distinct shorthand", flag.ShorthandDeprecated)
+	}
+
+	var output strings.Builder
+	flags.SetOutput(&output)
+	if err := flags.Parse([]string{"-x", "input.yaml"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if strings.Contains(output.String(), warning) {
+		t.Errorf("parsing kx's -x emitted kubectl's deprecation warning: %q", output.String())
 	}
 }
 

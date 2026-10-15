@@ -1,6 +1,10 @@
 package cmddoc
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/spf13/cobra"
+)
 
 // ShortSignature backs the README's command table, where the point is a column
 // narrow enough to scan. A command whose flags leak back into it would widen
@@ -17,5 +21,15 @@ func TestShortSignatureDropsFlags(t *testing.T) {
 	}
 	if got, want := ShortSignature(cmd), "kx delete <index>..."; got != want {
 		t.Fatalf("ShortSignature = %q, want %q", got, want)
+	}
+}
+
+func TestSignatureHidesDeprecatedShorthand(t *testing.T) {
+	cmd := &cobra.Command{Use: "example"}
+	cmd.Flags().StringP("filename", "f", "", "file to read")
+	cmd.Flags().Lookup("filename").ShorthandDeprecated = "use --filename instead"
+
+	if got, want := Signature(cmd), "kx example [--filename str]"; got != want {
+		t.Fatalf("Signature = %q, want %q", got, want)
 	}
 }

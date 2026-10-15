@@ -20,6 +20,9 @@ type Flag struct {
 	Name string
 	// Shorthand is the one-letter name, empty when there is none.
 	Shorthand string
+	// ShorthandDeprecated is kubectl's message for using the shorthand, empty
+	// when the shorthand is not deprecated.
+	ShorthandDeprecated string
 	// Type is pflag's name for the value's type: "bool", "string",
 	// "stringArray", "duration" and so on.
 	Type string

@@ -750,6 +750,23 @@ func TestRootOptionsMirrorTheRegisteredFlags(t *testing.T) {
 	}
 }
 
+func TestCommandHelpHidesDeprecatedShorthand(t *testing.T) {
+	cmd := &cobra.Command{Use: "example"}
+	cmd.Flags().StringP("filename", "f", "", "file to read")
+	cmd.Flags().Lookup("filename").ShorthandDeprecated = "use --filename instead"
+
+	help := commandHelp(cmd)
+	for _, option := range help.Options {
+		if option.Name == "-f, --filename" {
+			t.Fatalf("help lists deprecated shorthand: %q", option.Name)
+		}
+		if option.Name == "--filename string" {
+			return
+		}
+	}
+	t.Fatal("help does not list --filename string")
+}
+
 // Configuration lived only in the README: nothing in the binary named the file
 // kx reads, the file it writes, or a single environment override.
 func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {

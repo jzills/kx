@@ -140,7 +140,7 @@ func rootOptions(root *cobra.Command) []render.HelpItem {
 
 // flagNames spells a flag the way both help screens do.
 func flagNames(flag *pflag.Flag) string {
-	if flag.Shorthand == "" {
+	if flag.Shorthand == "" || flag.ShorthandDeprecated != "" {
 		return "--" + flag.Name
 	}
 	return "-" + flag.Shorthand + ", --" + flag.Name

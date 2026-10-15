@@ -33,7 +33,7 @@ func ArgToken(arg cli.Arg) string {
 // [--dry-run[=str]], since that is the only way it is taken.
 func FlagToken(flag *pflag.Flag) string {
 	names := "--" + flag.Name
-	if flag.Shorthand != "" {
+	if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
 		names += "/-" + flag.Shorthand
 	}
 	kind := flag.Value.Type()
