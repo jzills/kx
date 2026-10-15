@@ -1460,6 +1460,25 @@ func TestDebugParsesKubectlFlagsUpToTheCommand(t *testing.T) {
 	}
 }
 
+// An explicitly empty --image, which `--image "$IMG"` with IMG unset produces,
+// was forwarded as --image= beside the configured --image=busybox, leaving
+// kubectl two. Whichever won, an ephemeral container can't be removed once
+// attached, so it is refused before kubectl runs.
+func TestDebugRefusesAnEmptyImage(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--image", ""},
+		{"1", "--image="},
+	} {
+		kube, err := indexCommand(t, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "'--image' was given an empty value") {
+			t.Errorf("kx debug %q: err = %v, want the empty --image refused", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
 // kx delete parses kubectl delete's flags. --dry-run is kx's to read as well
 // as kubectl's, and takes kubectl's shape: bare, it is a dry run on its own
 // and takes nothing after it — kx registers it as a string, which alone would

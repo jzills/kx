@@ -654,9 +654,18 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 	// to nothing produces) read as "no image given", so kx appended its own
 	// --image=busybox and forwarded the bare --image alongside it, leaving
 	// kubectl to complain about a flag the user could see they had written.
+	//
+	// An explicitly empty one, which `--image "$IMG"` with IMG unset produces,
+	// is refused too. Read as absent, it reached kubectl as --image= beside
+	// the configured image, and whichever won was attached for good: an
+	// ephemeral container can't be removed from the pod.
 	image, _, err := extractString(extraArgs, "--image", "")
 	if err != nil {
 		return err
+	}
+	if image == "" && hasFlag(extraArgs, "--image", "") {
+		return fmt.Errorf("'--image' was given an empty value — name an image, "+
+			"or leave the flag out to use debug_image (%s).", c.Image)
 	}
 	if image == "" {
 		args = append(args, "--image="+c.Image)
