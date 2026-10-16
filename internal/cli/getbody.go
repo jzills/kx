@@ -371,9 +371,13 @@ func runGet(services Services, resource string, args []string, options getOption
 //
 // Saved over is the question, not the format. -o name and the collection
 // formats return from GetCommand.Execute before the Save, so there is nothing
-// behind them to offer; --no-headers without a term does not — it is a table
-// to kx, saved like any other — so dropping the note there left the user's
-// indexes retired with no way back named. Nor is one owed under a listing kx
+// behind them to offer. An empty reply to --no-headers without a term does
+// not: printsTable still holds, so it falls through to the Save and retires
+// the indexes on screen — and dropping the note there left them retired with
+// no way back named. A --no-headers reply that has rows is unnumberable and
+// saves nothing, so the same flag replaces an entry only when it finds none;
+// that asymmetry is older than this note (f349307, v0.8.0) and is not what
+// the note decides. The table says which happened. Nor is one owed under a listing kx
 // printed without numbering it — another cluster's, a table it cannot place —
 // which replaced nothing either. Read off the table, which says so, rather
 // than inferred from the flags: inferred, a term emptying a table kx cannot
