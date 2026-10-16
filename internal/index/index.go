@@ -626,8 +626,16 @@ func (l Listing) Unnumbered() string {
 // same rows, laid out the same way, with no header row above them.
 //
 // kx asks kubectl for the header whatever the caller wanted, because that is
-// where --match finds the NAME column, and drops it here instead. Widths come
-// from the rows alone, as kubectl's own --no-headers lays them out.
+// where --match finds the NAME column, and drops it here instead.
+//
+// Widths come from the rows alone, laid out by Format — kx's own gutters, not
+// kubectl's tabwriter. So `kx get pods --no-headers`, forwarded and printed as
+// kubectl wrote it, and `kx get pods --no-headers -m web`, re-laid here, align
+// their columns differently. Whitespace still separates every cell, which is
+// what a reader of headerless rows splits on; a reader of fixed columns sees
+// the width change when a term is added. Keeping kubectl's own bytes would
+// mean carrying each row's original line through the parse, which nothing
+// else here needs.
 func (l Listing) UnnumberedRows() string {
 	kept := l.withRows()
 	tables := make([]string, 0, len(kept))

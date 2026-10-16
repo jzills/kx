@@ -83,6 +83,10 @@ func TestAStaleIndexUnderMachineOutputIsNotRefreshed(t *testing.T) {
 		{[]string{"secret", "1", "--output=name"}, false},
 		{[]string{"secret", "1", "-o", "wide"}, true},
 		{[]string{"secret", "1"}, true},
+		// Rows with nothing above them are for a program too, whatever the
+		// -o says: the refreshed table landed among the rows it was parsing.
+		{[]string{"secret", "1", "--no-headers"}, false},
+		{[]string{"secret", "1", "--no-headers=false"}, true},
 		// One value, unwrapped, for $(...) to substitute: the refreshed
 		// table landed in the variable a script exported as a credential.
 		{[]string{"secret", "1", "--decode", "-k", "token"}, false},

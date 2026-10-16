@@ -70,7 +70,7 @@ func machineOutput(c *cobra.Command, args []string) bool {
 			return true
 		}
 		_, forward := kubectlArgv(c, args, recorded)
-		return !printsTable(forward)
+		return programReadsStdout(forward)
 	}
 	if !c.DisableFlagParsing {
 		return false

@@ -149,6 +149,22 @@ func printsTable(extraArgs []string) bool {
 	return false
 }
 
+// programReadsStdout reports whether args leave kx's stdout carrying output a
+// program reads rather than lines for a person: a kubectl -o that is not a
+// table, or --no-headers, which asks for the rows with nothing above them.
+//
+// One predicate for both, because they are one rule. Asked separately at each
+// call site, --no-headers was forgotten at most of them: an emptied listing
+// printed its caption into a headerless stream, a stale index relisted a
+// numbered table into one, and another cluster's rows were headed by a line
+// saying they could not be numbered.
+func programReadsStdout(args []string) bool {
+	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders {
+		return true
+	}
+	return !printsTable(args)
+}
+
 // getArgs begins a kubectl get of resource, with args the arguments that
 // follow it.
 //

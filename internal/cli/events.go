@@ -268,14 +268,23 @@ func newTopCommand(services Services) *cobra.Command {
 			render.Raw(document)
 			return nil
 		}
-		if crossCluster != "" {
+		// Nothing of kx's on stdout when a program is reading it, as for
+		// kx get (showListing): neither the caption another cluster's rows
+		// would be headed by, nor an emptied listing, which goes to stderr
+		// where kubectl reports one.
+		machine := programReadsStdout(rest)
+		if crossCluster != "" && !machine {
 			render.Caption(crossClusterCaption(crossCluster))
 		}
-		render.IndexedTable(output, resourceLabel, namespace)
-		// As for kx get (showListing): only a listing kx saved replaced
-		// one, so only under that is there a way back to offer.
-		if output.Empty() && !output.Unnumbered {
-			render.PreviousListingNote(previousListing(services))
+		if machine && output.Empty() {
+			render.EmptyListingNotice(resourceLabel, namespace, match)
+		} else {
+			render.IndexedTable(output, resourceLabel, namespace)
+			// As for kx get (showListing): only a listing kx saved replaced
+			// one, so only under that is there a way back to offer.
+			if output.Empty() && !output.Unnumbered {
+				render.PreviousListingNote(previousListing(services))
+			}
 		}
 		if !htmlOpts.Enabled {
 			return nil
