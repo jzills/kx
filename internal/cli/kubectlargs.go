@@ -216,6 +216,40 @@ func registerKubectlFlag(flags *pflag.FlagSet, args *kubectlArgs, flag kubectlfl
 	if flag.Filename {
 		registered.Annotations[cobra.BashCompFilenameExt] = flag.Extensions
 	}
+	switch pathFlags[flag.Name] {
+	case pathFile:
+		registered.Annotations[cobra.BashCompFilenameExt] = nil
+	case pathDir:
+		registered.Annotations[cobra.BashCompSubdirsInDir] = nil
+	}
+}
+
+// pathKind is what a kubectl flag's value names on disk.
+type pathKind int
+
+const (
+	pathNone pathKind = iota
+	pathFile
+	pathDir
+)
+
+// pathFlags are the kubectl flags that take a path but carry no Filename mark
+// in kubectl, which marks -f and --template and few others. Completion offers
+// nothing for an unmarked flag (takesPlainValue), so without these
+// `--kubeconfig ~/.kube/<TAB>` offered nothing where the shell's filenames
+// had worked before kx parsed kubectl's flags. A directory flag needs no
+// exemption there: cobra reads its annotation ahead of any completion
+// function registered for it.
+var pathFlags = map[string]pathKind{
+	"kubeconfig":            pathFile,
+	"kuberc":                pathFile,
+	"certificate-authority": pathFile,
+	"client-certificate":    pathFile,
+	"client-key":            pathFile,
+	"custom":                pathFile,
+	"profile-output":        pathFile,
+	"cache-dir":             pathDir,
+	"kustomize":             pathDir,
 }
 
 // recordedKubectlArgs is cmd's recorder, for code that sees the command but
