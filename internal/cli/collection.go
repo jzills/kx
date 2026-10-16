@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.yaml.in/yaml/v2"
 
@@ -154,6 +155,86 @@ func mapSliceValue(node any, key string) any {
 		}
 	}
 	return nil
+}
+
+// mergeCollections merges -o json or -o yaml replies into one List, the shape
+// kubectl gives several names fetched in one call: each reply's items if it is
+// a List, or the reply itself if it is the single resource one name returns.
+// Encoded as narrowCollection encodes, so the List is laid out as kubectl
+// would print it. false when a reply is not a document kx can read, so the
+// caller can print the replies as they came.
+func mergeCollections(replies []string, yamlFormat bool) (string, bool) {
+	if yamlFormat {
+		return mergeYAMLCollections(replies)
+	}
+	return mergeJSONCollections(replies)
+}
+
+func mergeJSONCollections(replies []string) (string, bool) {
+	items := []json.RawMessage{}
+	for _, reply := range replies {
+		if strings.TrimSpace(reply) == "" {
+			continue
+		}
+		var doc struct {
+			Kind  string            `json:"kind"`
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(reply), &doc); err != nil {
+			return "", false
+		}
+		if doc.Kind == "List" {
+			items = append(items, doc.Items...)
+		} else {
+			items = append(items, json.RawMessage(reply))
+		}
+	}
+	// Fields in kubectl's own order, which a struct keeps.
+	list := struct {
+		APIVersion string            `json:"apiVersion"`
+		Items      []json.RawMessage `json:"items"`
+		Kind       string            `json:"kind"`
+		Metadata   struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+	}{APIVersion: "v1", Items: items, Kind: "List"}
+	out, err := encodeCollectionJSON(list, "    ")
+	if err != nil {
+		return "", false
+	}
+	return out, true
+}
+
+func mergeYAMLCollections(replies []string) (string, bool) {
+	var items []any
+	for _, reply := range replies {
+		if strings.TrimSpace(reply) == "" {
+			continue
+		}
+		var doc yaml.MapSlice
+		if err := yaml.Unmarshal([]byte(reply), &doc); err != nil {
+			return "", false
+		}
+		if mapSliceValue(doc, "kind") == "List" {
+			list, ok := mapSliceValue(doc, "items").([]any)
+			if !ok && mapSliceValue(doc, "items") != nil {
+				return "", false
+			}
+			items = append(items, list...)
+			continue
+		}
+		items = append(items, doc)
+	}
+	out, err := encodeCollectionYAML(yaml.MapSlice{
+		{Key: "apiVersion", Value: "v1"},
+		{Key: "items", Value: items},
+		{Key: "kind", Value: "List"},
+		{Key: "metadata", Value: yaml.MapSlice{{Key: "resourceVersion", Value: ""}}},
+	})
+	if err != nil {
+		return "", false
+	}
+	return out, true
 }
 
 // notACollectionError is for a reply in a collection format that is not a
