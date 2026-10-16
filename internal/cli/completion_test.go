@@ -378,6 +378,12 @@ func TestKubectlFlagValuesOfferNoFilenames(t *testing.T) {
 		{[]string{"get", "pods", "-f", ""}, cobra.ShellCompDirectiveFilterFileExt},
 		// A file of any extension: the shell's own filenames.
 		{[]string{"get", "pods", "--template", ""}, cobra.ShellCompDirectiveDefault},
+		// Path flags kubectl leaves unmarked: files, or directories.
+		{[]string{"get", "pods", "--kubeconfig", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"get", "pods", "--client-key", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"debug", "1", "--custom", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"delete", "-k", ""}, cobra.ShellCompDirectiveFilterDirs},
+		{[]string{"get", "pods", "--cache-dir", ""}, cobra.ShellCompDirectiveFilterDirs},
 	} {
 		root := NewRoot(completionServices(t), "test")
 		var out bytes.Buffer
