@@ -234,9 +234,10 @@ func newGetCommand(services Services) *cobra.Command {
 			"cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace " +
 			"for either to name, so kx refuses them rather than listing something " +
 			"other than what was asked for.\n\n" +
-			"A `--match` term narrows the table, a watch's live table or `-o name` by " +
-			"each row's name. JSON, YAML and templates have no rows for it to pick, so " +
-			"kx refuses it beside them rather than printing everything.",
+			"A `--match` term narrows the table, a watch's live table, `-o name` or a " +
+			"`-o json`/`-o yaml` collection by each row's name. A template is a shape " +
+			"you chose, which kx cannot assume has names in it, so it refuses the term " +
+			"there rather than printing everything.",
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort-by=.metadata.creationTimestamp",
 		Args:    minArgs(1),
 	}
