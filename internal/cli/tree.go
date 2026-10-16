@@ -174,15 +174,16 @@ func (c TreeCommand) save(
 }
 
 // printForest prints the -A forest under its banner, returning the note the
-// banner carried. Every namespace dropped by a term is the one case with
-// nothing under the banner, so the banner says why — and the page's caption,
-// which reads the same, says it too. Shared by kx tree -A and the refresh of
-// a stale forest.
+// page's caption carries. Every namespace dropped by a term is the one case
+// with nothing under the banner, so a row beneath it names the term — the
+// banner itself keeps its shape, which for kx tree is no count at all (see
+// render.EmptyMatch). Shared by kx tree -A and the refresh of a stale forest.
 func printForest(roots []*tree.Node, match string) (note string) {
 	if match != "" && len(roots) == 0 {
-		note = render.NothingMatches(match)
+		render.EmptyMatch("Namespace", render.AllNamespaces, "", match)
+		return render.NothingMatches(match)
 	}
-	render.ScopeBanner("Namespace", render.AllNamespaces, note)
+	render.ScopeBanner("Namespace", render.AllNamespaces, "")
 	for i, root := range roots {
 		if i > 0 {
 			render.Blank()
