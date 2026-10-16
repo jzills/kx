@@ -34,6 +34,9 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 		// headerless expects a narrowed reply printed without its header,
 		// which is what --no-headers asks for.
 		headerless bool
+		// matchedNone expects the term to have left nothing: stdout stays
+		// clean for the program reading it, and the term is named on stderr.
+		matchedNone bool
 	}{
 		{name: "-o name", command: "get", args: []string{"pods", "-m", "redis", "-o", "name"},
 			replies: []string{nameReply}},
@@ -68,7 +71,8 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 			replies:    []string{podsOutput},
 			headerless: true},
 		{name: "--no-headers on an empty namespace", command: "get",
-			args: []string{"pods", "-m", "redis", "--no-headers"}, replies: []string{""}},
+			args: []string{"pods", "-m", "redis", "--no-headers"}, replies: []string{""},
+			matchedNone: true},
 		{name: "a watch kx streams", command: "get", args: []string{"pods", "-m", "redis", "-w", "-o", "name"},
 			refused: "--watch", preflight: true},
 		{name: "contexts", command: "get", args: []string{"contexts", "-m", "redis"},
@@ -113,6 +117,18 @@ func TestMatchNarrowsWhatIsPrintedOrRefuses(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("err = %v; stderr %q", err, stderr)
+			}
+			if tc.matchedNone {
+				// Nothing matched, so stdout carries no row — and the term
+				// is named where kubectl reports an empty reply, as it is
+				// for -o name (TestMatchNarrowingNamesToNothingPrintsNone).
+				if strings.TrimSpace(stdout) != "" {
+					t.Errorf("stdout = %q, want nothing for a program reading it", stdout)
+				}
+				if !strings.Contains(stderr, "nothing matches 'redis'") {
+					t.Errorf("stderr = %q, want the term named", stderr)
+				}
+				return
 			}
 			if !strings.Contains(stdout, "redis") || strings.Contains(stdout, "nginx") {
 				t.Errorf("stdout = %q, want redis kept and nginx narrowed away", stdout)

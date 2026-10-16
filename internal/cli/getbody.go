@@ -332,9 +332,9 @@ func runGet(services Services, resource string, args []string, options getOption
 			return runWatch(services, resource, extra, options.Match)
 		}
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
-		// opened with a line that is not a name. Nor ahead of rows asked for
-		// without a header, which are for a program too.
-		if noHeaders, _ := extractBool(extra, "--no-headers"); printsTable(extra) && !noHeaders {
+		// opened with a line that is not a name, and a headerless watch's rows
+		// are for a program too.
+		if !programReadsStdout(extra) {
 			render.Caption("watches can't be indexed — streaming kubectl output directly")
 		}
 		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
@@ -355,7 +355,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	// Another cluster's listing is captioned as one, but only as a table:
 	// ahead of JSON or names, the caption is a line the reader can't parse.
 	crossCluster := clusterFlagIn(extra)
-	if crossCluster != "" && printsTable(extra) {
+	if crossCluster != "" && !programReadsStdout(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
 	showListing(services, output, resource, namespace, options.Match, extra)
@@ -376,7 +376,7 @@ func runGet(services Services, resource string, args []string, options getOption
 func showListing(
 	services Services, output index.Table, resource, namespace, match string, extra []string,
 ) {
-	if !printsTable(extra) && output.Empty() {
+	if programReadsStdout(extra) && output.Empty() {
 		render.EmptyListingNotice(resource, namespace, match)
 		return
 	}
