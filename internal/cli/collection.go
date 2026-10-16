@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v2"
 
 	"github.com/jzills/kx/internal/index"
 )
@@ -73,8 +73,8 @@ func narrowJSONCollection(output, term string) (string, error) {
 	return encodeCollectionJSON(doc, "    ")
 }
 
-// encodeCollectionJSON is v as JSON, indented by indent, with &, < and > left as they
-// are rather than escaped for HTML.
+// encodeCollectionJSON is v as JSON, indented by indent, with &, < and > left
+// as they are rather than escaped for HTML.
 func encodeCollectionJSON(v any, indent string) (string, error) {
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
@@ -86,70 +86,71 @@ func encodeCollectionJSON(v any, indent string) (string, error) {
 	return out.String(), nil
 }
 
-// narrowYAMLCollection filters a YAML List's items through yaml.Node, which
-// keeps the document's key order and style rather than rebuilding it from a
-// map — kubectl's own order is what the caller expects to diff against.
+// narrowYAMLCollection filters a YAML List's items, keeping the document's key
+// order — kubectl's own order is what the caller expects to diff against.
+//
+// Through yaml.v2's MapSlice, which is what kubectl prints YAML with
+// (sigs.k8s.io/yaml), so the narrowed document is laid out exactly as kubectl
+// lays it out. yaml.v3 indented a sequence's dashes beneath its key and never
+// folded a long string, where kubectl folds at 80 columns, so a narrowed
+// document differed from kubectl's on every item line.
 func narrowYAMLCollection(output, term string) (string, error) {
-	var doc yaml.Node
+	var doc yaml.MapSlice
 	if err := yaml.Unmarshal([]byte(output), &doc); err != nil {
 		return "", notACollectionError("-o yaml")
 	}
-	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+	at := -1
+	for i, entry := range doc {
+		if entry.Key == "items" {
+			at = i
+		}
+	}
+	if at < 0 {
 		return "", notACollectionError("-o yaml")
 	}
-	root := doc.Content[0]
-	items := mappingValue(root, "items")
-	if items == nil || items.Kind != yaml.SequenceNode {
+	items, ok := doc[at].Value.([]any)
+	if !ok && doc[at].Value != nil {
 		return "", notACollectionError("-o yaml")
 	}
 	matches := index.NameMatcher(term)
-	kept := make([]*yaml.Node, 0, len(items.Content))
-	for _, item := range items.Content {
-		metadata := mappingValue(item, "metadata")
-		if metadata == nil {
+	var kept []any
+	for _, item := range items {
+		metadata, ok := mapSliceValue(item, "metadata").(yaml.MapSlice)
+		if !ok {
 			return "", notACollectionError("-o yaml")
 		}
-		name := mappingValue(metadata, "name")
+		name := mapSliceValue(metadata, "name")
 		if name == nil {
 			return "", notACollectionError("-o yaml")
 		}
-		if matches(name.Value) {
+		if matches(fmt.Sprint(name)) {
 			kept = append(kept, item)
 		}
 	}
-	items.Content = kept
-	// An emptied sequence prints as "items: []" rather than a dangling key.
-	if len(kept) == 0 {
-		items.Style = yaml.FlowStyle
-	}
-	return encodeCollectionYAML(&doc)
+	doc[at].Value = kept
+	return encodeCollectionYAML(doc)
 }
 
-// encodeCollectionYAML is node as YAML laid out as kubectl prints it: two-space indent,
-// and a sequence's dashes flush with its key ("items:\n- name"), not indented
-// beneath it as the encoder's default puts them.
-func encodeCollectionYAML(node *yaml.Node) (string, error) {
-	var out bytes.Buffer
-	encoder := yaml.NewEncoder(&out)
-	encoder.SetIndent(2)
-	encoder.CompactSeqIndent()
-	if err := encoder.Encode(node); err != nil {
+// encodeCollectionYAML is v as YAML laid out as kubectl prints it: yaml.v2's
+// encoder, which kubectl prints with.
+func encodeCollectionYAML(v any) (string, error) {
+	out, err := yaml.Marshal(v)
+	if err != nil {
 		return "", err
 	}
-	if err := encoder.Close(); err != nil {
-		return "", err
-	}
-	return out.String(), nil
+	return string(out), nil
 }
 
-// mappingValue is the value node for key in a mapping node, or nil.
-func mappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
+// mapSliceValue is the value for key in a YAML mapping, or nil when node is
+// not a mapping or has no such key.
+func mapSliceValue(node any, key string) any {
+	mapping, ok := node.(yaml.MapSlice)
+	if !ok {
 		return nil
 	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
+	for _, entry := range mapping {
+		if entry.Key == key {
+			return entry.Value
 		}
 	}
 	return nil
