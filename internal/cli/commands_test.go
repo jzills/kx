@@ -1479,6 +1479,25 @@ func TestDebugRefusesAnEmptyImage(t *testing.T) {
 	}
 }
 
+// An explicitly empty --target, which `--target "$T"` with T unset produces,
+// read as absent: kx supplied the pod's one container and forwarded --target=
+// after it, and kubectl kept the empty one. The container was attached for
+// good without the target's processes, so it is refused before kubectl runs.
+func TestDebugRefusesAnEmptyTarget(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--target", ""},
+		{"1", "--target="},
+	} {
+		kube, err := indexCommand(t, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "'--target' was given an empty value") {
+			t.Errorf("kx debug %q: err = %v, want the empty --target refused", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
 // kx delete parses kubectl delete's flags. --dry-run is kx's to read as well
 // as kubectl's, and takes kubectl's shape: bare, it is a dry run on its own
 // and takes nothing after it — kx registers it as a string, which alone would

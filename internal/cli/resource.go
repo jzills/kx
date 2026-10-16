@@ -726,10 +726,19 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 // means the flag is omitted rather than the command refused. kubectl still
 // runs, just without the process namespace shared. A malformed --target is a
 // different thing and is reported, the same as a malformed --image.
+//
+// So is an explicitly empty one, which `--target "$T"` with T unset produces.
+// Read as absent, kx supplied the container and forwarded --target= after it;
+// kubectl kept the empty one, and the container was attached for good with
+// nothing shared.
 func (c DebugCommand) target(name, namespace string, extraArgs []string) (string, error) {
 	explicit, _, err := extractString(extraArgs, "--target", "")
 	if err != nil {
 		return "", err
+	}
+	if explicit == "" && hasFlag(extraArgs, "--target", "") {
+		return "", errors.New("'--target' was given an empty value — name a container, " +
+			"or leave the flag out and kx picks the container when the pod has only one.")
 	}
 	if explicit != "" {
 		return "", nil
