@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/jzills/kx/internal/index"
 )
@@ -36,6 +36,9 @@ func narrowCollection(output, term string, yamlFormat bool) (string, error) {
 // Go sorts map keys when it marshals, which is the order kubectl already
 // prints — apiVersion, items, kind, metadata — so the document comes back
 // looking as it went in.
+//
+// Never through json.Marshal, which escapes &, < and > for HTML: an
+// annotation holding a URL came back with \u0026 where kubectl printed &.
 func narrowJSONCollection(output, term string) (string, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(output), &doc); err != nil {
@@ -62,15 +65,22 @@ func narrowJSONCollection(output, term string) (string, error) {
 			kept = append(kept, item)
 		}
 	}
-	narrowed, err := json.Marshal(kept)
+	narrowed, err := encodeCollectionJSON(kept, "")
 	if err != nil {
 		return "", err
 	}
-	doc["items"] = narrowed
+	doc["items"] = json.RawMessage(narrowed)
+	return encodeCollectionJSON(doc, "    ")
+}
+
+// encodeCollectionJSON is v as JSON, indented by indent, with &, < and > left as they
+// are rather than escaped for HTML.
+func encodeCollectionJSON(v any, indent string) (string, error) {
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
-	encoder.SetIndent("", "    ")
-	if err := encoder.Encode(doc); err != nil {
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", indent)
+	if err := encoder.Encode(v); err != nil {
 		return "", err
 	}
 	return out.String(), nil
@@ -112,10 +122,18 @@ func narrowYAMLCollection(output, term string) (string, error) {
 	if len(kept) == 0 {
 		items.Style = yaml.FlowStyle
 	}
+	return encodeCollectionYAML(&doc)
+}
+
+// encodeCollectionYAML is node as YAML laid out as kubectl prints it: two-space indent,
+// and a sequence's dashes flush with its key ("items:\n- name"), not indented
+// beneath it as the encoder's default puts them.
+func encodeCollectionYAML(node *yaml.Node) (string, error) {
 	var out bytes.Buffer
 	encoder := yaml.NewEncoder(&out)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(&doc); err != nil {
+	encoder.CompactSeqIndent()
+	if err := encoder.Encode(node); err != nil {
 		return "", err
 	}
 	if err := encoder.Close(); err != nil {
