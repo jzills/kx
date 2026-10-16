@@ -277,7 +277,8 @@ func IndexedTable(table index.Table, resourceType, namespace string) {
 	current.IndexedTable(table, resourceType, namespace)
 }
 
-func PreviousListingNote(previous state.State) { current.PreviousListingNote(previous) }
+func PreviousListingNote(previous state.State)    { current.PreviousListingNote(previous) }
+func PreviousListingNoteErr(previous state.State) { current.PreviousListingNoteErr(previous) }
 
 func EmptyListingNotice(resourceType, namespace, match string) {
 	current.EmptyListingNotice(resourceType, namespace, match)

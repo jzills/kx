@@ -70,3 +70,56 @@ func TestHeaderlessCrossClusterPrintsNoCaption(t *testing.T) {
 		})
 	}
 }
+
+// An empty listing that retired the indexes behind it still owes the way
+// back, whoever is reading stdout: --no-headers without a term is a table to
+// kx, saved like any other, so the note goes to stderr beside the notice
+// rather than being dropped with it.
+func TestHeaderlessEmptyListingOffersTheWayBackOnStderr(t *testing.T) {
+	for _, tc := range []struct{ name, command string }{
+		{"get", "get"},
+		{"top", "top"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &recordingKubectl{output: ""}
+			services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+
+			args := []string{"--no-headers"}
+			cmd := newTopCommand(services)
+			if tc.command == "get" {
+				cmd = newGetCommand(services)
+				args = append([]string{"pods"}, args...)
+			}
+			stdout, stderr, err := runCaptured(t, cmd, args)
+			if err != nil {
+				t.Fatalf("kx %s %v: %v", tc.command, args, err)
+			}
+			if strings.TrimSpace(stdout) != "" {
+				t.Errorf("stdout = %q, want nothing for the program reading it", stdout)
+			}
+			if !strings.Contains(stderr, "none found") {
+				t.Errorf("stderr = %q, want the empty listing reported", stderr)
+			}
+			if !strings.Contains(stderr, "'kx state back' returns to") {
+				t.Errorf("stderr = %q, want the way back to the listing this retired", stderr)
+			}
+		})
+	}
+}
+
+// A listing kx never saved replaced nothing, so there is no way back to
+// offer — the control that keeps the note tied to a saved entry rather than
+// to an empty screen.
+func TestUnsavedEmptyListingOffersNoWayBack(t *testing.T) {
+	kube := &recordingKubectl{output: ""}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+
+	_, stderr, err := runCaptured(t, newGetCommand(services),
+		[]string{"pods", "-o", "name"})
+	if err != nil {
+		t.Fatalf("kx get pods -o name: %v", err)
+	}
+	if strings.Contains(stderr, "'kx state back' returns to") {
+		t.Errorf("stderr = %q, want no way back under a listing that replaced nothing", stderr)
+	}
+}

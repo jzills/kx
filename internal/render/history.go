@@ -44,12 +44,28 @@ func kindLabel(entry state.State) string {
 // A no-op when there is nothing to return to: an empty previous entry, or none
 // at all, would have the note point at a listing that does not exist.
 func (r *Renderer) PreviousListingNote(previous state.State) {
-	if previous.Resources.Len() == 0 {
-		return
+	if note := previousListingNote(previous); note != "" {
+		r.Caption(note)
 	}
-	r.Caption("'kx state back' returns to " + strings.Join(captionParts(
+}
+
+// PreviousListingNoteErr is PreviousListingNote on stderr, for a listing asked
+// for in a format another program reads — see EmptyListingNotice for why. The
+// note is still owed: an entry was saved over, so the indexes on screen have
+// stopped resolving, and the person at the terminal is the one who has to know.
+func (r *Renderer) PreviousListingNoteErr(previous state.State) {
+	if note := previousListingNote(previous); note != "" {
+		r.CaptionErr(note)
+	}
+}
+
+func previousListingNote(previous state.State) string {
+	if previous.Resources.Len() == 0 {
+		return ""
+	}
+	return "'kx state back' returns to " + strings.Join(captionParts(
 		kindLabel(previous), scopeLabel(previous), countLabel(previous.Resources.Len()),
-	), " · "))
+	), " · ")
 }
 
 func entryLabel(count int) string {

@@ -278,6 +278,12 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 		if machine && output.Empty() {
 			render.EmptyListingNotice(resourceLabel, namespace, match)
+			// Saved like any other listing (TopCommand.Execute), so the
+			// indexes it retired are owed the way back — on stderr, beside
+			// the notice, since stdout is being read.
+			if !output.Unnumbered {
+				render.PreviousListingNoteErr(previousListing(services))
+			}
 		} else {
 			render.IndexedTable(output, resourceLabel, namespace)
 			// As for kx get (showListing): only a listing kx saved replaced
