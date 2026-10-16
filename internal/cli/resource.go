@@ -738,7 +738,7 @@ func (c DebugCommand) target(name, namespace string, extraArgs []string) (string
 	}
 	if explicit == "" && hasFlag(extraArgs, "--target", "") {
 		return "", errors.New("'--target' was given an empty value — name a container, " +
-			"or leave the flag out and kx targets a one-container pod's own.")
+			"or leave the flag out and kx picks the container when the pod has only one.")
 	}
 	if explicit != "" {
 		return "", nil
