@@ -20,17 +20,30 @@ func TestAnEmptyMatchKeepsItsCountLabel(t *testing.T) {
 		name    string
 		args    []string
 		caption string
+		// output answers kubectl when the command reads something other
+		// than a table; empty for the table.
+		output string
 	}{
 		{"get", []string{"get", "pods", "-n", "prod", "-m", "cron"},
-			"Pods · prod · 0 items"},
+			"Pods · prod · 0 items", ""},
 		{"top", []string{"top", "-n", "prod", "-m", "cron"},
-			"Pods · prod · 0 items"},
+			"Pods · prod · 0 items", ""},
 		{"diag", []string{"diag", "-n", "prod", "-m", "cron"},
-			"Mixed · prod · 0 checked"},
+			"Mixed · prod · 0 checked", ""},
+		{"secret --decode", []string{"secret", "--decode", "-n", "prod", "-m", "cron"},
+			"Secrets · prod · 0 items",
+			`{"items":[{"metadata":{"name":"db-creds","namespace":"prod"},"data":{}}]}`},
+		// kx tree prints no count when populated, so its caption has none.
+		{"tree -A", []string{"tree", "-A", "-m", "cron"},
+			"Namespace · all namespaces", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, _ := splitRender(t)
-			kube := &recordingKubectl{output: emptyTable}
+			output := emptyTable
+			if tc.output != "" {
+				output = tc.output
+			}
+			kube := &recordingKubectl{output: output}
 			services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
 			services.Kubernetes = func() (kubernetes.Interface, error) {
 				return fake.NewSimpleClientset(), nil

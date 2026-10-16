@@ -277,11 +277,13 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, m
 	secrets = kept
 
 	count := len(secrets)
-	label := itemCount(count)
+	// A term that matched nothing keeps the count and names the term in a
+	// row beneath, as kx get secrets -m does. See render.EmptyMatch.
 	if count == 0 && match != "" {
-		label = render.NothingMatches(match)
+		render.EmptyMatch(kinds.PluralDisplay("secret"), namespace, itemCount(0), match)
+	} else {
+		render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, itemCount(count))
 	}
-	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, label)
 	if count == 0 {
 		return nil
 	}
