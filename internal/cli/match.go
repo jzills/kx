@@ -132,6 +132,11 @@ func matchFormatError(args []string) error {
 		return projectionMatchError(outputFormat(args))
 	}
 	if isWatch(args) && !wantsLiveTable(args) {
+		if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders {
+			return errors.New("'--match' cannot be combined with '--watch --no-headers' — kx " +
+				"narrows the live table it draws, and streams a headerless watch as kubectl " +
+				"sends it. Drop one of them.")
+		}
 		return fmt.Errorf("'--match' cannot be combined with '--watch -o %s' — kx narrows the "+
 			"live table it draws, and streams that format as kubectl sends it. "+
 			"Drop the flag, or the -o.", outputFormat(args))

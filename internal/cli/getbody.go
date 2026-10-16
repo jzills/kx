@@ -332,8 +332,9 @@ func runGet(services Services, resource string, args []string, options getOption
 			return runWatch(services, resource, extra, options.Match)
 		}
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
-		// opened with a line that is not a name.
-		if printsTable(extra) {
+		// opened with a line that is not a name. Nor ahead of rows asked for
+		// without a header, which are for a program too.
+		if noHeaders, _ := extractBool(extra, "--no-headers"); printsTable(extra) && !noHeaders {
 			render.Caption("watches can't be indexed — streaming kubectl output directly")
 		}
 		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)

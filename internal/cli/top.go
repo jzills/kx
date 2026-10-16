@@ -68,14 +68,7 @@ func (c TopCommand) Execute(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		// Headerless rows are headerless whichever cluster they came from:
-		// the flag was withheld to find the NAME column, so it is dropped
-		// here too rather than only on the indexable path.
-		if headerless {
-			listing, _ := index.ParseListing(output)
-			return headerlessRows(listing, filterTerm), extractNamespace(extraArgs), nil
-		}
-		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
 		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
@@ -217,7 +210,7 @@ func (c TopCommand) ExecuteNodes(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
 		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
