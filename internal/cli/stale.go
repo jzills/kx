@@ -44,8 +44,10 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 // rather than a person: a command whose output is always a document
 // (documentAnnotation), kx's own --json, one Secret value written raw by
 // --decode --key, or argv that leaves kubectl printing for a program — a -o
-// format that is not a table, or --no-headers (see programReadsStdout). A refreshed listing is a table for a person to pick from, and
-// it goes to stdout, where a script reading the document fails to parse it —
+// format that is not a table, or --no-headers (see programReadsStdout).
+//
+// A refreshed listing is a table for a person to pick from, and it goes to
+// stdout, where a script reading the document fails to parse it —
 // `OUT=$(kx exec 3 -- cat /etc/hostname)` captured the table — or, under
 // $(kx secret 1 --decode -k token), exports it as the credential.
 //
