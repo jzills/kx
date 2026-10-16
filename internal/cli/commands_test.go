@@ -1498,6 +1498,25 @@ func TestDebugRefusesAnEmptyTarget(t *testing.T) {
 	}
 }
 
+// Debugging a Node refuses --target however it was written. An empty one read
+// as absent and was forwarded, the same "read as absent" failure the Pod side
+// refuses (TestDebugRefusesAnEmptyTarget).
+func TestDebugOnANodeRefusesAnEmptyTarget(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--target", ""},
+		{"1", "--target="},
+		{"1", "--target", "app"},
+	} {
+		kube, err := indexCommandOn(t, kinds.Node, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined with a Node") {
+			t.Errorf("kx debug %q: err = %v, want --target refused for a Node", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
 // kx delete parses kubectl delete's flags. --dry-run is kx's to read as well
 // as kubectl's, and takes kubectl's shape: bare, it is a dry run on its own
 // and takes nothing after it — kx registers it as a string, which alone would

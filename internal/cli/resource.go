@@ -679,7 +679,10 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 		if err != nil {
 			return err
 		}
-		if explicit != "" {
+		// An empty one is refused as well, as DebugCommand.target refuses it
+		// for a Pod: read as absent it was forwarded to kubectl, which has no
+		// container to resolve it against here either.
+		if explicit != "" || hasFlag(extraArgs, "--target", "") {
 			return errors.New(
 				"'--target' cannot be combined with a Node — it names a container " +
 					"to share a process namespace with, and debugging a node " +
