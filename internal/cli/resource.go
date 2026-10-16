@@ -675,14 +675,15 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 	// container for it to name — refused rather than forwarded, since kubectl
 	// would reject it with a message about a flag combination kx chose.
 	if kind == kinds.Node {
-		explicit, _, err := extractString(extraArgs, "--target", "")
-		if err != nil {
+		// Read for its error alone — a malformed --target is reported, as it
+		// is for a Pod — since the value does not matter here: hasFlag
+		// matches every spelling extractString consumes, so it refuses an
+		// empty --target too, which read as absent was forwarded to kubectl,
+		// and a Node has no container to resolve it against either.
+		if _, _, err := extractString(extraArgs, "--target", ""); err != nil {
 			return err
 		}
-		// An empty one is refused as well, as DebugCommand.target refuses it
-		// for a Pod: read as absent it was forwarded to kubectl, which has no
-		// container to resolve it against here either.
-		if explicit != "" || hasFlag(extraArgs, "--target", "") {
+		if hasFlag(extraArgs, "--target", "") {
 			return errors.New(
 				"'--target' cannot be combined with a Node — it names a container " +
 					"to share a process namespace with, and debugging a node " +

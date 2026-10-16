@@ -367,17 +367,26 @@ func runGet(services Services, resource string, args []string, options getOption
 //
 // A format another program reads gets kubectl's output and nothing of kx's
 // on stdout. An empty one is reported on stderr, where kubectl reports it,
-// with no way back offered: nothing was saved over the listing behind it (see
-// GetCommand.Execute). Nor under any listing kx printed without numbering it
-// — another cluster's, a table it cannot place — which replaced nothing
-// either. Read off the table, which says so, rather than inferred from the
-// flags: inferred, a term emptying a table kx cannot place offered "'kx
-// state back' returns to" the entry behind the listing still current.
+// and the way back goes there too when an entry was saved over.
+//
+// Saved over is the question, not the format. -o name and the collection
+// formats return from GetCommand.Execute before the Save, so there is nothing
+// behind them to offer; --no-headers without a term does not — it is a table
+// to kx, saved like any other — so dropping the note there left the user's
+// indexes retired with no way back named. Nor is one owed under a listing kx
+// printed without numbering it — another cluster's, a table it cannot place —
+// which replaced nothing either. Read off the table, which says so, rather
+// than inferred from the flags: inferred, a term emptying a table kx cannot
+// place offered "'kx state back' returns to" the entry behind the listing
+// still current.
 func showListing(
 	services Services, output index.Table, resource, namespace, match string, extra []string,
 ) {
 	if programReadsStdout(extra) && output.Empty() {
 		render.EmptyListingNotice(resource, namespace, match)
+		if !output.Unnumbered {
+			render.PreviousListingNoteErr(previousListing(services))
+		}
 		return
 	}
 	render.IndexedTable(output, resource, namespace)
