@@ -8,7 +8,7 @@ weight: 27
 
 Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -37,6 +37,20 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--containers` | If present, print usage of containers within a pod. |
+| `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--show-capacity` | Print node resources based on Capacity instead of Allocatable(default) of the nodes. |
+| `--show-swap` | Print pod resources related to swap memory. |
+| `--sort-by string` | If non-empty, sort pods list using specified field. The field can be either 'cpu' or 'memory'. |
+| `--sum` | Print the sum of the resource usage |
+| `--use-protocol-buffers` | Enables using protocol-buffers to access Metrics API. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -54,4 +68,5 @@ kx top --no-limits
 kx top --html
 kx top --json
 kx top --out top.html
+kx top --sort-by=memory
 ```

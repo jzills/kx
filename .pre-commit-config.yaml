@@ -63,3 +63,19 @@ repos:
         entry: go run ./tools/gen-site-docs
         pass_filenames: false
         always_run: true
+
+      - id: gen-kubectl-flags
+        name: Regenerate kubectl flag table
+        language: system
+        # kubectl's flag definitions, read from the k8s.io/kubectl version the
+        # generator's own module pins. It is a separate module so kubectl's
+        # command code never enters kx's go.mod, which also means the go vet
+        # hook above does not reach it; it is vetted here instead.
+        #
+        # Scoped to the generator and its output rather than always_run: the
+        # first run downloads kubectl's dependency tree, and the table can only
+        # change when one of these files does. --all-files, as CI runs it,
+        # matches them, so CI still checks every PR.
+        entry: sh -c 'go -C tools/gen-kubectl-flags vet ./... && go -C tools/gen-kubectl-flags run .'
+        pass_filenames: false
+        files: '^(tools/gen-kubectl-flags|internal/kubectlflags)/'

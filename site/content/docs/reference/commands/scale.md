@@ -10,6 +10,8 @@ Scales an indexed Deployment, StatefulSet, or ReplicaSet to a given replica coun
 
 kubectl's own flags pass through — --current-replicas to make the scale conditional, --timeout, --dry-run. --replicas is the exception: kx builds it from the replica count given here, so a second one is refused rather than left for kubectl to choose between.
 
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
@@ -27,8 +29,26 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 
 | Option | Description |
 |---|---|
-| `--dry-run string` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--all` | Select all resources in the namespace of the specified resource types |
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--current-replicas int` | Precondition for current size. Requires that the current size of the resource match this value in order to scale. -1 (default) for no condition. |
+| `-f, --filename strings` | Filename, directory, or URL to files identifying the resource to set a new size |
+| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `--replicas int` | The new desired number of replicas. Required. |
+| `--resource-version string` | Precondition for resource version. Requires that the current resource version match this value in order to scale. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--timeout duration` | The length of time to wait before giving up on a scale operation, zero means don't wait. Any other values should contain a corresponding time unit (e.g. 1s, 2m, 3h). |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

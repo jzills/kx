@@ -8,7 +8,7 @@ weight: 8
 
 Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -21,6 +21,19 @@ kx describe [OPTIONS] <index>... [kubectl flags]
 | Argument | Description |
 |---|---|
 | `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `-A, --all-namespaces` | If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace. |
+| `--chunk-size int64` | Return large lists in chunks rather than all at once. Pass 0 to disable. |
+| `-f, --filename strings` | Filename, directory, or URL to files containing the resource to describe |
+| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--show-events` | If true, display events related to the described object. Defaults to true for a single object, false for multiple objects and prefix matching. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 
@@ -37,4 +50,5 @@ kx describe 1 3 5
 kx describe 1..3
 kx describe 3..
 kx describe @api
+kx describe 1 --show-events=false
 ```

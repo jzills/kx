@@ -559,6 +559,18 @@ func registerFlagCompletions(root *cobra.Command, services Services) {
 	walk = func(cmd *cobra.Command) {
 		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 			complete, ok := lookupFlagValue(cmd, flag.Name)
+			if !ok && takesPlainValue(cmd, flag) {
+				// Cobra completes a parsed command's flag values itself, and
+				// with nothing registered it offers the shell's filenames —
+				// for a label selector or a context name. kx offers nothing,
+				// as it did when these commands parsed their flags by hand.
+				_ = cmd.RegisterFlagCompletionFunc(flag.Name, func(
+					*cobra.Command, []string, string,
+				) ([]string, cobra.ShellCompDirective) {
+					return nil, cobra.ShellCompDirectiveNoFileComp
+				})
+				return
+			}
 			if !ok || complete == nil {
 				return
 			}
@@ -576,6 +588,18 @@ func registerFlagCompletions(root *cobra.Command, services Services) {
 		}
 	}
 	walk(root)
+}
+
+// takesPlainValue reports whether flag, on a command that parses kubectl's
+// flags, takes a value in the next word and not a file: a file flag (-f,
+// --template) keeps the shell's filenames, and a switch or an optional value
+// (--dry-run) takes no next word to complete.
+func takesPlainValue(cmd *cobra.Command, flag *pflag.Flag) bool {
+	if cmd.Annotations[kubectlCommandAnnotation] == "" || flag.NoOptDefVal != "" {
+		return false
+	}
+	_, file := flag.Annotations[cobra.BashCompFilenameExt]
+	return !file
 }
 
 // completeNamespaceNames offers namespace names rather than indexes: -n takes

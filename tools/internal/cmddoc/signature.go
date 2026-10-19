@@ -29,20 +29,24 @@ func ArgToken(arg cli.Arg) string {
 }
 
 // FlagToken renders a flag as [--long/-short type], dropping the type for
-// booleans since a switch takes no value.
+// booleans since a switch takes no value. An optional value is shown attached,
+// [--dry-run[=str]], since that is the only way it is taken.
 func FlagToken(flag *pflag.Flag) string {
 	names := "--" + flag.Name
-	if flag.Shorthand != "" {
+	if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
 		names += "/-" + flag.Shorthand
 	}
-	switch flag.Value.Type() {
+	kind := flag.Value.Type()
+	switch kind {
 	case "bool":
 		return "[" + names + "]"
 	case "string", "stringArray", "stringSlice":
-		return "[" + names + " str]"
-	default:
-		return "[" + names + " " + flag.Value.Type() + "]"
+		kind = "str"
 	}
+	if flag.NoOptDefVal != "" {
+		return "[" + names + "[=" + kind + "]]"
+	}
+	return "[" + names + " " + kind + "]"
 }
 
 // Signature is the whole invocation: the command, its positional arguments, its
@@ -56,7 +60,9 @@ func Signature(cmd *cobra.Command) string {
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
 		// Inherited flags are global (--no-color) and belong on the root's help,
 		// not on every row of the table.
-		if flag.Hidden || flag.Name == "help" || cmd.InheritedFlags().Lookup(flag.Name) != nil {
+		// kubectl's own flags are what the placeholder below stands for.
+		if flag.Hidden || flag.Name == "help" || cmd.InheritedFlags().Lookup(flag.Name) != nil ||
+			cli.IsKubectlFlag(flag) {
 			return
 		}
 		parts = append(parts, FlagToken(flag))

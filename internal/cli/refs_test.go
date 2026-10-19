@@ -261,10 +261,21 @@ func TestResolveRefsRefusesNoArguments(t *testing.T) {
 	}
 }
 
-// resolveRefsExpecting is resolveRefs for a caller that has already named the
-// kind it wants — the kx get relist, so far. When the index's actual kind
-// matches, it resolves exactly as resolveRefs would.
-func TestResolveRefsExpectingResolvesWhenKindMatches(t *testing.T) {
+// resolveExpecting parses args and resolves them as kind, the way kx get's
+// relist does.
+func resolveExpecting(t *testing.T, resolver IndexResolver, args []string, kind kinds.Kind) ([]Resolved, error) {
+	t.Helper()
+	refs, err := parseRefs(resolver, "indexes", args)
+	if err != nil {
+		t.Fatalf("parseRefs(%v): %v", args, err)
+	}
+	return resolveParsedExpecting(resolver, refs, kind)
+}
+
+// resolveParsedExpecting is for a caller that has already named the kind it
+// wants — the kx get relist. When the index's actual kind matches, it
+// resolves exactly as resolveRefs would.
+func TestResolveParsedExpectingResolvesWhenKindMatches(t *testing.T) {
 	services := switchServices(t, nil)
 	if err := services.State.Save(state.State{
 		Resources: state.NewResources([]string{"api", "web"}, kinds.Pod), Namespace: "prod",
@@ -272,9 +283,9 @@ func TestResolveRefsExpectingResolvesWhenKindMatches(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	resolved, err := resolveRefsExpecting(services.State, "indexes", []string{"1"}, kinds.Pod)
+	resolved, err := resolveExpecting(t, services.State, []string{"1"}, kinds.Pod)
 	if err != nil {
-		t.Fatalf("resolveRefsExpecting: %v", err)
+		t.Fatalf("resolveParsedExpecting: %v", err)
 	}
 	if len(resolved) != 1 {
 		t.Fatalf("resolved %d references, want 1", len(resolved))
@@ -288,8 +299,8 @@ func TestResolveRefsExpectingResolvesWhenKindMatches(t *testing.T) {
 // refused with the same message FieldsExpecting has always given — naming
 // what the index actually is and what was expected, not a generic parse
 // failure. This is what "run 'kx get pods' to relist" depends on: it comes
-// from ResolveExpecting, not from anything resolveRefsExpecting adds itself.
-func TestResolveRefsExpectingRefusesTheWrongKind(t *testing.T) {
+// from ResolveExpecting, not from anything resolveParsedExpecting adds itself.
+func TestResolveParsedExpectingRefusesTheWrongKind(t *testing.T) {
 	services := switchServices(t, nil)
 	if err := services.State.Save(state.State{
 		Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
@@ -297,9 +308,9 @@ func TestResolveRefsExpectingRefusesTheWrongKind(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	_, err := resolveRefsExpecting(services.State, "indexes", []string{"1"}, kinds.Pod)
+	_, err := resolveExpecting(t, services.State, []string{"1"}, kinds.Pod)
 	if err == nil {
-		t.Fatal("resolveRefsExpecting accepted an index that resolved to the wrong kind")
+		t.Fatal("resolveParsedExpecting accepted an index that resolved to the wrong kind")
 	}
 	for _, want := range []string{"Deployment/web", "not Pod"} {
 		if !strings.Contains(err.Error(), want) {
@@ -308,18 +319,17 @@ func TestResolveRefsExpectingRefusesTheWrongKind(t *testing.T) {
 	}
 }
 
-// resolveRefsExpecting shares resolveRefs's identity dedupe via
-// resolveIndexes: two arguments that resolve to the same resource collapse
-// to one, the same as resolveRefs.
-func TestResolveRefsExpectingDedupesByResolvedIdentity(t *testing.T) {
+// resolveParsedExpecting dedupes by resolved identity, as resolveRefs does:
+// two arguments that resolve to the same resource collapse to one.
+func TestResolveParsedExpectingDedupesByResolvedIdentity(t *testing.T) {
 	resolver := refOf(
 		[3]string{"api", "prod", "Pod"},
 		[3]string{"api", "prod", "Pod"},
 	)
 
-	resolved, err := resolveRefsExpecting(resolver, "indexes", []string{"1", "2"}, kinds.Pod)
+	resolved, err := resolveExpecting(t, resolver, []string{"1", "2"}, kinds.Pod)
 	if err != nil {
-		t.Fatalf("resolveRefsExpecting: %v", err)
+		t.Fatalf("resolveParsedExpecting: %v", err)
 	}
 	if len(resolved) != 1 {
 		t.Fatalf("resolved %d references, want 1 — indexes 1 and 2 are one resource",

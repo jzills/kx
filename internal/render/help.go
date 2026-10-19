@@ -253,7 +253,11 @@ type CommandHelp struct {
 	// Global are the flags inherited from the root command. Kept apart from
 	// Options so a command's own flags read as a short list rather than being
 	// padded out by ones every command has.
-	Global   []HelpItem
+	Global []HelpItem
+	// Kubectl are kubectl's own flags, on a command that registers them from
+	// kubectl's table: listed apart from kx's options, which say what kx
+	// does, since these are kubectl's to document.
+	Kubectl  []HelpItem
 	Aliases  []string
 	Examples []string
 }
@@ -279,6 +283,7 @@ func (r *Renderer) CommandHelp(help CommandHelp) {
 
 	r.itemBlock("Arguments", help.Args, commandNameWidth)
 	r.itemBlock("Options", help.Options, commandNameWidth)
+	r.itemBlock("Passthrough options", help.Kubectl, commandNameWidth)
 	r.itemBlock("Global options", help.Global, commandNameWidth)
 
 	if len(help.Aliases) > 0 {

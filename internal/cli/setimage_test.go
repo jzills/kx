@@ -359,3 +359,24 @@ func TestWaitRefusesAnOutputFormatForTheJobItWatchesItself(t *testing.T) {
 		t.Errorf("kubectl was run %q before the refusal", kube.runs)
 	}
 }
+
+// kx set image parses kubectl set image's flags, so the index and the specs may
+// sit among them: every positional after the index is a spec.
+func TestSetImageParsesKubectlFlags(t *testing.T) {
+	_, _, kube, err := setImage(t, kinds.Deployment, oneContainerDeploy, false,
+		"--dry-run=server", "1", "--field-manager", "kx", "api:v2")
+	if err != nil {
+		t.Fatalf("kx set image --dry-run=server 1 --field-manager kx api:v2: %v", err)
+	}
+	if got := setCalls(kube); len(got) != 1 ||
+		got[0] != "set image Deployment/api api=api:v2 -n prod --dry-run=server --field-manager=kx" {
+		t.Errorf("kubectl set calls = %q, want the spec and both flags", got)
+	}
+	_, _, kube, err = setImage(t, kinds.Deployment, oneContainerDeploy, false, "1", "api:v2", "--bogus")
+	if err == nil || !strings.Contains(err.Error(), "'--bogus' isn't a flag of kubectl set image") {
+		t.Errorf("err = %v, want the unknown-flag refusal", err)
+	}
+	if got := setCalls(kube); len(got) != 0 {
+		t.Errorf("kubectl set ran %q for a refused flag", got)
+	}
+}

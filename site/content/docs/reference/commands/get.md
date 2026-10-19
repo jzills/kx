@@ -12,9 +12,9 @@ Fetches resources with kubectl and assigns each row an index.
 
 A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a cluster-scoped CRD — takes neither `-n` nor `-A`. There is no namespace for either to name, so kx refuses them rather than listing something other than what was asked for.
 
-A `--match` term narrows the table, a watch's live table or `-o name` by each row's name. JSON, YAML and templates have no rows for it to pick, so kx refuses it beside them rather than printing everything.
+A `--match` term narrows the table, a watch's live table, `-o name` or a `-o json`/`-o yaml` collection by each row's name. A template is a shape you chose, which kx cannot assume has names in it, so it refuses the term there rather than printing everything.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -43,6 +43,31 @@ kx get [OPTIONS] <resource> [index]... [kubectl flags]
 | `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--chunk-size int64` | Return large lists in chunks rather than all at once. Pass 0 to disable. |
+| `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
+| `-f, --filename strings` | Filename, directory, or URL to files identifying the resource to get from a server. |
+| `--ignore-not-found` | If set to true, suppresses NotFound error for specific objects that do not exist. Using this flag with commands that query for collections of resources has no effect when no resources are found. |
+| `--kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `-L, --label-columns strings` | Accepts a comma separated list of labels that are going to be presented as columns. Names are case-sensitive. You can also use multiple flag options like -L label1 -L label2... |
+| `--output-watch-events` | Output watch event objects when --watch or --watch-only is used. Existing objects are output as initial ADDED events. |
+| `--raw string` | Raw URI to request from the server. Uses the transport specified by the kubeconfig file. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--server-print` | If true, have the server return the appropriate table output. Supports extension APIs and CRDs. |
+| `--show-kind` | If present, list the resource type for the requested object(s). |
+| `--show-labels` | When printing, show all labels as the last column (default hide labels column) |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--sort-by string` | If non-empty, sort list types using this field specification. The field specification is expressed as a JSONPath expression (e.g. '{.metadata.name}'). The field in the API resource specified by this JSONPath expression must be an integer or a string. |
+| `--subresource string` | If specified, gets the subresource of the requested object. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--watch-only` | Watch for changes to the requested object(s), without listing/getting first. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -59,4 +84,5 @@ kx get deploy -m api
 kx get pods 1..3
 kx get pods 3..
 kx get pods --watch
+kx get pods --sort-by=.metadata.creationTimestamp
 ```

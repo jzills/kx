@@ -19,6 +19,9 @@ type getOptions struct {
 	Key    string
 	HasKey bool
 	Yes    bool
+	// AfterDash is what followed `--`: kubectl's, forwarded after its other
+	// flags, and never an index, however much it looks like one.
+	AfterDash []string
 }
 
 // namespaceGroup is a run of resolved names sharing a namespace, in the order
@@ -57,7 +60,7 @@ func groupByNamespace(resolved []Resolved) []namespaceGroup {
 // it over the listing, and kx get all 3 --decode printed a Secret.
 //
 // Every ref is resolved before any is refused or fetched, as
-// resolveRefsExpecting does, so the refusal names the first row it finds.
+// resolveParsedExpecting does, so the refusal names the first row it finds.
 func resolveCovered(resolver IndexResolver, refs []state.Ref, resource string) ([]Resolved, error) {
 	resolved, err := resolveParsed(refs, resolver.Resolve)
 	if err != nil {
@@ -124,6 +127,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	// and a scan-anywhere loop that expanded it as a range broke that
 	// passthrough outright instead of erroring or ignoring it.
 	indexArgs, extra := splitLeadingIndexes(args)
+	extra = append(extra[:len(extra):len(extra)], options.AfterDash...)
 	var refs []state.Ref
 	if len(indexArgs) > 0 {
 		var err error
@@ -197,6 +201,19 @@ func runGet(services Services, resource string, args []string, options getOption
 	if flag := clusterFlagIn(extra); flag != "" && len(refs) > 0 {
 		return clusterFlagBesideIndexError(flag)
 	}
+	// And its namespace, for the same reason. Without this the flag was
+	// forwarded into a by-name fetch: `kx get pods 1 -A` became a by-name
+	// lookup across all namespaces, which kubectl forbids, and `kx get pods
+	// 1 -n other` looked for one namespace's pod in another and reported a
+	// NotFound naming the right pod and the wrong namespace. kx get was the
+	// only index command without this check — kx describe, kx tree, kx diag
+	// and kx scan all refuse it.
+	//
+	// After the cluster-scoped branch above, which is the more specific
+	// answer for a kind that has no namespace at all.
+	if flag := scopeFlagIn(extra); flag != "" && len(refs) > 0 {
+		return scopeFlagBesideIndexError(flag, "")
+	}
 
 	// A term kx could not apply to the format asked for is refused before
 	// anything is fetched (see narrowText). --decode reads Secrets itself, in
@@ -211,7 +228,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		// Resolved only when the command already names a Secret-shaped
 		// resource and carries indexes: otherwise decodeSecrets's own guards
 		// (--decode required, kind mismatch) are what should fire, and firing
-		// resolveRefsExpecting first would replace those messages with a
+		// resolveParsedExpecting first would replace those messages with a
 		// resolution error about an index that was never going to be
 		// fetched. When it does apply, resolving the whole batch here —
 		// before decodeSecrets fetches or renders anything — is what stops a
@@ -230,7 +247,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	// The namespace an index fetch is taken in when the user named none.
 	var scope string
 	if len(refs) > 0 {
-		// resolveRefsExpecting resolves every index before any of them is
+		// resolveParsedExpecting resolves every index before any of them is
 		// acted on, so an out-of-range index late in the batch is caught
 		// before the first kubectl call rather than after some of them have
 		// already run. Expecting rather than resolveRefs's plain Resolve: the
@@ -315,8 +332,9 @@ func runGet(services Services, resource string, args []string, options getOption
 			return runWatch(services, resource, extra, options.Match)
 		}
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
-		// opened with a line that is not a name.
-		if printsTable(extra) {
+		// opened with a line that is not a name, and a headerless watch's rows
+		// are for a program too.
+		if !programReadsStdout(extra) {
 			render.Caption("watches can't be indexed — streaming kubectl output directly")
 		}
 		_, err := services.Kubectl.RunInteractive(append([]string{"get", resource}, extra...), false)
@@ -337,7 +355,7 @@ func runGet(services Services, resource string, args []string, options getOption
 	// Another cluster's listing is captioned as one, but only as a table:
 	// ahead of JSON or names, the caption is a line the reader can't parse.
 	crossCluster := clusterFlagIn(extra)
-	if crossCluster != "" && printsTable(extra) {
+	if crossCluster != "" && !programReadsStdout(extra) {
 		render.Caption(crossClusterCaption(crossCluster))
 	}
 	showListing(services, output, resource, namespace, options.Match, extra)
@@ -349,17 +367,30 @@ func runGet(services Services, resource string, args []string, options getOption
 //
 // A format another program reads gets kubectl's output and nothing of kx's
 // on stdout. An empty one is reported on stderr, where kubectl reports it,
-// with no way back offered: nothing was saved over the listing behind it (see
-// GetCommand.Execute). Nor under any listing kx printed without numbering it
-// — another cluster's, a table it cannot place — which replaced nothing
-// either. Read off the table, which says so, rather than inferred from the
-// flags: inferred, a term emptying a table kx cannot place offered "'kx
-// state back' returns to" the entry behind the listing still current.
+// and the way back goes there too when an entry was saved over.
+//
+// Saved over is the question, not the format. -o name and the collection
+// formats return from GetCommand.Execute before the Save, so there is nothing
+// behind them to offer. An empty reply to --no-headers without a term does
+// not: printsTable still holds, so it falls through to the Save and retires
+// the indexes on screen — and dropping the note there left them retired with
+// no way back named. A --no-headers reply that has rows is unnumberable and
+// saves nothing, so the same flag replaces an entry only when it finds none;
+// that asymmetry is older than this note (f349307, v0.8.0) and is not what
+// the note decides. The table says which happened. Nor is one owed under a listing kx
+// printed without numbering it — another cluster's, a table it cannot place —
+// which replaced nothing either. Read off the table, which says so, rather
+// than inferred from the flags: inferred, a term emptying a table kx cannot
+// place offered "'kx state back' returns to" the entry behind the listing
+// still current.
 func showListing(
 	services Services, output index.Table, resource, namespace, match string, extra []string,
 ) {
-	if !printsTable(extra) && output.Empty() {
+	if programReadsStdout(extra) && output.Empty() {
 		render.EmptyListingNotice(resource, namespace, match)
+		if !output.Unnumbered {
+			render.PreviousListingNoteErr(previousListing(services))
+		}
 		return
 	}
 	render.IndexedTable(output, resource, namespace)

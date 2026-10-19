@@ -22,8 +22,9 @@ type NodeCommand struct {
 	Verb string
 }
 
-// Execute runs the verb against one indexed node, returning the line to report.
-func (c NodeCommand) Execute(ref state.Ref) (string, error) {
+// Execute runs the verb against one indexed node, returning the line to
+// report. extraArgs are kubectl's own flags, forwarded as given.
+func (c NodeCommand) Execute(ref state.Ref, extraArgs []string) (string, error) {
 	name, _, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", err
@@ -34,13 +35,17 @@ func (c NodeCommand) Execute(ref state.Ref) (string, error) {
 	// No -n: a Node is cluster-scoped, and kubectl cordon takes no namespace.
 	// Namespace is left unset on the error below for the same reason — see the
 	// Namespace field's own doc on StaleResourceError.
-	if _, err := c.Kubectl.Run([]string{c.Verb, name}); err != nil {
+	if _, err := c.Kubectl.Run(append([]string{c.Verb, name}, extraArgs...)); err != nil {
 		// A vanished node reads as stale so the caller can relist, rather than
 		// as whatever kubectl said about a name that is no longer there.
 		if IsNotFound(err) {
 			return "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
 		}
 		return "", err
+	}
+	// kx's line stands in for kubectl's, which says "(server dry run)" itself.
+	if isDryRun(extraArgs) {
+		return fmt.Sprintf("%s Node/%s (dry run — nothing was changed)", c.pastTense(), name), nil
 	}
 	return fmt.Sprintf("%s Node/%s", c.pastTense(), name), nil
 }
@@ -124,35 +129,48 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 		short = "Mark one or more indexed Nodes schedulable again."
 		long = "Reverses kx cordon, letting the scheduler place pods on the node again."
 	}
-	return &cobra.Command{
-		Use:         verb + " <index>...",
+	long += "\n\nkubectl's own " + verb + " flags pass through, --dry-run among them."
+	cmd := &cobra.Command{
+		Use:         verb + " <index>... [kubectl flags]",
 		Short:       short,
 		Long:        long,
-		Example:     "  kx " + verb + " 1\n  kx " + verb + " 1 3\n  kx " + verb + " 1..3",
-		Args:        minArgs(1),
+		Example:     "  kx " + verb + " 1\n  kx " + verb + " 1 3\n  kx " + verb + " 1..3\n  kx " + verb + " 1 --dry-run=server",
 		Annotations: mutatingAnnotations,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			installAgentIndexNotice(services)
-			resolved, err := resolveRefs(services.State, "indexes", args)
+	}
+	registerDryRunFlag(cmd)
+	kubectlFlags := registerKubectlFlags(cmd, verb)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		installAgentIndexNotice(services)
+		indexArgs, stray, extra, err := splitIndexArgv(cmd, args, kubectlFlags)
+		if err != nil {
+			return err
+		}
+		if err := refuseStray(cmd, kubectlFlags, stray); err != nil {
+			return err
+		}
+		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		if err != nil {
+			return err
+		}
+		if err := validateNodeIndexes(resolved, verb); err != nil {
+			return err
+		}
+		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+			return err
+		}
+		command := NodeCommand{Kubectl: services.Kubectl, State: services.State, Verb: verb}
+		// Reported one at a time, so a failure partway through leaves the
+		// successes visible rather than swallowing them.
+		for _, target := range resolved {
+			message, err := command.Execute(target.Ref, extra)
 			if err != nil {
 				return err
 			}
-			if err := validateNodeIndexes(resolved, verb); err != nil {
-				return err
-			}
-			command := NodeCommand{Kubectl: services.Kubectl, State: services.State, Verb: verb}
-			// Reported one at a time, so a failure partway through leaves the
-			// successes visible rather than swallowing them.
-			for _, target := range resolved {
-				message, err := command.Execute(target.Ref)
-				if err != nil {
-					return err
-				}
-				render.Success(message)
-			}
-			return nil
-		},
+			render.Success(message)
+		}
+		return nil
 	}
+	return cmd
 }
 
 func newDrainCommand(services Services) *cobra.Command {
@@ -167,47 +185,12 @@ func newDrainCommand(services Services) *cobra.Command {
 			"command is a way to take a cluster down by typo.\n\n" +
 			"kubectl's own drain flags pass through — a drain usually needs " +
 			"--ignore-daemonsets, and often --delete-emptydir-data.",
-		Example: "  kx drain 1\n  kx drain 1 --ignore-daemonsets\n  kx drain 1 -y --ignore-daemonsets --delete-emptydir-data",
-		// Flags are parsed by hand so kubectl's own reach it untouched. No Args
-		// validator: cobra checks arity against the unstripped argv, which
-		// would answer `kx drain --help` with an arity error instead of help.
-		Annotations:        mutatingAnnotations,
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rest, handled, err := passthrough(cmd, args, nil)
-			if err != nil || handled {
-				return err
-			}
-			yes, rest := extractBool(rest, "--yes", "-y")
-			// Only with --yes: without it, the confirm prompt already names the
-			// listing's provenance (listingProvenance).
-			if yes {
-				installAgentIndexNotice(services)
-			}
-			if len(rest) == 0 {
-				return requiredArgsError(cmd)
-			}
-			ref, err := parseRef("index", rest[0])
-			if err != nil {
-				return err
-			}
-			_, namespace, kind, err := services.State.Resolve(ref)
-			if err != nil {
-				return err
-			}
-			resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-			if err := refuseScopeFlagResolved(resolved, rest[1:]); err != nil {
-				return err
-			}
-			return DrainCommand{
-				Kubectl: services.Kubectl,
-				State:   services.State,
-				Confirm: services.confirm(),
-			}.Execute(ref, yes, rest[1:])
-		},
+		Example:     "  kx drain 1\n  kx drain 1 --ignore-daemonsets\n  kx drain 1 -y --ignore-daemonsets --delete-emptydir-data",
+		Args:        minArgs(1),
+		Annotations: mutatingAnnotations,
 	}
-	// Registered so they appear in --help; parsing is by hand.
 	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	// kubectl's drain flags, documented in kx's words.
 	cmd.Flags().Bool("ignore-daemonsets", false,
 		"Continue even though DaemonSet-managed pods cannot be evicted")
 	cmd.Flags().Bool("delete-emptydir-data", false,
@@ -217,6 +200,40 @@ func newDrainCommand(services Services) *cobra.Command {
 	cmd.Flags().Int("grace-period", -1,
 		"Seconds to give each pod to terminate; -1 uses the pod's own")
 	cmd.Flags().Duration("timeout", 0, "Give up waiting after this long")
+	kubectlFlags := registerKubectlFlags(cmd, "drain")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		yes, _ := cmd.Flags().GetBool("yes")
+		// Only with --yes: without it, the confirm prompt already names the
+		// listing's provenance (listingProvenance).
+		if yes {
+			installAgentIndexNotice(services)
+		}
+		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
+		if len(positional) == 0 {
+			return requiredArgsError(cmd)
+		}
+		ref, err := parseRef("index", positional[0])
+		if err != nil {
+			return err
+		}
+		if err := refuseStray(cmd, kubectlFlags, positional[1:]); err != nil {
+			return err
+		}
+		_, namespace, kind, err := services.State.Resolve(ref)
+		if err != nil {
+			return err
+		}
+		extra := forward
+		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
+		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+			return err
+		}
+		return DrainCommand{
+			Kubectl: services.Kubectl,
+			State:   services.State,
+			Confirm: services.confirm(),
+		}.Execute(ref, yes, extra)
+	}
 	return cmd
 }
 

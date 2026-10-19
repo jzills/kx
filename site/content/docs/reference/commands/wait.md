@@ -14,7 +14,7 @@ A Deployment, StatefulSet or DaemonSet is waited for with kx rollout status, whi
 
 Several indexes are all resolved and checked before anything waits, then waited for in order; the first that fails or times out ends the command. --timeout covers them together, as it does for kubectl: each waits for what the ones before it left, not a timeout of its own.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -35,6 +35,22 @@ kx wait [OPTIONS] <index>... [kubectl flags]
 | `--for strings` | Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `--timeout duration` | How long to wait for every index together (default 30s); 0 checks once |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--all` | Select all resources in the namespace of the specified resource types |
+| `-A, --all-namespaces` | If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace. |
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
+| `-f, --filename strings` | identifying the resource. |
+| `--local` | If true, annotation will NOT contact api-server but run locally. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', and '!='.(e.g. -l key1=value1,key2=value2) |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

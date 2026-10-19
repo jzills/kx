@@ -8,7 +8,7 @@ weight: 5
 
 Copies files to or from an indexed pod via kubectl cp. Either side of the copy can name a path inside the pod as index:path.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -30,6 +30,12 @@ kx cp [OPTIONS] <src> <dest> [kubectl flags]
 | `-c, --container string` | Container name, if the pod has more than one |
 | `--no-preserve` | Don't preserve the copied file/directory's ownership and permissions |
 | `--retries int` | Number of retries on a copy failure (0 disables) |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

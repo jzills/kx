@@ -265,65 +265,58 @@ func newSetImageCommand(services Services) *cobra.Command {
 			"  kx set image 1 api=api:v2 envoy=envoyproxy/envoy:v1.31\n" +
 			"  kx set image 1 '*=api:v2'\n" +
 			"  kx set image @api api:v2 --dry-run=server",
-		// No Args validator, for the reason scale has none: cobra counts the
-		// forwarded kubectl flags as arguments. The arity check is below.
-		// No annotation either: the pinning test reads top-level commands,
-		// and the set group carries it for this one.
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rest, handled, err := passthrough(cmd, args, nil)
-			if err != nil || handled {
-				return err
-			}
-			// The specs are the words before the first flag: an image never
-			// starts with a dash, and anything that does is kubectl's.
-			if len(rest) < 2 {
-				return requiredArgsError(cmd)
-			}
-			specs, extra := splitLeadingPositionals(rest[1:])
-			if len(specs) == 0 {
-				return requiredArgsError(cmd)
-			}
-			installAgentIndexNotice(services)
-			ref, err := parseRef("index", rest[0])
-			if err != nil {
-				return err
-			}
-			name, namespace, kind, err := services.State.Resolve(ref)
-			if err != nil {
-				return err
-			}
-			target := Resolved{Ref: ref, Name: name, Namespace: namespace, Kind: kind}
-			if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
-				return err
-			}
-			changes, output, err := SetImageCommand{Kubectl: services.Kubectl}.
-				Execute(target, specs, extra)
-			if err != nil {
-				return err
-			}
-			dryRun := isDryRun(extra)
-			changed := false
-			lines := make([]string, 0, len(changes))
-			for _, change := range changes {
-				lines = append(lines, imageChangeLine(target, change, dryRun))
-				changed = changed || change.From != change.To
-			}
-			reportChange(extra, output, lines...)
-			// Only a real change starts a rollout: a dry run makes none, and
-			// nor does setting every container to the image it already runs.
-			if rolloutKinds.Has(kind) && changed && !dryRun {
-				hint := "kx rollout status " + ref.String() + " to follow it"
-				if askedForOutput(extra) {
-					render.Notice(hint)
-				} else {
-					render.Caption(hint)
-				}
-			}
-			return nil
-		},
+		// No annotation: the pinning test reads top-level commands, and the
+		// set group carries it for this one.
+		Args: minArgs(2),
 	}
 	registerChangeFlags(cmd)
+	kubectlFlags := registerKubectlFlags(cmd, "set image")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		positional, extra := kubectlArgv(cmd, args, kubectlFlags)
+		// Every positional after the index is a spec: a flag's value is
+		// attached to its flag by the parse, so none is mistaken for one.
+		if len(positional) < 2 {
+			return requiredArgsError(cmd)
+		}
+		specs := positional[1:]
+		installAgentIndexNotice(services)
+		ref, err := parseRef("index", positional[0])
+		if err != nil {
+			return err
+		}
+		name, namespace, kind, err := services.State.Resolve(ref)
+		if err != nil {
+			return err
+		}
+		target := Resolved{Ref: ref, Name: name, Namespace: namespace, Kind: kind}
+		if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
+			return err
+		}
+		changes, output, err := SetImageCommand{Kubectl: services.Kubectl}.
+			Execute(target, specs, extra)
+		if err != nil {
+			return err
+		}
+		dryRun := isDryRun(extra)
+		changed := false
+		lines := make([]string, 0, len(changes))
+		for _, change := range changes {
+			lines = append(lines, imageChangeLine(target, change, dryRun))
+			changed = changed || change.From != change.To
+		}
+		reportChange(extra, output, lines...)
+		// Only a real change starts a rollout: a dry run makes none, and
+		// nor does setting every container to the image it already runs.
+		if rolloutKinds.Has(kind) && changed && !dryRun {
+			hint := "kx rollout status " + ref.String() + " to follow it"
+			if askedForOutput(extra) {
+				render.Notice(hint)
+			} else {
+				render.Caption(hint)
+			}
+		}
+		return nil
+	}
 	return cmd
 }
 

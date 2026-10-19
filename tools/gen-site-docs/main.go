@@ -169,6 +169,7 @@ func commandPage(cmd *cobra.Command, weight int) string {
 	})
 	writeTable(&out, "Arguments", "Argument", help.Args, nil)
 	writeTable(&out, "Options", "Option", help.Options, nil)
+	writeTable(&out, "Passthrough options", "Option", help.Kubectl, nil)
 	writeTable(&out, "Global options", "Option", help.Global, nil)
 
 	if len(help.Examples) > 0 {

@@ -87,7 +87,7 @@ func TestWaitForOverridesTheDefault(t *testing.T) {
 		// spelling. It named only the last: the flag was read with the
 		// helper that keeps the final occurrence.
 		{kinds.Pod, []string{"1", "--for=condition=Ready", "--for", "condition=Initialized"},
-			"wait Pod/api -n prod --for=condition=Ready --for condition=Initialized",
+			"wait Pod/api -n prod --for=condition=Ready --for=condition=Initialized",
 			"· condition=Ready, condition=Initialized"},
 	} {
 		kube := &recordingKubectl{}
@@ -492,5 +492,26 @@ func TestWaitRefusesEveryTargetBeforeTheFirstWait(t *testing.T) {
 		if len(kube.runs) != 0 {
 			t.Errorf("%s: waited on %q before the refusal", tc.later.Kind, kube.runs)
 		}
+	}
+}
+
+// kx wait parses kubectl wait's flags: the indexes may follow them, and
+// --timeout is still kx's to read for the whole wait in any spelling.
+func TestWaitParsesKubectlFlags(t *testing.T) {
+	kube := &recordingKubectl{}
+	if _, err := runWait(t, kube, kinds.Pod, "prod", []string{"api"}, nil,
+		"--for", "delete", "--timeout", "2m", "1"); err != nil {
+		t.Fatalf("kx wait --for delete --timeout 2m 1: %v", err)
+	}
+	if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "wait Pod/api -n prod --for=delete --timeout=2m" {
+		t.Errorf("kubectl = %q, want the wait with both flags", kube.runs)
+	}
+	kube = &recordingKubectl{}
+	if _, err := runWait(t, kube, kinds.Pod, "prod", []string{"api"}, nil, "1", "--bogus"); err == nil ||
+		!strings.Contains(err.Error(), "'--bogus' isn't a flag of kubectl wait") {
+		t.Errorf("err = %v, want the unknown-flag refusal", err)
+	}
+	if len(kube.runs) > 0 {
+		t.Errorf("kubectl was called: %q", kube.runs)
 	}
 }

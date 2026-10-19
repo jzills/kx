@@ -10,6 +10,8 @@ Deletes one or more indexed resources, confirming each one individually — so d
 
 kubectl's own flags pass through: --force --grace-period=0 for a pod that will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still prompts — kx does not read kubectl's flag semantics, and reading --dry-run=none as a dry run would skip the prompt on a real delete.
 
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
@@ -26,9 +28,31 @@ kx delete [OPTIONS] <index>... [kubectl flags]
 
 | Option | Description |
 |---|---|
-| `--dry-run string` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `-y, --yes` | Skip the confirmation prompt |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--all` | Delete all resources, in the namespace of the specified resource types. |
+| `-A, --all-namespaces` | If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace. |
+| `--cascade[=string]` | Must be "background", "orphan", or "foreground". Selects the deletion cascading strategy for the dependents (e.g. Pods created by a ReplicationController). Defaults to background. |
+| `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
+| `-f, --filename strings` | containing the resource to delete. |
+| `--force` | If true, immediately remove resources from API and bypass graceful deletion. Note that immediate deletion of some resources may result in inconsistency or data loss and requires confirmation. |
+| `--grace-period int` | Period of time in seconds given to the resource to terminate gracefully. Ignored if negative. Set to 1 for immediate shutdown. Can only be set to 0 when --force is true (force deletion). |
+| `--ignore-not-found` | Treat "resource not found" as a successful delete. Defaults to "true" when --all is specified. |
+| `-i, --interactive` | If true, delete resource only when user confirms. |
+| `-k, --kustomize string` | Process a kustomization directory. This flag can't be used together with -f or -R. |
+| `--now` | If true, resources are signaled for immediate shutdown (same as --grace-period=1). |
+| `--raw string` | Raw URI to DELETE to the server. Uses the transport specified by the kubeconfig file. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--timeout duration` | The length of time to wait before giving up on a delete, zero means determine a timeout from the size of the object |
+| `--wait` | If true, wait for resources to be gone before returning. This waits for finalizers. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

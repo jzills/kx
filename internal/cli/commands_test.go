@@ -48,6 +48,10 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		// and produce "@nope is not a valid int".
 		{[]string{"@api", "-o", "wide"}, 1, "-o wide"},
 		{[]string{"@api", "2", "--tail=5"}, 2, "--tail=5"},
+		// A flag ends the run even when its value holds "..", which a range
+		// check alone would have taken for a malformed range.
+		{[]string{"1", "--since=.."}, 1, "--since=.."},
+		{[]string{"--output=jsonpath={..metadata.name}"}, 0, "--output=jsonpath={..metadata.name}"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -57,21 +61,6 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		if joinArgs(rest) != tc.wantRest {
 			t.Errorf("splitLeadingIndexes(%v) rest = %q, want %q", tc.args, joinArgs(rest), tc.wantRest)
 		}
-	}
-}
-
-func TestSplitAtDoubleDash(t *testing.T) {
-	before, after := splitAtDoubleDash([]string{"1", "-c", "app", "--", "ls", "/x"})
-	if joinArgs(before) != "1 -c app" {
-		t.Errorf("before = %q", joinArgs(before))
-	}
-	if joinArgs(after) != "ls /x" {
-		t.Errorf("after = %q", joinArgs(after))
-	}
-
-	before, after = splitAtDoubleDash([]string{"1"})
-	if joinArgs(before) != "1" || after != nil {
-		t.Errorf("no separator: before = %q, after = %v", joinArgs(before), after)
 	}
 }
 
@@ -909,7 +898,7 @@ func TestPortForwardHelpDoesNotTriggerAnArityError(t *testing.T) {
 func TestDebugWithoutAnIndexSaysSo(t *testing.T) {
 	cmd := newDebugCommand(Services{})
 
-	err := cmd.RunE(cmd, []string{"--"})
+	err := executeArgv(cmd, []string{"--"})
 
 	if err == nil {
 		t.Fatal("debug with no index succeeded")
@@ -1244,5 +1233,559 @@ func TestNewServicesForwardsKubectlWarnings(t *testing.T) {
 	}
 	if client.Warn == nil {
 		t.Error("kubectl.Exec.Warn is nil; kubectl's warnings are dropped")
+	}
+}
+
+// kx describe parses kubectl describe's flags, so an index may follow them,
+// a scope flag beside it is refused wherever it sits, and a flag kubectl
+// describe lacks is refused before kubectl runs.
+func TestDescribeParsesKubectlFlags(t *testing.T) {
+	describe := func(args ...string) (*recordingKubectl, error) {
+		kube := &recordingKubectl{output: "ok"}
+		services := switchServices(t, kube)
+		if err := services.State.Save(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod),
+			Namespace: "prod",
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		quietRender(t)
+		return kube, executeArgv(newDescribeCommand(services), args)
+	}
+
+	kube, err := describe("--show-events=false", "1")
+	if err != nil {
+		t.Fatalf("kx describe --show-events=false 1: %v", err)
+	}
+	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "describe Pod nginx -n prod --show-events=false" {
+		t.Errorf("kubectl = %q, want the index after the flag resolved", kube.interactive)
+	}
+
+	// An argument after the indexes is kubectl's, ahead of its flags, as it
+	// was when kx split argv by hand.
+	kube, err = describe("1", "redis", "--show-events=false")
+	if err != nil {
+		t.Fatalf("kx describe 1 redis: %v", err)
+	}
+	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "describe Pod nginx -n prod redis --show-events=false" {
+		t.Errorf("kubectl = %q, want redis forwarded before the flags", kube.interactive)
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"--chunk-size", "500"}, "requires <index>"},
+		{[]string{"1", "-o", "wide"}, "'-o' isn't a flag of kubectl describe"},
+	} {
+		kube, err := describe(tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx describe %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx describe %s: kubectl was called: %q", joinArgs(tc.args), kube.interactive)
+		}
+	}
+}
+
+// indexCommand runs a converted index command on argv against a listing of two
+// prod pods, nginx and redis, and returns what kubectl was asked to run.
+func indexCommand(t *testing.T, build func(Services) *cobra.Command, args ...string) (*recordingKubectl, error) {
+	t.Helper()
+	return indexCommandOn(t, kinds.Pod, build, args...)
+}
+
+// indexCommandOn is indexCommand with the two rows listed as kind.
+func indexCommandOn(t *testing.T, kind kinds.Kind, build func(Services) *cobra.Command, args ...string) (*recordingKubectl, error) {
+	t.Helper()
+	kube := &recordingKubectl{output: "ok"}
+	services := switchServices(t, kube)
+	services.Confirm = func(string) error { return nil }
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"nginx", "redis"}, kind),
+		Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	quietRender(t)
+	return kube, executeArgv(build(services), args)
+}
+
+// kx logs parses kubectl logs' flags: an index may follow them, kx's own
+// reading of --since and --follow sees them in any spelling, and an argument
+// after the index is still kubectl's container.
+func TestLogsParsesKubectlFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--tail", "5", "1"}, "logs nginx -n prod --tail=5"},
+		{[]string{"1", "--since", "7d"}, "logs nginx -n prod --since=168h0m0s"},
+		{[]string{"1", "web", "-f"}, "logs nginx -n prod web --follow"},
+	} {
+		kube, err := indexCommand(t, newLogsCommand, tc.args...)
+		if err != nil {
+			t.Errorf("kx logs %s: %v", joinArgs(tc.args), err)
+			continue
+		}
+		if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != tc.want {
+			t.Errorf("kx logs %s: kubectl = %q, want %q", joinArgs(tc.args), kube.interactive, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-f", "1", "2"}, "--follow streams a single pod"},
+		{[]string{"1", "--since", "soon"}, "'--since'"},
+		{[]string{"1", "-o", "json"}, "'-o' isn't a flag of kubectl logs"},
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+	} {
+		kube, err := indexCommand(t, newLogsCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx logs %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx logs %s: kubectl was called: %q", joinArgs(tc.args), kube.interactive)
+		}
+	}
+}
+
+// kx edit parses kubectl edit's flags: the index may follow them, and a flag
+// kubectl edit lacks is refused before an editor opens.
+func TestEditParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommand(t, newEditCommand, "-o", "json", "2")
+	if err != nil {
+		t.Fatalf("kx edit -o json 2: %v", err)
+	}
+	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "edit Pod redis -n prod --output=json" {
+		t.Errorf("kubectl = %q, want row 2 edited with the flag", kube.interactive)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "--tail", "5"}, "'--tail' isn't a flag of kubectl edit"},
+		{[]string{"--windows-line-endings"}, "requires <index>"},
+	} {
+		kube, err := indexCommand(t, newEditCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx edit %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx edit %s: kubectl was called: %q", joinArgs(tc.args), kube.interactive)
+		}
+	}
+}
+
+// kx exec parses kubectl exec's flags up to --, and everything after -- is the
+// command to run: a flag-shaped argument there is the command's own, never
+// kubectl's or kx's. That is also why a flag kx doesn't know cannot be passed
+// after -- on kx exec, and the refusal doesn't offer it.
+func TestExecParsesKubectlFlagsUpToTheCommand(t *testing.T) {
+	kube, err := indexCommand(t, newExecCommand, "-c", "app", "1", "--", "sh", "-c", "-o json")
+	if err != nil {
+		t.Fatalf("kx exec -c app 1 -- sh -c '-o json': %v", err)
+	}
+	if len(kube.interactive) != 1 {
+		t.Fatalf("kubectl = %q, want one exec", kube.interactive)
+	}
+	// Exactly: the command once, after --, and its -o never read as a flag.
+	if got, want := joinArgs(kube.interactive[0]), "exec -it nginx -n prod --container=app -- sh -c -o json"; got != want {
+		t.Errorf("kubectl = %q, want %q", got, want)
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "--bogus"}, "Everything after -- is the command to run"},
+	} {
+		kube, err := indexCommand(t, newExecCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx exec %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive)+len(kube.probes) > 0 {
+			t.Errorf("kx exec %s: kubectl was called: %q %q", joinArgs(tc.args), kube.interactive, kube.probes)
+		}
+	}
+	if doc := commandHelp(newExecCommand(Services{})).Doc; strings.Contains(doc, "put it after `--`") {
+		t.Errorf("kx exec --help offers -- for kubectl's flags, but -- starts the command:\n%s", doc)
+	}
+}
+
+// kx debug parses kubectl debug's flags up to --. Its --image is kx's to read
+// as well as kubectl's, in any spelling and any position; its --profile is
+// kubectl debug's own, which shadows kubectl's global --profile.
+func TestDebugParsesKubectlFlagsUpToTheCommand(t *testing.T) {
+	kube, err := indexCommand(t, newDebugCommand, "--image", "alpine", "1", "--profile", "general", "--", "ls", "-o")
+	if err != nil {
+		t.Fatalf("kx debug --image alpine 1 --profile general -- ls -o: %v", err)
+	}
+	if len(kube.interactive) != 1 {
+		t.Fatalf("kubectl = %q, want one debug", kube.interactive)
+	}
+	got := joinArgs(kube.interactive[0])
+	for _, want := range []string{"alpine", "--profile=general"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("kubectl = %q, want it to carry %q", got, want)
+		}
+	}
+	if !strings.HasSuffix(got, " -- ls -o") || strings.Count(got, "ls -o") != 1 {
+		t.Errorf("kubectl = %q, want the command once, after --", got)
+	}
+	if profile := newDebugCommand(Services{}).Flags().Lookup("profile"); profile == nil ||
+		!strings.Contains(profile.Usage, "general") {
+		t.Errorf("--profile = %+v, want kubectl debug's own, not the global pprof flag", profile)
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--image=x"}, "requires <index>"},
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "--bogus"}, "Everything after -- is the command to run"},
+	} {
+		kube, err := indexCommand(t, newDebugCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx debug %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %s: kubectl was called: %q", joinArgs(tc.args), kube.interactive)
+		}
+	}
+}
+
+// An explicitly empty --image, which `--image "$IMG"` with IMG unset produces,
+// was forwarded as --image= beside the configured --image=busybox, leaving
+// kubectl two. Whichever won, an ephemeral container can't be removed once
+// attached, so it is refused before kubectl runs.
+func TestDebugRefusesAnEmptyImage(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--image", ""},
+		{"1", "--image="},
+	} {
+		kube, err := indexCommand(t, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "'--image' was given an empty value") {
+			t.Errorf("kx debug %q: err = %v, want the empty --image refused", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
+// An explicitly empty --target, which `--target "$T"` with T unset produces,
+// read as absent: kx supplied the pod's one container and forwarded --target=
+// after it, and kubectl kept the empty one. The container was attached for
+// good without the target's processes, so it is refused before kubectl runs.
+func TestDebugRefusesAnEmptyTarget(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--target", ""},
+		{"1", "--target="},
+	} {
+		kube, err := indexCommand(t, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "'--target' was given an empty value") {
+			t.Errorf("kx debug %q: err = %v, want the empty --target refused", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
+// Debugging a Node refuses --target however it was written. An empty one read
+// as absent and was forwarded, the same "read as absent" failure the Pod side
+// refuses (TestDebugRefusesAnEmptyTarget).
+func TestDebugOnANodeRefusesAnEmptyTarget(t *testing.T) {
+	for _, args := range [][]string{
+		{"1", "--target", ""},
+		{"1", "--target="},
+		{"1", "--target", "app"},
+	} {
+		kube, err := indexCommandOn(t, kinds.Node, newDebugCommand, args...)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined with a Node") {
+			t.Errorf("kx debug %q: err = %v, want --target refused for a Node", args, err)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx debug %q: kubectl was called: %q", args, kube.interactive)
+		}
+	}
+}
+
+// kx delete parses kubectl delete's flags. --dry-run is kx's to read as well
+// as kubectl's, and takes kubectl's shape: bare, it is a dry run on its own
+// and takes nothing after it — kx registers it as a string, which alone would
+// have swallowed the -y that follows as its value.
+func TestDeleteParsesKubectlFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"1", "--dry-run", "-y"}, "delete Pod nginx -n prod --dry-run"},
+		{[]string{"-y", "--dry-run=client", "2"}, "delete Pod redis -n prod --dry-run=client"},
+		{[]string{"--force", "--grace-period", "0", "1", "-y"}, "delete Pod nginx -n prod --force --grace-period=0"},
+	} {
+		kube, err := indexCommand(t, newDeleteCommand, tc.args...)
+		if err != nil {
+			t.Errorf("kx delete %s: %v", joinArgs(tc.args), err)
+			continue
+		}
+		calls := append(kube.runs, kube.interactive...)
+		if len(calls) != 1 || joinArgs(calls[0]) != tc.want {
+			t.Errorf("kx delete %s: kubectl = %q, want %q", joinArgs(tc.args), calls, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-n", "other", "1", "-y"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "--bogus", "-y"}, "'--bogus' isn't a flag of kubectl delete"},
+		{[]string{"-y"}, "requires <index>"},
+	} {
+		kube, err := indexCommand(t, newDeleteCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx delete %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs)+len(kube.interactive) > 0 {
+			t.Errorf("kx delete %s: kubectl was called: %q %q", joinArgs(tc.args), kube.runs, kube.interactive)
+		}
+	}
+}
+
+// A positional left after a mutating command's arguments is refused, not
+// forwarded: kubectl read it as one more resource, so kx delete 1 web -y
+// deleted web as well as the nginx it reported (#507). --cascade orphan, bare,
+// left orphan behind that way, and the refusal says how to attach it.
+func TestMutatingCommandsRefuseAStrayPositional(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		kind  kinds.Kind
+		build func(Services) *cobra.Command
+		args  []string
+		want  string
+	}{
+		{"delete", kinds.Pod, newDeleteCommand, []string{"1", "web", "-y"}, "'web' isn't an argument of delete"},
+		{"delete", kinds.Pod, newDeleteCommand, []string{"1", "2", "web", "-y"}, "'web' isn't an argument of delete"},
+		{"delete", kinds.Pod, newDeleteCommand, []string{"1", "--cascade", "orphan", "-y"},
+			"attach it: '--cascade=orphan'"},
+		{"scale", kinds.Deployment, newScaleCommand, []string{"1", "3", "web"}, "'web' isn't an argument of scale"},
+		{"drain", kinds.Node, newDrainCommand, []string{"1", "node-b", "-y"}, "'node-b' isn't an argument of drain"},
+		{"rollout", kinds.Deployment, newRolloutCommand, []string{"restart", "1", "web"},
+			"'web' isn't an argument of rollout"},
+	} {
+		kube, err := indexCommandOn(t, tc.kind, tc.build, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx %s %s: err = %v, want %q", tc.name, joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs)+len(kube.interactive) > 0 {
+			t.Errorf("kx %s %s: kubectl was called: %q %q", tc.name, joinArgs(tc.args), kube.runs, kube.interactive)
+		}
+	}
+}
+
+// After -- a word is still kubectl's, forwarded unread: the refusal covers the
+// positionals kx parsed, not the escape that exists to get past kx's parse.
+func TestDeleteForwardsAfterDashUnread(t *testing.T) {
+	kube, err := indexCommand(t, newDeleteCommand, "1", "-y", "--", "--raw-flag")
+	if err != nil {
+		t.Fatalf("kx delete 1 -y -- --raw-flag: %v", err)
+	}
+	if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "delete Pod nginx -n prod --raw-flag" {
+		t.Errorf("kubectl = %q, want delete Pod nginx -n prod --raw-flag", kube.runs)
+	}
+}
+
+// --yes is kx's, parsed by cobra wherever it sits: with it the prompt is never
+// asked; without it a declined prompt deletes nothing.
+func TestDeleteYesSkipsThePromptWhereverItSits(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		deletes bool
+	}{
+		{[]string{"-y", "1"}, true},
+		{[]string{"1", "--yes"}, true},
+		{[]string{"1"}, false},
+	} {
+		kube := &recordingKubectl{output: "ok"}
+		services := switchServices(t, kube)
+		asked := false
+		services.Confirm = func(string) error { asked = true; return errors.New("declined") }
+		if err := services.State.Save(state.State{
+			Resources: state.NewResources([]string{"nginx"}, kinds.Pod), Namespace: "prod",
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		quietRender(t)
+		_ = executeArgv(newDeleteCommand(services), tc.args)
+		if deleted := len(kube.runs) > 0; deleted != tc.deletes || asked == tc.deletes {
+			t.Errorf("kx delete %s: deleted=%v asked=%v, want deleted=%v", joinArgs(tc.args), deleted, asked, tc.deletes)
+		}
+	}
+}
+
+// kx scale parses kubectl scale's flags: the index and the count may sit
+// among them, and --replicas is still refused beside a count in any spelling.
+func TestScaleParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommandOn(t, kinds.Deployment, newScaleCommand, "--current-replicas", "2", "1", "3")
+	if err != nil {
+		t.Fatalf("kx scale --current-replicas 2 1 3: %v", err)
+	}
+	if len(kube.runs) != 1 || !strings.Contains(joinArgs(kube.runs[0]), "--replicas=3") ||
+		!strings.Contains(joinArgs(kube.runs[0]), "--current-replicas=2") {
+		t.Errorf("kubectl = %q, want --replicas=3 and --current-replicas=2", kube.runs)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"1", "3", "--replicas", "4"}, "'--replicas' cannot be combined with a replica count"},
+		{[]string{"-n", "other", "1", "3"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "3", "--bogus"}, "'--bogus' isn't a flag of kubectl scale"},
+		{[]string{"1", "--timeout=1m"}, "requires <index> <replicas>"},
+		{[]string{"1", "x"}, "Invalid value for 'replicas': 'x' is not a valid int."},
+	} {
+		kube, err := indexCommandOn(t, kinds.Deployment, newScaleCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx scale %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs) > 0 {
+			t.Errorf("kx scale %s: kubectl was called: %q", joinArgs(tc.args), kube.runs)
+		}
+	}
+}
+
+// kx rollout registers every action's kubectl flags, and once the action is
+// read, refuses a flag only another action defines, naming that action.
+func TestRolloutParsesEachActionsFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"undo", "--to-revision", "2", "1"}, "--to-revision=2"},
+		{[]string{"history", "1", "--revision=3"}, "--revision=3"},
+		{[]string{"status", "1", "--timeout", "2m"}, "--timeout=2m"},
+	} {
+		kube, err := indexCommandOn(t, kinds.Deployment, newRolloutCommand, tc.args...)
+		if err != nil {
+			t.Errorf("kx rollout %s: %v", joinArgs(tc.args), err)
+			continue
+		}
+		calls := append(kube.runs, kube.interactive...)
+		if len(calls) != 1 || !strings.Contains(joinArgs(calls[0]), "rollout "+tc.args[0]) ||
+			!strings.Contains(joinArgs(calls[0]), tc.want) {
+			t.Errorf("kx rollout %s: kubectl = %q, want %s with %s", joinArgs(tc.args), calls, tc.args[0], tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"status", "1", "--to-revision=2"}, "'--to-revision' cannot be combined with 'status' — it is a flag of kubectl rollout undo."},
+		{[]string{"restart", "1", "--revision", "3"}, "it is a flag of kubectl rollout status and kubectl rollout history."},
+		// The first flag as typed, not the first alphabetically.
+		{[]string{"restart", "1", "--to-revision=2", "--revision=3"}, "'--to-revision' cannot be combined with 'restart'"},
+		{[]string{"-n", "other", "undo", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"undo", "1", "--bogus"}, "'--bogus' isn't a flag of kubectl rollout status, restart, pause, resume, history or undo as of"},
+		{[]string{"undo", "--timeout=1m"}, "requires <action> <index>"},
+	} {
+		kube, err := indexCommandOn(t, kinds.Deployment, newRolloutCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx rollout %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs)+len(kube.interactive) > 0 {
+			t.Errorf("kx rollout %s: kubectl was called: %q %q", joinArgs(tc.args), kube.runs, kube.interactive)
+		}
+	}
+}
+
+// kx port-forward parses kubectl port-forward's flags: the index and port may
+// sit among them, and further ports are still kubectl's.
+func TestPortForwardParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommand(t, newPortForwardCommand, "--address", "0.0.0.0", "1", "8080:80", "9090:90")
+	if err != nil {
+		t.Fatalf("kx port-forward --address 0.0.0.0 1 8080:80 9090:90: %v", err)
+	}
+	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "port-forward Pod/nginx 8080:80 -n prod 9090:90 --address=0.0.0.0" {
+		t.Errorf("kubectl = %q, want both ports and the address", kube.interactive)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-n", "other", "1", "8080"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "8080", "--bogus"}, "'--bogus' isn't a flag of kubectl port-forward"},
+		{[]string{"1", "--address=0.0.0.0"}, "requires <index> <port>"},
+	} {
+		kube, err := indexCommand(t, newPortForwardCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx port-forward %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.interactive) > 0 {
+			t.Errorf("kx port-forward %s: kubectl was called: %q", joinArgs(tc.args), kube.interactive)
+		}
+	}
+}
+
+// kx cp parses kubectl cp's flags: source and destination may sit among them,
+// and -c, --retries and --no-preserve reach kubectl in any spelling.
+func TestCopyParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommand(t, newCopyCommand, "-c", "app", "1:/etc/hosts", "./hosts", "--retries", "3")
+	if err != nil {
+		t.Fatalf("kx cp -c app 1:/etc/hosts ./hosts --retries 3: %v", err)
+	}
+	calls := append(kube.runs, kube.interactive...)
+	if len(calls) != 1 || !strings.HasPrefix(joinArgs(calls[0]), "cp prod/nginx:/etc/hosts ./hosts") ||
+		!strings.Contains(joinArgs(calls[0]), "--container=app") || !strings.Contains(joinArgs(calls[0]), "--retries=3") {
+		t.Errorf("kubectl = %q, want the copy with --container=app and --retries=3", calls)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"1:/etc/hosts", "./hosts", "--bogus"}, "'--bogus' isn't a flag of kubectl cp"},
+		{[]string{"1:/etc/hosts", "--retries=3"}, "requires <src> <dest>"},
+	} {
+		kube, err := indexCommand(t, newCopyCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx cp %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs)+len(kube.interactive) > 0 {
+			t.Errorf("kx cp %s: kubectl was called", joinArgs(tc.args))
+		}
+	}
+}
+
+// kx yaml parses kubectl get's flags; --show is kx's own, and is still
+// refused beside an output format in any spelling.
+func TestYamlParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommand(t, newYamlCommand, "--show-managed-fields", "1")
+	if err != nil {
+		t.Fatalf("kx yaml --show-managed-fields 1: %v", err)
+	}
+	if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "get Pod nginx -n prod -o yaml --show-managed-fields" {
+		t.Errorf("kubectl = %q, want the manifest with kubectl's --show-managed-fields", kube.runs)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--show", "spec", "-ojson", "1"}, "'--show' cannot be combined with an output format"},
+		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
+		{[]string{"1", "--bogus"}, "'--bogus' isn't a flag of kubectl get"},
+		{[]string{"--show", "spec"}, "requires <index>"},
+	} {
+		kube, err := indexCommand(t, newYamlCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx yaml %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs) > 0 {
+			t.Errorf("kx yaml %s: kubectl was called: %q", joinArgs(tc.args), kube.runs)
+		}
 	}
 }

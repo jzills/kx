@@ -76,12 +76,24 @@ func TestWriteValueNewlineOnlyForText(t *testing.T) {
 
 func isText(value []byte) bool { return toDisplay(value) == string(value) }
 
-func TestSecretFlags(t *testing.T) {
-	rest, options, err := secretFlags([]string{
-		"1", "--decode", "-k", "tls.crt", "-m", "web", "-y", "-n", "prod"})
-	if err != nil {
-		t.Fatalf("secretFlags: %v", err)
+// secretOptions parses argv the way kx secret does and returns kx's options
+// and the argv kubectl would get.
+func secretOptions(t *testing.T, args ...string) (getOptions, []string) {
+	t.Helper()
+	cmd := newSecretCommand(Services{}, "secret", nil)
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatalf("ParseFlags(%q): %v", args, err)
 	}
+	options, err := getOptionsFrom(cmd)
+	if err != nil {
+		t.Fatalf("getOptionsFrom: %v", err)
+	}
+	positional, forward := kubectlArgv(cmd, cmd.Flags().Args(), recordedKubectlArgs(cmd))
+	return options, append(positional, forward...)
+}
+
+func TestSecretFlags(t *testing.T) {
+	options, rest := secretOptions(t, "1", "--decode", "-k", "tls.crt", "-m", "web", "-y", "-n", "prod")
 	if !options.Decode || !options.Yes {
 		t.Errorf("options = %+v, want decode and yes set", options)
 	}
@@ -91,18 +103,14 @@ func TestSecretFlags(t *testing.T) {
 	if options.Match != "web" {
 		t.Errorf("match = %q, want web", options.Match)
 	}
-	// Everything kx doesn't own reaches kubectl untouched.
-	if strings.Join(rest, " ") != "1 -n prod" {
-		t.Errorf("rest = %q, want \"1 -n prod\"", strings.Join(rest, " "))
+	// Everything kx doesn't own reaches kubectl.
+	if strings.Join(rest, " ") != "1 --namespace=prod" {
+		t.Errorf("rest = %q, want \"1 --namespace=prod\"", strings.Join(rest, " "))
 	}
 }
 
 func TestSecretFlagsAbsentKey(t *testing.T) {
-	_, options, err := secretFlags([]string{"1", "--decode"})
-	if err != nil {
-		t.Fatalf("secretFlags: %v", err)
-	}
-	if options.HasKey {
+	if options, _ := secretOptions(t, "1", "--decode"); options.HasKey {
 		t.Error("HasKey is set with no --key given")
 	}
 }
@@ -116,15 +124,12 @@ func TestSecretFlagsEmptyKeyIsNotAnAbsentKey(t *testing.T) {
 		{"1", "--decode", "--key", ""},
 		{"1", "--decode", "--key="},
 	} {
-		_, options, err := secretFlags(args)
-		if err != nil {
-			t.Fatalf("secretFlags(%q): %v", args, err)
-		}
+		options, _ := secretOptions(t, args...)
 		if !options.HasKey {
-			t.Errorf("secretFlags(%q): HasKey = false, want true", args)
+			t.Errorf("%q: HasKey = false, want true", args)
 		}
 		if options.Key != "" {
-			t.Errorf("secretFlags(%q): Key = %q, want empty", args, options.Key)
+			t.Errorf("%q: Key = %q, want empty", args, options.Key)
 		}
 	}
 }
@@ -308,7 +313,7 @@ func TestIndexedDecodeRefusesMatch(t *testing.T) {
 	}
 }
 
-// oneResolved and twoResolved stand in for what runGet's resolveRefsExpecting
+// oneResolved and twoResolved stand in for what runGet's resolveParsedExpecting
 // call would have produced, for tests that exercise decodeSecrets directly
 // rather than through the whole runGet path. decodeSecrets trusts these —
 // the kind check now happens once, in the caller, before decodeSecrets is
@@ -501,6 +506,25 @@ func TestNamespaceDecodeAcrossNamespacesNamesEveryNamespace(t *testing.T) {
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A number after kubectl's flags is an index, as it is before them. kx secret
+// -n prod 1 asked kubectl for a Secret named "1", whose NotFound kx then took
+// for a vanished row: it said the state was stale and relisted.
+func TestSecretReadsATrailingNumberAsAnIndex(t *testing.T) {
+	for _, args := range [][]string{{"-n", "prod", "1"}, {"-A", "1"}} {
+		kube := &recordingKubectl{output: podsOutput}
+		services := staleServices(t, kube, &state.Query{Resource: "secret", Args: []string{}})
+		cmd := withRefresh(services, newSecretCommand(services, "secret", nil))
+		cmd.SilenceUsage, cmd.SilenceErrors = true, true
+		_, _, err := runCaptured(t, cmd, args)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined with an index") {
+			t.Errorf("kx secret %s: err = %v, want the scope flag refused beside the index", joinArgs(args), err)
+		}
+		if len(kube.runs) > 0 {
+			t.Errorf("kx secret %s: kubectl was called: %q", joinArgs(args), kube.runs)
 		}
 	}
 }

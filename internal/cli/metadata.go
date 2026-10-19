@@ -250,12 +250,6 @@ func (c MetadataWriteCommand) Execute(
 		message = fmt.Sprintf(
 			"kx %s needs key=value to set, or --remove to name a key to drop — neither was given.",
 			c.Verb)
-		// Pairs are read only from before the first kubectl flag, so one typed
-		// after them lands here, and "neither was given" alone would deny what
-		// the user can see they typed.
-		if len(extraArgs) > 0 {
-			message += " key=value pairs go right after the index, before kubectl's flags."
-		}
 		return "", "", errors.New(message)
 	}
 

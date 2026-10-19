@@ -12,6 +12,8 @@ One index only, unlike kx cordon: a drain evicts running workloads and blocks un
 
 kubectl's own drain flags pass through — a drain usually needs --ignore-daemonsets, and often --delete-emptydir-data.
 
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
@@ -34,6 +36,18 @@ kx drain [OPTIONS] <index> [kubectl flags]
 | `--ignore-daemonsets` | Continue even though DaemonSet-managed pods cannot be evicted |
 | `--timeout duration` | Give up waiting after this long |
 | `-y, --yes` | Skip the confirmation prompt |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--chunk-size int64` | Return large lists in chunks rather than all at once. Pass 0 to disable. |
+| `--disable-eviction` | Force drain to use delete, even if eviction is supported. This will bypass checking PodDisruptionBudgets, use with caution. |
+| `--dry-run[=string]` | Must be "none", "server", or "client". If client strategy, only print the object that would be sent, without sending it. If server strategy, submit server-side request without persisting the resource. |
+| `--pod-selector string` | Label selector to filter pods on the node |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--skip-wait-for-delete-timeout int` | If pod DeletionTimestamp older than N seconds, skip waiting for the pod. Seconds must be greater than 0 to skip. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

@@ -8,7 +8,7 @@ weight: 11
 
 Opens an indexed resource in your editor via kubectl edit — one resource at a time, since only one editor session can be open.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -22,6 +22,25 @@ kx edit [OPTIONS] <index> [kubectl flags]
 |---|---|
 | `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--field-manager string` | Name of the manager used to track field ownership. |
+| `-f, --filename strings` | Filename, directory, or URL to files to use to edit the resource |
+| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `-o, --output string` | Output format. One of: (json, yaml, kyaml, name, go-template, go-template-file, template, templatefile, jsonpath, jsonpath-as-json, jsonpath-file). |
+| `--output-patch` | Output the patch if the resource is edited. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `--save-config` | If true, the configuration of current object will be saved in its annotation. Otherwise, the annotation will be unchanged. This flag is useful when you want to perform kubectl apply on this object in the future. |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--subresource string` | If specified, edit will operate on the subresource of the requested object. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--validate[=string]` | Must be one of: strict (or true), warn, ignore (or false). "true" or "strict" will use a schema to validate the input and fail the request if invalid. It will perform server side validation if ServerSideFieldValidation is enabled on the api-server, but will fall back to less reliable client-side validation if not. "warn" will warn about unknown or duplicate fields without blocking the request if server-side field validation is enabled on the API server, and behave as "ignore" otherwise. "false" or "ignore" will not perform any schema validation, silently dropping any unknown or duplicate fields. |
+| `--windows-line-endings` | Defaults to the line ending native to your platform. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -33,4 +52,5 @@ kx edit [OPTIONS] <index> [kubectl flags]
 
 ```bash
 kx edit 2
+kx edit 2 -o json
 ```

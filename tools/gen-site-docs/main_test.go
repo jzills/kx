@@ -152,7 +152,7 @@ func TestSignatureMatchesTheREADMESpelling(t *testing.T) {
 	// them kx reads as well, which change what it prints, are registered and
 	// listed.
 	if got, want := cmddoc.Signature(cmd),
-		"kx scale <index> <replicas> [--dry-run str] [--output/-o str] [kubectl flags...]"; got != want {
+		"kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]"; got != want {
 		t.Errorf("Signature() = %q, want %q", got, want)
 	}
 }

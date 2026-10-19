@@ -532,10 +532,10 @@ func TestYamlUsesTheCallersOutputFormat(t *testing.T) {
 		t.Fatalf("kx yaml 1 -o json: %v", err)
 	}
 	got := joined(kube.runs[0])
-	if got != "get Pod nginx -n prod -o json" {
-		t.Errorf("argv = %q, want one -o, the caller's", got)
+	if got != "get Pod nginx -n prod --output=json" {
+		t.Errorf("argv = %q, want one output format, the caller's", got)
 	}
-	if strings.Count(got, "-o ") != 1 {
+	if strings.Contains(got, "yaml") {
 		t.Errorf("argv = %q, want kx's own -o yaml dropped", got)
 	}
 }
@@ -592,29 +592,6 @@ func TestScaleRefusesAnExplicitReplicasFlag(t *testing.T) {
 	}
 	if len(kube.runs) != 0 {
 		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
-	}
-}
-
-// Cobra's arity check runs against the unstripped argv, so a command whose
-// arguments are all kx's own flags reaches its index lookup with nothing —
-// and --help is a single argument that an Args gate would reject before
-// passthrough could resolve it.
-func TestNewlyForwardingCommandsHaveNoArgsValidator(t *testing.T) {
-	for name, cmd := range map[string]*cobra.Command{
-		"delete":   newDeleteCommand(Services{}),
-		"scale":    newScaleCommand(Services{}),
-		"rollout":  newRolloutCommand(Services{}),
-		"yaml":     newYamlCommand(Services{}),
-		"label":    newMetadataWriteCommand(Services{}, "label", "labels", "", ""),
-		"annotate": newMetadataWriteCommand(Services{}, "annotate", "annotations", "", ""),
-	} {
-		if cmd.Args != nil {
-			t.Errorf("%s has an Args validator; cobra runs it against the raw argv, "+
-				"which counts forwarded kubectl flags as positional arguments", name)
-		}
-		if !cmd.DisableFlagParsing {
-			t.Errorf("%s does not disable flag parsing, so kubectl's flags cannot pass through", name)
-		}
 	}
 }
 
@@ -867,7 +844,7 @@ func TestLabelAndAnnotateForwardKubectlFlags(t *testing.T) {
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("kx %s 1 team=web --dry-run=client: %v", tc.verb, err)
 		}
-		want := tc.verb + " Pod nginx -n prod team=web --dry-run=client --field-manager kx"
+		want := tc.verb + " Pod nginx -n prod team=web --dry-run=client --field-manager=kx"
 		if got := joined(kube.runs[len(kube.runs)-1]); got != want {
 			t.Errorf("argv = %q, want %q", got, want)
 		}
@@ -911,20 +888,18 @@ func TestLabelRefusesANamespaceFlagBesideAnIndex(t *testing.T) {
 	}
 }
 
-// Pairs come before kubectl's flags. One typed after them would reach kubectl
-// unseen by kx; the refusal for "nothing to set" says where they go.
-func TestLabelSaysWherePairsGoWhenTheyFollowTheFlags(t *testing.T) {
-	kube := &recordingKubectl{}
+// kx parses kubectl's flags, so a pair typed after them is still a pair: each
+// flag's value is attached to it by the parse, and nothing else is left to
+// mistake for one. Pairs had to come first when kx split argv by hand.
+func TestLabelReadsPairsAfterKubectlsFlags(t *testing.T) {
+	kube := &recordingKubectl{output: `{"metadata":{}}`}
 	cmd := newMetadataWriteCommand(labelServices(t, kube), "label", "labels", "", "")
-	cmd.SetArgs([]string{"1", "--dry-run=client", "team=web"})
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "before kubectl's flags") {
-		t.Fatalf("err = %v, want it to say pairs go before kubectl's flags", err)
+	if err := executeArgv(cmd, []string{"1", "--dry-run=client", "-o", "jsonpath={.metadata}", "team=web"}); err != nil {
+		t.Fatalf("kx label 1 --dry-run=client -o jsonpath={.metadata} team=web: %v", err)
 	}
-	if len(kube.runs) != 0 {
-		t.Errorf("made %d kubectl calls for a refused command, want 0", len(kube.runs))
+	want := "label Pod nginx -n prod team=web --dry-run=client --output=jsonpath={.metadata}"
+	if got := joined(kube.runs[len(kube.runs)-1]); got != want {
+		t.Errorf("argv = %q, want %q", got, want)
 	}
 }
 

@@ -352,8 +352,14 @@ type ownerRef struct {
 // matched tree is always whole ownership: a term that happened to hit one
 // pod's hash would otherwise prune its siblings out from under their
 // ReplicaSet. Empty keeps every root.
+// emptyNote is what the tree says when match narrowed it to nothing, passed
+// in already formatted rather than spelled here: the phrase belongs to
+// render.NothingMatches, and internal/render cannot be imported from here
+// (render → diagnostics → graph would cycle). Spelling it locally is what let
+// this one drift to "no workloads matching" while the rest of kx said
+// "nothing matches".
 func (b Builder) BuildNamespace(
-	ctx context.Context, namespace, match string, indexed bool, startAt int,
+	ctx context.Context, namespace, match, emptyNote string, indexed bool, startAt int,
 ) (*tree.Node, []Resource, error) {
 	deployments, err := b.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -485,7 +491,7 @@ func (b Builder) BuildNamespace(
 	}
 	if len(roots) == 0 {
 		if match != "" {
-			root.Add("(no workloads matching '"+match+"')", theme.Muted)
+			root.Add("("+emptyNote+")", theme.Muted)
 		} else {
 			root.Add("(no workloads)", theme.Muted)
 		}

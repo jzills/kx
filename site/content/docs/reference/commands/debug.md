@@ -14,7 +14,7 @@ Kubernetes keeps an ephemeral container on the pod's spec for as long as the pod
 
 A Node index — from kx get nodes or kx top nodes — debugs the node instead, which is a different operation wearing the same name: kubectl creates a new privileged pod on that node, in the current namespace, with the host's filesystem mounted at /host and the host namespaces joined. Use it to reach a kubelet, a container runtime, or the node's own logs. That pod outlives the shell — kubectl names it on exit, and it is yours to delete. --target does not apply, since there is no container to share a namespace with.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused.
 
 ## Usage
 
@@ -36,6 +36,34 @@ kx debug [OPTIONS] <index> [kubectl flags] [-- command...]
 | `--image string` | Image for the debug container (default: the debug_image config key) |
 | `--target string` | Container to share a process namespace with, for a pod with several; not for nodes |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--arguments-only` | If specified, everything after -- will be passed to the new container as Args instead of Command. |
+| `--attach` | If true, wait for the container to start running, and then attach as if 'kubectl attach ...' were called. Default false, unless '-i/--stdin' is set, in which case the default is true. |
+| `-c, --container string` | Container name to use for debug container. |
+| `--copy-to string` | Create a copy of the target Pod with this name. |
+| `--custom string` | Path to a JSON or YAML file containing a partial container spec to customize built-in debug profiles. |
+| `--env stringToString` | Environment variables to set in the container. |
+| `-f, --filename strings` | identifying the resource to debug |
+| `--image-pull-policy string` | The image pull policy for the container. If left empty, this value will not be specified by the client and defaulted by the server. |
+| `--keep-annotations` | If true, keep the original pod annotations.(This flag only works when used with '--copy-to') |
+| `--keep-init-containers` | Run the init containers for the pod. Defaults to true.(This flag only works when used with '--copy-to') |
+| `--keep-labels` | If true, keep the original pod labels.(This flag only works when used with '--copy-to') |
+| `--keep-liveness` | If true, keep the original pod liveness probes.(This flag only works when used with '--copy-to') |
+| `--keep-readiness` | If true, keep the original pod readiness probes.(This flag only works when used with '--copy-to') |
+| `--keep-startup` | If true, keep the original startup probes.(This flag only works when used with '--copy-to') |
+| `--profile string` | Options are "general", "baseline", "restricted", "netadmin" or "sysadmin". Defaults to "general" |
+| `-q, --quiet` | If true, suppress informational messages. |
+| `--replace` | When used with '--copy-to', delete the original Pod. |
+| `--same-node` | When used with '--copy-to', schedule the copy of target Pod on the same node. |
+| `--set-image stringToString` | When used with '--copy-to', a list of name=image pairs for changing container images, similar to how 'kubectl set image' works. |
+| `--share-processes` | When used with '--copy-to', enable process namespace sharing in the copy. |
+| `-i, --stdin` | Keep stdin open on the container(s) in the pod, even if nothing is attached. |
+| `-t, --tty` | Allocate a TTY for the debugging container. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -50,4 +78,5 @@ kx debug 1
 kx debug 1 --image alpine
 kx debug 1 -- ls /proc/1/root
 kx debug 1 -- ls /host/var/log
+kx debug 1 --profile=sysadmin
 ```

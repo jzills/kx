@@ -169,7 +169,7 @@ func renderSecret(secret secretData, namespace string) {
 // listing them, so it never re-saves state.
 //
 // resolved has already been resolved — and, for a non-empty batch, kind
-// checked against kinds.Secret — by the caller's resolveRefsExpecting call
+// checked against kinds.Secret — by the caller's resolveParsedExpecting call
 // before decodeSecrets is ever reached, so every entry here is safe to fetch.
 // That is what keeps `kx get secrets --decode 1 99` from decoding and
 // printing index 1's plaintext before failing on the out-of-range 99: the
@@ -277,11 +277,13 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, m
 	secrets = kept
 
 	count := len(secrets)
-	label := itemCount(count)
+	// A term that matched nothing keeps the count and names the term in a
+	// row beneath, as kx get secrets -m does. See render.EmptyMatch.
 	if count == 0 && match != "" {
-		label = render.NothingMatches(match)
+		render.EmptyMatch(kinds.PluralDisplay("secret"), namespace, itemCount(0), match)
+	} else {
+		render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, itemCount(count))
 	}
-	render.ScopeBanner(kinds.PluralDisplay("secret"), namespace, label)
 	if count == 0 {
 		return nil
 	}
@@ -310,66 +312,29 @@ func decodeNamespace(services Services, command SecretCommand, extra []string, m
 	return nil
 }
 
-// secretFlags pulls the flags `get` and `secret` share out of the raw
-// arguments. See passthrough.go for why cobra can't do this.
-func secretFlags(args []string) ([]string, getOptions, error) {
-	options := getOptions{}
-	match, rest, err := extractString(args, "--match", "-m")
-	if err != nil {
-		return nil, options, err
-	}
-	options.Match = match
-
-	options.Decode, rest = extractBool(rest, "--decode")
-	options.Yes, rest = extractBool(rest, "--yes", "-y")
-
-	// Presence, not emptiness: `-k ""` asks for a key that cannot exist, and
-	// must fail as a missing key rather than silently widening into a dump of
-	// every value in the Secret.
-	hasKey := hasFlag(rest, "--key", "-k")
-	key, rest, err := extractString(rest, "--key", "-k")
-	if err != nil {
-		return nil, options, err
-	}
-	if hasKey {
-		options.Key, options.HasKey = key, true
-	}
-	return rest, options, nil
-}
-
 func newSecretCommand(services Services, use string, aliases []string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     use + " [index]... [kubectl flags]",
 		Short:   "List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets.",
 		Aliases: aliases,
 		Long:    "Lists Secrets exactly as kx get does. With --decode, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.",
-		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3\n  kx secret 3..",
-		// Everything not a kx flag belongs to kubectl.
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rest, handled, err := passthrough(cmd, args, nil)
-			if err != nil || handled {
-				return err
-			}
-			rest, options, err := secretFlags(rest)
-			if err != nil {
-				return err
-			}
-			return runGet(services, "secret", rest, options)
-		},
+		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3\n  kx secret 3..\n  kx secret -l app=web",
 	}
-	// Registered so they appear in the command's help; parsing is by hand.
-	cmd.Flags().StringP("match", "m", "", matchUsage)
-	cmd.Flags().Bool("decode", false,
-		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
-	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
-	cmd.Flags().BoolP("yes", "y", false,
-		"Skip the confirmation prompt for a namespace-wide --decode")
-	// Pure kubectl passthrough, parsed by hand like every other flag here —
-	// registered only so they appear in --help instead of vanishing.
-	cmd.Flags().StringP("namespace", "n", "", "Namespace to list from; defaults to the current namespace")
-	cmd.Flags().BoolP("all-namespaces", "A", false, "List across every namespace; each row is indexed and carries its own namespace")
-	registerFormatFlags(cmd)
-	registerWatchFlag(cmd)
+	// kubectl get's flags, as kx get takes them: kx secret is kubectl get
+	// secret.
+	kubectlFlags := registerGetFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
+		options, err := getOptionsFrom(cmd)
+		if err != nil {
+			return err
+		}
+		// The indexes lead, as runGet reads them, then kubectl's flags; what
+		// followed `--` is handed over apart, so none of it is an index.
+		options.AfterDash = afterDash(cmd, args)
+		flags := forward[:len(forward)-len(options.AfterDash)]
+		rest := append(positional[:len(positional):len(positional)], flags...)
+		return runGet(services, "secret", rest, options)
+	}
 	return cmd
 }

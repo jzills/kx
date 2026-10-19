@@ -137,7 +137,7 @@ kx get pods --watch
 
 It is display-only.
 A watch never completes, so there is no final listing to number — nothing is indexed and the saved state is left as it was.
-With a non-tabular output format, kx streams kubectl's own watch output straight through rather than trying to redraw it.
+With a non-tabular output format, or with `--no-headers`, kx streams kubectl's own watch output straight through rather than trying to redraw it.
 
 ## When an index has gone stale
 

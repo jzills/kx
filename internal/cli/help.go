@@ -140,7 +140,7 @@ func rootOptions(root *cobra.Command) []render.HelpItem {
 
 // flagNames spells a flag the way both help screens do.
 func flagNames(flag *pflag.Flag) string {
-	if flag.Shorthand == "" {
+	if flag.Shorthand == "" || flag.ShorthandDeprecated != "" {
 		return "--" + flag.Name
 	}
 	return "-" + flag.Shorthand + ", --" + flag.Name
@@ -148,12 +148,19 @@ func flagNames(flag *pflag.Flag) string {
 
 // flagSpelling is flagNames plus the kind of value the flag takes, so a reader
 // can tell `--port` wants a number from `--full`, which wants nothing.
+//
+// A flag whose value is optional — kubectl's --cascade, --dry-run — takes it
+// only attached, as --cascade=orphan: the next word is never its value. Help
+// spelled it "--cascade string", and `kx delete 1 --cascade 2` read as it
+// suggested deleted row 2 as well, under a bare --cascade.
 func flagSpelling(flag *pflag.Flag) string {
 	name := flagNames(flag)
-	switch flag.Value.Type() {
-	case "bool":
+	switch kind := flag.Value.Type(); {
+	case kind == "bool":
 		return name
-	case "stringArray", "stringSlice":
+	case flag.NoOptDefVal != "":
+		return name + "[=" + kind + "]"
+	case kind == "stringArray", kind == "stringSlice":
 		return name + " strings"
 	default:
 		return name + " " + flag.Value.Type()
@@ -252,7 +259,15 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 	if doc == "" {
 		doc = strings.TrimSpace(cmd.Short)
 	}
-	if spec.Passthrough != "" && !passthroughMention.MatchString(doc) {
+	switch {
+	case cmd.Annotations[kubectlCommandAnnotation] != "" && trailingCommand(cmd):
+		// Here `--` starts the command to run, so it is no way through.
+		doc += "\n\nA flag kx doesn't know is refused."
+	case cmd.Annotations[kubectlCommandAnnotation] != "":
+		// Not passed through: kx knows kubectl's flags here, lists them below,
+		// and refuses one it does not know rather than guessing at its shape.
+		doc += "\n\nA flag kx doesn't know is refused; put it after `--` to pass it through to kubectl."
+	case spec.Passthrough != "" && !passthroughMention.MatchString(doc):
 		doc += "\n\nUnrecognized flags are passed through to " + passthroughTarget(spec.Passthrough) + "."
 	}
 
@@ -289,13 +304,30 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		Name: "-h, --help", Doc: "Show this message and exit",
 	})
 
-	var options []render.HelpItem
+	var options, kubectl []render.HelpItem
+	globals := false
 	cmd.LocalFlags().VisitAll(func(flag *pflag.Flag) {
-		if flag.Name == "help" || flag.Hidden {
+		if flag.Name == "help" || flag.Hidden || flag.Deprecated != "" {
 			return
 		}
-		options = append(options, render.HelpItem{Name: flagSpelling(flag), Doc: flag.Usage})
+		item := render.HelpItem{Name: flagSpelling(flag), Doc: flag.Usage}
+		switch kubectlFlagScope(flag) {
+		case kubectlFlagCommand:
+			kubectl = append(kubectl, item)
+		case kubectlFlagGlobal:
+			globals = true
+		default:
+			options = append(options, item)
+		}
 	})
+	// kubectl's global flags are the same thirty on every command and are
+	// kubectl's to document, so they are named here rather than listed.
+	if globals {
+		kubectl = append(kubectl, render.HelpItem{
+			Name: "…",
+			Doc:  "kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them",
+		})
+	}
 
 	var examples []string
 	for _, line := range strings.Split(cmd.Example, "\n") {
@@ -311,6 +343,7 @@ func commandHelp(cmd *cobra.Command) render.CommandHelp {
 		Commands: subcommands,
 		Args:     positionalArgs(cmd),
 		Options:  options,
+		Kubectl:  kubectl,
 		Global:   global,
 		Aliases:  cmd.Aliases,
 		Examples: examples,
@@ -425,20 +458,6 @@ func argSpelling(arg Arg) string {
 func minArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) >= n {
-			return nil
-		}
-		return requiredArgsError(cmd)
-	}
-}
-
-// exactArgs is minArgs' counterpart for a command whose argument count is
-// fixed rather than open-ended. Both a shortfall and an overflow report the
-// same message: either way, RunE did not get what the Use string promises,
-// and cp/drain/port-forward's hand-written arity errors don't distinguish
-// the two either.
-func exactArgs(n int) cobra.PositionalArgs {
-	return func(cmd *cobra.Command, args []string) error {
-		if len(args) == n {
 			return nil
 		}
 		return requiredArgsError(cmd)

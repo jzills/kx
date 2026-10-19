@@ -93,8 +93,11 @@ const (
 	tableFormat replyFormat = iota
 	// namesFormat is -o name: one kind/name a line, narrowed line by line.
 	namesFormat
-	// documentFormat is anything else — JSON, YAML, a template's text —
-	// which has no rows a term could pick.
+	// collectionFormat is -o json or -o yaml: a List whose items each carry
+	// metadata.name, so a term narrows the items rather than table rows.
+	collectionFormat
+	// documentFormat is a shape the caller chose — jsonpath, a Go template —
+	// which kx cannot assume has names in it at all.
 	documentFormat
 )
 
@@ -103,8 +106,11 @@ func replyFormatOf(args []string) replyFormat {
 	if printsTable(args) {
 		return tableFormat
 	}
-	if outputFormat(args) == "name" {
+	switch outputFormat(args) {
+	case "name":
 		return namesFormat
+	case "json", "yaml":
+		return collectionFormat
 	}
 	return documentFormat
 }
@@ -122,16 +128,15 @@ func outputFormat(args []string) string {
 // column by, or a watch kx streams as kubectl sends it rather than drawing it
 // itself (wantsLiveTable). nil when kx can narrow it.
 func matchFormatError(args []string) error {
-	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders && replyFormatOf(args) == tableFormat {
-		return errors.New("'--match' cannot be combined with '--no-headers' — kx finds each " +
-			"row's name under kubectl's NAME header. Drop one of them.")
-	}
 	if replyFormatOf(args) == documentFormat {
-		return fmt.Errorf("'--match' cannot be combined with '-o %s' — kx narrows a table or "+
-			"-o name by each row's name, and that output has no rows for it to pick. "+
-			"Drop the flag, or select with -l instead.", outputFormat(args))
+		return projectionMatchError(outputFormat(args))
 	}
 	if isWatch(args) && !wantsLiveTable(args) {
+		if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders {
+			return errors.New("'--match' cannot be combined with '--watch --no-headers' — kx " +
+				"narrows the live table it draws, and streams a headerless watch as kubectl " +
+				"sends it. Drop one of them.")
+		}
 		return fmt.Errorf("'--match' cannot be combined with '--watch -o %s' — kx narrows the "+
 			"live table it draws, and streams that format as kubectl sends it. "+
 			"Drop the flag, or the -o.", outputFormat(args))
@@ -151,6 +156,9 @@ func narrowText(output, term string, args []string) (string, error) {
 	}
 	if replyFormatOf(args) == namesFormat {
 		return narrowNames(output, term), nil
+	}
+	if replyFormatOf(args) == collectionFormat {
+		return narrowCollection(output, term, outputFormat(args) == "yaml")
 	}
 	// A table kx could not read has no NAME column to find names in. Custom
 	// columns can be given one; a kind's own table, as kubectl's events

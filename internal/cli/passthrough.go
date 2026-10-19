@@ -5,18 +5,34 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-// Commands that forward flags to kubectl must parse their own flags by hand.
+// The helpers below read flags out of an argv by hand.
 //
-// Typer keeps unrecognized options in ctx.args via
-// `{"allow_extra_args": True, "ignore_unknown_options": True}`, which is what
-// makes `kx get pods -n prod -l app=web` work. Cobra has no equivalent:
-// FParseErrWhitelist{UnknownFlags: true} *discards* unknown flags rather than
-// passing them through, so `-n prod` would silently vanish and the listing
-// would be saved against the wrong namespace. Those commands set
-// DisableFlagParsing and use the helpers below, which remove only kx's own
-// flags and leave everything else untouched for kubectl.
+// Every command that forwards to kubectl now has cobra parse its argv against
+// kubectl's own flag table (kubectlargs.go) and forwards each flag as
+// --long=value. kx's code that reads one of those flags back — the namespace
+// for a caption, --since to rewrite it, --dry-run for kx's own line — still
+// reads it from that forwarded argv with these helpers, which accept every
+// spelling kubectl does.
+//
+// kx scan is the one command that still splits its argv by hand: it forwards
+// to the vulnerability scanner, whose flags kx has no table for. It sets
+// DisableFlagParsing, and these helpers remove kx's own flags from the argv
+// and leave the scanner's untouched.
+
+// passthrough answers -h/--help for a DisableFlagParsing command and drops
+// --no-color, which main has already applied from the raw arguments, returning
+// the rest to forward.
+func passthrough(cmd *cobra.Command, args []string) ([]string, bool, error) {
+	if help, _ := extractBool(args, "-h", "--help"); help {
+		return nil, true, cmd.Help()
+	}
+	_, rest := extractBool(args, "--no-color")
+	return rest, false, nil
+}
 
 // extractString removes a string flag and its value from args, accepting
 // "--long value", "--long=value", "-s value", "-s=value" and the attached

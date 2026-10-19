@@ -245,24 +245,12 @@ func resolveRefs(resolver IndexResolver, name string, args []string) ([]Resolved
 	return resolveIndexes(resolver, name, args, resolver.Resolve)
 }
 
-// resolveRefsExpecting is resolveRefs for a caller that has already named the
-// kind it wants — the kx get relist, so far. It resolves through
+// resolveParsedExpecting resolves parsed refs for a caller that has already
+// named the kind it wants — the kx get relist. It resolves through
 // ResolveExpecting rather than Resolve, so every failure (out of range, no
 // state, or the wrong kind) is reported against the kind named on the command
-// line, the way FieldsExpecting always has. Parsing and identity-dedupe are
-// shared with resolveRefs via resolveIndexes rather than duplicated.
-func resolveRefsExpecting(
-	resolver IndexResolver, name string, args []string, expected kinds.Kind,
-) ([]Resolved, error) {
-	refs, err := parseRefs(resolver, name, args)
-	if err != nil {
-		return nil, err
-	}
-	return resolveParsedExpecting(resolver, refs, expected)
-}
-
-// resolveParsedExpecting is resolveRefsExpecting for a caller holding parsed
-// refs already; see resolveParsed for why kx get is that caller.
+// line, the way FieldsExpecting always has. See resolveParsed for why kx get
+// holds parsed refs already.
 func resolveParsedExpecting(
 	resolver IndexResolver, refs []state.Ref, expected kinds.Kind,
 ) ([]Resolved, error) {
@@ -274,9 +262,7 @@ func resolveParsedExpecting(
 
 // resolveIndexes parses a command's resource arguments and resolves every one
 // of them through resolve, deduping by resolved identity before any of them
-// is acted on. Shared by resolveRefs and resolveRefsExpecting so the two
-// differ only in how a single reference resolves, not in how a batch is
-// parsed or deduped.
+// is acted on.
 //
 // Each parsed Ref is passed to resolve exactly as parseRefs built it — never
 // rebuilt from ref.Index — so a mark parsed here is a mark resolve sees. That

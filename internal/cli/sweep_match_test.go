@@ -329,8 +329,12 @@ func TestTreeMatchIsOnRootsNotOnWhatTheyOwn(t *testing.T) {
 	if graph.HasWorkloads(node) {
 		t.Errorf("roots = %+v, want none — no root is called 5c4-x", node.Children)
 	}
-	if len(node.Children) != 1 || node.Children[0].Label != "(no workloads matching '5c4-x')" {
-		t.Errorf("children = %+v, want the placeholder naming the term", node.Children)
+	// render.NothingMatches' wording, passed into BuildNamespace rather than
+	// spelled in internal/graph — which is how this placeholder came to say
+	// "no workloads matching" while the rest of kx said "nothing matches".
+	if want := "(" + render.NothingMatches("5c4-x") + ")"; len(node.Children) != 1 ||
+		node.Children[0].Label != want {
+		t.Errorf("children = %+v, want %q", node.Children, want)
 	}
 }
 

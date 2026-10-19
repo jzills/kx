@@ -163,7 +163,7 @@ func TestGetIndexRangeRelist(t *testing.T) {
 }
 
 // A mark resolves the same way an index does, through the same leading-run
-// split and resolveRefsExpecting call — "kx get pods @api" relists the
+// split and resolveParsedExpecting call — "kx get pods @api" relists the
 // resource pinned by the mark rather than treating "@api" as a name to fetch
 // literally.
 func TestGetResolvesAMarkOnTheCommandLine(t *testing.T) {
@@ -587,7 +587,7 @@ func TestRelistValidatesEveryIndexBeforeFetching(t *testing.T) {
 // fixes it — "run 'kx get pods' to relist Pods" — not just a generic "index
 // out of range". Nothing pinned this before, and it silently regressed once
 // when the relist was first routed through resolveRefs's plain Resolve
-// instead of a kind-aware resolution; resolveRefsExpecting is what restores
+// instead of a kind-aware resolution; resolveParsedExpecting is what restores
 // it.
 func TestRelistOutOfRangeIndexNamesTheRelistCommand(t *testing.T) {
 	kube := &fakeKubectl{output: podsOutput, namespace: "prod"}
@@ -606,7 +606,7 @@ func TestRelistOutOfRangeIndexNamesTheRelistCommand(t *testing.T) {
 }
 
 // An index left over from a listing of a different kind is refused rather
-// than silently fetched as whatever it actually names — resolveRefsExpecting
+// than silently fetched as whatever it actually names — resolveParsedExpecting
 // performs this check itself (via ResolveExpecting/FieldsExpecting), so no
 // explicit kind check needs to run afterward in runGet.
 func TestRelistRefusesAnIndexOfTheWrongKind(t *testing.T) {

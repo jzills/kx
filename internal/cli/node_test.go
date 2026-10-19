@@ -13,6 +13,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/spf13/cobra"
 )
 
 func node(name string) fakeResolver {
@@ -27,7 +28,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 		command := NodeCommand{
 			Kubectl: &recordingKubectl{}, State: workload("web", kinds.Deployment), Verb: verb,
 		}
-		_, err := command.Execute(state.Ref{Index: 1})
+		_, err := command.Execute(state.Ref{Index: 1}, nil)
 		if err == nil {
 			t.Fatalf("%s: succeeded on a Deployment", verb)
 		}
@@ -45,7 +46,7 @@ func TestCordonRefusesANonNode(t *testing.T) {
 func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 	kubectl := &recordingKubectl{}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	message, err := command.Execute(state.Ref{Index: 1})
+	message, err := command.Execute(state.Ref{Index: 1}, nil)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestCordonRunsKubectlAgainstTheNode(t *testing.T) {
 func TestCordonReportsAVanishedNodeAsStale(t *testing.T) {
 	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}, probeCode: 1}
 	command := NodeCommand{Kubectl: kubectl, State: node("node-a"), Verb: "cordon"}
-	_, err := command.Execute(state.Ref{Index: 1})
+	_, err := command.Execute(state.Ref{Index: 1}, nil)
 
 	var stale StaleResourceError
 	if !errors.As(err, &stale) {
@@ -260,19 +261,23 @@ func TestDrainHelpIsNotAnArityError(t *testing.T) {
 	}
 }
 
-// The arity gate must not exist at all, which is the only assertion that holds
-// for every shape of the bug.
-//
-// Driving `drain --help` catches a MinimumNArgs(2) — the shape that bit kx cp —
-// but not an ExactArgs(1), because "--help" is itself one argument and satisfies
-// it. `drain 1 --ignore-daemonsets` would catch that one and not the first.
-// Since a DisableFlagParsing command counts forwarded kubectl flags as
-// positional arguments, no arity a validator could express is correct here, and
-// asserting its absence is what covers both.
-func TestDrainHasNoArityValidator(t *testing.T) {
-	if newDrainCommand(Services{}).Args != nil {
-		t.Error("drain has an Args validator; cobra runs it against the raw argv, " +
-			"which counts forwarded kubectl flags as positional arguments")
+// kx drain parses kubectl's flags, so its arity gate counts positionals only:
+// a forwarded flag can neither satisfy it nor overflow it. When kx split argv
+// by hand the gate saw the raw argv, which is why there used to be none.
+func TestDrainArityCountsOnlyPositionals(t *testing.T) {
+	cmd := newDrainCommand(Services{})
+	if err := cmd.ParseFlags([]string{"1", "--ignore-daemonsets", "--timeout", "1m"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.Args(cmd, cmd.Flags().Args()); err != nil {
+		t.Errorf("kx drain 1 --ignore-daemonsets --timeout 1m failed the arity gate: %v", err)
+	}
+	cmd = newDrainCommand(Services{})
+	if err := cmd.ParseFlags([]string{"--ignore-daemonsets", "--timeout", "1m"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+	if err := cmd.Args(cmd, cmd.Flags().Args()); err == nil {
+		t.Error("kx drain with only flags passed the arity gate, want <index> required")
 	}
 }
 
@@ -423,5 +428,120 @@ func TestCordonValidatesEveryIndexBeforeCordoningAny(t *testing.T) {
 	if len(kube.runs) != 0 {
 		t.Errorf("kubectl was called %d times, want 0 — index 99 is out of range and "+
 			"should be caught before node 1 is cordoned", len(kube.runs))
+	}
+}
+
+// kx drain parses kubectl drain's flags: the index may follow them, and -y is
+// kx's wherever it sits.
+func TestDrainParsesKubectlFlags(t *testing.T) {
+	kube, err := indexCommandOn(t, kinds.Node, newDrainCommand, "--ignore-daemonsets", "-y", "1", "--grace-period", "-1")
+	if err != nil {
+		t.Fatalf("kx drain --ignore-daemonsets -y 1 --grace-period -1: %v", err)
+	}
+	// The node is looked up first; the drain is the last call.
+	calls := append(kube.runs, kube.interactive...)
+	if len(calls) == 0 || joinArgs(calls[len(calls)-1]) != "drain nginx --ignore-daemonsets --grace-period=-1" {
+		t.Errorf("kubectl = %q, want the drain with both flags last", calls)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"1", "-y", "--bogus"}, "'--bogus' isn't a flag of kubectl drain"},
+		{[]string{"-y", "--force"}, "requires <index>"},
+	} {
+		kube, err := indexCommandOn(t, kinds.Node, newDrainCommand, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx drain %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.runs)+len(kube.interactive) > 0 {
+			t.Errorf("kx drain %s: kubectl was called", joinArgs(tc.args))
+		}
+	}
+}
+
+// kx cordon and uncordon parse their kubectl flags from the table, as drain
+// does: before, cobra refused --dry-run with a bare "unknown flag", and -- had
+// no way through. Every node in the batch gets the same flags.
+func TestCordonParsesKubectlFlags(t *testing.T) {
+	for _, verb := range []string{"cordon", "uncordon"} {
+		build := func(s Services) *cobra.Command { return newCordonCommand(s, verb) }
+		kube, err := indexCommandOn(t, kinds.Node, build, "--dry-run=server", "1", "2")
+		if err != nil {
+			t.Fatalf("kx %s --dry-run=server 1 2: %v", verb, err)
+		}
+		want := []string{verb + " nginx --dry-run=server", verb + " redis --dry-run=server"}
+		if got := []string{}; len(kube.runs) != 2 ||
+			!slices.Equal(append(got, joinArgs(kube.runs[0]), joinArgs(kube.runs[1])), want) {
+			t.Errorf("kx %s: kubectl = %q, want %q", verb, kube.runs, want)
+		}
+		for _, tc := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"1", "--bogus"}, "'--bogus' isn't a flag of kubectl " + verb},
+			{[]string{"1", "node-b"}, "'node-b' isn't an argument of"},
+			{[]string{"--dry-run=server"}, "requires <index>"},
+			{[]string{"1", "--context", "other"}, "'--context'"},
+		} {
+			kube, err := indexCommandOn(t, kinds.Node, build, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("kx %s %s: err = %v, want %q", verb, joinArgs(tc.args), err, tc.want)
+			}
+			if len(kube.runs)+len(kube.interactive) > 0 {
+				t.Errorf("kx %s %s: kubectl was called: %q", verb, joinArgs(tc.args), kube.runs)
+			}
+		}
+	}
+}
+
+// kx's line replaces kubectl's "(server dry run)", so a dry run has to say so
+// itself; --dry-run=none is a real cordon and claims nothing.
+func TestCordonDryRunSaysNothingChanged(t *testing.T) {
+	for _, tc := range []struct {
+		extra  []string
+		dryRun bool
+	}{
+		{[]string{"--dry-run=server"}, true},
+		{[]string{"--dry-run"}, true},
+		{[]string{"--dry-run=none"}, false},
+		{nil, false},
+	} {
+		command := NodeCommand{Kubectl: &recordingKubectl{}, State: node("node-a"), Verb: "uncordon"}
+		message, err := command.Execute(state.Ref{Index: 1}, tc.extra)
+		if err != nil {
+			t.Fatalf("Execute(%q): %v", tc.extra, err)
+		}
+		if got := strings.Contains(message, "(dry run — nothing was changed)"); got != tc.dryRun {
+			t.Errorf("Execute(%q) = %q, want dry run labelled: %v", tc.extra, message, tc.dryRun)
+		}
+	}
+}
+
+// --yes is kx's, parsed by cobra wherever it sits: with it the prompt is never
+// asked; without it a declined prompt drains nothing.
+func TestDrainYesSkipsThePromptWhereverItSits(t *testing.T) {
+	for _, tc := range []struct {
+		args   []string
+		drains bool
+	}{
+		{[]string{"-y", "1"}, true},
+		{[]string{"1", "--yes"}, true},
+		{[]string{"1"}, false},
+	} {
+		kube := &recordingKubectl{output: "ok"}
+		services := switchServices(t, kube)
+		asked := false
+		services.Confirm = func(string) error { asked = true; return errors.New("declined") }
+		if err := services.State.Save(state.State{
+			Resources: state.NewResources([]string{"node-a"}, kinds.Node),
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		quietRender(t)
+		_ = executeArgv(newDrainCommand(services), tc.args)
+		if drained := len(kube.interactive) > 0; drained != tc.drains || asked == tc.drains {
+			t.Errorf("kx drain %s: drained=%v asked=%v, want drained=%v", joinArgs(tc.args), drained, asked, tc.drains)
+		}
 	}
 }

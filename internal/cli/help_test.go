@@ -291,10 +291,10 @@ func TestRequiredArgsErrorNamesOnlyTheRequiredPrefix(t *testing.T) {
 	}
 }
 
-// minArgs and exactArgs must actually gate RunE, not just build a nicer
-// message nobody sees: a satisfied count returns nil, an unsatisfied one
-// returns the generated error.
-func TestMinArgsAndExactArgsGateOnCount(t *testing.T) {
+// minArgs must actually gate RunE, not just build a nicer message nobody
+// sees: a satisfied count returns nil, an unsatisfied one returns the
+// generated error.
+func TestMinArgsGatesOnCount(t *testing.T) {
 	cmd := &cobra.Command{Use: "describe <index>..."}
 	validate := minArgs(1)
 	if err := validate(cmd, []string{"1"}); err != nil {
@@ -302,17 +302,6 @@ func TestMinArgsAndExactArgsGateOnCount(t *testing.T) {
 	}
 	if err := validate(cmd, nil); err == nil {
 		t.Error("minArgs(1) with zero args returned nil, want an error")
-	}
-
-	scale := &cobra.Command{Use: "scale <index> <replicas>"}
-	exact := exactArgs(2)
-	if err := exact(scale, []string{"1", "3"}); err != nil {
-		t.Errorf("exactArgs(2) with two args: %v, want nil", err)
-	}
-	for _, args := range [][]string{nil, {"1"}, {"1", "3", "extra"}} {
-		if err := exact(scale, args); err == nil {
-			t.Errorf("exactArgs(2) with %v returned nil, want an error", args)
-		}
 	}
 }
 
@@ -761,6 +750,23 @@ func TestRootOptionsMirrorTheRegisteredFlags(t *testing.T) {
 	}
 }
 
+func TestCommandHelpHidesDeprecatedShorthand(t *testing.T) {
+	cmd := &cobra.Command{Use: "example"}
+	cmd.Flags().StringP("filename", "f", "", "file to read")
+	cmd.Flags().Lookup("filename").ShorthandDeprecated = "use --filename instead"
+
+	help := commandHelp(cmd)
+	for _, option := range help.Options {
+		if option.Name == "-f, --filename" {
+			t.Fatalf("help lists deprecated shorthand: %q", option.Name)
+		}
+		if option.Name == "--filename string" {
+			return
+		}
+	}
+	t.Fatal("help does not list --filename string")
+}
+
 // Configuration lived only in the README: nothing in the binary named the file
 // kx reads, the file it writes, or a single environment override.
 func TestRootHelpDocumentsFilesAndEnvironment(t *testing.T) {
@@ -931,6 +937,9 @@ func TestOptionsShowShorthandFirstAndValueType(t *testing.T) {
 		{"diagnostic", "port", "--port int"},
 		{"diagnostic", "all-namespaces", "-A, --all-namespaces"},
 		{"label", "remove", "--remove strings"},
+		// An optional value is attached or absent, never the next word.
+		{"delete", "cascade", "--cascade[=string]"},
+		{"delete", "dry-run", "--dry-run[=string]"},
 	}
 	for _, tc := range cases {
 		cmd, _, err := root.Find([]string{tc.command})

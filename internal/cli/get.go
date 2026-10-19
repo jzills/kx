@@ -121,7 +121,14 @@ func isWatch(extraArgs []string) bool {
 // instead, since a themed table doesn't apply to non-tabular output. -A is
 // included: watchRows keys rows by NAMESPACE/NAME when a NAMESPACE column is
 // present, so same-named pods in different namespaces don't collide.
+//
+// --no-headers streams too. The live table always draws a header, and runWatch
+// finds its columns in kubectl's, so given a headerless watch it failed on the
+// first row with "no EVENT column".
 func wantsLiveTable(extraArgs []string) bool {
+	if noHeaders, _ := extractBool(extraArgs, "--no-headers"); noHeaders {
+		return false
+	}
 	output, _, _ := extractString(extraArgs, "--output", "-o")
 	return output == "" || output == "wide"
 }
@@ -140,6 +147,22 @@ func printsTable(extraArgs []string) bool {
 		return true
 	}
 	return false
+}
+
+// programReadsStdout reports whether args leave kx's stdout carrying output a
+// program reads rather than lines for a person: a kubectl -o that is not a
+// table, or --no-headers, which asks for the rows with nothing above them.
+//
+// One predicate for both, because they are one rule. Asked separately at each
+// call site, --no-headers was forgotten at most of them: an emptied listing
+// printed its caption into a headerless stream, a stale index relisted a
+// numbered table into one, and another cluster's rows were headed by a line
+// saying they could not be numbered.
+func programReadsStdout(args []string) bool {
+	if noHeaders, _ := extractBool(args, "--no-headers"); noHeaders {
+		return true
+	}
+	return !printsTable(args)
 }
 
 // getArgs begins a kubectl get of resource, with args the arguments that
@@ -182,7 +205,14 @@ func (c GetCommand) Execute(
 	if clusterScoped(string(listingKind(resource))) {
 		scope = nil
 	}
-	args := append(getArgs(resource, extraArgs), extraArgs...)
+	// --no-headers describes the output the caller wants, not the reply kx
+	// has to read to produce it: --match finds each row's name under the NAME
+	// header, so the header is asked for regardless and dropped on the way
+	// out (see index.Listing.UnnumberedRows). Withheld only when there is a
+	// term to narrow by — without one kx reads nothing, so there is nothing
+	// to withhold.
+	kubectlArgs, headerless := withheldNoHeaders(extraArgs, filterTerm)
+	args := append(getArgs(resource, kubectlArgs), kubectlArgs...)
 	output, err := c.Kubectl.Run(append(args, scope...))
 	if err != nil {
 		return index.Table{}, "", err
@@ -193,7 +223,7 @@ func (c GetCommand) Execute(
 	// namespace is only the one named, if any: the current one is this
 	// cluster's, not that one's.
 	if clusterFlagIn(extraArgs) != "" {
-		table, err := unnumberedListing(output, filterTerm, extraArgs)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
 		return table, extractNamespace(extraArgs), err
 	}
 	// An -A listing has no single namespace to record on the entry; each
@@ -221,6 +251,12 @@ func (c GetCommand) Execute(
 	}
 
 	listing, tabular := c.Index.Parse(output)
+	// Rows the caller asked for without a header are for a program, so they
+	// are narrowed and printed bare — never numbered, since an index column
+	// would corrupt what they asked for.
+	if tabular && headerless {
+		return headerlessRows(listing, filterTerm), namespace, nil
+	}
 	// A table kx cannot number is printed unnumbered, narrowed by the term
 	// all the same (see numberable).
 	if tabular && !numberable(listing, resource, extraArgs) {
@@ -269,7 +305,12 @@ func (c GetCommand) Execute(
 // filterTerm as a numbered listing would be — a table by its rows, -o name
 // line by line, and anything else refused (narrowText). args are what
 // kubectl was asked with, which say what format the output is in.
-func unnumberedListing(output, filterTerm string, args []string) (index.Table, error) {
+//
+// headerless is a --no-headers kx withheld to find the NAME column
+// (withheldNoHeaders), so a table's header is dropped on the way out. Only a
+// table's: a reply that is not one — -o name, -o json — had no header to
+// drop, and read as a table it lost every row to "nothing matches".
+func unnumberedListing(output, filterTerm string, args []string, headerless bool) (index.Table, error) {
 	if filterTerm == "" {
 		return index.Table{Raw: output, Unnumbered: true}, nil
 	}
@@ -283,6 +324,9 @@ func unnumberedListing(output, filterTerm string, args []string) (index.Table, e
 			return index.Table{Match: filterTerm, Unnumbered: true}, nil
 		}
 		return index.Table{Raw: text, Unnumbered: true}, nil
+	}
+	if headerless {
+		return headerlessRows(listing, filterTerm), nil
 	}
 	return unnumbered(listing, output, filterTerm), nil
 }
@@ -408,11 +452,15 @@ func (c GetCommand) ExecuteGroups(
 	// yaml` with one namespace's YAML and exit 0, so the resource in the second
 	// namespace was silently dropped from a request that named it.
 	tabular := true
+	// --no-headers is withheld for a term to find the NAME column by, as in
+	// Execute. Forwarded, every reply came back without a header, and the
+	// first pod row was read as one.
+	kubectlArgs, headerless := withheldNoHeaders(extraArgs, filterTerm)
 
 	for _, group := range groups {
 		args := append(getArgs(resource, group.Names), group.Names...)
 		args = append(args, "-n", group.Namespace)
-		args = append(args, extraArgs...)
+		args = append(args, kubectlArgs...)
 		output, err := c.Kubectl.Run(args)
 		if err != nil {
 			return index.Table{}, err
@@ -454,11 +502,16 @@ func (c GetCommand) ExecuteGroups(
 	// unfiltered tables, printing exactly the rows the term had excluded.
 	listing, stitched := c.Index.Stitch(tables)
 	if !tabular || !stitched {
-		text, err := narrowText(strings.Join(raw, "\n"), filterTerm, extraArgs)
+		text, err := narrowText(joinReplies(raw, extraArgs), filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, err
 		}
 		return index.Table{Raw: text, Match: filterTerm, Unnumbered: true}, nil
+	}
+	// Rows asked for without a header are printed bare and never numbered,
+	// as in Execute.
+	if headerless {
+		return headerlessRows(listing, filterTerm), nil
 	}
 	// Rows of several kinds whose names carry no kind cannot be numbered, as
 	// in Execute — decided, as there, from every row stitched, before the term
@@ -617,4 +670,51 @@ func numericResourceError(services Services, args []string) error {
 	return fmt.Errorf(
 		"'%s' names a row, not a resource type — kx get takes the kind first: '%s %s'.",
 		args[0], suggestion, strings.Join(args, " "))
+}
+
+// joinReplies is the per-namespace replies to one fetch, as one reply.
+//
+// -o json and -o yaml are merged into the one List kubectl itself answers
+// several names with. Joined as text, they were two documents: YAML no parser
+// accepts, since the second List's keys repeat the first's, and JSON that only
+// a stream reader such as jq takes. --match then refused the joined text as
+// "a single resource", after every namespace had been fetched. Anything else —
+// -o name, a table kx could not stitch — is lines, which join as they are.
+func joinReplies(raw []string, args []string) string {
+	if replyFormatOf(args) == collectionFormat {
+		if merged, ok := mergeCollections(raw, outputFormat(args) == "yaml"); ok {
+			return merged
+		}
+	}
+	return strings.Join(raw, "\n")
+}
+
+// headerlessRows is the narrowed rows of a listing the caller asked for with
+// --no-headers: the rows alone, or an empty listing naming the term when it
+// matched none, so the caption and its reason go to stderr rather than into
+// output a program is reading.
+func headerlessRows(listing index.Listing, filterTerm string) index.Table {
+	narrowed := listing.Narrow(filterTerm)
+	if narrowed.Empty() {
+		return index.Table{Match: filterTerm, Unnumbered: true}
+	}
+	return index.Table{Raw: narrowed.UnnumberedRows(), Unnumbered: true}
+}
+
+// withheldNoHeaders removes --no-headers from the arguments kx sends kubectl
+// when there is a term to narrow by, reporting that the output must be
+// printed without a header.
+//
+// --no-headers describes what the caller wants printed, not the reply kx has
+// to read to produce it: --match finds each row's name under the NAME header,
+// so kx asks for the header regardless and drops it on the way out. Without a
+// term kx reads nothing, so the flag is forwarded as it always was.
+func withheldNoHeaders(extraArgs []string, filterTerm string) (args []string, headerless bool) {
+	if filterTerm == "" {
+		return extraArgs, false
+	}
+	if noHeaders, rest := extractBool(extraArgs, "--no-headers"); noHeaders {
+		return rest, true
+	}
+	return extraArgs, false
 }

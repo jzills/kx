@@ -271,23 +271,3 @@ func podEntry() state.State {
 		Namespace: "diagnostics",
 	}
 }
-
-// countingResolver counts resolutions, for the guards that must not pay for
-// one on the ordinary path.
-type countingResolver struct{ calls int }
-
-func (c *countingResolver) Fields(int) (string, string, kinds.Kind, error) {
-	c.calls++
-	return "web-abc", "prod", kinds.Pod, nil
-}
-
-func (c *countingResolver) Resolve(ref state.Ref) (string, string, kinds.Kind, error) {
-	return c.Fields(ref.Index)
-}
-
-func (c *countingResolver) ResolveExpecting(ref state.Ref, expected kinds.Kind) (string, string, error) {
-	name, namespace, _, err := c.Resolve(ref)
-	return name, namespace, err
-}
-
-func (c *countingResolver) Count() (int, error) { return 1, nil }

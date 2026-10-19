@@ -43,9 +43,11 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 // machineOutput reports whether an invocation's stdout is read by a program
 // rather than a person: a command whose output is always a document
 // (documentAnnotation), kx's own --json, one Secret value written raw by
-// --decode --key, or a kubectl -o format that is not a table (see
-// printsTable). A refreshed listing is a table for a person to pick from, and
-// it goes to stdout, where a script reading the document fails to parse it —
+// --decode --key, or argv that leaves kubectl printing for a program — a -o
+// format that is not a table, or --no-headers (see programReadsStdout).
+//
+// A refreshed listing is a table for a person to pick from, and it goes to
+// stdout, where a script reading the document fails to parse it —
 // `OUT=$(kx exec 3 -- cat /etc/hostname)` captured the table — or, under
 // $(kx secret 1 --decode -k token), exports it as the credential.
 //
@@ -61,6 +63,17 @@ func machineOutput(c *cobra.Command, args []string) bool {
 	if flag := c.Flags().Lookup("json"); flag != nil && flag.Changed {
 		return true
 	}
+	// A command that parses kubectl's flags from the table reads them from
+	// the argv kubectl will get, everything after "--" included: on such a
+	// command that is kubectl's too. Its own --decode and --key were parsed
+	// by cobra and are read back the same way.
+	if recorded := recordedKubectlArgs(c); recorded != nil {
+		if decode, _ := c.Flags().GetBool("decode"); decode && c.Flags().Changed("key") {
+			return true
+		}
+		_, forward := kubectlArgv(c, args, recorded)
+		return programReadsStdout(forward)
+	}
 	if !c.DisableFlagParsing {
 		return false
 	}
@@ -72,7 +85,7 @@ func machineOutput(c *cobra.Command, args []string) bool {
 	if decode, _ := extractBool(args, "--decode"); decode && hasFlag(args, "--key", "-k") {
 		return true
 	}
-	return hasFlag(args, "--json", "") || !printsTable(args)
+	return hasFlag(args, "--json", "") || programReadsStdout(args)
 }
 
 // withoutRefresh marks a command whose failures never mean stale state.

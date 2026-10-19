@@ -46,19 +46,25 @@ func assertListingUntouched(t *testing.T, services Services, entries int) {
 // way kx already prints output it cannot index, and the listing before it
 // keeps its numbers.
 func TestGetFromAnotherClusterIsPrintedNotSaved(t *testing.T) {
-	for _, flag := range [][]string{{"--context=b"}, {"--kubeconfig", "/tmp/b"}, {"-s", "https://b:6443"}} {
+	// Each typed spelling, and how kx forwards it: by the long name with
+	// the value attached, which is also how the caption names it.
+	for _, tc := range []struct{ typed, forwarded []string }{
+		{[]string{"--context=b"}, []string{"--context=b"}},
+		{[]string{"--kubeconfig", "/tmp/b"}, []string{"--kubeconfig=/tmp/b"}},
+		{[]string{"-s", "https://b:6443"}, []string{"--server=https://b:6443"}},
+	} {
 		kube := &recordingKubectl{output: crossClusterPods}
 		services := crossClusterServices(t, kube)
-		args := append([]string{"pods"}, flag...)
+		args := append([]string{"pods"}, tc.typed...)
 		stdout, _, err := runCaptured(t, newGetCommand(services), args)
 		if err != nil {
 			t.Fatalf("kx get %v: %v", args, err)
 		}
-		if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "get pods "+joinArgs(flag) {
-			t.Errorf("kubectl = %q, want the flag forwarded", kube.runs)
+		if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "get pods "+joinArgs(tc.forwarded) {
+			t.Errorf("kubectl = %q, want %q forwarded", kube.runs, tc.forwarded)
 		}
 		if !strings.Contains(stdout, "api    1/1     Running") ||
-			!strings.Contains(stdout, "listings with '"+strings.SplitN(flag[0], "=", 2)[0]+"' can't be indexed") {
+			!strings.Contains(stdout, "listings with '"+strings.SplitN(tc.forwarded[0], "=", 2)[0]+"' can't be indexed") {
 			t.Errorf("kx get %v printed %q, want kubectl's rows and the caption", args, stdout)
 		}
 		if strings.Contains(stdout, " X ") {

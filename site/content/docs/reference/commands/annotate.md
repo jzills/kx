@@ -8,9 +8,7 @@ weight: 1
 
 Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key.
 
-key=value pairs go right after the index, before any kubectl flags.
-
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -29,10 +27,30 @@ kx annotate [OPTIONS] <index> [key=value...] [kubectl flags]
 
 | Option | Description |
 |---|---|
-| `--dry-run string` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `--overwrite` | Allow replacing an existing key |
 | `--remove strings` | Key to remove (repeatable) |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--all` | Select all resources in the namespace of the specified resource types |
+| `-A, --all-namespaces` | If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace. |
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--field-manager string` | Name of the manager used to track field ownership. |
+| `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
+| `-f, --filename strings` | identifying the resource. |
+| `-k, --kustomize string` | Process a kustomization directory. This flag can't be used together with -f or -R. |
+| `--list` | If true, display the annotations for a given resource. |
+| `--local` | If true, annotation will NOT contact api-server but run locally. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `--resource-version string` | If non-empty, the annotation update will only succeed if this is the current resource-version for the object. Only valid when specifying a single resource. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', and '!='.(e.g. -l key1=value1,key2=value2) |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 

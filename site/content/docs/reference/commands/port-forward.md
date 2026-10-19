@@ -8,7 +8,7 @@ weight: 20
 
 Forwards a local port to an indexed resource. Given a workload rather than a Pod, kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.
 
-Unrecognized flags are passed through to kubectl.
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
 
@@ -23,6 +23,14 @@ kx port-forward [OPTIONS] <index> <port> [kubectl flags]
 | `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
 | `<port>` | Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--address strings` | Addresses to listen on (comma separated). Only accepts IP addresses or localhost as a value. When localhost is supplied, kubectl will try to bind on both 127.0.0.1 and ::1 and will fail if neither of these addresses are available to bind. |
+| `--pod-running-timeout duration` | The length of time (like 5s, 2m, or 3h, higher than zero) to wait until at least one pod is running |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -34,4 +42,5 @@ kx port-forward [OPTIONS] <index> <port> [kubectl flags]
 
 ```bash
 kx port-forward 1 8080:80
+kx port-forward 1 8080:80 --address=0.0.0.0
 ```

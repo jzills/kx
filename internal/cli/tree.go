@@ -73,7 +73,7 @@ func (c TreeCommand) ExecuteResource(
 
 // ExecuteNamespace graphs the whole ownership forest for a namespace.
 func (c TreeCommand) ExecuteNamespace(ctx context.Context, namespace string, indexed bool) (*tree.Node, error) {
-	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, c.Match, indexed, 0)
+	node, resources, err := c.Builder.BuildNamespace(ctx, namespace, c.Match, emptyNote(c.Match), indexed, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (c TreeCommand) ExecuteAllNamespaces(
 	var resources []graph.Resource
 	for _, namespace := range namespaces {
 		node, walked, err := c.Builder.BuildNamespace(
-			ctx, namespace, c.Match, indexed, len(resources))
+			ctx, namespace, c.Match, emptyNote(c.Match), indexed, len(resources))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -174,15 +174,16 @@ func (c TreeCommand) save(
 }
 
 // printForest prints the -A forest under its banner, returning the note the
-// banner carried. Every namespace dropped by a term is the one case with
-// nothing under the banner, so the banner says why — and the page's caption,
-// which reads the same, says it too. Shared by kx tree -A and the refresh of
-// a stale forest.
+// page's caption carries. Every namespace dropped by a term is the one case
+// with nothing under the banner, so a row beneath it names the term — the
+// banner itself keeps its shape, which for kx tree is no count at all (see
+// render.EmptyMatch). Shared by kx tree -A and the refresh of a stale forest.
 func printForest(roots []*tree.Node, match string) (note string) {
 	if match != "" && len(roots) == 0 {
-		note = render.NothingMatches(match)
+		render.EmptyMatch("Namespace", render.AllNamespaces, "", match)
+		return render.NothingMatches(match)
 	}
-	render.ScopeBanner("Namespace", render.AllNamespaces, note)
+	render.ScopeBanner("Namespace", render.AllNamespaces, "")
 	for i, root := range roots {
 		if i > 0 {
 			render.Blank()
@@ -451,4 +452,15 @@ func newTreeCommand(services Services) *cobra.Command {
 	cmd.Flags().String("out", "",
 		"Write the HTML report to this file instead of serving it in a browser")
 	return cmd
+}
+
+// emptyNote is the note a namespace tree shows when a --match term narrowed
+// it to nothing, formatted here because internal/graph cannot import
+// internal/render — see BuildNamespace. Empty for no term, which leaves the
+// tree's own "(no workloads)".
+func emptyNote(match string) string {
+	if match == "" {
+		return ""
+	}
+	return render.NothingMatches(match)
 }

@@ -3,11 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/jzills/kx/internal/config"
@@ -229,7 +233,7 @@ func TestTopCommandDefaultsToPods(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
-	if err := cmd.RunE(cmd, nil); err != nil {
+	if err := executeArgv(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "Pods") {
@@ -243,7 +247,7 @@ func TestTopCommandAllNamespacesCaptionSaysAllNamespaces(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{topAllNamespacesOutput, allNamespacesPodsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
-	if err := cmd.RunE(cmd, []string{"-A"}); err != nil {
+	if err := executeArgv(cmd, []string{"-A"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "all namespaces") {
@@ -262,7 +266,7 @@ func TestTopCommandRoutesNodesToken(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{nodesOutput}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
-	if err := cmd.RunE(cmd, []string{"nodes"}); err != nil {
+	if err := executeArgv(cmd, []string{"nodes"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "Nodes") {
@@ -280,7 +284,7 @@ func TestTopCommandStripsExplicitPodsToken(t *testing.T) {
 	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
 	cmd := newTopCommand(topServices(t, kube))
 	sink := captureRender(t)
-	if err := cmd.RunE(cmd, []string{"pods"}); err != nil {
+	if err := executeArgv(cmd, []string{"pods"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "Pods") {
@@ -402,13 +406,10 @@ func TestTopWithHTMLStillPrintsTheTerminalTable(t *testing.T) {
 	cmd := newTopCommand(topServices(t, kube))
 	cmd.SetContext(stoppedContext())
 	sink := captureRender(t)
-	// --html/--no-open must go through args, not cmd.Flags().Set: top uses
-	// DisableFlagParsing (like scan), so these are extracted by hand from
-	// the raw argv, not populated by cobra's own flag parsing. Setting the
-	// registered flag directly would pass even if the hand-extraction were
-	// broken (as it briefly was) since real invocations never populate the
-	// flag that way.
-	if err := cmd.RunE(cmd, []string{"--html", "--no-open"}); err != nil {
+	// --html/--no-open must go through argv, not cmd.Flags().Set or RunE
+	// called directly: either skips the parse a real invocation goes
+	// through, and RunE given flags as arguments reads them as positionals.
+	if err := executeArgv(cmd, []string{"--html", "--no-open"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	if !strings.Contains(sink.String(), "Pods") {
@@ -424,7 +425,7 @@ func TestTopHTMLFlagsAreStrippedBeforeReachingKubectl(t *testing.T) {
 	cmd := newTopCommand(topServices(t, kube))
 	cmd.SetContext(stoppedContext())
 	captureRender(t)
-	if err := cmd.RunE(cmd, []string{"--html", "--no-open", "--port", "0"}); err != nil {
+	if err := executeArgv(cmd, []string{"--html", "--no-open", "--port", "0"}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 	for _, call := range kube.calls {
@@ -760,8 +761,14 @@ func TestTopNodesRefusesScopeFlags(t *testing.T) {
 			if err == nil {
 				t.Fatal("kx top nodes accepted a namespace flag")
 			}
-			if !strings.Contains(err.Error(), args[1]) {
-				t.Errorf("error = %q, want it to name %q", err, args[1])
+			// Named by the long name whichever spelling was typed, as every
+			// flag cobra parsed is.
+			long := map[string]string{"-A": "--all-namespaces", "-n": "--namespace"}[args[1]]
+			if long == "" {
+				long = args[1]
+			}
+			if !strings.Contains(err.Error(), "'"+long+"'") {
+				t.Errorf("error = %q, want it to name %q", err, long)
 			}
 			if !strings.Contains(err.Error(), "Node") {
 				t.Errorf("error = %q, want it to name the kind it refused for", err)
@@ -789,7 +796,7 @@ func TestTopPodsStillAcceptsScopeFlags(t *testing.T) {
 	if len(kube.calls) == 0 {
 		t.Fatal("kx top -A never reached kubectl")
 	}
-	if got := joinArgs(kube.calls[0]); !strings.Contains(got, "-A") {
+	if got := joinArgs(kube.calls[0]); !strings.Contains(got, "--all-namespaces") {
 		t.Errorf("first call = %q, want -A forwarded to kubectl", got)
 	}
 }
@@ -1043,5 +1050,135 @@ func TestTopContainersJSONNamesThePodOfEachRow(t *testing.T) {
 	name, _, _, err := services.State.Fields(1)
 	if err != nil || name != document.Rows[0].Pod {
 		t.Errorf("index 1 resolves to %q (err %v), want the row's pod", name, err)
+	}
+}
+
+// executeArgv runs cmd on argv the way a user's invocation reaches it: parsed
+// by cobra, then RunE. Calling RunE directly with flags as arguments skips the
+// parse, and a converted command reads them as positionals.
+func executeArgv(cmd *cobra.Command, args []string) error {
+	if args == nil {
+		args = []string{}
+	}
+	cmd.SetArgs(args)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	return cmd.Execute()
+}
+
+// The resource is found wherever it sits. kx top -n prod pods sent "pods" to
+// kubectl as a pod name — `pods "pods" not found` — because the first
+// argument was -n and the resource was read by position.
+func TestTopFindsTheResourceAfterAFlag(t *testing.T) {
+	quietRender(t)
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	if err := executeArgv(cmd, []string{"-n", "prod", "pods"}); err != nil {
+		t.Fatalf("kx top -n prod pods: %v", err)
+	}
+	if len(kube.calls) == 0 || joinArgs(kube.calls[0]) != "top pods --namespace=prod" {
+		t.Errorf("kubectl = %q, want top pods --namespace=prod", kube.calls)
+	}
+
+	quietRender(t)
+	nodes := &fakeKubectl{output: nodesOutput}
+	cmd = newTopCommand(topServices(t, nodes))
+	if err := executeArgv(cmd, []string{"--sort-by", "cpu", "nodes"}); err != nil {
+		t.Fatalf("kx top --sort-by cpu nodes: %v", err)
+	}
+	if len(nodes.calls) == 0 || joinArgs(nodes.calls[0]) != "top nodes --sort-by=cpu" {
+		t.Errorf("kubectl = %q, want top nodes --sort-by=cpu", nodes.calls)
+	}
+}
+
+// kx top registers the flags of kubectl top pod and kubectl top node both,
+// since which runs is decided by the resource. A flag only the other defines
+// is refused in kx's words, before kubectl runs; one that both define, or the
+// chosen one defines, is forwarded.
+func TestTopRefusesTheOtherSubcommandsFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"nodes", "--containers"}, "'--containers' cannot be combined with 'nodes' — it is a flag of kubectl top pod only."},
+		{[]string{"nodes", "--sum"}, "'--sum' cannot be combined with 'nodes'"},
+		// The first flag as typed, not the first alphabetically.
+		{[]string{"nodes", "--sum", "--containers"}, "'--sum' cannot be combined with 'nodes'"},
+		{[]string{"--show-capacity"}, "'--show-capacity' cannot be combined with 'pods' — it is a flag of kubectl top node only."},
+		{[]string{"pods", "--show-capacity"}, "'--show-capacity' cannot be combined with 'pods'"},
+	} {
+		quietRender(t)
+		kube := &fakeKubectl{output: nodesOutput}
+		err := executeArgv(newTopCommand(topServices(t, kube)), tc.args)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("kx top %s: err = %v, want %q", joinArgs(tc.args), err, tc.want)
+		}
+		if len(kube.calls) > 0 {
+			t.Errorf("kx top %s: kubectl was called: %q", joinArgs(tc.args), kube.calls)
+		}
+	}
+
+	// A flag both subcommands define is forwarded on either.
+	quietRender(t)
+	pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	if err := executeArgv(newTopCommand(topServices(t, pods)), []string{"--sort-by", "memory"}); err != nil {
+		t.Fatalf("kx top --sort-by memory: %v", err)
+	}
+	if len(pods.calls) == 0 || joinArgs(pods.calls[0]) != "top pods --sort-by=memory" {
+		t.Errorf("kubectl = %q, want --sort-by forwarded on pods", pods.calls)
+	}
+
+	quietRender(t)
+	nodes := &fakeKubectl{output: nodesOutput}
+	if err := executeArgv(newTopCommand(topServices(t, nodes)), []string{"nodes", "--show-capacity"}); err != nil {
+		t.Fatalf("kx top nodes --show-capacity: %v", err)
+	}
+	if len(nodes.calls) == 0 || joinArgs(nodes.calls[0]) != "top nodes --show-capacity" {
+		t.Errorf("kubectl = %q, want --show-capacity forwarded", nodes.calls)
+	}
+}
+
+func TestTopRefusesAnUnknownFlag(t *testing.T) {
+	quietRender(t)
+	kube := &fakeKubectl{output: nodesOutput}
+	err := executeArgv(newTopCommand(topServices(t, kube)), []string{"--bogus"})
+	if err == nil || !strings.Contains(err.Error(), "'--bogus' isn't a flag of kubectl top pod or node as of") {
+		t.Errorf("err = %v, want the unknown-flag refusal", err)
+	}
+	if len(kube.calls) > 0 {
+		t.Errorf("kubectl was called: %q", kube.calls)
+	}
+}
+
+// kx's own typed flags keep kx's wording for a malformed value, not pflag's
+// "strconv.ParseInt: parsing" — the sentence kx has always given --port.
+func TestTopReportsAMalformedPortInKxsWords(t *testing.T) {
+	quietRender(t)
+	err := executeArgv(newTopCommand(topServices(t, &fakeKubectl{})), []string{"--port", "x", "--html"})
+	if err == nil || err.Error() != "Invalid value for '--port': 'x' is not a valid int." {
+		t.Errorf("err = %v, want kx's invalid-value sentence", err)
+	}
+}
+
+// --port is kx's and is read by cobra: the page is served on the port given,
+// as the serving caption reports.
+func TestTopServesOnThePortGiven(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	kube := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	cmd := newTopCommand(topServices(t, kube))
+	cmd.SetContext(stoppedContext())
+	sink := captureRender(t)
+	if err := executeArgv(cmd, []string{"--html", "--no-open", "--port", strconv.Itoa(port)}); err != nil {
+		t.Fatalf("kx top --html --port %d: %v", port, err)
+	}
+	if want := fmt.Sprintf(":%d", port); !strings.Contains(sink.String(), "serving at") || !strings.Contains(sink.String(), want) {
+		t.Errorf("output = %q, want it served on %s", sink.String(), want)
 	}
 }

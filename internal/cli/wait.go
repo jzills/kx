@@ -405,49 +405,45 @@ func newWaitCommand(services Services) *cobra.Command {
 			"it left, not a timeout of its own.",
 		Example: "  kx wait 2\n  kx wait 1..4 --timeout=2m\n  kx wait @db-claim\n" +
 			"  kx wait 3 --for=delete\n  kx wait 5 --for=condition=Ready=false",
-		// No Args validator, for the reason scale has none: cobra counts the
-		// forwarded kubectl flags as arguments. The arity check is below.
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rest, handled, err := passthrough(cmd, args, nil)
-			if err != nil || handled {
-				return err
-			}
-			indexArgs, extra := splitLeadingIndexes(rest)
-			if len(indexArgs) == 0 {
-				return requiredArgsError(cmd)
-			}
-			timeout, err := waitTimeout(extra)
-			if err != nil {
-				return err
-			}
-			// Every reference resolved before any wait begins: a typo in the
-			// last one should cost nothing, not minutes of waiting first.
-			resolved, err := resolveRefs(services.State, "indexes", indexArgs)
-			if err != nil {
-				return err
-			}
-			if err := refuseScopeFlagResolved(resolved, extra); err != nil {
-				return err
-			}
-			command := WaitCommand{
-				Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
-			}
-			return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
-				func(target Resolved, met, output string) {
-					reportChange(extra, output, scopeCaption(
-						string(target.Kind)+"/"+target.Name, target.Namespace, met))
-				})
-		},
+		Args: minArgs(1),
 	}
-	// Read by hand out of the passthrough args — kx acts on both, rather than
-	// only forwarding them — so they have to be registered too, or they work
-	// and are invisible to `kx wait --help`.
+	// kubectl's flags that kx acts on as well as forwarding, registered first
+	// so they keep kx's usage.
 	cmd.Flags().StringArray("for", nil,
 		"Condition to wait for instead of the kind's default, as kubectl wait takes it; repeatable")
 	cmd.Flags().Duration("timeout", defaultWaitTimeout,
 		"How long to wait for every index together (default 30s); 0 checks once")
 	registerOutputFlag(cmd)
+	kubectlFlags := registerKubectlFlags(cmd, "wait")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
+		indexArgs, stray := splitLeadingIndexes(positional)
+		if len(indexArgs) == 0 {
+			return requiredArgsError(cmd)
+		}
+		extra := append(stray[:len(stray):len(stray)], forward...)
+		timeout, err := waitTimeout(extra)
+		if err != nil {
+			return err
+		}
+		// Every reference resolved before any wait begins: a typo in the
+		// last one should cost nothing, not minutes of waiting first.
+		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		if err != nil {
+			return err
+		}
+		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+			return err
+		}
+		command := WaitCommand{
+			Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
+		}
+		return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
+			func(target Resolved, met, output string) {
+				reportChange(extra, output, scopeCaption(
+					string(target.Kind)+"/"+target.Name, target.Namespace, met))
+			})
+	}
 	return cmd
 }
 

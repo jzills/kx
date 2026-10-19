@@ -654,9 +654,18 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 	// to nothing produces) read as "no image given", so kx appended its own
 	// --image=busybox and forwarded the bare --image alongside it, leaving
 	// kubectl to complain about a flag the user could see they had written.
+	//
+	// An explicitly empty one, which `--image "$IMG"` with IMG unset produces,
+	// is refused too. Read as absent, it reached kubectl as --image= beside
+	// the configured image, and whichever won was attached for good: an
+	// ephemeral container can't be removed from the pod.
 	image, _, err := extractString(extraArgs, "--image", "")
 	if err != nil {
 		return err
+	}
+	if image == "" && hasFlag(extraArgs, "--image", "") {
+		return fmt.Errorf("'--image' was given an empty value — name an image, "+
+			"or leave the flag out to use debug_image (%s).", c.Image)
 	}
 	if image == "" {
 		args = append(args, "--image="+c.Image)
@@ -666,11 +675,15 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 	// container for it to name — refused rather than forwarded, since kubectl
 	// would reject it with a message about a flag combination kx chose.
 	if kind == kinds.Node {
-		explicit, _, err := extractString(extraArgs, "--target", "")
-		if err != nil {
+		// Read for its error alone — a malformed --target is reported, as it
+		// is for a Pod — since the value does not matter here: hasFlag
+		// matches every spelling extractString consumes, so it refuses an
+		// empty --target too, which read as absent was forwarded to kubectl,
+		// and a Node has no container to resolve it against either.
+		if _, _, err := extractString(extraArgs, "--target", ""); err != nil {
 			return err
 		}
-		if explicit != "" {
+		if hasFlag(extraArgs, "--target", "") {
 			return errors.New(
 				"'--target' cannot be combined with a Node — it names a container " +
 					"to share a process namespace with, and debugging a node " +
@@ -717,10 +730,19 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 // means the flag is omitted rather than the command refused. kubectl still
 // runs, just without the process namespace shared. A malformed --target is a
 // different thing and is reported, the same as a malformed --image.
+//
+// So is an explicitly empty one, which `--target "$T"` with T unset produces.
+// Read as absent, kx supplied the container and forwarded --target= after it;
+// kubectl kept the empty one, and the container was attached for good with
+// nothing shared.
 func (c DebugCommand) target(name, namespace string, extraArgs []string) (string, error) {
 	explicit, _, err := extractString(extraArgs, "--target", "")
 	if err != nil {
 		return "", err
+	}
+	if explicit == "" && hasFlag(extraArgs, "--target", "") {
+		return "", errors.New("'--target' was given an empty value — name a container, " +
+			"or leave the flag out and kx picks the container when the pod has only one.")
 	}
 	if explicit != "" {
 		return "", nil

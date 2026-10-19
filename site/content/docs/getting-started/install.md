@@ -92,6 +92,7 @@ kx --version
 ```
 
 That prints the version, the commit it was built from, the Go toolchain and platform, and the paths kx reads its config and state from.
+It also names the kubectl on your PATH, which is the one kx runs, so a `not found on PATH` there is the thing to fix first.
 
 {{% kx-note kind="warn" %}}
 On macOS, the first run of a freshly installed krew plugin or standalone binary takes a few seconds while Gatekeeper scans it.

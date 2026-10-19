@@ -278,16 +278,22 @@ func (r *Renderer) switchListing(
 	r.table(append([]Column{columns[0], {Header: ""}}, columns[1:]...), marked, available)
 }
 
-// emptyListing captions a listing that resolved to nothing. "none found"
-// rather than itemLabel(0)'s "0 items": a bare zero count reads as silence,
-// where kubectl's own "No resources found in X namespace" at least says
-// nothing was there — this says the same thing without repeating the
-// namespace the caption already carries a segment for.
+// emptyListing captions a listing that resolved to nothing.
 //
-// A listing a --match term emptied says so instead, in the words the sweeps
-// use: "Pods · prod · none found" claims prod has no pods.
+// With no --match term there is nothing to explain beyond the absence, so the
+// caption says "none found" where a count would go: a bare "0 items" reads as
+// silence with a number attached, where kubectl's own "No resources found in
+// X namespace" at least says nothing was there.
+//
+// A term that emptied the listing is different — the caption keeps "0 items"
+// and the term goes in a row beneath it, so the caption's shape does not
+// change with the result. See render.EmptyMatch.
 func (r *Renderer) emptyListing(resourceType, namespace, match string) {
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, emptyLabel(match))
+	if match != "" {
+		r.EmptyMatch(kinds.PluralDisplay(resourceType), namespace, itemLabel(0), match)
+		return
+	}
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, noneFound)
 }
 
 // EmptyListingNotice is the empty listing's caption on stderr, for a listing
@@ -296,8 +302,12 @@ func (r *Renderer) emptyListing(resourceType, namespace, match string) {
 // | xargs is a line the reader takes for a name. kubectl reports an empty
 // listing on stderr for the same reason.
 func (r *Renderer) EmptyListingNotice(resourceType, namespace, match string) {
+	if match != "" {
+		r.EmptyMatchErr(kinds.PluralDisplay(resourceType), namespace, itemLabel(0), match)
+		return
+	}
 	fmt.Fprintln(r.err, r.style(theme.Muted, strings.Join(captionParts(
-		kinds.PluralDisplay(resourceType), namespace, emptyLabel(match)), " · ")))
+		kinds.PluralDisplay(resourceType), namespace, noneFound), " · ")))
 }
 
 // emptyLabel is what stands where a count would for a listing that holds

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -82,6 +83,10 @@ func TestAStaleIndexUnderMachineOutputIsNotRefreshed(t *testing.T) {
 		{[]string{"secret", "1", "--output=name"}, false},
 		{[]string{"secret", "1", "-o", "wide"}, true},
 		{[]string{"secret", "1"}, true},
+		// Rows with nothing above them are for a program too, whatever the
+		// -o says: the refreshed table landed among the rows it was parsing.
+		{[]string{"secret", "1", "--no-headers"}, false},
+		{[]string{"secret", "1", "--no-headers=false"}, true},
 		// One value, unwrapped, for $(...) to substitute: the refreshed
 		// table landed in the variable a script exported as a credential.
 		{[]string{"secret", "1", "--decode", "-k", "token"}, false},
@@ -176,18 +181,27 @@ func TestAStaleIndexLeavesADocumentOnStdoutAlone(t *testing.T) {
 	}
 }
 
-// A "--" ends the flags kx and kubectl read: an -o after it is the trailing
-// command's, not kx's. kx exec and kx debug, which are what put a command
-// there, no longer reach this — they carry documentAnnotation and are machine
-// output whatever their arguments say — so the rule is pinned on a
-// passthrough command that still reads its argv.
+// On a command that still splits its argv by hand, a "--" ends the flags kx
+// reads: what follows is the scanner's own trailing argv, and an -o there is
+// not an output format kx is asked for.
 func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
-	cmd := newCopyCommand(argvServices(t))
-	if machineOutput(cmd, []string{"1:/etc/hosts", "./hosts", "--", "-o", "json"}) {
+	cmd := newScanCommand(argvServices(t))
+	if machineOutput(cmd, []string{"1", "--", "-o", "json"}) {
 		t.Error("an -o past the separator read as kx's output format")
 	}
-	if !machineOutput(cmd, []string{"1:/etc/hosts", "./hosts", "-o", "json", "--", "x"}) {
+	if !machineOutput(cmd, []string{"1", "-o", "json", "--", "x"}) {
 		t.Error("an -o before the separator was not read")
+	}
+}
+
+// On a command that parses kubectl's flags, what follows "--" is kubectl's,
+// unread, so an -o there is an output format like any other.
+func TestMachineOutputReadsKubectlsArgvPastTheSeparator(t *testing.T) {
+	if !parsedMachineOutput(t, newCopyCommand(argvServices(t)), "1:/etc/hosts", "./hosts", "--", "-o", "json") {
+		t.Error("an -o kubectl will get, after --, was not read")
+	}
+	if parsedMachineOutput(t, newCopyCommand(argvServices(t)), "1:/etc/hosts", "./hosts", "-c", "app") {
+		t.Error("a copy with no output format was read as machine output")
 	}
 }
 
@@ -196,10 +210,44 @@ func TestMachineOutputStopsAtTheCommandSeparator(t *testing.T) {
 // table for a person, which a stale index refreshes.
 func TestMachineOutputReadsKeyOnlyBesideDecode(t *testing.T) {
 	services := argvServices(t)
-	if machineOutput(newDescribeCommand(services), []string{"1", "-k", "overlays/prod", "-o", "wide"}) {
+	if parsedMachineOutput(t, newDescribeCommand(services), "1", "-k", "overlays/prod") {
 		t.Error("kubectl's -k read as --decode's key")
 	}
-	if !machineOutput(newSecretCommand(services, "secret", nil), []string{"1", "--decode", "-k", "token"}) {
+	if !parsedMachineOutput(t, newSecretCommand(services, "secret", nil), "1", "--decode", "-k", "token") {
 		t.Error("--decode -k not read as raw output")
+	}
+}
+
+// parsedMachineOutput is machineOutput on a command that parses kubectl's
+// flags itself, called the way withRefresh calls it: after cobra parsed argv,
+// with the positional arguments left over.
+func parsedMachineOutput(t *testing.T, cmd *cobra.Command, args ...string) bool {
+	t.Helper()
+	if err := cmd.ParseFlags(args); err != nil {
+		t.Fatalf("ParseFlags(%q): %v", args, err)
+	}
+	return machineOutput(cmd, cmd.Flags().Args())
+}
+
+// On a command that parses kubectl's flags, the format is read from the argv
+// kubectl gets — including after "--", which on such a command is kubectl's
+// too — and a stale index never puts a listing where a document was expected.
+func TestMachineOutputOnAParsingCommand(t *testing.T) {
+	services := argvServices(t)
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"1"}, false},
+		{[]string{"1", "-o", "wide"}, false},
+		{[]string{"1", "-o", "json"}, true},
+		{[]string{"1", "-ojsonpath={.data}"}, true},
+		{[]string{"1", "--", "-o", "yaml"}, true},
+		{[]string{"1", "--decode"}, false},
+		{[]string{"1", "--decode", "--key="}, true},
+	} {
+		if got := parsedMachineOutput(t, newSecretCommand(services, "secret", nil), tc.args...); got != tc.want {
+			t.Errorf("kx secret %s: machineOutput = %v, want %v", joinArgs(tc.args), got, tc.want)
+		}
 	}
 }

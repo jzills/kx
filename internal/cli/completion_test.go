@@ -355,6 +355,51 @@ func TestCompletionFollowsTheKindShorthand(t *testing.T) {
 	}
 }
 
+// A command that parses kubectl's flags has cobra complete their values, and
+// cobra's answer for a flag with nothing registered is the shell's filenames:
+// `kx get pods -l <TAB>` listed the working directory. A value kx has nothing
+// to offer for offers nothing; only a flag kubectl marks as taking a file
+// offers files, narrowed to the extensions kubectl gives it.
+//
+// Driven through Execute, as the shell drives it, because the directive comes
+// from cobra's flag-value path, which the complete() helper never reaches.
+func TestKubectlFlagValuesOfferNoFilenames(t *testing.T) {
+	for _, tc := range []struct {
+		line []string
+		want cobra.ShellCompDirective
+	}{
+		{[]string{"get", "pods", "-l", ""}, cobra.ShellCompDirectiveNoFileComp},
+		{[]string{"describe", "1", "--context", ""}, cobra.ShellCompDirectiveNoFileComp},
+		{[]string{"logs", "1", "-c", ""}, cobra.ShellCompDirectiveNoFileComp},
+		// kx's own value flag on a converted command, as it was before.
+		{[]string{"label", "1", "--remove", ""}, cobra.ShellCompDirectiveNoFileComp},
+		// kx's own path flag on a converted command offers files.
+		{[]string{"top", "--out", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"get", "pods", "-f", ""}, cobra.ShellCompDirectiveFilterFileExt},
+		// A file of any extension: the shell's own filenames.
+		{[]string{"get", "pods", "--template", ""}, cobra.ShellCompDirectiveDefault},
+		// Path flags kubectl leaves unmarked: files, or directories.
+		{[]string{"get", "pods", "--kubeconfig", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"get", "pods", "--client-key", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"debug", "1", "--custom", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"delete", "-k", ""}, cobra.ShellCompDirectiveFilterDirs},
+		{[]string{"get", "pods", "--cache-dir", ""}, cobra.ShellCompDirectiveFilterDirs},
+	} {
+		root := NewRoot(completionServices(t), "test")
+		var out bytes.Buffer
+		root.SetOut(&out)
+
+		args := append([]string{cobra.ShellCompRequestCmd}, tc.line...)
+		if err := Execute(root, args); err != nil {
+			t.Fatalf("Execute(%v): %v", args, err)
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if got, want := lines[len(lines)-1], ":"+strconv.Itoa(int(tc.want)); got != want {
+			t.Errorf("kx %s<TAB> ended %q, want directive %q", strings.Join(tc.line, " "), got, want)
+		}
+	}
+}
+
 // `kx pods` is `kx get pods`, so the first word completes to the resource types
 // as well as to the command names cobra offers there on its own. Without this
 // the shorthand could only be completed by someone who had already typed it out

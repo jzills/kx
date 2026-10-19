@@ -8,6 +8,20 @@ updates:
     schedule:
       interval: "weekly"
 
+  # The kubectl flag table's generator, its own module so kubectl's command
+  # code stays out of kx's go.mod. A bump here moves the kubectl release the
+  # table describes; the gen-kubectl-flags hook fails the PR until the table is
+  # regenerated to match. The k8s.io modules are version-locked siblings that
+  # do not build as a mixed set, so they move as one PR.
+  - package-ecosystem: "gomod"
+    directory: "/tools/gen-kubectl-flags"
+    schedule:
+      interval: "weekly"
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

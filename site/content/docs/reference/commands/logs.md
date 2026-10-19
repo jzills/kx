@@ -10,6 +10,8 @@ Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Job
 
 kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.
 
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
@@ -28,6 +30,27 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 |---|---|
 | `--since string` | Only logs newer than this; s, m, h or d: 90s, 30m, 12h, 7d |
 
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--all-containers` | Get all containers' logs in the pod(s). |
+| `--all-pods` | Get logs from all pod(s). Sets prefix to true. |
+| `-c, --container string` | Print the logs of this container |
+| `-f, --follow` | Specify if the logs should be streamed. |
+| `--ignore-errors` | If watching / following pod logs, allow for any errors that occur to be non-fatal |
+| `--insecure-skip-tls-verify-backend` | Skip verifying the identity of the kubelet that logs are requested from. In theory, an attacker could provide invalid log content back. You might want to use this if your kubelet serving certificates have expired. |
+| `--limit-bytes int64` | Maximum bytes of logs to return. Defaults to no limit. |
+| `--max-log-requests int` | Specify maximum number of concurrent logs to follow when using by a selector. Defaults to 5. |
+| `--pod-running-timeout duration` | The length of time (like 5s, 2m, or 3h, higher than zero) to wait until at least one pod is running |
+| `--prefix` | Prefix each log line with the log source (pod name and container name) |
+| `-p, --previous` | If true, print the logs for the previous instance of the container in a pod if it exists. |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--since-time string` | Only return logs after a specific date (RFC3339). Defaults to all logs. Only one of since-time / since may be used. |
+| `--tail int64` | Lines of recent log file to display. Defaults to -1 with no selector, showing all log lines otherwise 10, if a selector is provided. |
+| `--timestamps` | Include timestamps on each line in the log output |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
 ## Global options
 
 | Option | Description |
@@ -42,6 +65,7 @@ kx logs 1
 kx logs 1 2
 kx logs 1 -f --tail=100
 kx logs 1 --since 7d
+kx logs 1 --previous
 kx logs 1..3
 kx logs 3..
 kx logs @api -f

@@ -10,6 +10,8 @@ Runs a rollout action on a Deployment, StatefulSet, or DaemonSet. status streams
 
 kubectl's own flags pass through, which is how undo reaches a particular revision: --to-revision, --revision for history, --timeout for status.
 
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
 ## Usage
 
 ```text
@@ -22,6 +24,26 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
 | `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--dry-run[=string]` | Must be "none", "server", or "client". If client strategy, only print the object that would be sent, without sending it. If server strategy, submit server-side request without persisting the resource. |
+| `--field-manager string` | Name of the manager used to track field ownership. |
+| `-f, --filename strings` | Filename, directory, or URL to files identifying the resource to get from a server. |
+| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `-o, --output string` | Output format. One of: (json, yaml, kyaml, name, go-template, go-template-file, template, templatefile, jsonpath, jsonpath-as-json, jsonpath-file). |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `--revision int64` | Pin to a specific revision for showing its status. Defaults to 0 (last revision). |
+| `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--timeout duration` | The length of time to wait before ending watch, zero means never. Any other values should contain a corresponding time unit (e.g. 1s, 2m, 3h). |
+| `--to-revision int64` | The revision to rollback to. Default to 0 (last revision). |
+| `-w, --watch` | Watch the status of the rollout until it's done. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
 
 ## Global options
 
