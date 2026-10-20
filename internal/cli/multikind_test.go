@@ -97,7 +97,10 @@ func TestGetSeveralKindsWithoutKindsInTheNamesIsNotNumbered(t *testing.T) {
 	if err := runGet(services, "deploy,svc", []string{"-o", "custom-columns=NAME:.metadata.name"}, getOptions{}); err != nil {
 		t.Fatalf("runGet: %v", err)
 	}
-	if out.String() != output+"\n" {
+	// Exactly kubectl's bytes: the write added a newline of its own on top
+	// of the one kubectl had already written, and this assertion pinned
+	// that extra line rather than the "as kubectl gave it" it describes.
+	if out.String() != output {
 		t.Errorf("output = %q, want kubectl's own %q", out.String(), output)
 	}
 	if name, _, _, err := services.State.Fields(1); err != nil || name != "nginx" {
@@ -307,7 +310,10 @@ func TestGetSeveralKindsByIndexWithoutKindsInTheNamesIsNotNumbered(t *testing.T)
 		[]string{"1", "3", "-o", "custom-columns=NAME:.metadata.name"}, getOptions{}); err != nil {
 		t.Fatalf("kx get deploy,svc 1 3 -o custom-columns: %v", err)
 	}
-	if out.String() != output+"\n" {
+	// Exactly kubectl's bytes: the write added a newline of its own on top
+	// of the one kubectl had already written, and this assertion pinned
+	// that extra line rather than the "as kubectl gave it" it describes.
+	if out.String() != output {
 		t.Errorf("output = %q, want kubectl's own %q", out.String(), output)
 	}
 	name, _, kind, err := services.State.Fields(1)
