@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -268,5 +270,42 @@ func TestYamlSeparatesDocumentsOnlyInYAML(t *testing.T) {
 				t.Errorf("separated by --- = %v, want %v\n%s", separated, tc.separated, stdout)
 			}
 		})
+	}
+}
+
+// Each banner introduces the manifest printed under it. The separator goes to
+// stdout and the banner to stderr, so on a terminal they interleave in call
+// order: written beside the manifest rather than before the banner, that
+// order read `banner / --- / manifest`, leaving every banner but the first
+// divorced from the manifest it names.
+//
+// Checked on one buffer, because the defect is only visible where both
+// streams land together — which is a terminal, and was how it was reported.
+func TestYamlBannerIntroducesTheManifestUnderIt(t *testing.T) {
+	kube := &recordingKubectl{outputs: []string{"kind: Pod\nname: web-1", "kind: Pod\nname: web-2"}}
+	var both bytes.Buffer
+	render.SetOutput(&both, &both, "github-dark")
+	cmd := newYamlCommand(yamlServices(t, kube))
+	cmd.SetArgs([]string{"1", "2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("kx yaml 1 2: %v", err)
+	}
+
+	var shape []string
+	for _, line := range strings.Split(both.String(), "\n") {
+		switch {
+		case strings.Contains(line, "web-1"), strings.Contains(line, "web-2"):
+			if strings.Contains(line, "·") {
+				shape = append(shape, "banner")
+				continue
+			}
+			shape = append(shape, "manifest")
+		case strings.TrimSpace(line) == "---":
+			shape = append(shape, "---")
+		}
+	}
+	want := []string{"banner", "manifest", "---", "banner", "manifest"}
+	if strings.Join(shape, " ") != strings.Join(want, " ") {
+		t.Errorf("order = %v, want %v\n%s", shape, want, both.String())
 	}
 }
