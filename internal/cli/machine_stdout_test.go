@@ -177,3 +177,30 @@ func seedPrevious(t *testing.T, services Services) {
 		t.Fatalf("cursor = %d, want a previous entry for the note to name", history.Cursor)
 	}
 }
+
+// kx's claim for the collection formats is that stdout carries kubectl's own
+// bytes. It carried them plus a trailing blank line: Raw ended the document
+// with a newline of its own on top of the one kubectl had already written, so
+// `kx get pods -o json` and `kubectl get pods -o json` differed by a line.
+// Harmless to a parser, which is why it survived to v0.9.0, and enough to
+// fail any checksum or golden-file comparison of the two.
+func TestPassthroughWritesKubectlsBytesExactly(t *testing.T) {
+	for _, tc := range []struct{ name, reply string }{
+		{"-o json", "{\n    \"apiVersion\": \"v1\",\n    \"items\": [],\n    \"kind\": \"List\"\n}\n"},
+		{"-o yaml", "apiVersion: v1\nitems: []\nkind: List\n"},
+		{"-o name", "pod/web-1\npod/web-2\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			format := strings.TrimPrefix(tc.name, "-o ")
+			kube := &recordingKubectl{output: tc.reply}
+			services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+			stdout, _, err := runCaptured(t, newGetCommand(services), []string{"pods", "-o", format})
+			if err != nil {
+				t.Fatalf("kx get pods -o %s: %v", format, err)
+			}
+			if stdout != tc.reply {
+				t.Errorf("stdout = %q, want kubectl's reply unchanged %q", stdout, tc.reply)
+			}
+		})
+	}
+}
