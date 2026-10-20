@@ -567,7 +567,7 @@ func TestQuotedFlagsAreStillAccentedBesideAPossessive(t *testing.T) {
 		t.Errorf("the possessive did not survive: %q", plain)
 	}
 	// Each flag closes its own styled run, which is what the accenting is for.
-	// Matched against the escape rather than a literal colour so a palette
+	// Matched against the escape rather than a literal color so a palette
 	// change does not rewrite this test.
 	for _, flag := range []string{"'--json'", "'--full'"} {
 		if !strings.Contains(plain, flag+esc) {

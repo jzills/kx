@@ -329,7 +329,7 @@ func TestTopPageRowsParsesIndexedTable(t *testing.T) {
 
 // --no-limits skips the limits lookup, so its table has no CPU%/MEM% columns
 // and those fields must stay at their zero value rather than misreading a
-// neighbouring column.
+// neighboring column.
 //
 // This used to also assert Index stayed 0, back when an -A table reached here
 // unindexed. Every table topPageRows sees now comes from index.Add, which

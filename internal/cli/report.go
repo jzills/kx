@@ -65,7 +65,7 @@ type jsonReport struct {
 	Findings []jsonFinding `json:"findings"`
 }
 
-// reportOf converts one analysed resource, keeping the findings in the order
+// reportOf converts one analyzed resource, keeping the findings in the order
 // they were sorted into so the JSON and the terminal cannot disagree about
 // which one is the headline. ref is what named the resource: a 1-based
 // position, a mark, or the zero Ref when the caller has neither — a sweep
@@ -110,7 +110,7 @@ func rfc3339(timestamp time.Time) string {
 	return timestamp.UTC().Format(time.RFC3339)
 }
 
-// diagnosticJSON serialises one resource's report. index is the one the
+// diagnosticJSON serializes one resource's report. index is the one the
 // caller resolved it from, so the document names the same number `kx diag
 // <index>` was just run with.
 //
@@ -176,7 +176,7 @@ type diagnosticDocument struct {
 	Resources []jsonReport `json:"resources"`
 }
 
-// triageJSON serialises a sweep.
+// triageJSON serializes a sweep.
 //
 // Every resource swept, healthy ones included, regardless of --full: --full
 // governs how much of a table fits on a screen, and nothing is scrolling past
@@ -293,7 +293,7 @@ func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument 
 	}
 }
 
-// scanJSON serialises a scan's rows, the same ones the summary table and the
+// scanJSON serializes a scan's rows, the same ones the summary table and the
 // HTML report are built from.
 func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
 	return encode(scanDocumentOf(subject, rows))
@@ -311,7 +311,7 @@ func severityToken(severity string) string { return strings.ToLower(severity) }
 
 // countTokens re-keys a severity tally into the document's spelling. A nil
 // tally — an image whose scan failed — stays nil, so the field is omitted
-// rather than serialised as an empty object beside the error that explains it.
+// rather than serialized as an empty object beside the error that explains it.
 func countTokens(counts map[string]int) map[string]int {
 	if counts == nil {
 		return nil
@@ -460,7 +460,7 @@ func treeDocumentOf(subject scanSubject, roots []*tree.Node) treeDocument {
 	}
 }
 
-// treeJSON serialises an ownership graph — one root for an indexed resource or
+// treeJSON serializes an ownership graph — one root for an indexed resource or
 // a single namespace, several for an -A forest.
 func treeJSON(subject scanSubject, roots []*tree.Node) (string, error) {
 	return encode(treeDocumentOf(subject, roots))
@@ -528,7 +528,7 @@ func topDocumentOf(subject scanSubject, resource string, rows []web.TopRow) topD
 	}
 }
 
-// topJSON serialises a usage listing, built from the same rows the table and
+// topJSON serializes a usage listing, built from the same rows the table and
 // the HTML page render.
 func topJSON(subject scanSubject, resource string, rows []web.TopRow) (string, error) {
 	return encode(topDocumentOf(subject, resource, rows))

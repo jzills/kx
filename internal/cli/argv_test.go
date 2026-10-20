@@ -306,7 +306,7 @@ func TestHTMLOutWritesTheReportAndReturns(t *testing.T) {
 
 // The page actually reaches the file, through the real delivery path.
 //
-// An already-cancelled context, so a regression that serves instead of writing
+// An already-canceled context, so a regression that serves instead of writing
 // fails here rather than hanging until the test binary's own timeout: servePage
 // returns as soon as the context is done, leaving nothing on disk to read back.
 func TestDeliverPageWritesToOut(t *testing.T) {

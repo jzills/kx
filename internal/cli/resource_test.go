@@ -635,8 +635,8 @@ func TestScaleSingularReplica(t *testing.T) {
 
 // kx scale prints its own line in place of kubectl's "scaled (server dry
 // run)", so a dry run read "✓ Scaled Deployment/api to 3 replicas" — a change
-// that never happened. The same spellings delete and label recognise count
-// here, and a real scale stays unlabelled.
+// that never happened. The same spellings delete and label recognize count
+// here, and a real scale stays unlabeled.
 func TestScaleSaysWhenItWasADryRun(t *testing.T) {
 	for _, tc := range []struct {
 		args []string

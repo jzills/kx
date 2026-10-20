@@ -185,7 +185,7 @@ func TestRefNamespaceOfAClusterScopedResourceIsAnError(t *testing.T) {
 }
 
 // Two field flags would be a third output format nobody asked for, and
-// honouring the first silently prints something that looks right.
+// honoring the first silently prints something that looks right.
 func TestRefRefusesTwoFieldFlags(t *testing.T) {
 	services := switchServices(t, &recordingKubectl{output: namespaceTable})
 	if err := services.State.Save(podEntry()); err != nil {

@@ -221,7 +221,7 @@ func block(name string) (string, error) {
 	for key := range styles {
 		keys = append(keys, key)
 	}
-	// Sorted so the file is byte-stable; Go map iteration is randomised and
+	// Sorted so the file is byte-stable; Go map iteration is randomized and
 	// the hook compares the rendered output against what is on disk.
 	sort.Strings(keys)
 	for _, key := range keys {
@@ -267,7 +267,7 @@ func toHSL(hex string) (hue, saturation, lightness float64, err error) {
 	lightness = (high + low) / 2
 
 	if high == low {
-		// Achromatic: hue is undefined and any value renders the same grey.
+		// Achromatic: hue is undefined and any value renders the same gray.
 		return 0, 0, lightness * 100, nil
 	}
 

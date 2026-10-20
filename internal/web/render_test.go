@@ -547,7 +547,7 @@ func TestRenderDiagSweepEscapesClusterContent(t *testing.T) {
 
 	rows := decodeDiagRows(t, html)
 	if rows[0].Kind != `<script>kind</script>` || rows[0].Namespace != `<b>ns</b>` {
-		t.Errorf("escaping mangled the decoded values instead of just neutralising them: %+v", rows[0])
+		t.Errorf("escaping mangled the decoded values instead of just neutralizing them: %+v", rows[0])
 	}
 	if rows[1].Name != `<script>alert(1)</script>` {
 		t.Errorf("escaping mangled the decoded name: %+v", rows[1])
@@ -619,7 +619,7 @@ func cssRule(t *testing.T, css, prefix string) string {
 }
 
 // style.css previously styled no anchors at all, so the CVE ID links
-// scan.gohtml renders fell back to the browser's default link colour —
+// scan.gohtml renders fell back to the browser's default link color —
 // roughly #0000EE, about 2:1 contrast against github-dark's #0d1117
 // background and effectively invisible on nine of kx's ten palettes. The
 // rule applies regardless of whether the anchor comes from server-rendered
@@ -627,9 +627,9 @@ func cssRule(t *testing.T, css, prefix string) string {
 // builds client-side — CSS selectors don't care which built the element.
 func TestAnchorsUseThePaletteAccent(t *testing.T) {
 	if !strings.Contains(stylesheet, "a { color: var(--accent); }") {
-		t.Error("anchors are not coloured through the palette's accent " +
+		t.Error("anchors are not colored through the palette's accent " +
 			"custom property, so links fall back to the browser's default " +
-			"colour regardless of theme")
+			"color regardless of theme")
 	}
 }
 
@@ -664,7 +664,7 @@ func TestWordmarkUsesThePaletteAccent(t *testing.T) {
 // another are told apart in a tab strip by their icons.
 //
 // It has to survive html/template's URL filter, which rewrites any scheme it
-// doesn't recognise to "#ZgotmplZ" and would leave every report with a broken
+// doesn't recognize to "#ZgotmplZ" and would leave every report with a broken
 // icon; that is what the decode below is really checking.
 func TestFaviconCarriesThePaletteAccent(t *testing.T) {
 	for _, name := range []string{"github-dark", "dracula"} {
@@ -937,7 +937,7 @@ func TestRenderScanEscapesImageNames(t *testing.T) {
 // JSON blob — it only becomes dangerous once turned into a real href, which
 // now happens client-side (kx-grid.js's cveFormatter, guarded by
 // isSafeLink's http(s)-only allowlist, mirroring html/template's own
-// "#ZgotmplZ" neutralisation of dangerous URL schemes in the pre-grid
+// "#ZgotmplZ" neutralization of dangerous URL schemes in the pre-grid
 // rendering). No Go test executes that JS; it's covered by code review and
 // the manual QA pass described in the plan, not here.
 func TestRenderScanEscapesFindingFields(t *testing.T) {
@@ -1047,7 +1047,7 @@ func TestRenderScanHealthyImageIsEmptyNotZero(t *testing.T) {
 
 // ownershipTree builds a small three-level graph — a header-styled root with
 // one indexed, non-leaf child and one indexed leaf grandchild — so a single
-// fixture exercises the nesting, header-style and index behaviour together,
+// fixture exercises the nesting, header-style and index behavior together,
 // the way a real `kx tree` walk would nest them.
 func ownershipTree() *tree.Node {
 	return &tree.Node{
@@ -1062,7 +1062,7 @@ func ownershipTree() *tree.Node {
 }
 
 // theme.Header carries no CSS custom property of its own — headers are
-// bold-accent, not their own colour (theme.WebStyles emits no --header var)
+// bold-accent, not their own color (theme.WebStyles emits no --header var)
 // — so kx-grid.js's treeLabelFormatter must route it through --accent rather
 // than a nonexistent var(--header), the same constraint the old template
 // held.

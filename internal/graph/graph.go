@@ -80,7 +80,7 @@ type collector struct {
 	resources []Resource
 }
 
-// add appends a labelled child, numbering it and recording it when the tree is
+// add appends a labeled child, numbering it and recording it when the tree is
 // being indexed.
 func (c *collector) add(parent *tree.Node, style, prefix, name string, kind kinds.Kind) *tree.Node {
 	label := prefix + "/" + name

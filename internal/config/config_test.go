@@ -124,7 +124,7 @@ func TestOldNoColorSpellingsAreNotRead(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ThemeDisable {
-		t.Error("Load still honours the old no_color spelling")
+		t.Error("Load still honors the old no_color spelling")
 	}
 }
 
@@ -318,7 +318,7 @@ func TestLoadAfterSaveEngine(t *testing.T) {
 }
 
 // Settings is what `kx --help` lists under Environment, so an override Load
-// honours but Settings omits is one a user can only discover by reading the
+// honors but Settings omits is one a user can only discover by reading the
 // source. The loader's own text is the reference: every KX_* variable it looks
 // up must be documented.
 func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
@@ -346,7 +346,7 @@ func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
 }
 
 // kx debug attaches a container of the user's choosing, and someone who
-// standardises on their own toolbox image should say so once rather than pass
+// standardizes on their own toolbox image should say so once rather than pass
 // --image every time — the same reason `shells` exists for kx exec.
 func TestDebugImageDefaults(t *testing.T) {
 	if got := Default().DebugImage; got != "busybox" {

@@ -551,7 +551,7 @@ func TestFailOnCompletesPerCommand(t *testing.T) {
 
 // The alias is what anyone actually types. Cobra resolves it to the command
 // before completing, so cmd.Name() is "diagnostic" either way — but that is
-// cobra's behaviour rather than kx's, and the per-command key is worthless if
+// cobra's behavior rather than kx's, and the per-command key is worthless if
 // it only works for the spelling nobody uses.
 func TestFailOnCompletesThroughTheDiagAlias(t *testing.T) {
 	root := NewRoot(completionServices(t), "test")

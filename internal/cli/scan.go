@@ -392,7 +392,7 @@ func (c ScanCommand) scanImage(engine scanner.Engine, image string) (scanner.Ima
 // grypeSources are the scheme prefixes grype reads as "scan this source"
 // rather than as part of an image name: its dir:, file:, sbom: and archive
 // sources, and its registry:, docker: and podman: selectors. dir:/ would have
-// grype catalogue the machine running kx.
+// grype catalog the machine running kx.
 //
 // Grype's alone. Trivy and scout take registry:2 and docker:24-dind — both
 // official images — as the image references they are, so refusing these
@@ -412,7 +412,7 @@ var grypeSources = map[string]bool{
 // imageReferenceError refuses an image reference the named engine would read
 // as something other than an image: a flag, or a source scheme. Every engine
 // puts the image last in argv with no "--" before it (not every scanner
-// honours one), and the reference comes from a pod spec anyone who can create
+// honors one), and the reference comes from a pod spec anyone who can create
 // a workload wrote — so it is checked here, on kx's side, before it goes near
 // a command line.
 //
@@ -439,8 +439,8 @@ func imageReferenceError(engineName, image string) error {
 	return nil
 }
 
-// ansiEscape matches the CSI sequences a scanner uses to colour its own
-// output. Grype colours stderr; its reset lands mid-cell in kx's summary
+// ansiEscape matches the CSI sequences a scanner uses to color its own
+// output. Grype colors stderr; its reset lands mid-cell in kx's summary
 // table, ending kx's styling early and printing the escape's tail as text.
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
@@ -448,7 +448,7 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 // lines are usually progress noise.
 //
 // Styling is stripped rather than preserved: the string is bound for a cell kx
-// styles itself, and a scanner's own colours cannot know what they are landing
+// styles itself, and a scanner's own colors cannot know what they are landing
 // in. A line that was nothing but escapes is treated as empty, so the fallback
 // covers it instead of a cell rendering blank.
 func lastLine(text string) string {

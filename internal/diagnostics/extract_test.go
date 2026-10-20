@@ -444,7 +444,7 @@ func TestContainerDiagnosticKeepsWhenItLastTerminated(t *testing.T) {
 
 // A container that has never terminated has nothing to date, and must not be
 // given a zero-value timestamp that reads as 1 January year 1 — outsideWindow
-// treats a zero as undatable, which is the behaviour that keeps it reported.
+// treats a zero as undatable, which is the behavior that keeps it reported.
 func TestContainerDiagnosticWithoutATerminationHasNoTime(t *testing.T) {
 	status := running("app")
 	if got := containerDiagnostic(&status, nil); !got.LastTerminatedAt.IsZero() {

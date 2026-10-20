@@ -11,7 +11,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 )
 
-// SupportedKinds are the kinds kx diag can analyse.
+// SupportedKinds are the kinds kx diag can analyze.
 var SupportedKinds = kinds.Set{
 	// In the order kx diag's own help names them, since the same list is now
 	// printed by the error a wrong kind gets.
@@ -30,7 +30,7 @@ var SupportedKinds = kinds.Set{
 const restartWarnThreshold = 5
 
 // Usage thresholds, as percentages so the comparison is integer arithmetic.
-// These mirror the CPU%/MEM% colouring in kx top: a red 94% there means what a
+// These mirror the CPU%/MEM% coloring in kx top: a red 94% there means what a
 // critical finding means here. Kept in sync by hand.
 const (
 	memoryWarnPct     = 75

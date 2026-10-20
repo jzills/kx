@@ -42,12 +42,12 @@ type Service interface {
 
 // Exec is the real Service, shelling out to kubectl.
 type Exec struct {
-	// context memoises `kubectl config current-context`.
+	// context memoizes `kubectl config current-context`.
 	//
 	// A pointer so Exec stays copyable — the methods take it by value, and a
 	// mutex sitting directly in the struct would make every copy a vet
 	// complaint. Nil means "do not cache", which is what a bare Exec{} in a
-	// test gets and what the uncached behaviour used to be everywhere.
+	// test gets and what the uncached behavior used to be everywhere.
 	context *contextCache
 	// Warn receives each warning kubectl writes on a call that succeeds — a
 	// deprecated API, an admission webhook's notice, the caveat rollout undo
@@ -309,7 +309,7 @@ func (e Exec) CurrentNamespace() string {
 // CurrentNamespace does — a plain field, no auth involved — rather than
 // shelling out to `kubectl config current-context`.
 //
-// Memoised for the life of the process, and dropped again when kx switches the
+// Memoized for the life of the process, and dropped again when kx switches the
 // context itself — see contextCache. A kubeconfig with no current context
 // caches the empty answer too: "none set" is as worth remembering as a name,
 // and re-reading the file spent work to be told the same thing.

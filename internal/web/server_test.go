@@ -164,7 +164,7 @@ func TestServeShutsDownOnContextCancel(t *testing.T) {
 			t.Fatalf("Serve returned %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not return after the context was cancelled")
+		t.Fatal("Serve did not return after the context was canceled")
 	}
 
 	if _, err := http.Get(url); err == nil {
@@ -198,7 +198,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 			t.Fatalf("Serve returned %v, want nil — a stuck preconnect must not fail an ordinary shutdown", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not return after the context was cancelled")
+		t.Fatal("Serve did not return after the context was canceled")
 	}
 }
 
@@ -218,7 +218,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 //
 // The context carries its own 5s timeout rather than a bare
 // context.WithCancel: every other test in this file bounds its waits the
-// same way. If Serve ever stopped honouring opts.Port and bound an ephemeral
+// same way. If Serve ever stopped honoring opts.Port and bound an ephemeral
 // port instead, the second Serve call below would succeed and block forever
 // in its own select — this timeout is what turns that into a reported test
 // failure instead of a 10-minute panic.

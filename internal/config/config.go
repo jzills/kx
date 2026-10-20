@@ -100,7 +100,7 @@ type Setting struct {
 // screen sorts the block it builds from this.
 //
 // TestSettingsDocumentsEveryEnvOverride keeps this in step with Load: an
-// override the loader honours but this list omits is one a user can only find
+// override the loader honors but this list omits is one a user can only find
 // by reading the source.
 //
 // KX_CONFIG has no Key: it names which file Load reads config from, so it

@@ -74,7 +74,7 @@ func (s Service) Sweep(ctx context.Context, namespace string) ([]Data, error) {
 		// Every owned Job's pods are claimed, not just the displayed
 		// (most-recent) one's: all owned Jobs are excluded from the standalone
 		// listing, so all of their pods must be excluded from the orphan pass
-		// too, or old runs' pods leak through as unlabelled orphans.
+		// too, or old runs' pods leak through as unlabeled orphans.
 		for j := range pods.Items {
 			for _, ref := range pods.Items[j].OwnerReferences {
 				if ownedJobUIDs[ref.UID] {

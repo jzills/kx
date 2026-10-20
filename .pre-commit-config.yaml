@@ -47,7 +47,7 @@ repos:
         name: Regenerate site palette stylesheet
         language: system
         # Same contract as gen-command-table: reads internal/theme so the site
-        # is coloured from the registry the terminal and --html reports use,
+        # is colored from the registry the terminal and --html reports use,
         # and exits non-zero when it rewrites the generated files.
         entry: go run ./tools/gen-site-theme
         pass_filenames: false

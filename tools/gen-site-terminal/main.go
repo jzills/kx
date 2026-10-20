@@ -5,13 +5,13 @@
 //
 // Not a mock of a terminal. kx is run for real, under a pty so it emits the
 // styling it would emit to a terminal, and the ANSI is converted to spans. The
-// colours in that stream are the palette's own literal values — truecolor SGR
+// colors in that stream are the palette's own literal values — truecolor SGR
 // carries #rrggbb exactly — so the conversion loses nothing.
 //
 // One capture per palette rather than one capture mapped back onto CSS
-// variables: within a palette several semantic styles share a colour
+// variables: within a palette several semantic styles share a color
 // (github-dark draws accent, success and status.ok all in #3fb950), so a
-// colour cannot be mapped back to the style that produced it. Capturing per
+// color cannot be mapped back to the style that produced it. Capturing per
 // palette sidesteps the ambiguity entirely and still costs about 2 KB each.
 //
 // Requires a seeded demo cluster — see demo/seed.sh — so this is run by hand
@@ -108,7 +108,7 @@ func main() {
 		"  commands the tagline names, each captured and converted from ANSI like\n" +
 		"  the sample below. The synthesized \"> \" prompt lines are this file's own\n" +
 		"  markup, not captured output, styled from --kx-accent so no palette-\n" +
-		"  specific colour needs baking in for them.\n" +
+		"  specific color needs baking in for them.\n" +
 		"*/ -}}\n")
 
 	for _, name := range palettes() {
@@ -134,7 +134,7 @@ func fail(err error) {
 func palettes() []string {
 	var kept []string
 	for _, name := range theme.Names() {
-		// "plain" emits no styling at all, so its capture would be a grey
+		// "plain" emits no styling at all, so its capture would be a gray
 		// block; the site does not offer it either. See tools/gen-site-theme.
 		if name != "plain" {
 			kept = append(kept, name)
@@ -164,7 +164,7 @@ func buildKx() (string, error) {
 //
 // script(1) supplies the pty: kx styles output only when stdout is a terminal,
 // so a plain pipe would capture the unstyled form. COLORTERM asks termenv for
-// truecolor, which is what makes the emitted colours the palette's exact hex
+// truecolor, which is what makes the emitted colors the palette's exact hex
 // rather than the nearest of 256.
 func capture(binary, palette string, cmd []string, maxRows int) (string, error) {
 	// stty rather than COLUMNS: kx measures the terminal with an ioctl, which

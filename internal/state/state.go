@@ -1031,7 +1031,7 @@ func positionOutOfRange(position, count int) error {
 // where the fix is kx state back.
 //
 // where is the caller's own "what to do next" clause, the same division of
-// labour outOfRange has with describeCurrent: this names what went wrong, the
+// labor outOfRange has with describeCurrent: this names what went wrong, the
 // caller names where to look, because a kind-checking command can offer a
 // relist that a generic one cannot.
 func emptyListing(entry State, where string) error {

@@ -406,7 +406,7 @@ func TestEnsureExistsCarriesAMarkOntoTheStaleError(t *testing.T) {
 	if stale.Ref.Mark != "api" {
 		t.Fatalf("Ref.Mark = %q, want %q — the mark did not survive ensureExists", stale.Ref.Mark, "api")
 	}
-	// A mark carries no query to replay, so this is the behavioural
+	// A mark carries no query to replay, so this is the behavioral
 	// consequence of the mark reaching the error: isStale must decline it
 	// rather than route it to a relist of an unrelated listing.
 	if isStale(err) {

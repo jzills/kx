@@ -90,7 +90,7 @@ def serve(binary: Path, report: str, theme: str, port: int):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        # Own process group, so the whole thing can be signalled: the server
+        # Own process group, so the whole thing can be signaled: the server
         # runs until interrupted and ignoring that leaves a port bound.
         start_new_session=True,
     )
@@ -149,7 +149,7 @@ def pad_bottom(destination: Path) -> None:
     edge while the top keeps the page's own margin, so the image looks cropped
     rather than framed. The padding is filled with the background sampled from
     the corner, which is the palette's own, so it extends the page rather than
-    matting it in some other colour.
+    matting it in some other color.
     """
     from PIL import Image
 

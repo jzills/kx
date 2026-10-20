@@ -43,7 +43,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	}, serialized(deps, deps.listResources))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "diagnose",
-		Description: "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, " +
+		Description: "Diagnose Kubernetes health. With a target, analyzes that resource — replica counts, " +
 			"container states, restarts, warning events — and returns findings ranked most specific first. " +
 			"With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. " +
 			"Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, " +

@@ -116,14 +116,14 @@ var hexColor = regexp.MustCompile(`^#[0-9a-f]{6}$`)
 
 // webKeys is every key WebStyles must return. header is not among them: Styles
 // builds it as "bold "+Accent, and boldness is a font weight in CSS, not a
-// colour.
+// color.
 var webKeys = []string{
 	Accent, Muted, Body, Error, Warn, Success,
 	StatusOK, StatusWarn, StatusBad, StatusNeutral,
 	Background, Surface, Border,
 }
 
-// Every registered theme must yield a literal colour for every web key.
+// Every registered theme must yield a literal color for every web key.
 // Without this, a palette added later ships an unstyleable page and nobody
 // notices until somebody selects it.
 func TestWebStylesAreHexForEveryTheme(t *testing.T) {
@@ -151,7 +151,7 @@ func TestWebStylesAreHexForEveryTheme(t *testing.T) {
 	}
 }
 
-// mono and plain carry terminal attributes rather than colours, so their web
+// mono and plain carry terminal attributes rather than colors, so their web
 // values come from the Chrome overrides instead.
 func TestWebStylesUsesChromeOverrides(t *testing.T) {
 	for _, name := range []string{"mono", "plain"} {

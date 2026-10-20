@@ -4,7 +4,7 @@
 // Gathering and analysis are deliberately separate: the service produces flat
 // data from the API, and the findings layer turns it into a verdict. That keeps
 // the thresholds testable without a cluster, and keeps the API-shaped code free
-// of judgement calls.
+// of judgment calls.
 package diagnostics
 
 import (
@@ -138,7 +138,7 @@ func (p PodDiagnostic) FinishedAt() time.Time {
 // the container statuses, which a pod that failed in an init container never
 // fills in — podDiagnostic flattens pod.Status.ContainerStatuses alone — and
 // which an eviction can drop entirely. An undated failure falls outside no
-// window, so without this one Job that failed to initialise last month holds
+// window, so without this one Job that failed to initialize last month holds
 // its workload critical, and a --fail-on gate red, forever: the case the
 // window exists to end.
 //
@@ -486,7 +486,7 @@ func ongoing(severity Severity, rank Rank, since time.Time, summary string) Find
 	return Finding{Severity: severity, Rank: rank, Since: since, Summary: summary}
 }
 
-// Report is the analysed result.
+// Report is the analyzed result.
 //
 // Replica health is not carried here: the findings distil it into ready,
 // available and updated shortfalls, so the rendered report needs no separate

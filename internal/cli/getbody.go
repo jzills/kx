@@ -12,7 +12,7 @@ import (
 
 // getOptions carries the flags `get` and `secret` share. They delegate to the
 // same body so that shadowing the `secret` kind spelling costs none of the
-// listing behaviour.
+// listing behavior.
 type getOptions struct {
 	Match  string
 	Decode bool

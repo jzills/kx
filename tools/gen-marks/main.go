@@ -28,7 +28,7 @@ import (
 
 // The README banner is embedded via <img width="800">, wide of the mark's own
 // 4:3 shape, so its canvas keeps the original text version's width — the mark
-// centred with letterbox padding — rather than cropping to it. Its height is
+// centered with letterbox padding — rather than cropping to it. Its height is
 // the drawn mark's plus bannerPadding above and below.
 const (
 	bannerWidth   = 800.0
@@ -52,7 +52,7 @@ var outputs = []struct {
 	open, close func(e extent) string
 }{
 	{
-		// The site colours the mark from the active palette by inheriting
+		// The site colors the mark from the active palette by inheriting
 		// fill from the SVG's own fill="currentColor", set through CSS.
 		path: "site/assets/kx-mark.svg",
 		open: func(e extent) string {
@@ -64,7 +64,7 @@ var outputs = []struct {
 		close: func(extent) string { return "</svg>\n" },
 	},
 	{
-		// The --html report masthead colours the mark via .wordmark's own
+		// The --html report masthead colors the mark via .wordmark's own
 		// fill: var(--accent) in internal/web/style.css, so the rects here
 		// carry no fill of their own and just inherit it.
 		path: "internal/web/wordmark.svg",
@@ -78,8 +78,8 @@ var outputs = []struct {
 	{
 		// GitHub renders READMEs standalone, with no page palette to inherit
 		// from, so this one carries its own fixed fill rather than
-		// currentColor. The mark is centred on the box its rectangles cover,
-		// not on its grid: centred on the grid, the grid's inkless lower half
+		// currentColor. The mark is centered on the box its rectangles cover,
+		// not on its grid: centered on the grid, the grid's inkless lower half
 		// row left more space under the mark than over it.
 		path: "assets/banner.svg",
 		open: func(e extent) string {

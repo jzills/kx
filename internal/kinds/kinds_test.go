@@ -242,7 +242,7 @@ func TestPluralDisplayNamesTheKindWithoutAPlural(t *testing.T) {
 // segment, not a display string — so captioning with it directly printed
 // "serviceaccounts · diagnostics · 1 item" beside "Pods" and "ConfigMaps".
 //
-// The kind supplies the register; the API supplies only the pluralising
+// The kind supplies the register; the API supplies only the pluralizing
 // suffix, which is the part worth taking because the API server knows the
 // irregulars.
 func TestDisplayPluralKeepsTheKindsCase(t *testing.T) {
@@ -287,7 +287,7 @@ func TestPluralDisplayCapitalisesADiscoveredType(t *testing.T) {
 	}
 }
 
-// Cluster-scoped kinds kx names itself must be recognised with no discovery
+// Cluster-scoped kinds kx names itself must be recognized with no discovery
 // cache at all — a fresh machine, or a kubeconfig kubectl has never populated
 // a cache for. Without this, kx would caption a Node listing with whichever
 // namespace the caller happened to be standing in.
@@ -313,7 +313,7 @@ func TestClusterScopedIsKnownWithoutADiscoverySource(t *testing.T) {
 // A kind kx has never heard of — a CRD — is answered by the discovery cache,
 // which records scope per resource. There is no guessing fallback: an unknown
 // kind with no source reports "not known", and the caller keeps today's
-// behaviour rather than inventing a scope for it.
+// behavior rather than inventing a scope for it.
 func TestNamespacedFallsBackToTheDiscoverySource(t *testing.T) {
 	SetShorthandSource(nil)
 	if _, known := Namespaced(Kind("Gateway")); known {
@@ -396,9 +396,9 @@ func TestListCommandForSeveralKinds(t *testing.T) {
 // kx get deployments.apps listed Deployments and saved every row as a kind
 // called "deployments.apps", which kx scale and kx rollout then refused, while
 // the same Deployment reached through kx get all worked. Only in the kind's
-// own group, as Qualified recognises it: Knative's services.serving.knative.dev
+// own group, as Qualified recognizes it: Knative's services.serving.knative.dev
 // is not a Service.
-func TestNormalizeRecognisesABuiltinKindInItsOwnGroup(t *testing.T) {
+func TestNormalizeRecognizesABuiltinKindInItsOwnGroup(t *testing.T) {
 	for spelling, want := range map[string]Kind{
 		"deployments.apps":                     Deployment,
 		"Deployments.Apps":                     Deployment,
