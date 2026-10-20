@@ -747,3 +747,24 @@ func TestMarkListHasNoViaColumnWithoutAgentMarks(t *testing.T) {
 		t.Errorf("output = %q, want no VIA column", out)
 	}
 }
+
+// A document kubectl already terminated keeps exactly its own newline. Raw
+// adds one unconditionally, and the second showed up as a trailing blank line
+// that made `kx get -o json` differ from `kubectl get -o json` — the one
+// difference between output kx claims is kubectl's own bytes and kubectl's.
+func TestRawBlockKeepsTheTextsOwnTrailingNewline(t *testing.T) {
+	for _, tc := range []struct{ name, text, want string }{
+		{"document ends in a newline", "{\n  \"kind\": \"List\"\n}\n", "{\n  \"kind\": \"List\"\n}\n"},
+		{"text ends without one", "pod/web-1", "pod/web-1\n"},
+		{"inner blank lines are left alone", "a\n\nb\n", "a\n\nb\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			renderer := New(&out, &out, "github-dark", false)
+			renderer.RawBlock(tc.text)
+			if got := out.String(); got != tc.want {
+				t.Errorf("RawBlock(%q) wrote %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}

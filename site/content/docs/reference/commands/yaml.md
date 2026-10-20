@@ -6,9 +6,11 @@ description: "Print the raw YAML manifest for one or more indexed resources; --s
 weight: 32
 ---
 
-Prints the raw YAML manifest for one or more indexed resources. --show fetches the same full manifest and narrows it client-side to the named top-level fields, so it works with anything kubectl's own YAML output has.
+Prints the raw YAML manifest for one or more indexed resources. `--show` fetches the same full manifest and narrows it client-side to the named top-level fields, so it works with anything kubectl's own YAML output has.
 
-kubectl's own flags pass through. Naming an output format yourself replaces kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints JSON. --show cannot be combined with one: it parses the YAML it narrows.
+kubectl's own flags pass through. Naming an output format yourself replaces kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints JSON. `--show` cannot be combined with one: it parses the YAML it narrows.
+
+Several indexes are joined the way their format joins documents: YAML separated by `---`, JSON merged into the one List kubectl answers several names with.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 

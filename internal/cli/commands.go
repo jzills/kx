@@ -739,12 +739,14 @@ func newYamlCommand(services Services) *cobra.Command {
 		Use:        "yaml <index>... [kubectl flags]",
 		SuggestFor: []string{"manifest", "spec"},
 		Short:      "Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.",
-		Long: "Prints the raw YAML manifest for one or more indexed resources. --show fetches the " +
+		Long: "Prints the raw YAML manifest for one or more indexed resources. `--show` fetches the " +
 			"same full manifest and narrows it client-side to the named top-level fields, so it " +
 			"works with anything kubectl's own YAML output has.\n\n" +
 			"kubectl's own flags pass through. Naming an output format yourself replaces " +
 			"kx's own -o yaml rather than arriving beside it, so `kx yaml 1 -o json` prints " +
-			"JSON. --show cannot be combined with one: it parses the YAML it narrows.",
+			"JSON. `--show` cannot be combined with one: it parses the YAML it narrows.\n\n" +
+			"Several indexes are joined the way their format joins documents: YAML separated " +
+			"by `---`, JSON merged into the one List kubectl answers several names with.",
 		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
 			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
 		Args:        minArgs(1),
@@ -782,16 +784,14 @@ func newYamlCommand(services Services) *cobra.Command {
 			}
 		}
 		command := YamlCommand{Kubectl: services.Kubectl, State: services.State}
-		first := true
-		return runEach(resolved, func(target Resolved) error {
-			if !first {
-				// YAML's own document separator, not a blank line:
-				// several manifests on stdout are one stream, and
-				// separated by a blank line they parsed as a single
-				// document with every key repeated.
-				render.Raw("---")
-			}
-			first = false
+		// Joined the way the output format joins several documents: YAML
+		// separated by its own `---`, JSON merged into one List, anything
+		// else written as it came. See manifestWriter.
+		manifests := newManifestWriter(extra, len(resolved))
+		err = runEach(resolved, func(target Resolved) error {
+			// Before the banner, so the banner introduces the manifest
+			// printed under it rather than the separator. See separate.
+			manifests.separate()
 			// Banner per manifest, on stderr: without it, several
 			// manifests run together with nothing saying which is which.
 			banner(cmd, target, "")
@@ -801,12 +801,11 @@ func newYamlCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Trimmed: the blank line above the next banner is the only
-			// separator. Kept as well, a manifest's trailing newline put
-			// two between every pair and one after the last.
-			render.Raw(strings.TrimRight(output, "\n"))
+			manifests.add(output)
 			return nil
 		})
+		manifests.close()
+		return err
 	}
 	return cmd
 }

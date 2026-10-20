@@ -183,7 +183,11 @@ func (r *Renderer) indexedTable(
 		// Non-tabular output (JSON/YAML, or a table with no NAME column) prints
 		// as-is; genuinely empty stdout (kubectl sends "No resources found" to
 		// stderr) takes the empty caption above instead of silence.
-		r.Raw(table.Raw)
+		//
+		// RawBlock, not Raw: this is kubectl's own document, which ends in its
+		// own newline, and Raw's second one left a trailing blank line kubectl
+		// never printed.
+		r.RawBlock(table.Raw)
 		return
 	}
 

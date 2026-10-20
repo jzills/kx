@@ -5,9 +5,100 @@ import (
 	"strings"
 
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	"gopkg.in/yaml.v3"
 )
+
+// yamlOutputFormat is the format kx yaml's reply comes back in: the caller's
+// own -o, or the -o yaml Execute adds when they named none.
+func yamlOutputFormat(args []string) string {
+	if !hasFlag(args, "--output", "-o") {
+		return "yaml"
+	}
+	return outputFormat(args)
+}
+
+// manifestWriter writes the manifests kx yaml fetched, joined the way the
+// format they came back in joins several of them.
+//
+// YAML's `---` is a document separator, not a general one, but it was written
+// between every pair whatever the format. Between JSON objects it made the
+// stream unparseable — `kx yaml 1 2 -o json | jq` failed on it, as did every
+// other reader, since JSON has no multi-document form to separate. Between
+// -o name lines or a Go template's output it was simply a line the caller
+// never asked for and would have had to filter back out.
+//
+// So only YAML is separated. JSON is merged into the one List kubectl itself
+// answers several names with, and anything else is written as it came.
+type manifestWriter struct {
+	// merge holds the replies back to combine them, rather than writing
+	// each as it arrives.
+	merge     bool
+	separator string
+	replies   []string
+	written   bool
+}
+
+func newManifestWriter(args []string, targets int) *manifestWriter {
+	writer := &manifestWriter{}
+	switch yamlOutputFormat(args) {
+	case "yaml":
+		writer.separator = "---"
+	case "json":
+		// One target keeps kubectl's own shape for one name — the bare
+		// object, not a List holding it. Decided by what was asked for
+		// rather than by how many replies arrive, so a fetch that fails
+		// partway still prints the shape the arguments promised.
+		writer.merge = targets > 1
+	}
+	return writer
+}
+
+// separate writes the separator owed before the next manifest, and is called
+// before that manifest's banner rather than beside the manifest itself.
+//
+// The separator goes to stdout and the banner to stderr, so on a terminal the
+// two interleave in call order. Written beside the manifest, that order read
+// `banner / --- / manifest`: the separator sat between a banner and the
+// manifest it names, while the first banner sat directly above its own. Each
+// banner now introduces the manifest under it, whichever pair it is.
+func (w *manifestWriter) separate() {
+	if w.merge || w.separator == "" || !w.written {
+		return
+	}
+	render.Raw(w.separator)
+}
+
+func (w *manifestWriter) add(manifest string) {
+	if w.merge {
+		w.replies = append(w.replies, manifest)
+		return
+	}
+	w.written = true
+	// Trimmed: Raw ends the line itself, so a manifest's own trailing
+	// newline would leave a blank line between every pair.
+	render.Raw(strings.TrimRight(manifest, "\n"))
+}
+
+// close writes what merge held back. Nothing when every fetch failed: an
+// empty List reads as a successful query that matched nothing, which is not
+// what happened.
+func (w *manifestWriter) close() {
+	if !w.merge || len(w.replies) == 0 {
+		return
+	}
+	merged, ok := mergeCollections(w.replies, false)
+	if !ok {
+		// Not documents kx can read, so there is nothing to merge them
+		// into. Written as they came, as kx did before.
+		for _, reply := range w.replies {
+			render.Raw(strings.TrimRight(reply, "\n"))
+		}
+		return
+	}
+	render.Raw(strings.TrimRight(merged, "\n"))
+}
 
 // sortedKeys returns a map's keys in a stable order.
 func sortedKeys(m map[string]any) []string {

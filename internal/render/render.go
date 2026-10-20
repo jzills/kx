@@ -259,6 +259,26 @@ func (r *Renderer) Section(label string) {
 // Raw prints text verbatim, with no styling or interpretation.
 func (r *Renderer) Raw(text string) { r.line(text) }
 
+// RawBlock writes text that already carries its own line breaks — kubectl's
+// reply, passed through — ending the stream with exactly the one newline the
+// text itself ends with.
+//
+// Raw ends every write with a newline of its own, which is right for a line
+// kx composed and wrong for a document kubectl already terminated: the second
+// newline made `kx get pods -o json` differ from `kubectl get pods -o json`
+// by a trailing blank line. Harmless to a parser, which is why it went
+// unnoticed, but enough to fail any byte comparison of the two — and kx's
+// claim about these formats is that they are kubectl's own bytes. Text that
+// does not end in a newline still gets one, since a narrowed listing kx built
+// itself has none and would otherwise run into the shell prompt.
+func (r *Renderer) RawBlock(text string) {
+	if strings.HasSuffix(text, "\n") {
+		r.write(text)
+		return
+	}
+	r.line(text)
+}
+
 // Package-level wrappers. Commands call these rather than threading a renderer
 // through every constructor, matching the module-global console in the Python
 // implementation.
@@ -271,6 +291,7 @@ func Caption(parts ...string)               { current.Caption(parts...) }
 func CaptionErr(parts ...string)            { current.CaptionErr(parts...) }
 func Section(label string)                  { current.Section(label) }
 func Raw(text string)                       { current.Raw(text) }
+func RawBlock(text string)                  { current.RawBlock(text) }
 func Table(columns []Column, rows [][]Cell) { current.Table(columns, rows) }
 
 func IndexedTable(table index.Table, resourceType, namespace string) {
