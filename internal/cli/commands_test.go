@@ -1337,7 +1337,7 @@ func TestLogsParsesKubectlFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-f", "1", "2"}, "--follow streams a single pod"},
+		{[]string{"-f", "1", "2"}, "'--follow' streams a single pod"},
 		{[]string{"1", "--since", "soon"}, "'--since'"},
 		{[]string{"1", "-o", "json"}, "'-o' isn't a flag of kubectl logs"},
 		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
@@ -1402,7 +1402,7 @@ func TestExecParsesKubectlFlagsUpToTheCommand(t *testing.T) {
 		want string
 	}{
 		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
-		{[]string{"1", "--bogus"}, "Everything after -- is the command to run"},
+		{[]string{"1", "--bogus"}, "Everything after '--' is the command to run"},
 	} {
 		kube, err := indexCommand(t, newExecCommand, tc.args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -1448,7 +1448,7 @@ func TestDebugParsesKubectlFlagsUpToTheCommand(t *testing.T) {
 	}{
 		{[]string{"--image=x"}, "requires <index>"},
 		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},
-		{[]string{"1", "--bogus"}, "Everything after -- is the command to run"},
+		{[]string{"1", "--bogus"}, "Everything after '--' is the command to run"},
 	} {
 		kube, err := indexCommand(t, newDebugCommand, tc.args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

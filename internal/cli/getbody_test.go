@@ -406,7 +406,7 @@ func TestGetWatchRefusesSeveralIndexes(t *testing.T) {
 	if err == nil {
 		t.Fatal("multi-index watch was accepted; want it refused")
 	}
-	if !strings.Contains(err.Error(), "--watch takes a single resource") {
+	if !strings.Contains(err.Error(), "'--watch' takes a single resource") {
 		t.Errorf("error = %q, want it to name the single-resource rule", err)
 	}
 	if len(kube.watchArgs) != 0 {

@@ -63,7 +63,7 @@ func newThemeCommand(services Services) *cobra.Command {
 		Long: "Lists available color themes with a preview of each. A name, or the row " +
 			"number from that listing, persists a choice to config.",
 		Example: "  kx theme\n  kx theme dracula",
-		Args:    cobra.MaximumNArgs(1),
+		Args:    maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) == 1 {

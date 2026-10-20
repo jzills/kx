@@ -139,7 +139,7 @@ func matchFormatError(args []string) error {
 		}
 		return fmt.Errorf("'--match' cannot be combined with '--watch -o %s' — kx narrows the "+
 			"live table it draws, and streams that format as kubectl sends it. "+
-			"Drop the flag, or the -o.", outputFormat(args))
+			"Drop the flag, or the '-o'.", outputFormat(args))
 	}
 	return nil
 }

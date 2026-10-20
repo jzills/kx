@@ -581,7 +581,7 @@ func sharedMarkContext(marks []state.Mark) string {
 // say nothing a shared caption hadn't already.
 func (r *Renderer) MarkList(marks map[string]state.Mark) {
 	if len(marks) == 0 {
-		r.Caption("No marks set — run 'kx mark <name> <index>' to create one.")
+		r.Caption("No marks set — run 'kx mark <name> <index>' to create one")
 		return
 	}
 	names := make([]string, 0, len(marks))

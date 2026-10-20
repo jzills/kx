@@ -266,7 +266,7 @@ func TestSetRefusesAnUnknownSubcommand(t *testing.T) {
 			t.Errorf("kx %v returned no error", tc.argv)
 			continue
 		}
-		if !strings.Contains(err.Error(), `unknown command "`+tc.argv[1]+`" for "kx set"`) ||
+		if !strings.Contains(err.Error(), "'"+tc.argv[1]+"' isn't a kx set command") ||
 			!strings.Contains(err.Error(), tc.want) {
 			t.Errorf("kx %v: err = %q, want it refused as unknown, mentioning %q",
 				tc.argv, err, tc.want)

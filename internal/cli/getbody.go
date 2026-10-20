@@ -284,8 +284,8 @@ func runGet(services Services, resource string, args []string, options getOption
 		// gone rather than a request kubectl will not serve.
 		if len(resolved) > 1 && isWatch(extra) {
 			return fmt.Errorf(
-				"--watch takes a single resource; %d indexes were given. "+
-					"Watch one of them, or drop --watch to fetch them all.",
+				"'--watch' takes a single resource, and %d indexes were given — "+
+					"watch one of them, or drop '--watch' to fetch them all.",
 				len(resolved))
 		}
 

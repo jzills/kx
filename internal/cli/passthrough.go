@@ -56,7 +56,7 @@ func extractStrings(args []string, long, short string) (values, rest []string, e
 		switch {
 		case arg == long || (short != "" && arg == short):
 			if i+1 >= len(args) {
-				return nil, nil, fmt.Errorf("flag needs an argument: %s", arg)
+				return nil, nil, fmt.Errorf("'%s' needs a value.", arg)
 			}
 			values = append(values, args[i+1])
 			i++
@@ -192,7 +192,7 @@ func clusterFlagBesideIndexError(flag string) error {
 	return fmt.Errorf(
 		"'%s' cannot be combined with an index — an index already carries the "+
 			"cluster it was listed from. To act on another cluster, switch to it "+
-			"with kx context and list it there.", flag)
+			"with 'kx context' and list it there.", flag)
 }
 
 // crossClusterCaption heads a listing taken with a cluster-selecting flag,

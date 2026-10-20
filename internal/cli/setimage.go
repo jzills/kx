@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -325,18 +324,15 @@ var kubectlSetVerbs = map[string]bool{
 	"env": true, "resources": true, "selector": true, "serviceaccount": true, "subject": true,
 }
 
-// unknownSetCommand refuses a set subcommand kx doesn't have, in cobra's own
-// wording for the root's unknown commands. One of kubectl's is pointed at
+// unknownSetCommand refuses a set subcommand kx doesn't have, in the words
+// the root uses for its unknown commands. One of kubectl's is pointed at
 // kx ref, which spends an index on any verb; anything else gets cobra's
 // suggestions, so a typo of image is offered image.
 func unknownSetCommand(cmd *cobra.Command, name string) error {
-	message := fmt.Sprintf("unknown command %q for %q", name, cmd.CommandPath())
 	if kubectlSetVerbs[name] {
-		return fmt.Errorf("%s — only set image is wrapped. For kubectl set %s, pass the "+
-			"index through kx ref: 'kubectl set %s $(kx ref <index>) ...'.", message, name, name)
+		return fmt.Errorf("'%s' isn't a %s command — only 'set image' is wrapped. "+
+			"For 'kubectl set %s', pass the index through 'kx ref': "+
+			"'kubectl set %s $(kx ref <index>) ...'.", name, cmd.CommandPath(), name, name)
 	}
-	if suggestions := cmd.SuggestionsFor(name); len(suggestions) > 0 {
-		message += "\n\nDid you mean this?\n\t" + strings.Join(suggestions, "\n\t")
-	}
-	return errors.New(message)
+	return unknownCommandError(cmd, name, cmd.SuggestionsFor(name))
 }

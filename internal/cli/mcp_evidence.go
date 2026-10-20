@@ -433,7 +433,7 @@ func (d mcpDeps) getYAML(_ context.Context, _ *mcp.CallToolRequest, in getYamlIn
 	for _, field := range in.Fields {
 		if !fieldNamePattern.MatchString(field) {
 			return nil, yamlOutput{}, fmt.Errorf(
-				"field '%s' is not a manifest key — use letters and digits only, e.g. \"spec\".", field)
+				"Field '%s' is not a manifest key — use letters and digits only, such as 'spec'.", field)
 		}
 	}
 

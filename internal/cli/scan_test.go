@@ -784,7 +784,7 @@ func TestScanConsumesNoOpenBeforePort(t *testing.T) {
 	if err == nil {
 		t.Fatal("kx scan --port --no-open was accepted")
 	}
-	want := "flag needs an argument: --port"
+	want := "'--port' needs a value."
 	if err.Error() != want {
 		t.Errorf("err = %q, want %q — a typo'd --no-open would let --port "+
 			"swallow it as a value and report it as an invalid int instead",

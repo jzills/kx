@@ -36,14 +36,14 @@ func hasNoColorFlag(args []string) bool {
 // run renders expected failures as a styled error and returns the exit code,
 // so no path calls os.Exit while defers are pending.
 //
-// Config errors are already user-facing (they carry the "kx: " prefix) and
-// print verbatim; command errors go through the renderer, matching the Python
-// handle_errors decorator.
+// Config errors go through the renderer like any other failure, styled with
+// the default theme: the configured one is what failed to load.
 func run() int {
 	loader := config.Loader{ThemeKnown: theme.Exists, EngineKnown: scanner.Exists}
 	cfg, err := loader.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		render.Configure(theme.Default, hasNoColorFlag(os.Args[1:]))
+		render.Error(err.Error())
 		return 1
 	}
 

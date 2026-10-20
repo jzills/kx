@@ -158,7 +158,7 @@ func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []stri
 			return waitPlan{}, fmt.Errorf(
 				"'-o' cannot be combined with waiting on %s/%s — kx watches a Job itself, since "+
 					"kubectl wait cannot wait for Complete or Failed, so there is no kubectl "+
-					"output to format. Drop -o, or pass --for=condition=Complete to have kubectl "+
+					"output to format. Drop '-o', or pass '--for=condition=Complete' to have kubectl "+
 					"wait and print it.", target.Kind, target.Name)
 		}
 		return waitPlan{job: true}, nil
@@ -168,14 +168,14 @@ func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []stri
 		return waitPlan{}, fmt.Errorf(
 			"A %s is waited for with 'kx rollout status %s' — its Available condition "+
 				"is true mid-rollout, so it can't say the rollout finished. "+
-				"Pass --for to wait on a condition anyway.",
+				"Pass '--for' to wait on a condition anyway.",
 			target.Kind, target.Ref)
 	}
 	condition, ok := waitDefaults[target.Kind]
 	if !ok {
 		return waitPlan{}, fmt.Errorf(
-			"kx has no default condition for a %s — pass one with --for, "+
-				"e.g. --for=condition=Ready, or --for=delete.", target.Kind)
+			"kx has no default condition for a %s — pass one with '--for', "+
+				"such as '--for=condition=Ready' or '--for=delete'.", target.Kind)
 	}
 	return waitPlan{forArgs: []string{"--for=" + condition.For}, label: condition.Label}, nil
 }
@@ -299,7 +299,7 @@ func jobOutcome(target Resolved, job *batchv1.Job) (label string, err error, don
 			if condition.Message != "" {
 				reason += " — " + condition.Message
 			}
-			return "", fmt.Errorf("%s/%s failed: %s", target.Kind, target.Name, reason), true
+			return "", fmt.Errorf("%s/%s failed: %s.", target.Kind, target.Name, strings.TrimSuffix(reason, ".")), true
 		}
 	}
 	return "", nil, false
@@ -320,7 +320,7 @@ func (c WaitCommand) planService(ctx context.Context, target Resolved) (waitPlan
 	if service.Spec.Type != corev1.ServiceTypeLoadBalancer {
 		return waitPlan{}, fmt.Errorf(
 			"%s/%s is a %s Service, which is never given an external address — "+
-				"only a LoadBalancer is. Pass --for to wait on something else.",
+				"only a LoadBalancer is. Pass '--for' to wait on something else.",
 			target.Kind, target.Name, service.Spec.Type)
 	}
 	return waitPlan{

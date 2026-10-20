@@ -49,5 +49,5 @@ func OpenBrowser(url string) error {
 // openFailed reports a browser that would not launch. Not fatal: the URL was
 // announced first precisely so this case degrades to copy-and-paste.
 func openFailed(err error) {
-	render.Error(fmt.Sprintf("could not open a browser (%v) — open the URL above instead.", err))
+	render.Error(fmt.Sprintf("Could not open a browser (%v) — open the URL above instead.", err))
 }

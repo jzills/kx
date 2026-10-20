@@ -77,7 +77,7 @@ func entryLabel(count int) string {
 
 // emptyHistoryNote explains an empty stack, since `kx ns` writing a slot rather
 // than a history entry means you can reach this without anything being wrong.
-const emptyHistoryNote = "No history yet — run kx get <resource> to start one"
+const emptyHistoryNote = "No history yet — run 'kx get <resource>' to start one"
 
 // contextListing reports whether an entry holds nothing but kubeconfig
 // contexts — the one listing kx keeps that has no namespace scope of any kind.
@@ -244,7 +244,7 @@ var slotOrder = []kinds.Kind{kinds.Namespace, kinds.Context}
 
 // emptyTargetsNote explains empty slots the way emptyHistoryNote explains an
 // empty stack.
-const emptyTargetsNote = "No switch targets yet — run kx ns or kx contexts to fill them"
+const emptyTargetsNote = "No switch targets yet — run 'kx ns' or 'kx contexts' to fill them"
 
 // switchTargetSummary lists the slots under the history table.
 //

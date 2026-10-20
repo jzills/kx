@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -149,7 +150,7 @@ func TestNonIntegerEnvMaxHistoryRejected(t *testing.T) {
 	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
 	t.Setenv("KX_MAX_HISTORY", "many")
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+	if err == nil || !strings.Contains(err.Error(), "'KX_MAX_HISTORY': 'many' is not a valid int") {
 		t.Errorf("error = %v, want an integer complaint", err)
 	}
 }
@@ -169,7 +170,7 @@ func TestUnknownThemeRejectedWhenValidatorSupplied(t *testing.T) {
 	loader := writeConfig(t, `theme = "nonexistent"`)
 	loader.ThemeKnown = func(string) bool { return false }
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "unknown theme") {
+	if err == nil || !strings.Contains(err.Error(), "Unknown theme 'nonexistent'") {
 		t.Errorf("error = %v, want an unknown-theme complaint", err)
 	}
 }
@@ -245,7 +246,7 @@ func TestUnknownEngineRejectedWhenValidatorSupplied(t *testing.T) {
 	loader := writeConfig(t, `engine = "nonexistent"`)
 	loader.EngineKnown = func(string) bool { return false }
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "unknown engine") {
+	if err == nil || !strings.Contains(err.Error(), "Unknown engine 'nonexistent'") {
 		t.Errorf("error = %v, want an unknown-engine complaint", err)
 	}
 }
@@ -448,9 +449,8 @@ func TestDiagMaxAgeRejectsAMalformedValue(t *testing.T) {
 	loader := writeConfig(t, "diag_max_age = \"7 weeks\"\n")
 	if _, err := loader.Load(); err == nil {
 		t.Fatal("Load() = nil error for a malformed diag_max_age")
-	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
-		!strings.Contains(err.Error(), "diag_max_age") {
-		t.Errorf("error = %q, want a kx: error naming diag_max_age", err)
+	} else if !strings.HasPrefix(err.Error(), "Invalid value for 'diag_max_age' in ") {
+		t.Errorf("error = %q, want an invalid-value error naming diag_max_age", err)
 	}
 }
 
@@ -522,9 +522,8 @@ func TestEventsMaxAgeRejectsAMalformedValue(t *testing.T) {
 	loader := writeConfig(t, "events_max_age = \"7 weeks\"\n")
 	if _, err := loader.Load(); err == nil {
 		t.Fatal("Load() = nil error for a malformed events_max_age")
-	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
-		!strings.Contains(err.Error(), "events_max_age") {
-		t.Errorf("error = %q, want a kx: error naming events_max_age", err)
+	} else if !strings.HasPrefix(err.Error(), "Invalid value for 'events_max_age' in ") {
+		t.Errorf("error = %q, want an invalid-value error naming events_max_age", err)
 	}
 }
 
@@ -602,6 +601,24 @@ func TestEmptyShellsListIsUnsetRatherThanOneEmptyShell(t *testing.T) {
 	for _, shell := range cfg.Shells {
 		if shell == "" {
 			t.Fatalf("KX_SHELLS=\"\" produced an empty shell candidate: %#v", cfg.Shells)
+		}
+	}
+}
+
+// A key of the wrong type names the key and the file it was read from, as a
+// sentence: with KX_CONFIG set, "theme must be a string" alone would send a
+// reader to ~/.kx/config.toml, which may not be the file that holds it.
+func TestWrongTypedKeyNamesItsFile(t *testing.T) {
+	for _, tc := range []struct{ contents, want string }{
+		{"theme = 3\n", "'theme' in %s must be a string."},
+		{"theme_disable = \"yes\"\n", "'theme_disable' in %s must be true or false."},
+		{"max_history = 0\n", "'max_history' in %s must be a positive integer."},
+		{"shells = [\"bash\", 1]\n", "'shells' in %s must be an array of strings."},
+	} {
+		loader := writeConfig(t, tc.contents)
+		_, err := loader.Load()
+		if want := fmt.Sprintf(tc.want, loader.Path); err == nil || err.Error() != want {
+			t.Errorf("%q: err = %v, want %q", tc.contents, err, want)
 		}
 	}
 }
