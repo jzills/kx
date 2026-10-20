@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
+	"github.com/spf13/cobra"
 )
 
 // A command whose stdout is a document keeps everything of its own off it.
@@ -85,5 +87,65 @@ func TestSeveralManifestsAreSeparatedByADocumentMarker(t *testing.T) {
 	if got := strings.Count(stdout.String(), "\n---\n"); got != 1 {
 		t.Errorf("found %d document separators between two manifests, want 1:\n%s",
 			got, stdout.String())
+	}
+}
+
+// The pinning test for documentAnnotation, shaped like the one for
+// kx.mutating: every command in the tree is on one of two lists, and a command
+// on neither fails, so a new one has to decide rather than land on the
+// unannotated side by default. The annotation is what machineOutput reads to
+// keep a refreshed listing off stdout, and what banner reads to move its line
+// to stderr; a document command that forgot it would print a table or a banner
+// into the file a program is reading, and no flag reveals that from outside.
+//
+// Subcommands are walked too, named by their path ("set image"), so a
+// document subcommand is pinned the same way. kx ref and the completion
+// scripts are read by programs but stay off the list: neither resolves an
+// index through withRefresh, so neither has a listing or a banner to misplace.
+func TestDocumentAnnotationAllowlistIsPinned(t *testing.T) {
+	document := map[string]bool{
+		"debug": true, "exec": true, "logs": true, "yaml": true,
+	}
+	other := map[string]bool{
+		"annotate": true, "annotations": true, "completion": true,
+		"completion bash": true, "completion fish": true,
+		"completion powershell": true, "completion zsh": true,
+		"context": true, "cordon": true, "cp": true, "delete": true,
+		"describe": true, "diagnostic": true, "drain": true, "edit": true,
+		"engine": true, "events": true, "get": true, "label": true,
+		"labels": true, "mark": true, "mcp": true, "namespace": true,
+		"port-forward": true, "ref": true, "rollout": true, "scale": true,
+		"scan": true, "secret": true, "set": true, "set image": true,
+		"state": true, "state back": true, "state drop": true,
+		"state forward": true, "theme": true, "top": true, "tree": true,
+		"uncordon": true, "unmark": true, "wait": true,
+	}
+	root := NewRoot(NewServices(config.Default()), "test")
+	seen := map[string]bool{}
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, child := range cmd.Commands() {
+			name := strings.TrimPrefix(child.CommandPath(), root.Name()+" ")
+			seen[name] = true
+			switch want, got := document[name], writesDocument(child); {
+			case want && !got:
+				t.Errorf("%s is on the document list but carries no %s annotation",
+					name, documentAnnotation)
+			case !want && got:
+				t.Errorf("%s carries %s but is not on the document list — "+
+					"was it made a document command without updating the pin?",
+					name, documentAnnotation)
+			case !want && !other[name]:
+				t.Errorf("%s is a command neither list accounts for — decide whether "+
+					"its stdout is a document a program reads, then add it to one list", name)
+			}
+			walk(child)
+		}
+	}
+	walk(root)
+	for name := range document {
+		if !seen[name] {
+			t.Errorf("%s is on the document list but no longer exists as a command", name)
+		}
 	}
 }
