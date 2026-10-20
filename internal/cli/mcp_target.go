@@ -154,7 +154,7 @@ const (
 func validKind(kind string) error {
 	if !kindPattern.MatchString(kind) {
 		return fmt.Errorf(
-			"kind '%s' is not a resource type — give one such as pods, deploy or a CRD's plural name.", kind)
+			"Kind '%s' is not a resource type — give one such as pods, deploy or a CRD's plural name.", kind)
 	}
 	return nil
 }
@@ -162,7 +162,7 @@ func validKind(kind string) error {
 func validObjectName(name string) error {
 	if len(name) > maxObjectNameLength || !objectNamePattern.MatchString(name) {
 		return fmt.Errorf(
-			"name '%s' is not a Kubernetes name — use lowercase letters, digits, '-', '.' and ':', starting with a letter or digit.",
+			"Name '%s' is not a Kubernetes name — use lowercase letters, digits, '-', '.' and ':', starting with a letter or digit.",
 			name)
 	}
 	return nil
@@ -171,7 +171,7 @@ func validObjectName(name string) error {
 func validNamespace(namespace string) error {
 	if len(namespace) > maxNamespaceLength || !namespacePattern.MatchString(namespace) {
 		return fmt.Errorf(
-			"namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
+			"Namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
 			namespace)
 	}
 	return nil

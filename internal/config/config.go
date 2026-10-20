@@ -158,7 +158,7 @@ func File() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot locate home directory: %w", err)
+		return "", fmt.Errorf("Could not find your home directory: %w.", err)
 	}
 	return filepath.Join(home, ".kx", "config.toml"), nil
 }
@@ -184,8 +184,8 @@ func (l Loader) path() (string, error) {
 }
 
 // Load resolves the config file then the environment, with the environment
-// winning. Errors are already user-facing: they carry the "kx: " prefix and are
-// meant to be printed verbatim.
+// winning. Errors are already user-facing sentences, naming the key and the
+// file or variable it came from.
 func (l Loader) Load() (Config, error) {
 	cfg := Default()
 
@@ -197,85 +197,83 @@ func (l Loader) Load() (Config, error) {
 	if data, err := os.ReadFile(path); err == nil {
 		var raw map[string]any
 		if err := decodeTOML(data, &raw); err != nil {
-			return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
+			return cfg, fmt.Errorf("Could not read %s: %w.", path, err)
 		}
 		if value, ok := raw["max_history"]; ok {
-			n, err := asPositiveInt(value)
-			if err != nil {
-				return cfg, err
+			n, ok := asPositiveInt(value)
+			if !ok {
+				return cfg, keyError(path, "max_history", "a positive integer")
 			}
 			cfg.MaxHistory = n
 		}
 		if value, ok := raw["shells"]; ok {
-			shells, err := asStringSlice(value)
-			if err != nil {
-				return cfg, err
+			shells, ok := asStringSlice(value)
+			if !ok {
+				return cfg, keyError(path, "shells", "an array of strings")
 			}
 			cfg.Shells = shells
 		}
 		if value, ok := raw["theme_disable"]; ok {
 			flag, ok := value.(bool)
 			if !ok {
-				return cfg, errors.New("kx: theme_disable must be a boolean")
+				return cfg, keyError(path, "theme_disable", "true or false")
 			}
 			cfg.ThemeDisable = flag
 		}
 		if value, ok := raw["theme"]; ok {
 			name, ok := value.(string)
 			if !ok {
-				return cfg, errors.New("kx: theme must be a string")
+				return cfg, keyError(path, "theme", "a string")
 			}
 			cfg.Theme = name
 		}
 		if value, ok := raw["engine"]; ok {
 			name, ok := value.(string)
 			if !ok {
-				return cfg, errors.New("kx: engine must be a string")
+				return cfg, keyError(path, "engine", "a string")
 			}
 			cfg.Engine = name
 		}
 		if value, ok := raw["diag_max_age"]; ok {
 			text, ok := value.(string)
 			if !ok {
-				return cfg, errors.New(
-					"kx: diag_max_age must be a string, such as \"7d\"")
+				return cfg, keyError(path, "diag_max_age", "a string such as '7d'")
 			}
 			window, err := ParseDuration(text)
 			if err != nil {
-				return cfg, fmt.Errorf("kx: diag_max_age: %w", err)
+				return cfg, fmt.Errorf("Invalid value for 'diag_max_age' in %s: %w.", path, err)
 			}
 			cfg.DiagMaxAge = window
 		}
 		if value, ok := raw["events_max_age"]; ok {
 			text, ok := value.(string)
 			if !ok {
-				return cfg, errors.New(
-					"kx: events_max_age must be a string, such as \"7d\"")
+				return cfg, keyError(path, "events_max_age", "a string such as '7d'")
 			}
 			window, err := ParseDuration(text)
 			if err != nil {
-				return cfg, fmt.Errorf("kx: events_max_age: %w", err)
+				return cfg, fmt.Errorf("Invalid value for 'events_max_age' in %s: %w.", path, err)
 			}
 			cfg.EventsMaxAge = window
 		}
 		if value, ok := raw["debug_image"]; ok {
 			name, ok := value.(string)
 			if !ok {
-				return cfg, errors.New("kx: debug_image must be a string")
+				return cfg, keyError(path, "debug_image", "a string")
 			}
 			cfg.DebugImage = name
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return cfg, fmt.Errorf("kx: error reading %s: %w", path, err)
+		return cfg, fmt.Errorf("Could not read %s: %w.", path, err)
 	}
 
 	if value, ok := lookupEnv("KX_MAX_HISTORY"); ok {
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return cfg, errors.New("kx: KX_MAX_HISTORY must be an integer")
+			return cfg, fmt.Errorf("Invalid value for 'KX_MAX_HISTORY': '%s' is not a valid int.", value)
 		}
 		if n < 1 {
-			return cfg, errors.New("kx: max_history must be a positive integer")
+			return cfg, fmt.Errorf("Invalid value for 'KX_MAX_HISTORY': '%s' is not a positive integer.", value)
 		}
 		cfg.MaxHistory = n
 	}
@@ -299,14 +297,14 @@ func (l Loader) Load() (Config, error) {
 	if value, ok := lookupEnv("KX_DIAG_MAX_AGE"); ok {
 		window, err := ParseDuration(value)
 		if err != nil {
-			return cfg, fmt.Errorf("kx: KX_DIAG_MAX_AGE: %w", err)
+			return cfg, fmt.Errorf("Invalid value for 'KX_DIAG_MAX_AGE': %w.", err)
 		}
 		cfg.DiagMaxAge = window
 	}
 	if value, ok := lookupEnv("KX_EVENTS_MAX_AGE"); ok {
 		window, err := ParseDuration(value)
 		if err != nil {
-			return cfg, fmt.Errorf("kx: KX_EVENTS_MAX_AGE: %w", err)
+			return cfg, fmt.Errorf("Invalid value for 'KX_EVENTS_MAX_AGE': %w.", err)
 		}
 		cfg.EventsMaxAge = window
 	}
@@ -316,51 +314,50 @@ func (l Loader) Load() (Config, error) {
 
 	if l.ThemeKnown != nil && !l.ThemeKnown(cfg.Theme) {
 		return cfg, fmt.Errorf(
-			"kx: unknown theme '%s' (run kx theme to list themes)", cfg.Theme,
+			"Unknown theme '%s'. Run 'kx theme' to list themes.", cfg.Theme,
 		)
 	}
 	if l.EngineKnown != nil && !l.EngineKnown(cfg.Engine) {
 		return cfg, fmt.Errorf(
-			"kx: unknown engine '%s' (run kx engine to list engines)", cfg.Engine,
+			"Unknown engine '%s'. Run 'kx engine' to list engines.", cfg.Engine,
 		)
 	}
 	return cfg, nil
 }
 
+// keyError refuses a config key whose value has the wrong type, naming the
+// file so a reader with KX_CONFIG set is not sent to the default one.
+func keyError(path, key, want string) error {
+	return fmt.Errorf("'%s' in %s must be %s.", key, path, want)
+}
+
 // asPositiveInt rejects booleans and non-positive values, matching the Python
 // check that guards against `max_history = true` and `max_history = "10"`.
-func asPositiveInt(value any) (int, error) {
-	invalid := errors.New("kx: max_history must be a positive integer")
+func asPositiveInt(value any) (int, bool) {
 	switch n := value.(type) {
 	case int64:
-		if n < 1 {
-			return 0, invalid
-		}
-		return int(n), nil
+		return int(n), n >= 1
 	case int:
-		if n < 1 {
-			return 0, invalid
-		}
-		return n, nil
+		return n, n >= 1
 	default:
-		return 0, invalid
+		return 0, false
 	}
 }
 
-func asStringSlice(value any) ([]string, error) {
+func asStringSlice(value any) ([]string, bool) {
 	items, ok := value.([]any)
 	if !ok {
-		return nil, errors.New("kx: shells must be an array of strings")
+		return nil, false
 	}
 	shells := make([]string, 0, len(items))
 	for _, item := range items {
 		shell, ok := item.(string)
 		if !ok {
-			return nil, errors.New("kx: shells must be an array of strings")
+			return nil, false
 		}
 		shells = append(shells, shell)
 	}
-	return shells, nil
+	return shells, true
 }
 
 var themeLineRE = regexp.MustCompile(`(?m)^theme\s*=.*$`)

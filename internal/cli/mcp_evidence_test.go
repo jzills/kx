@@ -97,7 +97,7 @@ func TestMCPSinceRefusalsNameTheField(t *testing.T) {
 	} {
 		result := callTool(t, session, tool, args)
 		text := toolText(result)
-		if !result.IsError || !strings.HasPrefix(text, "'since': invalid duration \"soon\"") {
+		if !result.IsError || !strings.HasPrefix(text, "Invalid value for 'since': 'soon' is not a duration") {
 			t.Errorf("%s: result = %q, want a refusal naming 'since'", tool, text)
 		}
 		if strings.Contains(text, "--since") {

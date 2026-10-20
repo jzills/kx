@@ -114,7 +114,7 @@ func TestWaitRefusesKindsWithoutADefault(t *testing.T) {
 	}{
 		{kinds.Deployment, "waited for with 'kx rollout status 1'"},
 		{kinds.StatefulSet, "waited for with 'kx rollout status 1'"},
-		{kinds.ConfigMap, "no default condition for a ConfigMap — pass one with --for"},
+		{kinds.ConfigMap, "no default condition for a ConfigMap — pass one with '--for'"},
 	} {
 		kube := &recordingKubectl{}
 		_, err := runWait(t, kube, tc.kind, "prod", []string{"api"}, nil, "1")
@@ -229,7 +229,7 @@ func TestWaitForAJobThatAlreadyFinished(t *testing.T) {
 	_, err = waitForJob(t, fake.NewSimpleClientset(job(
 		jobCondition(batchv1.JobFailed, "BackoffLimitExceeded", "Job has reached the specified backoff limit"))),
 		nil, time.Second)
-	if want := "Job/migrate failed: BackoffLimitExceeded — Job has reached the specified backoff limit"; err == nil ||
+	if want := "Job/migrate failed: BackoffLimitExceeded — Job has reached the specified backoff limit."; err == nil ||
 		err.Error() != want {
 		t.Errorf("failed Job: err = %v, want %q", err, want)
 	}

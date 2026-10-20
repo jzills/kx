@@ -535,7 +535,7 @@ func HelpFor(cmd *cobra.Command) render.CommandHelp { return commandHelp(cmd) }
 // spelling that matches no command reaches the alias.
 func Execute(root *cobra.Command, args []string) error {
 	root.SetArgs(rewriteArgs(root, args))
-	return root.Execute()
+	return rewriteUnknownCommand(root, root.Execute())
 }
 
 // completionRequests are cobra's own completion entry points, which carry the

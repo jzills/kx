@@ -398,7 +398,7 @@ func TestMCPScanRefusals(t *testing.T) {
 		{"both scopes", map[string]any{"namespace": "prod", "allNamespaces": true},
 			&fakeScanner{}, "'allNamespaces' and 'namespace' cannot be combined."},
 		{"flag-shaped namespace", map[string]any{"namespace": "-A"},
-			&fakeScanner{}, "namespace '-A'"},
+			&fakeScanner{}, "Namespace '-A'"},
 	} {
 		deps, kube := scanDeps(t, tc.fake, workloadJSON("api:v1"))
 		session := connectMCP(t, deps)

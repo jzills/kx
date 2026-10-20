@@ -48,7 +48,7 @@ func decodeData(object map[string]json.RawMessage) ([]string, map[string][]byte,
 	for key, value := range encoded {
 		decoded, err := base64.StdEncoding.DecodeString(value)
 		if err != nil {
-			return nil, nil, fmt.Errorf("could not decode key '%s': %w", key, err)
+			return nil, nil, fmt.Errorf("Key '%s' is not valid base64: %w.", key, err)
 		}
 		keys = append(keys, key)
 		values[key] = decoded
@@ -177,7 +177,7 @@ func renderSecret(secret secretData, namespace string) {
 // resolving and fetching one index at a time.
 func decodeSecrets(services Services, resource string, resolved []Resolved, extra []string, options getOptions) error {
 	if !options.Decode {
-		return fmt.Errorf("--key requires --decode")
+		return fmt.Errorf("'--key' requires '--decode' — add it, or drop '--key'.")
 	}
 	expected := kinds.Normalize(resource)
 	if expected != kinds.Secret {
@@ -186,7 +186,7 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 			kinds.PluralDisplay(string(expected)))
 	}
 	if options.HasKey && len(resolved) != 1 {
-		return fmt.Errorf("--key takes a single index")
+		return fmt.Errorf("'--key' takes a single index — give one, or drop '--key' to decode each Secret whole.")
 	}
 
 	command := SecretCommand{Kubectl: services.Kubectl, State: services.State}

@@ -249,7 +249,7 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 			"and kx delete and kx drain say an index came from one before they act.",
 		Example: "  claude mcp add kx -- kx mcp\n" +
 			"  claude mcp add kx -- kx mcp --write-listings",
-		Args: cobra.NoArgs,
+		Args: maxArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			writeListings, _ := cmd.Flags().GetBool("write-listings")
 			// Built here rather than in NewRoot: tests construct the root with

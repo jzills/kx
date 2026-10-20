@@ -209,7 +209,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 // listener, and url.Parse's Port() is the robust way to recover a port from
 // a URL without assuming where the colons fall.
 //
-// The assertion checks for the "cannot serve on port N" wrapping, not just
+// The assertion checks for the "Could not serve on port N" wrapping, not just
 // the bare number: the raw net.Listen error is "listen tcp 127.0.0.1:N:
 // bind: address already in use", which already contains N, so a
 // strings.Contains on the number alone would keep passing even if server.go's
@@ -237,7 +237,7 @@ func TestServeReportsABusyPort(t *testing.T) {
 	if err == nil {
 		t.Fatal("serving on a taken port returned no error")
 	}
-	want := "cannot serve on port " + strconv.Itoa(taken)
+	want := "Could not serve on port " + strconv.Itoa(taken)
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("error %q does not contain %q", err, want)
 	}

@@ -330,7 +330,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
-		Args: cobra.MaximumNArgs(1),
+		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")

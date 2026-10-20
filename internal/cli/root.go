@@ -103,7 +103,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	info := buildinfo.Resolve(version)
 	root := &cobra.Command{
 		Use:           "kx",
-		Short:         "Select Kubernetes resources by index instead of typing names",
+		Short:         "Select Kubernetes resources by index instead of typing names.",
 		Version:       info.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -112,6 +112,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	installVersion(root, info, services.KubectlClient)
 	root.Flags().BoolP("version", "v", false, "Show the kx version and exit")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
+	root.SetFlagErrorFunc(ownFlagError)
 
 	// `get` is the only command that doesn't consume an index, so a NotFound
 	// from it means the resource type doesn't exist — refreshing the listing

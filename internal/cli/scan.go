@@ -103,7 +103,7 @@ func (c ScanCommand) ExecuteResource(kind kinds.Kind, name, namespace, engine st
 	}
 	images := dedupe(imagesOf(object))
 	if len(images) == 0 {
-		return nil, fmt.Errorf("no container images found for %s/%s.", kind, name)
+		return nil, fmt.Errorf("No container images found for %s/%s.", kind, name)
 	}
 	return images, nil
 }
@@ -639,7 +639,7 @@ func newScanCommand(services Services) *cobra.Command {
 			}
 			if asJSON && full {
 				return errors.New(
-					"'--json' cannot be combined with '--full' — --full streams " +
+					"'--json' cannot be combined with '--full' — '--full' streams " +
 						"the scanner's own report, which kx does not parse.")
 			}
 			// Same reason, one step further: a gate needs findings, and --full
@@ -648,7 +648,7 @@ func newScanCommand(services Services) *cobra.Command {
 			// whatever the scan turned up, and nothing said the gate had gone.
 			if full && failOn != "" {
 				return errors.New(
-					"'--full' cannot be combined with '--fail-on' — --full streams " +
+					"'--full' cannot be combined with '--fail-on' — '--full' streams " +
 						"the scanner's own report, which kx does not parse, so the " +
 						"gate has nothing to read.")
 			}

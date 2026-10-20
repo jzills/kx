@@ -46,9 +46,9 @@ const (
 // `7d` from the environment but not from the command line would be a trap.
 func ParseDuration(value string) (time.Duration, error) {
 	invalid := fmt.Errorf(
-		"invalid duration %q — use a number and a unit ("+DurationUnits+"): "+
+		"'%s' is not a duration — use a number and a unit ("+DurationUnits+"): "+
 			DurationExamples, value)
-	negative := fmt.Errorf("duration %q cannot be negative", value)
+	negative := fmt.Errorf("'%s' is negative, and a window cannot reach into the future", value)
 
 	parsed := time.Duration(0)
 	if days, ok := strings.CutSuffix(value, "d"); ok {
@@ -72,7 +72,7 @@ func ParseDuration(value string) (time.Duration, error) {
 		// multiplying it by 24h lands on 2^63 rather than one below it.
 		if count >= maxDays {
 			return 0, fmt.Errorf(
-				"duration %q is too long — a window has to fit in about 292 years", value)
+				"'%s' is too long — a window has to fit in about 292 years", value)
 		}
 		parsed = time.Duration(count * float64(24*time.Hour))
 	} else {

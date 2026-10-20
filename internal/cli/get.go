@@ -668,7 +668,7 @@ func numericResourceError(services Services, args []string) error {
 		}
 	}
 	return fmt.Errorf(
-		"'%s' names a row, not a resource type — kx get takes the kind first: '%s %s'.",
+		"'%s' names a row, not a resource type — 'kx get' takes the kind first: '%s %s'.",
 		args[0], suggestion, strings.Join(args, " "))
 }
 

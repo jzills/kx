@@ -508,7 +508,7 @@ func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, 
 		labels = selector.MatchLabels
 	}
 	if len(labels) == 0 {
-		return "", fmt.Errorf("%s/%s has no pod selector; cannot aggregate logs.", kind, name)
+		return "", fmt.Errorf("%s/%s has no pod selector, so there are no pods to aggregate logs from.", kind, name)
 	}
 
 	// Sorted so the selector is stable run to run, which matters when it shows
@@ -603,7 +603,7 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 		return err
 	}
 	return fmt.Errorf(
-		"No shell found in container. Provide an explicit command: kx exec <index> -- /path/to/binary",
+		"No shell found in the container — give the command to run: 'kx exec <index> -- /path/to/binary'.",
 	)
 }
 

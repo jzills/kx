@@ -307,7 +307,7 @@ func rewriteSince(args []string) ([]string, error) {
 	}
 	window, err := config.ParseDuration(value)
 	if err != nil {
-		return nil, fmt.Errorf("'--since': %w", err)
+		return nil, fmt.Errorf("Invalid value for '--since': %w.", err)
 	}
 	// String() rather than FormatDuration: this spelling is for kubectl, and
 	// FormatDuration writes the day form kubectl rejects — the very reason
@@ -324,7 +324,7 @@ func checkFollow(args []string, indexes int) error {
 	follow, _ := extractBool(args, "-f", "--follow")
 	if follow && indexes > 1 {
 		return fmt.Errorf(
-			"--follow streams a single pod; give one index, or use the workload's index to aggregate")
+			"'--follow' streams a single pod — give one index, or the workload's index to aggregate its pods.")
 	}
 	return nil
 }
@@ -975,7 +975,7 @@ func newSwitchCommand(services Services, use, alias, short string, isContext boo
 		Short:      short,
 		Long:       switchLong(use, isContext),
 		Aliases:    []string{alias},
-		Args:       cobra.MaximumNArgs(1),
+		Args:       maxArgs(1),
 		Example:    "  kx " + use + "\n  kx " + use + " 2",
 		SuggestFor: switchSuggestions(isContext),
 		Annotations: map[string]string{
@@ -1130,7 +1130,7 @@ func newStateCommand(services Services) *cobra.Command {
 		// command that replaced them. No command is added: SuggestFor is
 		// consulted only after a lookup has already failed.
 		SuggestFor: []string{"history", "stack", "cursor", "back", "forward", "drop"},
-		Args:       cobra.MaximumNArgs(1),
+		Args:       maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if asJSON {
 				return printStateJSON(services, all, targets, args)
@@ -1204,11 +1204,11 @@ func printStateJSON(services Services, all, targets bool, args []string) error {
 	if targets {
 		// The slots are switch screens: a number off one is spent by kx ns
 		// or kx context, never by a script, so there is no document to give.
-		return fmt.Errorf("--json covers the history stack, not --targets; drop one of them.")
+		return fmt.Errorf("'--json' covers the history stack, not '--targets' — drop one of them.")
 	}
 	if len(args) == 1 {
 		if all {
-			return fmt.Errorf("--all shows every entry; a position picks one. Drop one of them.")
+			return fmt.Errorf("'--all' shows every entry, and a position picks one — drop one of them.")
 		}
 		position, err := parseIndex("position", args[0])
 		if err != nil {
@@ -1244,7 +1244,7 @@ func newNavigateCommand(services Services, use, short, long string, delta int) *
 		Use:   use,
 		Short: short,
 		Long:  long,
-		Args:  cobra.NoArgs,
+		Args:  maxArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entry, err := services.State.Navigate(delta)
 			if err != nil {
@@ -1271,21 +1271,21 @@ func newDropCommand(services Services) *cobra.Command {
 			"--all leaves marks in place — they were named deliberately, not accumulated the way " +
 			"the stack is. 'kx unmark --all' is what removes them.",
 		Example: fmt.Sprintf("  %s 2\n  %s --empty\n  %s --all", prefix, prefix, prefix),
-		Args:    cobra.MaximumNArgs(1),
+		Args:    maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && empty {
-				return fmt.Errorf("drop --all and --empty are different requests; pick one")
+				return fmt.Errorf("'--all' and '--empty' are different requests — pick one.")
 			}
 			if empty {
 				if len(args) > 0 {
-					return fmt.Errorf("drop --empty takes no position argument")
+					return fmt.Errorf("%s --empty takes no position — drop the position, or drop '--empty' to drop that one entry.", cmd.CommandPath())
 				}
 				history, dropped, err := services.State.DropEmpty()
 				if err != nil {
 					return err
 				}
 				if dropped == 0 {
-					render.Caption("No empty entries to drop.")
+					render.Caption("No empty entries to drop")
 					return nil
 				}
 				render.StateHistory(history)
@@ -1293,7 +1293,7 @@ func newDropCommand(services Services) *cobra.Command {
 			}
 			if all {
 				if len(args) > 0 {
-					return fmt.Errorf("drop --all takes no position argument")
+					return fmt.Errorf("%s --all takes no position — drop the position, or drop '--all' to drop that one entry.", cmd.CommandPath())
 				}
 				if err := services.confirm()(
 					"Clear all kx history, including namespace and context slots? Marks are untouched — run 'kx unmark --all' for those.",
@@ -1303,11 +1303,11 @@ func newDropCommand(services Services) *cobra.Command {
 				if err := services.State.DropAll(); err != nil {
 					return err
 				}
-				render.Success("Cleared all history.")
+				render.Success("Cleared all history")
 				return nil
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("drop requires a position, or --all to clear everything")
+				return fmt.Errorf("%s requires a position, or '--all' to clear everything.", cmd.CommandPath())
 			}
 			position, err := parseIndex("position", args[0])
 			if err != nil {

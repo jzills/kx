@@ -321,33 +321,26 @@ func wordSepNormalize(_ *pflag.FlagSet, name string) pflag.NormalizedName {
 // which is the way through; kx --version names both kubectls when the
 // difference needs explaining.
 //
-// A malformed value for one of kx's own typed flags (kx top's --port): the
-// same sentence kx uses for a malformed index. kubectl's flags never raise it,
-// since kx forwards their values for kubectl to judge.
+// Every other flag error — a malformed value for one of kx's own typed flags
+// (kx top's --port), say — is worded as on any other command, by ownFlagError.
+// kubectl's flags never raise that one, since kx forwards their values for
+// kubectl to judge.
 func flagError(cmd *cobra.Command, err error) error {
-	var invalid *pflag.InvalidValueError
-	if errors.As(err, &invalid) {
-		return fmt.Errorf("Invalid value for '--%s': '%s' is not a valid %s.",
-			invalid.GetFlag().Name, invalid.GetValue(), invalid.GetFlag().Value.Type())
-	}
 	var missing *pflag.NotExistError
 	if !errors.As(err, &missing) {
-		return err
+		return ownFlagError(cmd, err)
 	}
-	spelling := "--" + missing.GetSpecifiedName()
-	if missing.GetSpecifiedShortnames() != "" {
-		spelling = "-" + missing.GetSpecifiedName()
-	}
+	spelling := typedSpelling(missing.GetSpecifiedName(), missing.GetSpecifiedShortnames())
 	if trailingCommand(cmd) {
 		return fmt.Errorf(
 			"'%s' isn't a flag of %s as of %s, the release kx's table of its "+
-				"flags was read from. Everything after -- is the command to run, "+
+				"flags was read from. Everything after '--' is the command to run, "+
 				"so a flag kx doesn't know needs %s itself.",
 			spelling, kubectlSubcommands(cmd), kubectlflags.Version, kubectlSubcommands(cmd))
 	}
 	return fmt.Errorf(
 		"'%s' isn't a flag of %s as of %s, the release kx's table of its flags "+
-			"was read from. If your kubectl takes it, put it after --: '%s -- %s'.",
+			"was read from. If your kubectl takes it, put it after '--': '%s -- %s'.",
 		spelling, kubectlSubcommands(cmd), kubectlflags.Version, requiredUse(cmd), spelling)
 }
 

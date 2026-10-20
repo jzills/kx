@@ -43,9 +43,9 @@ func Serve(ctx context.Context, page []byte, opts Options) error {
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", opts.Port))
 	if err != nil {
 		if opts.Port != 0 {
-			return fmt.Errorf("cannot serve on port %d: %w", opts.Port, err)
+			return fmt.Errorf("Could not serve on port %d: %w.", opts.Port, err)
 		}
-		return err
+		return fmt.Errorf("Could not serve the report: %w.", err)
 	}
 
 	addr := listener.Addr().String()
