@@ -55,13 +55,25 @@ func newManifestWriter(args []string, targets int) *manifestWriter {
 	return writer
 }
 
+// separate writes the separator owed before the next manifest, and is called
+// before that manifest's banner rather than beside the manifest itself.
+//
+// The separator goes to stdout and the banner to stderr, so on a terminal the
+// two interleave in call order. Written beside the manifest, that order read
+// `banner / --- / manifest`: the separator sat between a banner and the
+// manifest it names, while the first banner sat directly above its own. Each
+// banner now introduces the manifest under it, whichever pair it is.
+func (w *manifestWriter) separate() {
+	if w.merge || w.separator == "" || !w.written {
+		return
+	}
+	render.Raw(w.separator)
+}
+
 func (w *manifestWriter) add(manifest string) {
 	if w.merge {
 		w.replies = append(w.replies, manifest)
 		return
-	}
-	if w.written && w.separator != "" {
-		render.Raw(w.separator)
 	}
 	w.written = true
 	// Trimmed: Raw ends the line itself, so a manifest's own trailing

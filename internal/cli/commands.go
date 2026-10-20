@@ -789,6 +789,9 @@ func newYamlCommand(services Services) *cobra.Command {
 		// else written as it came. See manifestWriter.
 		manifests := newManifestWriter(extra, len(resolved))
 		err = runEach(resolved, func(target Resolved) error {
+			// Before the banner, so the banner introduces the manifest
+			// printed under it rather than the separator. See separate.
+			manifests.separate()
 			// Banner per manifest, on stderr: without it, several
 			// manifests run together with nothing saying which is which.
 			banner(cmd, target, "")
