@@ -29,8 +29,9 @@ go test -race ./...
 
 ## Conventions
 
-Repo-local skills in `.claude/skills/` are shared with everyone who clones the repo; load the one that matches the task before starting it.
+The house voice — errors, captions, help text, docs, comments, commits, release notes — is written down in `STYLE.md`. Repo-local skills in `.claude/skills/` are shared with everyone who clones the repo; load the one that matches the task before starting it.
 
+- `kx-voice` — writing or rewording any text kx shows or ships: errors, captions, help, docs, comments, commits, release notes.
 - `verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
 
 ## Stack
