@@ -8,7 +8,7 @@ package main
 // because its head partial is what links them.
 //
 // The mark is drawn without its shadow (mark.FaviconShapes, or
-// mark.TabIconShapes where the icon sits beside a title) and coloured from
+// mark.TabIconShapes where the icon sits beside a title) and colored from
 // the palette registry rather than a literal, so the icons a browser caches
 // are the same green the site paints itself with. The site repaints the SVG
 // from the reader's chosen palette at runtime; these files are what shows
@@ -36,8 +36,8 @@ import (
 // drawn beside a title, and it decides two things at once. A home-screen icon
 // is painted on the palette's background — iOS composites a transparent
 // apple-touch-icon onto black, and Android draws the manifest icons on a
-// launcher background — and it is centred in its tile, with no line of text to
-// centre against. A tab icon is transparent, so it sits on whatever the
+// launcher background — and it is centered in its tile, with no line of text to
+// center against. A tab icon is transparent, so it sits on whatever the
 // browser draws behind it, and takes mark.TabIconShapes' drop.
 var rasters = []struct {
 	path       string
@@ -109,7 +109,7 @@ func write(path string, content []byte) error {
 	return nil
 }
 
-// draw rasterises the favicon tile at size pixels square.
+// draw rasterizes the favicon tile at size pixels square.
 //
 // Block edges are snapped to whole pixels rather than antialiased, which is
 // the raster equivalent of the shape-rendering="crispEdges" the SVGs carry:
@@ -119,7 +119,7 @@ func write(path string, content []byte) error {
 // margin would otherwise land the whole mark on half-pixels and blur every
 // edge of it.
 //
-// Rounding both edges of a block the same way keeps neighbours touching, so
+// Rounding both edges of a block the same way keeps neighbors touching, so
 // the letterforms stay solid rather than growing seams.
 func draw(size int, fg, bg color.RGBA, standalone bool) *image.RGBA {
 	shapes, side := mark.TabIconShapes()
@@ -230,7 +230,7 @@ func manifest(styles map[string]string) string {
 // parseHex reads the #rrggbb the palettes are written in.
 func parseHex(value string) (color.RGBA, error) {
 	if len(value) != 7 || value[0] != '#' {
-		return color.RGBA{}, fmt.Errorf("%q is not a #rrggbb colour", value)
+		return color.RGBA{}, fmt.Errorf("%q is not a #rrggbb color", value)
 	}
 	channels := [3]uint8{}
 	for i := range channels {

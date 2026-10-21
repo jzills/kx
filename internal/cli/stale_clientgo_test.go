@@ -27,7 +27,7 @@ func (g gatherFailing) Sweep(context.Context, string) ([]diagnostics.Data, error
 }
 
 // kx tree and kx diag read the cluster through client-go, and its not-found
-// error is not kubectl's, which is the only kind isStale recognised. So an
+// error is not kubectl's, which is the only kind isStale recognized. So an
 // index whose resource had gone printed `pods "x" not found` and stopped,
 // where every kubectl-backed command — describe, logs, yaml, scan — said it
 // no longer exists and refreshed the listing to pick a new index from.

@@ -84,7 +84,7 @@ func extractStrings(args []string, long, short string) (values, rest []string, e
 // has to be distinguishable from an absent flag — which the returned value
 // alone cannot do.
 //
-// This must recognise exactly the spellings extractString consumes,
+// This must recognize exactly the spellings extractString consumes,
 // attached shorthand included — a caller that checks presence before
 // extracting the value (like scan's --namespace/--all-namespaces guard)
 // would otherwise miss a spelling extractString quietly consumes anyway.

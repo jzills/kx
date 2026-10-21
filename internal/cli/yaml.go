@@ -184,7 +184,7 @@ func findKeys(document any, keys []string) map[string]any {
 		for _, node := range frontier {
 			switch value := node.(type) {
 			case map[string]any:
-				// Walked in sorted order because Go randomises map iteration:
+				// Walked in sorted order because Go randomizes map iteration:
 				// an unordered walk puts sibling subtrees into the frontier in
 				// a different order on every run, so a key present in two of
 				// them at the same depth resolves differently each time and

@@ -270,7 +270,7 @@ func TestRestartFindingSuppressedWhileWaiting(t *testing.T) {
 	}
 }
 
-// Thresholds mirror the CPU%/MEM% colouring in kx top.
+// Thresholds mirror the CPU%/MEM% coloring in kx top.
 func TestUsageFindings(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -598,7 +598,7 @@ func TestWarningEventsRankBelowAggregates(t *testing.T) {
 // This pins the observable order, not the choice of sort.SliceStable over
 // sort.Slice. Nothing can pin that here: every finding in this fixture
 // compares equal, so the comparator never returns true, and Go's pdqsort
-// recognises an already-ordered run and leaves it alone whatever the size.
+// recognizes an already-ordered run and leaves it alone whatever the size.
 // SliceStable stays because the guarantee is what the code means to rely on —
 // but a mutation to sort.Slice survives this test, and no test in this package
 // would catch it.
@@ -1149,7 +1149,7 @@ func TestUndatedFailedPodIsStillReported(t *testing.T) {
 // A pod that failed in an init container leaves no main-container status to
 // date it by — podDiagnostic reads pod.Status.ContainerStatuses alone, and an
 // eviction can lose those too. Undated, the failure is outside no window at
-// all, so one Job that failed to initialise last month would hold its workload
+// all, so one Job that failed to initialize last month would hold its workload
 // critical and a --fail-on gate red forever. The pod's own UnhealthySince
 // dates it instead.
 func TestFailedPodWithNoContainerDateIsDatedByItsReadyTransition(t *testing.T) {

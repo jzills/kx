@@ -513,7 +513,7 @@ func TestCordonDryRunSaysNothingChanged(t *testing.T) {
 			t.Fatalf("Execute(%q): %v", tc.extra, err)
 		}
 		if got := strings.Contains(message, "(dry run — nothing was changed)"); got != tc.dryRun {
-			t.Errorf("Execute(%q) = %q, want dry run labelled: %v", tc.extra, message, tc.dryRun)
+			t.Errorf("Execute(%q) = %q, want dry run labeled: %v", tc.extra, message, tc.dryRun)
 		}
 	}
 }

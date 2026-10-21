@@ -3,7 +3,7 @@
   "tools": [
     {
       "name": "diagnose",
-      "description": "Diagnose Kubernetes health. With a target, analyses that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without full, the numbers skip the healthy rows left out.",
+      "description": "Diagnose Kubernetes health. With a target, analyzes that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without full, the numbers skip the healthy rows left out.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,

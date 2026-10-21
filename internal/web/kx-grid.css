@@ -1,6 +1,6 @@
 /* kx-grid.css re-skins vendored Tabulator (tabulator.min.css, the "simple"
    base) so a grid reads as part of the report rather than a bolted-on
-   widget. Every colour below is one of the custom properties cssVars()
+   widget. Every color below is one of the custom properties cssVars()
    already emits per-request — nothing here is a fixed hex, so this file
    needs no reordering relative to cssVars in layout.gohtml. */
 
@@ -61,9 +61,9 @@
 }
 
 /* Sort-direction arrows are CSS border-triangles, not an icon font or SVG —
-   each state colours a different side and leaves the others "transparent"
+   each state colors a different side and leaves the others "transparent"
    to form the triangle, so this must only touch the side each state
-   actually colours (not a blanket border-color, which would fill in the
+   actually colors (not a blanket border-color, which would fill in the
    transparent sides and square the triangle off). !important is
    deliberate: Tabulator's own rules for these are long compound selectors
    with attribute selectors ([aria-sort=ascending]), specific enough that
@@ -183,13 +183,13 @@
 }
 
 /* This is the one hover state that actually was broken (unlike the plain
-   background/text-colour rules above, which the comment before this block
+   background/text-color rules above, which the comment before this block
    still correctly says were fine): Tabulator auto-applies
    ".tabulator-selectable" to any row with a click handler bound — which
    the diag grid has, for row-expand — and its own
    ".tabulator-row.tabulator-selectable:hover" rule (found in the vendored
    stylesheet, wrapped in an @media (hover:hover) block) sets a flat light
-   grey, three selectors deep versus this file's plain ".tabulator-row:hover"
+   gray, three selectors deep versus this file's plain ".tabulator-row:hover"
    at two, so it always won regardless of source order. !important covers
    every hover variant Tabulator might apply — selectable, selected, or
    neither — so the row a user is pointing at always reads the same
@@ -229,13 +229,13 @@
    rgba(0,0,0,.1) overlay at matching specificity, which would otherwise
    layer semi-transparent black on top of this rule's own var(--background)
    in whichever order the two happen to parse — !important makes the
-   themed colour authoritative instead of leaving that to chance. */
+   themed color authoritative instead of leaving that to chance. */
 .tabulator-row.tabulator-group:hover {
   background: var(--background) !important;
 }
 
 /* Collapsed groups draw a right-pointing triangle (border-left carries the
-   colour); expanded groups (.tabulator-group-visible) draw a down-pointing
+   color); expanded groups (.tabulator-group-visible) draw a down-pointing
    one (border-top carries it) — two different sides, not interchangeable. */
 .tabulator-row.tabulator-group .tabulator-arrow {
   border-left-color: var(--muted) !important;
@@ -256,7 +256,7 @@
    classes) — one class more specific than a same-cascade-position override
    without .tabulator-cell in the chain, so a shorter selector here loses
    the specificity contest regardless of source order and silently never
-   applies. Matched exactly, plus !important on the actual +/- bar colour
+   applies. Matched exactly, plus !important on the actual +/- bar color
    (drawn via the ::after pseudo-element's background, not a border) for the
    same vendor-selector-fragility reason as the sort arrows above. */
 .tabulator-row .tabulator-cell .tabulator-data-tree-control {
@@ -274,7 +274,7 @@
   background: var(--muted) !important;
 }
 
-/* Status colours, applied via row/cell formatters using the same class
+/* Status colors, applied via row/cell formatters using the same class
    vocabulary the rest of the page uses (statusClass/severityClass). */
 .tabulator-row .status-ok { color: var(--status-ok); }
 .tabulator-row .status-warn { color: var(--status-warn); }
@@ -375,7 +375,7 @@
 
 /* The trigger and the search input now get the same box treatment as
    Kind/Verdict's own header-filter inputs (background, border, body-
-   coloured text at step-0, not the label's micro/uppercase/muted look) —
+   colored text at step-0, not the label's micro/uppercase/muted look) —
    this is the "selected value" text, styled the same as any other
    filter's selected value, with the small-caps treatment living on
    .kx-control-label above it instead.

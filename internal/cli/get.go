@@ -15,7 +15,7 @@ type Indexer interface {
 	// Add parses kubectl output and numbers it, for callers holding text.
 	Add(output string) index.Table
 	// AddRows numbers rows already parsed, for callers that narrowed or
-	// widened the table on the way and must not re-serialise it to do so.
+	// widened the table on the way and must not re-serialize it to do so.
 	AddRows(headers []string, rows [][]string) index.Table
 	// Parse reads kubectl table output into a listing, to be narrowed and
 	// numbered as steps of their own (see index.Listing).
@@ -90,7 +90,7 @@ func replayScope(scope string, extraArgs []string) []string {
 // than the context's current one.
 // The spellings themselves are extractString's business rather than this
 // function's. A second matcher living here drifted from that one: `-nprod` and
-// `-n=prod` went unrecognised, so the state recorded the current namespace
+// `-n=prod` went unrecognized, so the state recorded the current namespace
 // while kubectl listed the one that was asked for, and every index afterwards
 // resolved against the wrong namespace.
 //
@@ -581,7 +581,7 @@ func scopeFlagIn(args []string) string {
 
 // firstSpelling names which of several spellings of one flag appears first in
 // argv, without whatever value was attached to it. The attached-value form is
-// recognised for shorthands only ("-nprod"), matching hasFlag.
+// recognized for shorthands only ("-nprod"), matching hasFlag.
 func firstSpelling(args []string, names ...string) string {
 	for _, arg := range args {
 		for _, name := range names {

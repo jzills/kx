@@ -57,7 +57,7 @@ func (i Info) Tag() string { return tag(i.Version) }
 // ShortTag is Tag with a pseudo-version's tail cut off — the version alone.
 // The help screen signs off with this: there, the question is which kx this is,
 // and the timestamp and commit answering "built from what" belong under
-// `kx --version`, which reports them as their own labelled lines anyway.
+// `kx --version`, which reports them as their own labeled lines anyway.
 //
 // Semver build metadata goes first, and not only so pseudoTail's anchor still
 // reaches the commit it matches on: installing from a modified tree appends

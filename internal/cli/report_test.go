@@ -192,7 +192,7 @@ func TestDiagnosticJSONCarriesTheFindingsInOrder(t *testing.T) {
 // Every swept resource, healthy ones included — not just the rows the terminal
 // table printed. --full governs what fits on a screen, and a machine is not
 // scrolling. Reports here holds only the unhealthy row, as it does without
-// --full, so a serialiser reading Reports instead of All loses the healthy one.
+// --full, so a serializer reading Reports instead of All loses the healthy one.
 func TestTriageJSONCarriesEveryResourceNotJustThePrintedRows(t *testing.T) {
 	broken := diagnostics.Report{
 		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
@@ -428,7 +428,7 @@ func TestScanJSONMarksAClusterWideSweep(t *testing.T) {
 }
 
 // The point of the change: two commands, one vocabulary for saying what was
-// analysed. A pipeline that reads kx diag must not have to learn a second
+// analyzed. A pipeline that reads kx diag must not have to learn a second
 // shape to read kx scan.
 func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
 	t.Run("one resource", func(t *testing.T) {

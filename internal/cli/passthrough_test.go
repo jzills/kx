@@ -112,7 +112,7 @@ func TestExtractStringKeepsKubectlFlagsAlongsideMatch(t *testing.T) {
 	}
 }
 
-// hasFlag must recognise exactly the spellings extractString consumes. If it
+// hasFlag must recognize exactly the spellings extractString consumes. If it
 // falls behind — missing attached shorthand, say — a caller that checks
 // presence before extracting (scan's --namespace/--all-namespaces guard) sees
 // "absent" for a flag extractString is quietly consuming anyway.
@@ -450,7 +450,7 @@ func TestClusterFlagsPassWhereNoIndexIsSpent(t *testing.T) {
 }
 
 // The four commands that swallowed kubectl's flags now forward them. Asserted
-// on the exact argv, because "no error" is what the old behaviour looked like
+// on the exact argv, because "no error" is what the old behavior looked like
 // from the outside too — it just dropped the flag.
 func TestDeleteForwardsKubectlFlags(t *testing.T) {
 	kube := &recordingKubectl{output: ""}
@@ -671,8 +671,8 @@ func TestDeleteSaysWhenItWasADryRun(t *testing.T) {
 	}
 }
 
-// Only the two values that mean a dry run are labelled. Anything else —
-// --dry-run=none, or a spelling kubectl may add — is left unlabelled rather
+// Only the two values that mean a dry run are labeled. Anything else —
+// --dry-run=none, or a spelling kubectl may add — is left unlabeled rather
 // than guessed at: a wrong "(dry run)" on a real delete is the worse failure,
 // and kx does not otherwise read kubectl's flag semantics.
 func TestDeleteDoesNotClaimADryRunItCannotConfirm(t *testing.T) {
@@ -790,7 +790,7 @@ func TestExpandRangeRefusesARangeEntirelyPastTheListing(t *testing.T) {
 	for _, arg := range []string{"20..30", "30..20"} {
 		_, ok, err := expandRange(resolver, "indexes", arg)
 		if !ok {
-			t.Fatalf("expandRange(%q) was not recognised as a range", arg)
+			t.Fatalf("expandRange(%q) was not recognized as a range", arg)
 		}
 		if err == nil {
 			t.Errorf("expandRange(%q) = nil error, want a refusal", arg)
@@ -803,7 +803,7 @@ func TestExpandRangeRefusesARangeEntirelyPastTheListing(t *testing.T) {
 }
 
 // The open-ended form must keep behaving exactly as it did — it is the
-// behaviour the closed form is being brought into line with.
+// behavior the closed form is being brought into line with.
 func TestExpandRangeOpenEndStillEndsAtTheListing(t *testing.T) {
 	resolver := fakeResolver{name: "web", namespace: "prod", kind: kinds.Pod, count: 14}
 
@@ -924,7 +924,7 @@ func TestMetadataWriteSaysWhenItWasADryRun(t *testing.T) {
 			t.Fatalf("Execute(%v): %v", tc.extra, err)
 		}
 		if got := strings.Contains(message, "dry run"); got != tc.dry {
-			t.Errorf("message = %q for %v, want dry run labelled = %v", message, tc.extra, tc.dry)
+			t.Errorf("message = %q for %v, want dry run labeled = %v", message, tc.extra, tc.dry)
 		}
 	}
 }

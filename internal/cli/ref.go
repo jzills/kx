@@ -129,7 +129,7 @@ func newRefCommand(services Services) *cobra.Command {
 // refField picks the one field asked for, refusing a combination.
 //
 // Two fields on one line would be a third output format nobody asked for, and
-// silently honouring the first flag would make `kx ref 3 --name --namespace`
+// silently honoring the first flag would make `kx ref 3 --name --namespace`
 // print something that looks right and isn't.
 func refField(name, namespace, kind bool) (string, error) {
 	chosen := make([]string, 0, 3)

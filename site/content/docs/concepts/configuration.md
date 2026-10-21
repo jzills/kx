@@ -23,7 +23,7 @@ Running `kx --version` prints the path it resolved, which is the quickest way to
 
 | Key | Environment | Default | What it does |
 | --- | --- | --- | --- |
-| `theme` | `KX_THEME` | `github-dark` | Colour palette for all output; see [themes](../themes/). |
+| `theme` | `KX_THEME` | `github-dark` | Color palette for all output; see [themes](../themes/). |
 | `engine` | `KX_ENGINE` | `scout` | Default scanner for `kx scan` — `scout`, `trivy` or `grype`. |
 | `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](../state/) keeps. |
 | `shells` | `KX_SHELLS` | `bash, sh` | Shell candidates `kx exec` tries, in order. |

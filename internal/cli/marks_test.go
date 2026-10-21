@@ -409,7 +409,7 @@ func TestUnmarkRemovesSeveralByName(t *testing.T) {
 }
 
 // A typo in the middle of a batch refuses the whole thing. Removing the names
-// it recognised first would leave the user to work out which half landed, and
+// it recognized first would leave the user to work out which half landed, and
 // a mark is not recoverable from the listing that no longer mentions it.
 func TestUnmarkRefusesTheBatchBeforeRemovingAnything(t *testing.T) {
 	services := switchServices(t, &recordingKubectl{})

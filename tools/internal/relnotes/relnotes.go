@@ -78,7 +78,7 @@ var (
 	squashSubject = regexp.MustCompile(`\s\(#(\d+)\)$`)
 	// A conventional-commit prefix: type, optional scope, optional breaking
 	// "!", then ": ". The scope is kept on the type so "chore(deps)" can be
-	// categorised apart from a plain "chore", and the "!" is captured rather
+	// categorized apart from a plain "chore", and the "!" is captured rather
 	// than merely tolerated — matched and discarded, it let `feat!: …` render
 	// as an ordinary Features bullet, indistinguishable from a change that
 	// asks nothing of anyone.

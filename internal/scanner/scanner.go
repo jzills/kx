@@ -482,7 +482,7 @@ func messageField(text, label string) (string, bool) {
 	return "", false
 }
 
-// fixedVersion normalises Scout's "not fixed", which is prose rather than a
+// fixedVersion normalizes Scout's "not fixed", which is prose rather than a
 // version and must not be printed as one.
 func fixedVersion(value string) string {
 	if strings.EqualFold(strings.TrimSpace(value), "not fixed") {

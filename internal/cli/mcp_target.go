@@ -23,7 +23,7 @@ type mcpTarget struct {
 	Index     int    `json:"index,omitempty" jsonschema:"A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it."`
 }
 
-// resolvedTarget is a target after normalisation. Mark is kept so a result can
+// resolvedTarget is a target after normalization. Mark is kept so a result can
 // say which mark produced it, the way kx diag --json does.
 type resolvedTarget struct {
 	Kind      kinds.Kind
@@ -192,7 +192,7 @@ func refuseAll(spelling string) error {
 // kind, name and namespace came from the state file rather than from the
 // caller directly — to exactly the checks a typed target gets as it is
 // parsed: the flag-injection shapes, the 'all' refusal, and the kind
-// normalised — every kubectl spelling of it, secrets.v1. as much as secrets
+// normalized — every kubectl spelling of it, secrets.v1. as much as secrets
 // (kinds.Normalize). It returns the canonical kind, which is what reaches
 // argv and every kind-keyed check (Secret redaction above all). Without it
 // either path was trusted outright.

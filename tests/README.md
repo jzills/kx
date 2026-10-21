@@ -1,7 +1,7 @@
 # Cluster scenarios
 
 Fixtures that put a cluster into a situation `kx` is supposed to diagnose, so
-a behaviour can be seen rather than described.
+a behavior can be seen rather than described.
 
 ```bash
 go run ./tools/scenario list
@@ -59,5 +59,5 @@ back short rather than empty.
 
 These deploy a situation; they do not check the output. Running the commands
 and reading what comes back is the point — an expected-output file would fix
-the wording of a report that is still being shaped, and the behaviour itself
+the wording of a report that is still being shaped, and the behavior itself
 is covered by `go test ./...`.

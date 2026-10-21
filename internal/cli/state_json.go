@@ -100,7 +100,7 @@ func stateJSONOf(entry state.State, place, cursor int) stateJSON {
 	return document
 }
 
-// stateEntryJSON serialises the entry at the cursor, or a null entry for an
+// stateEntryJSON serializes the entry at the cursor, or a null entry for an
 // empty stack.
 func stateEntryJSON(history state.History, context string) (string, error) {
 	document := stateDocument{SchemaVersion: reportSchemaVersion, Context: context}
@@ -111,7 +111,7 @@ func stateEntryJSON(history state.History, context string) (string, error) {
 	return encode(document)
 }
 
-// stateHistoryJSON serialises the whole stack.
+// stateHistoryJSON serializes the whole stack.
 func stateHistoryJSON(history state.History, context string) (string, error) {
 	entries := make([]stateJSON, 0, len(history.States))
 	for place, entry := range history.States {

@@ -98,8 +98,8 @@ func cell(glyph rune, x, y float64) []Rect {
 	var (
 		midX = x + (cellWidth-stroke)/2
 		midY = y + (cellHeight-stroke)/2
-		// Arms run from the cell edge to the centre of the stroke, so two
-		// neighbouring cells overlap by nothing and leave no gap.
+		// Arms run from the cell edge to the center of the stroke, so two
+		// neighboring cells overlap by nothing and leave no gap.
 		leftArm  = Rect{x, midY, (cellWidth-stroke)/2 + stroke, stroke}
 		rightArm = Rect{midX, midY, (cellWidth-stroke)/2 + stroke, stroke}
 		upArm    = Rect{midX, y, stroke, (cellHeight-stroke)/2 + stroke}
@@ -133,13 +133,13 @@ func cell(glyph rune, x, y float64) []Rect {
 // edge of the tile at large sizes without spending pixels that matter at 16.
 const faviconPadding = cellWidth / 2
 
-// opticalDrop is how far below the tile's centre the mark sits in an icon that
+// opticalDrop is how far below the tile's center the mark sits in an icon that
 // is drawn beside text.
 //
-// A browser centres the icon's box against the title's line box, and a line
+// A browser centers the icon's box against the title's line box, and a line
 // box is taller than the letters in it — it reserves room for descenders below
 // the baseline. Type set in it therefore carries its visual weight above the
-// box's centre, and a mark centred in its own box next to that reads as
+// box's center, and a mark centered in its own box next to that reads as
 // floating high, which is what a tab actually looked like.
 //
 // Half a cell: at 288 units to a tile that is one sixteenth, so it lands as
@@ -148,16 +148,16 @@ const faviconPadding = cellWidth / 2
 // drawing the same icon at 32.
 const opticalDrop = cellHeight / 2
 
-// FaviconShapes returns the blocks centred in a square tile, with the tile's
+// FaviconShapes returns the blocks centered in a square tile, with the tile's
 // side. What an icon standing on its own — a home screen, a launcher — is
 // drawn from; TabIconShapes is the same tile for one drawn beside a title.
 //
 // Square because every consumer of a favicon is: the mark's own 15:5 block
-// grid is centred in the tile rather than stretched to it, and the tile is
+// grid is centered in the tile rather than stretched to it, and the tile is
 // sized from the blocks actually drawn rather than the full line grid, whose
 // last row and column are shadow the favicon leaves out.
 //
-// Separate from Favicon so the SVG and the PNGs tools/gen-marks rasterises are
+// Separate from Favicon so the SVG and the PNGs tools/gen-marks rasterizes are
 // the same shapes in the same tile — an icon set whose sizes disagreed about
 // where the mark sits would be visible as a jump when a browser switched
 // between them.

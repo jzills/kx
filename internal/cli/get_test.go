@@ -644,7 +644,7 @@ func TestNamespacedListingStillSavesItsNamespace(t *testing.T) {
 }
 
 // A kind kx cannot place — a CRD with no discovery cache — keeps today's
-// behaviour rather than having a scope invented for it. Guessing
+// behavior rather than having a scope invented for it. Guessing
 // cluster-scoped would strip the namespace off a namespaced CRD and leave
 // every index resolving into the wrong place.
 func TestUnknownKindKeepsTheCurrentNamespace(t *testing.T) {

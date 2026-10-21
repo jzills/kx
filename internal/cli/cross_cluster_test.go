@@ -40,7 +40,7 @@ func assertListingUntouched(t *testing.T, services Services, entries int) {
 }
 
 // A listing taken in another cluster was numbered and saved as though it came
-// from this one — its rows labelled with the current context and namespace —
+// from this one — its rows labeled with the current context and namespace —
 // so `kx get pods --context=b` then `kx delete 1` deleted a same-named pod
 // here. It is printed as kubectl gave it instead, unnumbered and unsaved, the
 // way kx already prints output it cannot index, and the listing before it

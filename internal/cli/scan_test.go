@@ -417,9 +417,9 @@ func TestScanImageRefusesFlagAndSchemeShapedImages(t *testing.T) {
 	}
 }
 
-// A cancelled sweep stops handing out images: the scans already running
+// A canceled sweep stops handing out images: the scans already running
 // finish, no new one starts, and the context's error comes back.
-func TestSummarizeContextStopsStartingScansOnceCancelled(t *testing.T) {
+func TestSummarizeContextStopsStartingScansOnceCanceled(t *testing.T) {
 	entered := make(chan string, 8)
 	release := make(chan struct{})
 	fake := &fakeScanner{capturing: func(argv []string) {
@@ -460,7 +460,7 @@ func TestSummarizeContextStopsStartingScansOnceCancelled(t *testing.T) {
 	}
 	select {
 	case image := <-entered:
-		t.Errorf("%s was scanned after the sweep was cancelled", image)
+		t.Errorf("%s was scanned after the sweep was canceled", image)
 	default:
 	}
 }
@@ -713,7 +713,7 @@ func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
 // A namespace sweep's page must carry the same "Mixed · " cross-kind label
 // the terminal's ScopeBanner prints; an indexed scan's pageScope is built
 // separately (in the index branch, string(kind)+"/"+name+" · "+namespace) and
-// never calls this, which is what keeps it unlabelled.
+// never calls this, which is what keeps it unlabeled.
 func TestSweepPageScopeAddsTheMixedLabel(t *testing.T) {
 	if got := sweepPageScope("prod"); got != "Mixed · prod" {
 		t.Errorf("sweepPageScope(%q) = %q, want %q", "prod", got, "Mixed · prod")
@@ -810,10 +810,10 @@ func TestScanOmittedEngineUsesConfiguredDefault(t *testing.T) {
 	}
 }
 
-// A scanner is free to colour its own stderr, and Grype does. Carried into a
+// A scanner is free to color its own stderr, and Grype does. Carried into a
 // table cell verbatim, its reset sequence ends kx's styling mid-row and prints
 // the escape's tail as text ("local-directory[0m").
-func TestLastLineStripsScannerColour(t *testing.T) {
+func TestLastLineStripsScannerColor(t *testing.T) {
 	stderr := "resolving image\n\x1b[31mfailed to fetch \x1b[1mregistry.invalid\x1b[0m\n"
 	got := lastLine(stderr)
 	want := "failed to fetch registry.invalid"
@@ -824,7 +824,7 @@ func TestLastLineStripsScannerColour(t *testing.T) {
 
 // Stripping the escapes must not leave a cell that is empty or blank, which
 // would read as a scan that failed for no reason at all.
-func TestLastLineFallsBackWhenColourIsAllThereIs(t *testing.T) {
+func TestLastLineFallsBackWhenColorIsAllThereIs(t *testing.T) {
 	if got := lastLine("\x1b[31m\x1b[0m\n"); got != "scan failed" {
 		t.Errorf("lastLine = %q, want the generic fallback", got)
 	}

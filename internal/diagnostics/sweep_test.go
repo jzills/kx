@@ -75,7 +75,7 @@ func sweptCluster(t *testing.T, s Service) map[string]Data {
 }
 
 // An empty namespace sweeps the whole cluster. Each row then has to carry the
-// namespace it actually came from: labelling them all from the argument would
+// namespace it actually came from: labeling them all from the argument would
 // stamp every row with the empty string, and the caller can no longer tell one
 // web-abc from another.
 func TestSweepAcrossAllNamespacesLabelsEachRow(t *testing.T) {

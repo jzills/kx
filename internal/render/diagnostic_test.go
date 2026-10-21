@@ -91,8 +91,8 @@ func TestHealthyDiagnosticSaysSo(t *testing.T) {
 	}
 }
 
-// A raw tail is labelled as such, so it isn't mistaken for matched errors.
-func TestUnfilteredLogsAreLabelled(t *testing.T) {
+// A raw tail is labeled as such, so it isn't mistaken for matched errors.
+func TestUnfilteredLogsAreLabeled(t *testing.T) {
 	report := diagnostics.Report{
 		Kind: kinds.Pod, Name: "api-abc", Namespace: "prod",
 		Pods: []diagnostics.PodDiagnostic{{
@@ -104,7 +104,7 @@ func TestUnfilteredLogsAreLabelled(t *testing.T) {
 	}
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
 	if !strings.Contains(out, "recent output") {
-		t.Errorf("raw tail is not labelled:\n%s", out)
+		t.Errorf("raw tail is not labeled:\n%s", out)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestTriageEmptyNamespace(t *testing.T) {
 // Every indexed listing labels its index column "X". The Python renderer left
 // the triage table's blank, alone among them; this is a deliberate divergence,
 // so it is pinned rather than left to drift back.
-func TestTriageIndexColumnIsLabelled(t *testing.T) {
+func TestTriageIndexColumnIsLabeled(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			Namespace: "prod", Checked: 2, Healthy: 1,
@@ -559,7 +559,7 @@ func TestCurrentLogTailIsNotDated(t *testing.T) {
 	}
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
 	if strings.Contains(out, "previous instance") {
-		t.Errorf("a current tail was labelled as the previous instance:\n%s", out)
+		t.Errorf("a current tail was labeled as the previous instance:\n%s", out)
 	}
 }
 

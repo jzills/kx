@@ -8,7 +8,7 @@ import (
 )
 
 // scanSeverity maps a CVE bucket onto its column header and the style a nonzero
-// count is drawn in. Critical and high share the alarm colour; medium is a
+// count is drawn in. Critical and high share the alarm color; medium is a
 // warning; low and unspecified stay muted so the eye lands on what's
 // actionable. Order matches scanner.Severities.
 var scanSeverity = map[string]struct{ Header, Style string }{
@@ -19,7 +19,7 @@ var scanSeverity = map[string]struct{ Header, Style string }{
 	"UNSPECIFIED": {"UNSPEC", theme.Muted},
 }
 
-// ScanSummary renders one row per unique image: severity counts coloured by
+// ScanSummary renders one row per unique image: severity counts colored by
 // bucket, with a trailing status cell for images that failed to scan.
 //
 // Counts of zero stay muted so nonzero criticals and highs stand out.

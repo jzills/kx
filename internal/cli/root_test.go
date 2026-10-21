@@ -20,7 +20,7 @@ func TestNewServicesWiresTheStateContextHook(t *testing.T) {
 }
 
 // kx completion's examples are per-shell alternatives, and the help screen
-// renders each on its own "$ " line with nothing between them. Unlabelled,
+// renders each on its own "$ " line with nothing between them. Unlabeled,
 // they read as a two-step sequence — and someone on zsh ran both:
 //
 //	kx completion zsh > "${fpath[1]}/_kx"

@@ -212,8 +212,8 @@ func installCompletion(root *cobra.Command) {
 	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
 	completion.Long = "Generates a shell completion script for kx. See each subcommand's " +
 		"own --help for how to install it."
-	// Labelled by shell because the help screen prints each example on its
-	// own "$ " line with nothing between them, so an unlabelled pair reads as
+	// Labeled by shell because the help screen prints each example on its
+	// own "$ " line with nothing between them, so an unlabeled pair reads as
 	// a sequence to run. Someone on zsh ran both: the bash script registers
 	// its own completer over the zsh one where bashcompinit is loaded, and
 	// then fails on a bash-completion helper zsh has no equivalent for.
@@ -322,10 +322,10 @@ func registerFormatFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 }
 
-// registerWatchFlag declares --watch on the listing commands that honour it.
+// registerWatchFlag declares --watch on the listing commands that honor it.
 //
 // kubectl owns the flag and isWatch parses it by hand, but kx gives it its own
-// behaviour — a live-redrawing table instead of a stream — so leaving it
+// behavior — a live-redrawing table instead of a stream — so leaving it
 // unregistered made a kx feature visible only in the README.
 func registerWatchFlag(cmd *cobra.Command) {
 	cmd.Flags().BoolP("watch", "w", false,

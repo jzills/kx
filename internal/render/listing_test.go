@@ -119,7 +119,7 @@ func TestSwitchListingMarksTheCurrentRow(t *testing.T) {
 	}
 }
 
-// Status colouring and the caption are the ordinary listing's, unchanged: the
+// Status coloring and the caption are the ordinary listing's, unchanged: the
 // marker column is the only difference, so a switch listing and a kx get
 // listing of the same resource do not drift apart.
 func TestSwitchListingKeepsTheOrdinaryCaption(t *testing.T) {

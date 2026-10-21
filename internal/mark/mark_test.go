@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-// The favicon is the mark with its shadow left off, centred in a square tile.
+// The favicon is the mark with its shadow left off, centered in a square tile.
 //
 // Each half of that is load-bearing and neither shows up in a diff: a favicon
 // that let the shadow through would go muddy at the 16 pixels a tab draws it
@@ -37,31 +37,31 @@ func TestFaviconTileHoldsTheWholeMark(t *testing.T) {
 	}
 }
 
-// A tab icon sits below the centre of its tile on purpose: the browser centres
-// it against a line box that reserves room for descenders, so a mark centred
+// A tab icon sits below the center of its tile on purpose: the browser centers
+// it against a line box that reserves room for descenders, so a mark centered
 // in its own tile reads as floating above the title beside it.
 //
 // The drop is one pixel at the sixteen a tab draws an icon at — the smallest
 // move available there — so this pins both that it happens and that it stays
 // small, in the units the tile is measured in rather than in pixels.
-func TestTabIconSitsBelowTheTileCentre(t *testing.T) {
-	centred, side := FaviconShapes()
+func TestTabIconSitsBelowTheTileCenter(t *testing.T) {
+	centered, side := FaviconShapes()
 	dropped, tabSide := TabIconShapes()
 
 	if tabSide != side {
-		t.Errorf("tab icon tile is %g, want the same %g the centred tile uses",
+		t.Errorf("tab icon tile is %g, want the same %g the centered tile uses",
 			tabSide, side)
 	}
-	if len(dropped) != len(centred) {
-		t.Fatalf("tab icon has %d shapes, want %d", len(dropped), len(centred))
+	if len(dropped) != len(centered) {
+		t.Fatalf("tab icon has %d shapes, want %d", len(dropped), len(centered))
 	}
 
 	for i := range dropped {
-		if dropped[i].X != centred[i].X {
+		if dropped[i].X != centered[i].X {
 			t.Errorf("shape %d moved sideways, from %g to %g; the drop is vertical",
-				i, centred[i].X, dropped[i].X)
+				i, centered[i].X, dropped[i].X)
 		}
-		if drop := dropped[i].Y - centred[i].Y; drop != opticalDrop {
+		if drop := dropped[i].Y - centered[i].Y; drop != opticalDrop {
 			t.Errorf("shape %d dropped by %g, want %g", i, drop, opticalDrop)
 		}
 	}
@@ -83,7 +83,7 @@ func TestTabIconSitsBelowTheTileCentre(t *testing.T) {
 	}
 }
 
-// The colour is the one thing a caller chooses, and the reports choose it per
+// The color is the one thing a caller chooses, and the reports choose it per
 // palette. An SVG that dropped it would render black on a dark tab.
 func TestFaviconCarriesTheFill(t *testing.T) {
 	svg := Favicon("#bd93f9")

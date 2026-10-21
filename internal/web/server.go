@@ -34,7 +34,7 @@ const shutdownGrace = 2 * time.Second
 // preconnect connections shutdownGrace has to tolerate below.
 const readHeaderTimeout = 5 * time.Second
 
-// Serve hands out one already-rendered page until ctx is cancelled.
+// Serve hands out one already-rendered page until ctx is canceled.
 //
 // It binds 127.0.0.1 and nothing else: the page carries pod logs, event
 // messages and vulnerability inventories, none of which belong on a network

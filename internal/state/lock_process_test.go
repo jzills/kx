@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// The lock exists to serialise separate processes — the CLI and a `kx mcp`
+// The lock exists to serialize separate processes — the CLI and a `kx mcp`
 // server — and the in-process tests only stand in for that. This one runs
 // the real shape: several copies of the test binary, re-executed as helpers,
 // each writing its own marks to one state file. Every mark must survive.
