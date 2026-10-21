@@ -27,6 +27,12 @@ go test -race ./...
 
 `pre-commit run --all-files` runs the first two, plus the README command-table generator. It does **not** run the tests — a clean commit is not a passing one, so run `go test -race ./...` yourself.
 
+## Conventions
+
+Repo-local skills in `.claude/skills/` are shared with everyone who clones the repo; load the one that matches the task before starting it.
+
+- `verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
+
 ## Stack
 
 - **cobra/pflag** — CLI framework; the command tree is built in `internal/cli/root.go` with injected dependencies
