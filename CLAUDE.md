@@ -38,6 +38,8 @@ The house voice — errors, captions, help text, docs, comments, commits, releas
 - `kx-voice` — writing or rewording any text kx shows or ships: errors, captions, help, docs, comments, commits, release notes.
 - `verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
 
+Two hooks in `.claude/settings.json` (scripts in `.claude/hooks/`, no-ops without `jq`): after an Edit or Write to a `.go` file, `gofmt.sh` reports, without rewriting, a file gofmt would change; before a Bash call, `gate.sh` refuses a `git commit` sent in the same command as `go test`, `go vet`, `gofmt` or `pre-commit run`, or with `--no-verify`.
+
 ## Stack
 
 - **cobra/pflag** — CLI framework; the command tree is built in `internal/cli/root.go` with injected dependencies
