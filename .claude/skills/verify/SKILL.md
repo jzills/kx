@@ -11,7 +11,7 @@ description: Use when running, demoing or verifying a kx CLI change end-to-end a
 go run ./cmd/kx <command> [args]
 ```
 
-For anything comparing behaviour across commits, build instead — `go run`
+For anything comparing behavior across commits, build instead — `go run`
 recompiles each invocation and the difference swamps short commands:
 
 ```bash

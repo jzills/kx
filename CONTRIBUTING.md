@@ -21,7 +21,8 @@ yourself.
 ## Style
 
 Errors, help text, docs, comments, commits and release notes all share one
-voice, written down in [`STYLE.md`](STYLE.md). If you work with an AI agent,
+voice, written down in [`STYLE.md`](STYLE.md); `go run ./tools/voicecheck`,
+run by the pre-commit hook, checks the parts of it a machine can. If you work with an AI agent,
 the repo's shared skills in `.claude/skills/` load the relevant parts of it
 for the task at hand; CLAUDE.md lists them.
 

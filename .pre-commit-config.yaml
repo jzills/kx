@@ -22,6 +22,17 @@ repos:
         # rather than the command tree, so it takes filenames.
         entry: scripts/check_file_size.sh
 
+      - id: voicecheck
+        name: Check STYLE.md's mechanical rules
+        language: system
+        # Spelling, message label prefixes, README and site sentence openings,
+        # and unwrapped release notes, across every tracked file rather than
+        # only the ones being committed: a rule added to the tool should hold
+        # for the whole tree from the commit that adds it.
+        entry: go run ./tools/voicecheck
+        pass_filenames: false
+        always_run: true
+
       - id: gen-command-table
         name: Regenerate README command table
         language: system

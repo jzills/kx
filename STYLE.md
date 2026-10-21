@@ -1,7 +1,7 @@
 # kx style guide
 
 This is the house voice for everything kx says: errors, captions, help text, the README and site docs, code comments, commits, pull requests and release notes.
-The rules a machine can check are pinned by tests and hooks, and the test names are given beside them; the rest is judgment, and this page is where that judgment is written down.
+The rules a machine can check are pinned by tests (named beside them) and by `tools/voicecheck`, which pre-commit runs over the whole tree; the rest is judgment, and this page is where that judgment is written down.
 
 When something you are writing has no rule here, find the closest existing message and match its shape exactly: its punctuation, casing and field order.
 A new shape that merely looks similar is drift.
