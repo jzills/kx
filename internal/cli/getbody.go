@@ -291,9 +291,10 @@ func runGet(services Services, resource string, args []string, options getOption
 
 		// Indexes from an -A listing can land in different namespaces, and
 		// kubectl cannot fetch named resources across namespaces in one call.
-		// One call per namespace, stitched back together. An explicit -n means
-		// the user overrode the scope, so there is nothing to span.
-		if len(groups) > 1 && extractNamespace(extra) == "" {
+		// One call per namespace, stitched back together. A -n or -A beside
+		// an index was refused above, so the listing's namespaces are the
+		// only scope there is.
+		if len(groups) > 1 {
 			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
 			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
@@ -309,12 +310,10 @@ func runGet(services Services, resource string, args []string, options getOption
 		for _, entry := range resolved {
 			names = append(names, entry.Name)
 		}
-		// The listing's own namespace, unless the user named one. It is the
-		// listing's, not the command's, so it is the fetch's Scope rather
-		// than a -n in the recorded query (listingScope).
-		if extractNamespace(extra) == "" {
-			scope = groups[0].Namespace
-		}
+		// The listing's own namespace. It is the listing's, not the
+		// command's, so it is the fetch's Scope rather than a -n in the
+		// recorded query (listingScope).
+		scope = groups[0].Namespace
 		extra = append(names, extra...)
 	}
 
