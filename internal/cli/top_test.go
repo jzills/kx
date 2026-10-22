@@ -1139,6 +1139,42 @@ func TestTopRefusesTheOtherSubcommandsFlags(t *testing.T) {
 	}
 }
 
+// A flag several of a command's kubectl subcommands define is registered once,
+// and kubectl words it for each: kx top's --sort-by "sort pods list", kx
+// rollout's --revision for status alone. Help showed whichever came first, so
+// kx rewords such flags' usage to cover every subcommand.
+func TestSharedSubcommandFlagsDescribeEverySubcommand(t *testing.T) {
+	top := newTopCommand(topServices(t, &fakeKubectl{}))
+	rollout := newRolloutCommand(argvServices(t))
+	for _, tc := range []struct {
+		cmd  *cobra.Command
+		flag string
+		want []string
+	}{
+		{top, "sort-by", []string{"pods", "nodes"}},
+		{top, "show-swap", []string{"pods", "nodes"}},
+		{rollout, "revision", []string{"status", "history"}},
+	} {
+		usage := tc.cmd.Flags().Lookup(tc.flag).Usage
+		for _, word := range tc.want {
+			if !strings.Contains(usage, word) {
+				t.Errorf("kx %s --%s usage = %q, want it to mention %s", tc.cmd.Name(), tc.flag, usage, word)
+			}
+		}
+	}
+
+	// Reworded, it is still kubectl's flag, forwarded on the subcommand that
+	// was not first to define it.
+	quietRender(t)
+	nodes := &fakeKubectl{output: nodesOutput}
+	if err := executeArgv(newTopCommand(topServices(t, nodes)), []string{"nodes", "--show-swap"}); err != nil {
+		t.Fatalf("kx top nodes --show-swap: %v", err)
+	}
+	if len(nodes.calls) == 0 || joinArgs(nodes.calls[0]) != "top nodes --show-swap" {
+		t.Errorf("kubectl = %q, want top nodes --show-swap", nodes.calls)
+	}
+}
+
 func TestTopRefusesAnUnknownFlag(t *testing.T) {
 	quietRender(t)
 	kube := &fakeKubectl{output: nodesOutput}

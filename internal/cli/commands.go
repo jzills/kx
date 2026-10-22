@@ -615,6 +615,10 @@ func newRolloutCommand(services Services) *cobra.Command {
 		subcommands = append(subcommands, "rollout "+action)
 	}
 	kubectlFlags := registerKubectlFlags(cmd, subcommands...)
+	// Two actions define --revision and the first to register it keeps its
+	// usage, so help described status's alone; this one covers both.
+	cmd.Flags().Lookup("revision").Usage = "With status, the revision whose status to show " +
+		"(0, the default, is the latest); with history, the revision to show in full."
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) < 2 {
