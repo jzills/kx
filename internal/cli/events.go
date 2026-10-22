@@ -330,5 +330,10 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
 	kubectlFlags = registerKubectlFlags(cmd, "top pod", "top node")
+	// Both subcommands define these and the first to register a flag keeps
+	// its usage, so help described top pod's alone, as if nodes could not
+	// be sorted; these cover both.
+	cmd.Flags().Lookup("sort-by").Usage = "Sort pods or nodes by 'cpu' or 'memory'."
+	cmd.Flags().Lookup("show-swap").Usage = "Show swap memory for the pods or nodes listed."
 	return cmd
 }

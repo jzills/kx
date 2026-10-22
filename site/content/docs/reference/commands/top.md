@@ -45,8 +45,8 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `--field-selector string` | Selector (field query) to filter on, supports '=', '==', and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type. |
 | `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
 | `--show-capacity` | Print node resources based on Capacity instead of Allocatable(default) of the nodes. |
-| `--show-swap` | Print pod resources related to swap memory. |
-| `--sort-by string` | If non-empty, sort pods list using specified field. The field can be either 'cpu' or 'memory'. |
+| `--show-swap` | Show swap memory for the pods or nodes listed. |
+| `--sort-by string` | Sort pods or nodes by 'cpu' or 'memory'. |
 | `--sum` | Print the sum of the resource usage |
 | `--use-protocol-buffers` | Enables using protocol-buffers to access Metrics API. |
 | `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
