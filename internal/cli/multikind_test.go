@@ -242,7 +242,7 @@ func TestAStaleFetchAcrossKindsIsRefreshedAsOne(t *testing.T) {
 // A fetch of rows spanning kinds is recorded as the listing it was asked for:
 // kx get deploy,svc 1 3 is a deploy,svc listing. Recorded with no resource,
 // a stale index into it named no command to relist — "kx get <resource>" —
-// and kx state <TAB> labelled one spanning namespaces "fetch", a command
+// and kx state <TAB> labeled one spanning namespaces "fetch", a command
 // nobody types.
 func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
 	t.Run("one namespace", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
 			t.Errorf("relist = %q, want %q", got, want)
 		}
 		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tdeploy,svc in prod" {
-			t.Errorf("candidates = %q, want the fetch labelled \"deploy,svc in prod\"", candidates)
+			t.Errorf("candidates = %q, want the fetch labeled \"deploy,svc in prod\"", candidates)
 		}
 	})
 	t.Run("across namespaces", func(t *testing.T) {
@@ -286,7 +286,7 @@ func TestGetSeveralKindsByIndexRecordsTheListingAskedFor(t *testing.T) {
 			t.Errorf("relist = %q, want %q", got, want)
 		}
 		if candidates := completePosition(services, ""); candidates[len(candidates)-1] != "2\tall" {
-			t.Errorf("candidates = %q, want the fetch labelled \"all\"", candidates)
+			t.Errorf("candidates = %q, want the fetch labeled \"all\"", candidates)
 		}
 	})
 }

@@ -447,7 +447,7 @@ func diagnosticHTMLServices(t *testing.T, objects ...runtime.Object) Services {
 // Ctrl-C: web.Serve binds its listener, announces the URL, sees ctx.Done()
 // immediately in its select, and shuts back down — the same clean-stop path,
 // just without a wall-clock wait. context.WithCancel's cancellation reaches an
-// already-cancelled parent synchronously (propagateCancel checks p.err before
+// already-canceled parent synchronously (propagateCancel checks p.err before
 // returning), so this is deterministic rather than a race against a goroutine.
 func stoppedContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -752,7 +752,7 @@ func TestSinceOverviewNamesTheConfiguredDefault(t *testing.T) {
 		t.Errorf("long help = %q, want it not to promise an unbounded default "+
 			"a set diag_max_age has taken away", long)
 	}
-	// The way back to the old behaviour is the only thing a reader with the
+	// The way back to the old behavior is the only thing a reader with the
 	// key set can't work out from the rest of the screen.
 	if !strings.Contains(long, "'--since 0'") {
 		t.Errorf("long help = %q, want it to name --since 0", long)
@@ -808,7 +808,7 @@ func TestReportWindowFlagOverridesTheSetting(t *testing.T) {
 	}
 }
 
-// --since 0 is how someone gets the old unbounded behaviour back for one run,
+// --since 0 is how someone gets the old unbounded behavior back for one run,
 // so zero from the flag must not be mistaken for an absent flag.
 func TestReportWindowZeroFromTheFlagIsUnlimited(t *testing.T) {
 	cfg := config.Default()

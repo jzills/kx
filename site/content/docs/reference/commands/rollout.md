@@ -36,7 +36,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 | `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
 | `-o, --output string` | Output format. One of: (json, yaml, kyaml, name, go-template, go-template-file, template, templatefile, jsonpath, jsonpath-as-json, jsonpath-file). |
 | `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
-| `--revision int64` | Pin to a specific revision for showing its status. Defaults to 0 (last revision). |
+| `--revision int64` | With status, the revision whose status to show (0, the default, is the latest); with history, the revision to show in full. |
 | `-l, --selector string` | Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints. |
 | `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
 | `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |

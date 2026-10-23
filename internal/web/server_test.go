@@ -164,7 +164,7 @@ func TestServeShutsDownOnContextCancel(t *testing.T) {
 			t.Fatalf("Serve returned %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not return after the context was cancelled")
+		t.Fatal("Serve did not return after the context was canceled")
 	}
 
 	if _, err := http.Get(url); err == nil {
@@ -198,7 +198,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 			t.Fatalf("Serve returned %v, want nil — a stuck preconnect must not fail an ordinary shutdown", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Serve did not return after the context was cancelled")
+		t.Fatal("Serve did not return after the context was canceled")
 	}
 }
 
@@ -209,7 +209,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 // listener, and url.Parse's Port() is the robust way to recover a port from
 // a URL without assuming where the colons fall.
 //
-// The assertion checks for the "cannot serve on port N" wrapping, not just
+// The assertion checks for the "Could not serve on port N" wrapping, not just
 // the bare number: the raw net.Listen error is "listen tcp 127.0.0.1:N:
 // bind: address already in use", which already contains N, so a
 // strings.Contains on the number alone would keep passing even if server.go's
@@ -218,7 +218,7 @@ func TestServeTreatsAnUnusedConnectionAsACleanStop(t *testing.T) {
 //
 // The context carries its own 5s timeout rather than a bare
 // context.WithCancel: every other test in this file bounds its waits the
-// same way. If Serve ever stopped honouring opts.Port and bound an ephemeral
+// same way. If Serve ever stopped honoring opts.Port and bound an ephemeral
 // port instead, the second Serve call below would succeed and block forever
 // in its own select — this timeout is what turns that into a reported test
 // failure instead of a 10-minute panic.
@@ -237,7 +237,7 @@ func TestServeReportsABusyPort(t *testing.T) {
 	if err == nil {
 		t.Fatal("serving on a taken port returned no error")
 	}
-	want := "cannot serve on port " + strconv.Itoa(taken)
+	want := "Could not serve on port " + strconv.Itoa(taken)
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("error %q does not contain %q", err, want)
 	}

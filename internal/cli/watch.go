@@ -173,7 +173,7 @@ func runWatch(services Services, resource string, extra []string, match string) 
 		if displayHeaders == nil {
 			parsed, ok := index.ParseHeader(line)
 			if !ok || parsed.EventIdx < 0 {
-				return fmt.Errorf("kx get --watch: unexpected kubectl output (no EVENT column)")
+				return fmt.Errorf("kubectl's watch output has no EVENT column, so kx cannot draw it.")
 			}
 			shape = parsed
 			displayHeaders = dropIndex(shape.Headers, shape.EventIdx)

@@ -114,7 +114,7 @@ func TestStatusStopRacesTheFirstFrame(t *testing.T) {
 	}
 }
 
-// Concurrent stops from several goroutines, which sync.Once has to serialise.
+// Concurrent stops from several goroutines, which sync.Once has to serialize.
 func TestStatusConcurrentStops(t *testing.T) {
 	r, _ := spinnerRenderer()
 	stop := r.status("fetching", true, time.Millisecond, time.Millisecond)

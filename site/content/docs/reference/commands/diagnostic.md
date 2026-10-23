@@ -6,7 +6,7 @@ description: "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJ
 weight: 9
 ---
 
-Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
+Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
 
 With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.
 

@@ -108,10 +108,10 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (mes
 // there.
 //
 // Deliberately narrow: only the spellings kubectl itself runs as a dry run are
-// recognised — client and server, plus the deprecated ones it still accepts
+// recognized — client and server, plus the deprecated ones it still accepts
 // and warns about, a bare --dry-run and a boolean true, both client dry runs.
 // --dry-run=none (or false) is a real delete, and a spelling kubectl adds later
-// is unlabelled rather than guessed at — a missing "(dry run)" on a dry run is
+// is unlabeled rather than guessed at — a missing "(dry run)" on a dry run is
 // a smaller failure than the label on a real one. This is the only place kx
 // reads a forwarded flag's meaning; the confirmation prompt deliberately does
 // not, since getting that wrong skips a safety step rather than a label.
@@ -374,7 +374,7 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	}
 	// cp resolves its pod out of an "<index>:<path>" argument via strconv.Atoi,
 	// so there is no Ref in hand here the way the other commands have one — the
-	// zero Ref keeps today's refreshable behaviour, which is right for an index
+	// zero Ref keeps today's refreshable behavior, which is right for an index
 	// path. cp does not support marks: resolve (above) refuses one with a clear
 	// message rather than reaching here at all, so this path is only ever an
 	// index's.
@@ -508,7 +508,7 @@ func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, 
 		labels = selector.MatchLabels
 	}
 	if len(labels) == 0 {
-		return "", fmt.Errorf("%s/%s has no pod selector; cannot aggregate logs.", kind, name)
+		return "", fmt.Errorf("%s/%s has no pod selector, so there are no pods to aggregate logs from.", kind, name)
 	}
 
 	// Sorted so the selector is stable run to run, which matters when it shows
@@ -603,7 +603,7 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 		return err
 	}
 	return fmt.Errorf(
-		"No shell found in container. Provide an explicit command: kx exec <index> -- /path/to/binary",
+		"No shell found in the container — give the command to run: 'kx exec <index> -- /path/to/binary'.",
 	)
 }
 
@@ -616,7 +616,7 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 // what it runs.
 //
 // The container it adds stays on the pod's spec for as long as the pod lives —
-// Kubernetes offers no way to remove one. That is kubectl's behaviour, not
+// Kubernetes offers no way to remove one. That is kubectl's behavior, not
 // kx's, and the command's help says so rather than prompting: the change is
 // additive, and a confirmation in front of every debugging session would be
 // friction where kx delete's prompt guards actual loss.

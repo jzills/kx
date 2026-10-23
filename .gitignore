@@ -4,7 +4,13 @@
 # repository root and only those.
 /docs/
 .superpowers/
-.claude/
+# Claude Code's own directory is per-user except for what the repo shares on
+# purpose: skills, hooks and project settings. settings.local.json, worktrees
+# and lock files stay ignored.
+/.claude/*
+!/.claude/skills/
+!/.claude/hooks/
+!/.claude/settings.json
 build/
 dist/
 

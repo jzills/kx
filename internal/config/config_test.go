@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -123,7 +125,7 @@ func TestOldNoColorSpellingsAreNotRead(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.ThemeDisable {
-		t.Error("Load still honours the old no_color spelling")
+		t.Error("Load still honors the old no_color spelling")
 	}
 }
 
@@ -149,7 +151,7 @@ func TestNonIntegerEnvMaxHistoryRejected(t *testing.T) {
 	loader := Loader{Path: filepath.Join(t.TempDir(), "absent.toml")}
 	t.Setenv("KX_MAX_HISTORY", "many")
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+	if err == nil || !strings.Contains(err.Error(), "'KX_MAX_HISTORY': 'many' is not a valid int") {
 		t.Errorf("error = %v, want an integer complaint", err)
 	}
 }
@@ -169,8 +171,32 @@ func TestUnknownThemeRejectedWhenValidatorSupplied(t *testing.T) {
 	loader := writeConfig(t, `theme = "nonexistent"`)
 	loader.ThemeKnown = func(string) bool { return false }
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "unknown theme") {
+	if err == nil || !strings.Contains(err.Error(), "Unknown theme 'nonexistent'") {
 		t.Errorf("error = %v, want an unknown-theme complaint", err)
+	}
+}
+
+// The binary tells an unknown name from any other config failure by type, so
+// kx theme and kx engine can still run to fix it. A name from the environment
+// says so, since saving a choice writes the file, which the variable overrides.
+func TestUnknownNameErrorNamesItsSource(t *testing.T) {
+	loader := writeConfig(t, `theme = "nonexistent"`)
+	loader.ThemeKnown = func(string) bool { return false }
+	_, err := loader.Load()
+	var unknown UnknownNameError
+	if !errors.As(err, &unknown) || unknown.Setting != "theme" || unknown.Name != "nonexistent" {
+		t.Fatalf("error = %#v, want an UnknownNameError for theme 'nonexistent'", err)
+	}
+	if want := "Unknown theme 'nonexistent'. Run 'kx theme' to list themes."; err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+
+	t.Setenv("KX_ENGINE", "nope")
+	loader = writeConfig(t, ``)
+	loader.EngineKnown = func(string) bool { return false }
+	_, err = loader.Load()
+	if want := "Unknown engine 'nope' in 'KX_ENGINE'. Unset it, or run 'kx engine' to list engines."; err == nil || err.Error() != want {
+		t.Errorf("error = %v, want %q", err, want)
 	}
 }
 
@@ -245,7 +271,7 @@ func TestUnknownEngineRejectedWhenValidatorSupplied(t *testing.T) {
 	loader := writeConfig(t, `engine = "nonexistent"`)
 	loader.EngineKnown = func(string) bool { return false }
 	_, err := loader.Load()
-	if err == nil || !strings.Contains(err.Error(), "unknown engine") {
+	if err == nil || !strings.Contains(err.Error(), "Unknown engine 'nonexistent'") {
 		t.Errorf("error = %v, want an unknown-engine complaint", err)
 	}
 }
@@ -317,7 +343,7 @@ func TestLoadAfterSaveEngine(t *testing.T) {
 }
 
 // Settings is what `kx --help` lists under Environment, so an override Load
-// honours but Settings omits is one a user can only discover by reading the
+// honors but Settings omits is one a user can only discover by reading the
 // source. The loader's own text is the reference: every KX_* variable it looks
 // up must be documented.
 func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
@@ -345,7 +371,7 @@ func TestSettingsDocumentsEveryEnvOverride(t *testing.T) {
 }
 
 // kx debug attaches a container of the user's choosing, and someone who
-// standardises on their own toolbox image should say so once rather than pass
+// standardizes on their own toolbox image should say so once rather than pass
 // --image every time — the same reason `shells` exists for kx exec.
 func TestDebugImageDefaults(t *testing.T) {
 	if got := Default().DebugImage; got != "busybox" {
@@ -448,9 +474,8 @@ func TestDiagMaxAgeRejectsAMalformedValue(t *testing.T) {
 	loader := writeConfig(t, "diag_max_age = \"7 weeks\"\n")
 	if _, err := loader.Load(); err == nil {
 		t.Fatal("Load() = nil error for a malformed diag_max_age")
-	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
-		!strings.Contains(err.Error(), "diag_max_age") {
-		t.Errorf("error = %q, want a kx: error naming diag_max_age", err)
+	} else if !strings.HasPrefix(err.Error(), "Invalid value for 'diag_max_age' in ") {
+		t.Errorf("error = %q, want an invalid-value error naming diag_max_age", err)
 	}
 }
 
@@ -522,9 +547,8 @@ func TestEventsMaxAgeRejectsAMalformedValue(t *testing.T) {
 	loader := writeConfig(t, "events_max_age = \"7 weeks\"\n")
 	if _, err := loader.Load(); err == nil {
 		t.Fatal("Load() = nil error for a malformed events_max_age")
-	} else if !strings.HasPrefix(err.Error(), "kx: ") ||
-		!strings.Contains(err.Error(), "events_max_age") {
-		t.Errorf("error = %q, want a kx: error naming events_max_age", err)
+	} else if !strings.HasPrefix(err.Error(), "Invalid value for 'events_max_age' in ") {
+		t.Errorf("error = %q, want an invalid-value error naming events_max_age", err)
 	}
 }
 
@@ -602,6 +626,24 @@ func TestEmptyShellsListIsUnsetRatherThanOneEmptyShell(t *testing.T) {
 	for _, shell := range cfg.Shells {
 		if shell == "" {
 			t.Fatalf("KX_SHELLS=\"\" produced an empty shell candidate: %#v", cfg.Shells)
+		}
+	}
+}
+
+// A key of the wrong type names the key and the file it was read from, as a
+// sentence: with KX_CONFIG set, "theme must be a string" alone would send a
+// reader to ~/.kx/config.toml, which may not be the file that holds it.
+func TestWrongTypedKeyNamesItsFile(t *testing.T) {
+	for _, tc := range []struct{ contents, want string }{
+		{"theme = 3\n", "'theme' in %s must be a string."},
+		{"theme_disable = \"yes\"\n", "'theme_disable' in %s must be true or false."},
+		{"max_history = 0\n", "'max_history' in %s must be a positive integer."},
+		{"shells = [\"bash\", 1]\n", "'shells' in %s must be an array of strings."},
+	} {
+		loader := writeConfig(t, tc.contents)
+		_, err := loader.Load()
+		if want := fmt.Sprintf(tc.want, loader.Path); err == nil || err.Error() != want {
+			t.Errorf("%q: err = %v, want %q", tc.contents, err, want)
 		}
 	}
 }

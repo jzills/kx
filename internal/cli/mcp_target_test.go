@@ -44,9 +44,9 @@ func TestResolveTargetNormalizesKubectlSpellings(t *testing.T) {
 // kubectl reads "secrets." and "secrets.v1." as core/v1 Secrets, and
 // "deployments.v1.apps" as a Deployment. Left as spelled, every check keyed
 // on the canonical kind (redaction, the cluster-scope table) would miss them,
-// and a mark would store the odd spelling; each is normalised as the kind it
+// and a mark would store the odd spelling; each is normalized as the kind it
 // names. Another group's kind is left alone.
-func TestResolveTargetNormalisesCoreGroupDottedSpellings(t *testing.T) {
+func TestResolveTargetNormalizesCoreGroupDottedSpellings(t *testing.T) {
 	deps := mcpTestDeps(t, &recordingKubectl{namespace: "prod"})
 	for spelling, want := range map[string]kinds.Kind{
 		"secrets.":                     kinds.Secret,
@@ -117,7 +117,7 @@ func TestResolveTargetRefusesAmbiguousOrEmptyTargets(t *testing.T) {
 	}
 }
 
-// The CLI memoises the context for the life of the process. The server must
+// The CLI memoizes the context for the life of the process. The server must
 // not: a user who switches context mid-session has to see the next call
 // answer from the new cluster.
 func TestLiveKubectlRereadsTheContext(t *testing.T) {
@@ -449,7 +449,7 @@ func TestResolvedIndexTargetIsNotEchoedInOutput(t *testing.T) {
 }
 
 // A resolved target is held to exactly the checks a typed one gets: a stored
-// core-group dotted kind is reduced and normalised before it reaches argv or
+// core-group dotted kind is reduced and normalized before it reaches argv or
 // any kind-keyed check, and a stored 'all' is refused.
 func TestResolveTargetResolvedKindsGetTheTypedPathsChecks(t *testing.T) {
 	store := map[string]func(t *testing.T, deps mcpDeps, kind kinds.Kind) mcpTarget{

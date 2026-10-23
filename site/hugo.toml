@@ -45,7 +45,7 @@ title = "kubectl, indexed."
     unsafe = true
 
   # The typographer stays on for quotes, but its dash substitutions are
-  # neutralised: it rewrites "--" as an en dash, which turned every flag named
+  # neutralized: it rewrites "--" as an en dash, which turned every flag named
   # in prose into "–decode" and "–all-namespaces". Fifteen cells of the
   # generated command reference were affected. Setting the replacements to the
   # literal characters is narrower than disabling the extension, which would
@@ -58,7 +58,7 @@ title = "kubectl, indexed."
   description = "kubectl, indexed. Select Kubernetes resources by number instead of typing names."
 
   # Both off: layouts/_partials/custom/navbar-title.html draws the mark
-  # itself, inlined so it takes its colour from the active palette.
+  # itself, inlined so it takes its color from the active palette.
   [params.navbar]
     displayTitle = false
     displayLogo = false

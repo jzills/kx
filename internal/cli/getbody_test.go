@@ -406,7 +406,7 @@ func TestGetWatchRefusesSeveralIndexes(t *testing.T) {
 	if err == nil {
 		t.Fatal("multi-index watch was accepted; want it refused")
 	}
-	if !strings.Contains(err.Error(), "--watch takes a single resource") {
+	if !strings.Contains(err.Error(), "'--watch' takes a single resource") {
 		t.Errorf("error = %q, want it to name the single-resource rule", err)
 	}
 	if len(kube.watchArgs) != 0 {
@@ -512,7 +512,7 @@ func TestGetNamespacedStillAcceptsScopeFlags(t *testing.T) {
 }
 
 // A kind kx cannot place — a CRD with no discovery cache — keeps today's
-// behaviour rather than being refused on a guess. Refusing on "not known to be
+// behavior rather than being refused on a guess. Refusing on "not known to be
 // namespaced" would reject -A for every custom resource on a machine whose
 // discovery cache has not been populated.
 func TestGetUnknownKindStillAcceptsScopeFlags(t *testing.T) {

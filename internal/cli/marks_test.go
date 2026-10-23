@@ -357,8 +357,12 @@ func TestUnmarkAllTakesNoNameArgument(t *testing.T) {
 
 	cmd := newUnmarkCommand(services)
 	cmd.SetArgs([]string{"--all", "api"})
-	if err := cmd.Execute(); err == nil {
+	err := cmd.Execute()
+	if err == nil {
 		t.Fatal("kx unmark --all api succeeded; --all takes no name argument")
+	}
+	if want := "kx unmark takes no name with '--all' — drop the name, or drop '--all' to remove that one mark."; err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
 	}
 
 	marks, err := services.State.Marks()
@@ -409,7 +413,7 @@ func TestUnmarkRemovesSeveralByName(t *testing.T) {
 }
 
 // A typo in the middle of a batch refuses the whole thing. Removing the names
-// it recognised first would leave the user to work out which half landed, and
+// it recognized first would leave the user to work out which half landed, and
 // a mark is not recoverable from the listing that no longer mentions it.
 func TestUnmarkRefusesTheBatchBeforeRemovingAnything(t *testing.T) {
 	services := switchServices(t, &recordingKubectl{})

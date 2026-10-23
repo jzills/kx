@@ -212,7 +212,7 @@ func seedUserListing(t *testing.T, deps mcpDeps) {
 // recorded calls list look short and clean. This is the read-only promise as
 // a test, covering every path that reads a cluster: kubectl (list_resources,
 // mark, events, logs, top, get_yaml, scan) and client-go (diagnose, tree) —
-// and scan's scanner, which may only preflight and summarise.
+// and scan's scanner, which may only preflight and summarize.
 //
 // With --write-listings off, which is the default, it is the local-state
 // promise too: the state file ends byte-for-byte what the user's own listing

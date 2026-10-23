@@ -253,5 +253,5 @@ func notACollectionError(format string) error {
 func projectionMatchError(format string) error {
 	return errors.New("'--match' narrows by each item's name, and '-o " + format +
 		"' is a shape you chose, which kx cannot assume has names in it. " +
-		"Narrow the template itself, or select with -l instead.")
+		"Narrow the template itself, or select with '-l' instead.")
 }

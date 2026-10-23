@@ -442,8 +442,8 @@ func TestStateHelpListsItsSubcommands(t *testing.T) {
 
 // --watch is parsed by hand (isWatch) rather than by cobra, so nothing forces
 // it to be registered — and for a while it wasn't, leaving a flag kx gives its
-// own live-table behaviour documented only in the README. Both listing
-// commands run through runGet, so both honour it and both must show it.
+// own live-table behavior documented only in the README. Both listing
+// commands run through runGet, so both honor it and both must show it.
 func TestListingCommandsDocumentWatch(t *testing.T) {
 	root := NewRoot(Services{}, "test")
 	for _, name := range []string{"get", "secret"} {
@@ -518,7 +518,7 @@ func TestPassthroughIsDescribedOnce(t *testing.T) {
 	}
 }
 
-// kx scan forwards what it does not recognise to the scanner, and its help
+// kx scan forwards what it does not recognize to the scanner, and its help
 // said they went to kubectl — the note was one sentence for every
 // placeholder, whatever the placeholder named.
 func TestPassthroughNoteNamesWhereFlagsGo(t *testing.T) {
@@ -1049,7 +1049,7 @@ func TestSuggestForDoesNotShadowRealSpellings(t *testing.T) {
 	walk(root)
 }
 
-// How indexes resolve is the one concept no command's own behaviour reveals,
+// How indexes resolve is the one concept no command's own behavior reveals,
 // and it lived only in the README: that the history is a stack with a cursor,
 // and that namespaces and contexts sit in slots outside it — which is why
 // `kx ns 2` survives any number of `kx get` runs when no other index does.

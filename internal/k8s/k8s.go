@@ -32,7 +32,7 @@ func Client() (*kubernetes.Clientset, error) {
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("could not build a Kubernetes client: %w", err)
+		return nil, fmt.Errorf("Could not build a Kubernetes client: %w.", err)
 	}
 	return clientset, nil
 }
@@ -50,7 +50,7 @@ func restConfig() (*rest.Config, error) {
 	if inClusterErr != nil {
 		// Report the kubeconfig failure: a user outside a cluster is far more
 		// likely to have a kubeconfig problem than to have meant in-cluster.
-		return nil, fmt.Errorf("could not load Kubernetes configuration: %w", err)
+		return nil, fmt.Errorf("Could not load the Kubernetes configuration: %w.", err)
 	}
 	return inCluster, nil
 }

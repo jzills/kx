@@ -113,7 +113,7 @@ type ShorthandSource interface {
 	// Namespaced reports whether a kind is namespaced, and whether the
 	// source knows. "Don't know" is distinct from "cluster-scoped": a
 	// discovery cache that is missing, stale or partial must leave the
-	// caller on its existing behaviour rather than have kx decide a
+	// caller on its existing behavior rather than have kx decide a
 	// namespaced resource has no namespace.
 	Namespaced(kind Kind) (namespaced, known bool)
 }
@@ -166,7 +166,7 @@ var namespacedKinds = map[Kind]bool{
 //
 // The third answer, "not known", matters as much as the other two: it is what
 // a caller gets for a CRD with no discovery cache, and it must leave existing
-// behaviour alone rather than guess.
+// behavior alone rather than guess.
 func Namespaced(kind Kind) (namespaced, known bool) {
 	if namespacedKinds[kind] {
 		return true, true
@@ -361,12 +361,12 @@ func builtinSpelling(spelling string) (Kind, bool) {
 // spans kinds — "pod", "deployment.apps", "lease.coordination.k8s.io" — onto
 // a kind.
 //
-// A kind kx names itself is recognised only in its own API group: Knative's
+// A kind kx names itself is recognized only in its own API group: Knative's
 // service.serving.knative.dev is not a Service, and resolving it as one would
 // send kx describe to a core Service that happens to share the name. Any
 // other group is kept as written, which kubectl takes back as it gave it, as
 // kx already keeps certificates.cert-manager.io when that is what was typed.
-// The core group has no suffix to keep, so its spellings are normalised.
+// The core group has no suffix to keep, so its spellings are normalized.
 func Qualified(spelling string) Kind {
 	if kind, ok := builtinSpelling(spelling); ok {
 		return kind
@@ -386,7 +386,7 @@ func Qualified(spelling string) Kind {
 // "serviceaccounts · diagnostics · 1 item" on screen beside "Pods" and
 // "ConfigMaps".
 //
-// The kind is already the PascalCase spelling, so only the pluralising suffix
+// The kind is already the PascalCase spelling, so only the pluralizing suffix
 // is taken from the API — which is the part worth taking, since the API server
 // knows the irregulars and a rule here would have to guess them.
 func displayPlural(kind Kind, apiPlural string) string {
@@ -398,7 +398,7 @@ func displayPlural(kind Kind, apiPlural string) string {
 	case strings.HasPrefix(apiPlural, lower):
 		return string(kind) + apiPlural[len(lower):]
 	// "networkpolicy" -> "networkpolicies" is not a suffix at all: the stem
-	// changes. Recognised rather than guessed, so it only applies when the API
+	// changes. Recognized rather than guessed, so it only applies when the API
 	// actually spelled it that way.
 	case strings.HasSuffix(lower, "y") && apiPlural == strings.TrimSuffix(lower, "y")+"ies":
 		return strings.TrimSuffix(string(kind), "y") + "ies"

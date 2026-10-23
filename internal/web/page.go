@@ -33,7 +33,7 @@ import (
 // is being served.
 //
 // Named Meta rather than Chrome because theme.Chrome is the palette's page
-// colours, and two unrelated Chromes one import apart would be a trap.
+// colors, and two unrelated Chromes one import apart would be a trap.
 type Meta struct {
 	Title      string
 	Invocation string
@@ -245,13 +245,13 @@ func severityIcon(severity diagnostics.Severity) string {
 //
 // This is the one place page content becomes template.CSS, and it is safe
 // because the values never come from page data: theme.WebStyles returns only
-// #rrggbb, guarded by a test over every registered theme. Do not generalise
+// #rrggbb, guarded by a test over every registered theme. Do not generalize
 // from this — nothing else in this package may be marked pre-escaped.
 func cssVars(styles map[string]string) template.CSS {
 	var out strings.Builder
 	out.WriteString(":root{")
 	// Sorted so the output is byte-stable for golden-file tests; Go map
-	// iteration order is randomised.
+	// iteration order is randomized.
 	for _, name := range sortedKeys(styles) {
 		fmt.Fprintf(&out, "--%s:%s;", styleClass(name), styles[name])
 	}

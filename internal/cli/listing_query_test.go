@@ -148,12 +148,12 @@ func TestCompletionLabelsASweepByItsCommand(t *testing.T) {
 	}
 	candidates := completePosition(services, "")
 	if len(candidates) == 0 || candidates[len(candidates)-1] != "2\tdiag in prod" {
-		t.Errorf("candidates = %q, want the sweep labelled \"diag in prod\"", candidates)
+		t.Errorf("candidates = %q, want the sweep labeled \"diag in prod\"", candidates)
 	}
 }
 
 // A fetch is named by its resource, never by its command, which nobody types:
-// one spanning kinds saved before it recorded its listing is labelled Mixed,
+// one spanning kinds saved before it recorded its listing is labeled Mixed,
 // as kx state calls it, rather than "fetch".
 func TestCompletionNeverLabelsAFetchByItsCommand(t *testing.T) {
 	services := completionServices(t)
@@ -165,6 +165,6 @@ func TestCompletionNeverLabelsAFetchByItsCommand(t *testing.T) {
 	}
 	candidates := completePosition(services, "")
 	if len(candidates) == 0 || candidates[len(candidates)-1] != "2\tMixed" {
-		t.Errorf("candidates = %q, want the fetch labelled \"Mixed\"", candidates)
+		t.Errorf("candidates = %q, want the fetch labeled \"Mixed\"", candidates)
 	}
 }

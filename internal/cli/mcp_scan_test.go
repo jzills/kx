@@ -398,7 +398,7 @@ func TestMCPScanRefusals(t *testing.T) {
 		{"both scopes", map[string]any{"namespace": "prod", "allNamespaces": true},
 			&fakeScanner{}, "'allNamespaces' and 'namespace' cannot be combined."},
 		{"flag-shaped namespace", map[string]any{"namespace": "-A"},
-			&fakeScanner{}, "namespace '-A'"},
+			&fakeScanner{}, "Namespace '-A'"},
 	} {
 		deps, kube := scanDeps(t, tc.fake, workloadJSON("api:v1"))
 		session := connectMCP(t, deps)
@@ -626,7 +626,7 @@ func TestMCPScanRunsOneScanAtATime(t *testing.T) {
 	deps, _ := scanDeps(t, fake, workloadJSON("a:v1"), workloadJSON("b:v1"))
 	session := connectMCP(t, deps)
 	// Both deferred ahead of the sessions' cleanups: a scan stuck waiting
-	// for the slot is cancelled rather than hanging the session's close.
+	// for the slot is canceled rather than hanging the session's close.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer unblock()
@@ -680,8 +680,8 @@ func TestMCPScanStopsWhenTheCallerCancels(t *testing.T) {
 		<-release
 	}}
 	deps, _ := scanDeps(t, fake,
-		workloadJSON("a:v1", "b:v1", "c:v1", "d:v1"), // the sweep that is cancelled
-		workloadJSON("queued:v1"),                    // the scan cancelled while queued
+		workloadJSON("a:v1", "b:v1", "c:v1", "d:v1"), // the sweep that is canceled
+		workloadJSON("queued:v1"),                    // the scan canceled while queued
 		workloadJSON("after:v1"),                     // the scan that proves the slot is free
 	)
 	session := connectMCP(t, deps)
@@ -716,11 +716,11 @@ func TestMCPScanStopsWhenTheCallerCancels(t *testing.T) {
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			t.Fatal("a cancelled call did not return")
+			t.Fatal("a canceled call did not return")
 		}
 	}
 	// The client returns at once and sends notifications/cancelled from a
-	// goroutine afterwards, so the server's request context is cancelled a
+	// goroutine afterwards, so the server's request context is canceled a
 	// moment after the calls above return. Nothing observable marks that
 	// moment, so give it one before freeing the workers.
 	time.Sleep(300 * time.Millisecond)
@@ -734,7 +734,7 @@ func TestMCPScanStopsWhenTheCallerCancels(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("the next scan never got the slot — the cancelled scan still holds it")
+		t.Fatal("the next scan never got the slot — the canceled scan still holds it")
 	}
 	close(entered)
 	var started []string
@@ -742,14 +742,14 @@ func TestMCPScanStopsWhenTheCallerCancels(t *testing.T) {
 		started = append(started, image)
 	}
 	if !slices.Equal(started, []string{"after:v1"}) {
-		t.Errorf("after cancelling, scanned %v; want only after:v1", started)
+		t.Errorf("after canceling, scanned %v; want only after:v1", started)
 	}
 }
 
 // A caller that gives up while its scan is queued behind another leaves the
 // queue at once, rather than holding a goroutine until the slot frees and
 // only then noticing.
-func TestMCPScanLeavesTheQueueWhenCancelled(t *testing.T) {
+func TestMCPScanLeavesTheQueueWhenCanceled(t *testing.T) {
 	fake := &fakeScanner{captures: []captured{{image: "a:v1", stdout: "{}"}}}
 	deps, _ := scanDeps(t, fake, workloadJSON("a:v1"))
 	deps.scanSlots <- struct{}{} // another scan holds the slot
@@ -767,7 +767,7 @@ func TestMCPScanLeavesTheQueueWhenCancelled(t *testing.T) {
 			t.Errorf("err = %v, want context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("a cancelled scan stayed queued for the slot")
+		t.Fatal("a canceled scan stayed queued for the slot")
 	}
 	if fake.calls != 0 {
 		t.Errorf("scanned %d images, want none", fake.calls)

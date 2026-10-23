@@ -32,7 +32,7 @@ func resolveWindowAs(label, since string, configured time.Duration) (time.Durati
 	}
 	window, err := config.ParseDuration(since)
 	if err != nil {
-		return 0, fmt.Errorf("'%s': %w", label, err)
+		return 0, fmt.Errorf("Invalid value for '%s': %w.", label, err)
 	}
 	return window, nil
 }

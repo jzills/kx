@@ -93,7 +93,7 @@ func (s *Service) withLock(fn func() error) error {
 			return fn()
 		}
 		if err != nil {
-			return fmt.Errorf("cannot lock %s: %w", file.Name(), err)
+			return fmt.Errorf("Could not lock %s: %w.", file.Name(), err)
 		}
 		if locked {
 			break

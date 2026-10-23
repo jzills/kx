@@ -396,7 +396,7 @@
 
   // Scanner output is not trusted input — a compromised or malformed
   // scanner could hand back a "javascript:" URL. The server-side JSON
-  // encoding neutralises HTML metacharacters (see marshalJS in page.go) but
+  // encoding neutralizes HTML metacharacters (see marshalJS in page.go) but
   // has no notion of URL safety, so that check belongs here, right before
   // the value becomes a real href. Mirrors html/template's own
   // http(s)-only allowlist for the same field in the pre-grid rendering.
@@ -505,7 +505,7 @@
 
   // Search is implemented by pruning a copy of the tree client-side and
   // re-setting the table's data, rather than relying on Tabulator's built-in
-  // dataTree filter — that filter's default behaviour hides a parent outright
+  // dataTree filter — that filter's default behavior hides a parent outright
   // when it fails the test even if a descendant matches, which is the
   // opposite of "search collapses to non-matches, keeps matching branches
   // expanded." Pruning our own copy sidesteps that entirely: a node survives

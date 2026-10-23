@@ -22,13 +22,13 @@ type Palette struct {
 	Chrome Chrome
 }
 
-// Chrome is the page-level colour a terminal palette has no need for: a
+// Chrome is the page-level color a terminal palette has no need for: a
 // terminal supplies its own background, a browser does not.
 //
 // The foreground fields are overrides, set only by palettes whose terminal
-// specs are attributes rather than colours. "bold" and "bright_black" mean
+// specs are attributes rather than colors. "bold" and "bright_black" mean
 // something to a terminal and nothing to CSS, so those palettes name explicit
-// web colours here instead.
+// web colors here instead.
 type Chrome struct {
 	Background string
 	Surface    string
@@ -75,7 +75,7 @@ var palettes = map[string]Palette{
 	"nord": {
 		Accent: "#88c0d0", Muted: "#4c566a", Body: "#d8dee9",
 		Error: "#bf616a", Warn: "#ebcb8b", Success: "#a3be8c",
-		// Nord's terminal muted is its own border colour, which would vanish
+		// Nord's terminal muted is its own border color, which would vanish
 		// against the page. The web muted is lifted one step up the Nord ramp.
 		Chrome: Chrome{Background: "#2e3440", Surface: "#3b4252", Border: "#4c566a",
 			Muted: "#7b88a1"},
@@ -114,7 +114,7 @@ var palettes = map[string]Palette{
 		Error: "bold", Warn: "default", Success: "bold", Header: "bold",
 		// Every terminal value here is an attribute, so the whole web palette
 		// is declared. Severity stays legible without hue: the page marks it
-		// with an icon and a row stripe as well as a colour.
+		// with an icon and a row stripe as well as a color.
 		Chrome: Chrome{
 			Background: "#101010", Surface: "#1a1a1a", Border: "#333333",
 			Accent: "#ffffff", Muted: "#8a8a8a", Body: "#e6e6e6",
@@ -130,8 +130,8 @@ var palettes = map[string]Palette{
 	"plain": {
 		Accent: "default", Muted: "default", Body: "default",
 		Error: "default", Warn: "default", Success: "default", Header: "default",
-		// "No colour" has no CSS spelling, so the page borrows mono's neutral
-		// ramp rather than rendering one unreadable colour on itself.
+		// "No color" has no CSS spelling, so the page borrows mono's neutral
+		// ramp rather than rendering one unreadable color on itself.
 		Chrome: Chrome{
 			Background: "#101010", Surface: "#1a1a1a", Border: "#333333",
 			Accent: "#ffffff", Muted: "#8a8a8a", Body: "#e6e6e6",
@@ -212,12 +212,12 @@ func MustStyles(name string) map[string]string {
 // WebStyles expands a palette into the CSS custom properties a page sets, as
 // semantic name → #rrggbb.
 //
-// Unlike Styles, every value is a literal colour. Styles may return terminal
+// Unlike Styles, every value is a literal color. Styles may return terminal
 // attributes ("bold", "bright_black", "default"), which CSS cannot express, so
-// palettes built from those declare explicit web colours in their Chrome.
+// palettes built from those declare explicit web colors in their Chrome.
 //
 // header is deliberately absent: Styles builds it as "bold " + Accent, and
-// boldness is a font weight in CSS rather than a colour. The stylesheet sets
+// boldness is a font weight in CSS rather than a color. The stylesheet sets
 // the weight itself and draws headings in the accent.
 func WebStyles(name string) (map[string]string, error) {
 	palette, ok := palettes[name]
@@ -244,7 +244,7 @@ func WebStyles(name string) (map[string]string, error) {
 		Error:   bad,
 		Warn:    warn,
 		Success: success,
-		// The status.* names alias the three severity colours, exactly as
+		// The status.* names alias the three severity colors, exactly as
 		// Styles does, so render.StatusStyle's answers resolve here too.
 		StatusOK:      success,
 		StatusWarn:    warn,

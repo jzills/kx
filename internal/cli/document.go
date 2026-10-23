@@ -14,7 +14,7 @@ import (
 //
 // Two things read it. machineOutput keeps a refreshed listing off stdout for
 // a stale index, and banner keeps the scope line off it too. One annotation
-// rather than a list per behaviour, so the two cannot come to disagree about
+// rather than a list per behavior, so the two cannot come to disagree about
 // which commands write documents.
 //
 // kx cp does not carry it: kubectl cp writes files, and its stdout is its

@@ -82,7 +82,7 @@ This read is always on, needs no setup, and never writes anything: the agent lea
 
 **Agent → terminal.** By default an agent's own listings — `list_resources`, a `diagnose` sweep, `tree`, `top` — are never saved, so there's nothing in them for you to spend from your shell.
 Start the server with `--write-listings` and that changes: those four tools save what they list to your kx history exactly as the matching CLI command would, and return each row's index.
-An agent's `tree` call with a target (the analogue of `kx tree 3`) still saves the whole walk it returns, so a node it shows you keeps the index it was saved at.
+An agent's `tree` call with a target (the analog of `kx tree 3`) still saves the whole walk it returns, so a node it shows you keeps the index it was saved at.
 Each listing is stamped with the context it was read in, so if you switch context while an agent's sweep is running, its numbers are refused in the new context rather than resolved there.
 
 ```bash

@@ -234,11 +234,11 @@ func newTreeCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "tree [index]",
 		SuggestFor: []string{"graph", "owners", "children"},
-		Short:      "Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace.",
+		Short:      "Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default.",
 		Long:       "Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. -m keeps only the top-level workloads whose name matches, each with everything it owns. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.",
 		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -A\n  kx tree -m api\n" +
 			"  kx tree -n prod --html\n  kx tree --json\n  kx tree --out tree.html",
-		Args: cobra.MaximumNArgs(1),
+		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			noIndex, _ := cmd.Flags().GetBool("no-index")
 			indexed := !noIndex

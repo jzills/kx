@@ -34,7 +34,7 @@ const shutdownGrace = 2 * time.Second
 // preconnect connections shutdownGrace has to tolerate below.
 const readHeaderTimeout = 5 * time.Second
 
-// Serve hands out one already-rendered page until ctx is cancelled.
+// Serve hands out one already-rendered page until ctx is canceled.
 //
 // It binds 127.0.0.1 and nothing else: the page carries pod logs, event
 // messages and vulnerability inventories, none of which belong on a network
@@ -43,9 +43,9 @@ func Serve(ctx context.Context, page []byte, opts Options) error {
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", opts.Port))
 	if err != nil {
 		if opts.Port != 0 {
-			return fmt.Errorf("cannot serve on port %d: %w", opts.Port, err)
+			return fmt.Errorf("Could not serve on port %d: %w.", opts.Port, err)
 		}
-		return err
+		return fmt.Errorf("Could not serve the report: %w.", err)
 	}
 
 	addr := listener.Addr().String()

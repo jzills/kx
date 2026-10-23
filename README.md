@@ -313,7 +313,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx secret [<index>...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx set` | Change an indexed workload's container images with kx set image, printing each one before and after. |
 | `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
-| `kx tree [<index>]` | Show the ownership graph for an indexed resource, or the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. A Namespace index graphs that namespace. |
+| `kx tree [<index>]` | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
 | `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |
 | `kx wait <index>...` | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |

@@ -23,7 +23,7 @@ type Gatherer interface {
 	Sweep(ctx context.Context, namespace string) ([]diagnostics.Data, error)
 }
 
-// DiagnosticCommand analyses one indexed resource.
+// DiagnosticCommand analyzes one indexed resource.
 type DiagnosticCommand struct {
 	State       IndexResolver
 	Diagnostics Gatherer
@@ -293,7 +293,7 @@ func sinceFlag(window time.Duration) string {
 // is absent.
 //
 // Split on the setting for the same reason — "without it everything is
-// reported" is the behaviour of an unset diag_max_age, not of kx — and the
+// reported" is the behavior of an unset diag_max_age, not of kx — and the
 // half that no longer applies is replaced rather than merely qualified: a
 // reader who has already set the key does not need to be told to set it, and
 // does need to be told how to get the unbounded run back.
@@ -318,7 +318,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		SuggestFor: []string{"triage", "health", "why", "status"},
 		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases:    aliases,
-		Long: "Analyses health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
+		Long: "Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
 			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
@@ -330,7 +330,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
-		Args: cobra.MaximumNArgs(1),
+		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")

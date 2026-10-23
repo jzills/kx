@@ -974,7 +974,7 @@ func TestFieldsExpectingNamesTheKindOnEveryFailure(t *testing.T) {
 }
 
 // A mixed entry has no single kind to name, so the count is described in
-// neutral terms rather than mislabelled as one of them.
+// neutral terms rather than mislabeled as one of them.
 func TestDescribeCurrentOnAMixedListing(t *testing.T) {
 	service := newTestService(t, 10)
 	save(t, service, State{
@@ -1042,7 +1042,7 @@ func TestSaveNamedDoesNotTouchHistory(t *testing.T) {
 	}
 }
 
-// `kx get ns` is the escape hatch for describing or labelling a namespace, so it
+// `kx get ns` is the escape hatch for describing or labeling a namespace, so it
 // writes both: history (for `kx describe <n>`) and the slot (for `kx ns <n>`).
 func TestSaveOfANamespaceListingPopulatesBoth(t *testing.T) {
 	service := newTestService(t, 10)
@@ -1843,7 +1843,7 @@ func TestLoadStillBackfillsTheEntryItReturns(t *testing.T) {
 }
 
 // A cluster-scoped listing keeps its empty namespace — #271, which the
-// backfill has to keep honouring wherever it now runs.
+// backfill has to keep honoring wherever it now runs.
 func TestLoadLeavesAClusterScopedListingWithoutANamespace(t *testing.T) {
 	service := &Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
 	if err := service.Save(State{
@@ -2178,7 +2178,7 @@ func TestSaveKeepsFetchesOfDifferentRowsApart(t *testing.T) {
 }
 
 // A Ref carrying an index resolves exactly as Fields did — Resolve is the
-// shape that will also carry a mark, not a change of behaviour.
+// shape that will also carry a mark, not a change of behavior.
 func TestResolveAnIndexRefMatchesFields(t *testing.T) {
 	service := newTestService(t, 10)
 	save(t, service, State{Resources: pods("api", "web"), Namespace: "prod"})

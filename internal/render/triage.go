@@ -86,7 +86,7 @@ func (r *Renderer) Triage(result TriageResult) {
 
 	// Headed "X" like every other indexed listing. The Python renderer left it
 	// blank, alone among the indexed tables; these numbers are indexes passed
-	// to `kx diag <index>` exactly as `kx get`'s are, so they are labelled the
+	// to `kx diag <index>` exactly as `kx get`'s are, so they are labeled the
 	// same way.
 	//
 	// A cluster-wide sweep carries NAMESPACE as well, not instead: the index is

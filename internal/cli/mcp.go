@@ -34,7 +34,7 @@ import (
 // mcpDeps are what the server's tools are built from.
 //
 // Not Services, because Services caches for the life of the process: the
-// kubectl service memoises the current context and kubernetesClient builds one
+// kubectl service memoizes the current context and kubernetesClient builds one
 // client-go client. A command lives for a second; a server lives for a session,
 // and a user who switches context halfway through it would have the server
 // reading one cluster through client-go while kubectl reads another.
@@ -55,7 +55,7 @@ type mcpDeps struct {
 	// indexes. Off, the server writes nothing but marks. See listingSave.
 	WriteListings bool
 
-	// mu serialises tool calls; locked takes it, and nothing else does.
+	// mu serializes tool calls; locked takes it, and nothing else does.
 	// Every tool runs wholly under it except scan, which holds it only while
 	// resolving images and releases it for the scanners themselves. The SDK
 	// runs each request on its own goroutine, and kx was built as a CLI that
@@ -249,7 +249,7 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 			"and kx delete and kx drain say an index came from one before they act.",
 		Example: "  claude mcp add kx -- kx mcp\n" +
 			"  claude mcp add kx -- kx mcp --write-listings",
-		Args: cobra.NoArgs,
+		Args: maxArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			writeListings, _ := cmd.Flags().GetBool("write-listings")
 			// Built here rather than in NewRoot: tests construct the root with

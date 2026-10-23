@@ -339,7 +339,7 @@ func TestDecodeGuards(t *testing.T) {
 		{
 			name: "--key without --decode", kind: kinds.Secret, res: "secret",
 			resolved: oneResolved, options: getOptions{HasKey: true, Key: "tls.crt"},
-			want: "--key requires --decode",
+			want: "'--key' requires '--decode'",
 		},
 		{
 			name: "--decode on a non-Secret kind", kind: kinds.Pod, res: "pods",
@@ -349,7 +349,7 @@ func TestDecodeGuards(t *testing.T) {
 		{
 			name: "--key with several indexes", kind: kinds.Secret, res: "secret",
 			resolved: twoResolved, options: getOptions{Decode: true, HasKey: true, Key: "a"},
-			want: "--key takes a single index",
+			want: "'--key' takes a single index",
 		},
 	}
 	for _, tc := range tests {

@@ -272,9 +272,14 @@ func (c MetadataWriteCommand) Execute(
 			}
 		}
 		if len(conflicts) > 0 {
-			return "", "", fmt.Errorf(
-				"%s already set; use --overwrite to replace", strings.Join(conflicts, ", "),
-			)
+			quoted := make([]string, len(conflicts))
+			for i, key := range conflicts {
+				quoted[i] = "'" + key + "'"
+			}
+			if len(conflicts) == 1 {
+				return "", "", fmt.Errorf("%s is already set — add '--overwrite' to replace it.", quoted[0])
+			}
+			return "", "", fmt.Errorf("%s are already set — add '--overwrite' to replace them.", joinAnd(quoted))
 		}
 	}
 
@@ -318,7 +323,7 @@ func parsePairs(pairs []string) (keys []string, values map[string]string, err er
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
 		if !found || key == "" {
-			return nil, nil, fmt.Errorf("expected key=value, got '%s'", pair)
+			return nil, nil, fmt.Errorf("'%s' is not a key=value pair.", pair)
 		}
 		if _, seen := values[key]; !seen {
 			keys = append(keys, key)

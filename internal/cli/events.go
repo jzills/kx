@@ -236,8 +236,8 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 		if flag := kubectlFlags.outside(subcommand); flag != "" {
 			return fmt.Errorf(
-				"'%s' cannot be combined with '%s' — it is a flag of kubectl %s only.",
-				flag, resource, otherTopSubcommand(subcommand))
+				"'%s' cannot be combined with '%s' — it is a flag of %s only.",
+				flag, resource, joinAnd(kubectlFlags.definers(flag)))
 		}
 
 		output, resourceLabel, namespace, scopedAllNamespaces, err :=
@@ -330,13 +330,10 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
 	kubectlFlags = registerKubectlFlags(cmd, "top pod", "top node")
+	// Both subcommands define these and the first to register a flag keeps
+	// its usage, so help described top pod's alone, as if nodes could not
+	// be sorted; these cover both.
+	cmd.Flags().Lookup("sort-by").Usage = "Sort pods or nodes by 'cpu' or 'memory'."
+	cmd.Flags().Lookup("show-swap").Usage = "Show swap memory for the pods or nodes listed."
 	return cmd
-}
-
-// otherTopSubcommand is the kubectl top subcommand kx top did not choose.
-func otherTopSubcommand(chosen string) string {
-	if chosen == "top node" {
-		return "top pod"
-	}
-	return "top node"
 }

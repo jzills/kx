@@ -329,7 +329,7 @@ body {
   height: 0.85rem;
   border-radius: 999px;
   /* em, like the swatch's own border above: the ring is the palette's accent,
-     and at 1px it read as a hairline rather than as the colour it is naming. */
+     and at 1px it read as a hairline rather than as the color it is naming. */
   border: 0.15em solid var(--kx-border);
 }
 
@@ -504,11 +504,11 @@ body {
  * kx palette. Its *surfaces* do not: they are bg-white / bg-dark, and "dark"
  * is a fixed #111. On the landing page that was a thin strip behind the
  * navbar; on a docs page it is the whole sidebar sitting in a different
- * colour from the body beside it.
+ * color from the body beside it.
  *
  * Named surfaces rather than a redefinition of Hextra's --hx-color-white,
  * which is also what hx:text-white reads — a palette background as a text
- * colour would be invisible on the surface it came from. */
+ * color would be invisible on the surface it came from. */
 
 .hextra-nav-container-blur {
   background-color: var(--kx-background);
@@ -517,7 +517,7 @@ body {
 .hextra-sidebar-container [data-toggle-animation] {
   background-color: var(--kx-background);
   /* The theme fades the sidebar's contents out under this footer with a
-     hardcoded white/#111 shadow, which reads as a smear of the wrong colour
+     hardcoded white/#111 shadow, which reads as a smear of the wrong color
      over any other palette. */
   box-shadow: 0 -12px 16px var(--kx-background);
   border-color: var(--kx-border);
@@ -551,7 +551,7 @@ body {
  * The landing page is hand-written HTML with no prose in it; the docs are
  * nothing but prose, and Hextra's own typography is styled against fixed
  * grays. Only the surfaces and text are reclaimed here — chroma's syntax
- * token colours are left alone. kx's palette is semantic (accent, muted,
+ * token colors are left alone. kx's palette is semantic (accent, muted,
  * status.ok...) and chroma's is lexical (keyword, string, comment); mapping
  * one onto the other would be invention, and the docs are shell commands,
  * which highlight almost nothing anyway. */

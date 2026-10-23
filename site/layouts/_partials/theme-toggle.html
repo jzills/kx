@@ -18,7 +18,7 @@
   ".hextra-theme-toggle-options button[role=menuitemradio]" and passes
   dataset.item to a switchTheme() that coerces anything outside
   ["light","dark"] to "system" — every kx palette name would land there. The
-  open/close behaviour those classes would buy is thirty lines; the coupling
+  open/close behavior those classes would buy is thirty lines; the coupling
   is not worth it.
 
   Applying a palette is window.kxTheme's job (assets/js/kx-theme.js, inlined
@@ -63,8 +63,8 @@
           aria-hidden="true"
         ></span>
         <span class="kx-palette__label">{{ .name }}</span>
-        {{- /* A tick as well as the accent colour: mono draws its accent in
-               the body colour, so colour alone marks nothing there. */ -}}
+        {{- /* A tick as well as the accent color: mono draws its accent in
+               the body color, so color alone marks nothing there. */ -}}
         <svg class="kx-palette__check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" width="13" height="13">
           <path d="m4 10.5 4 4 8-9" stroke-linecap="round" stroke-linejoin="round" />
         </svg>

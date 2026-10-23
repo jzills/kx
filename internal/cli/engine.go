@@ -60,7 +60,7 @@ func newEngineCommand(services Services) *cobra.Command {
 		Long: "Lists available scan engines. A name, or the row number from that listing, " +
 			"persists a choice as the default kx scan uses.",
 		Example: "  kx engine\n  kx engine trivy",
-		Args:    cobra.MaximumNArgs(1),
+		Args:    maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) == 1 {

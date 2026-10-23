@@ -93,7 +93,7 @@ func (r *Renderer) Diagnostic(report diagnostics.Report) {
 		extra = status + " · " + strconv.Itoa(count) + " " + label
 	}
 	// Built by hand rather than through Caption, so the verdict keeps its own
-	// colour inside the muted banner.
+	// color inside the muted banner.
 	// The namespace segment is dropped when there isn't one rather than left
 	// as an empty gap between separators — a Node is cluster-scoped, and
 	// "Node/x ·  · healthy" reads as a missing value rather than an absent
@@ -249,7 +249,7 @@ func (r *Renderer) findingLines(finding diagnostics.Finding) []string {
 	}
 	// No room, so the time takes a line of its own — still the entry's own
 	// indent, and still carrying its separator, since what it separates is
-	// the summary above it rather than a neighbour on the same line.
+	// the summary above it rather than a neighbor on the same line.
 	return append(lines, r.style(theme.Muted, strings.TrimPrefix(suffix, " ")))
 }
 
@@ -273,7 +273,7 @@ var logErrorTokens = map[string]bool{
 	"EXCEPTION": true, "TRACEBACK": true, "PANIC": true,
 }
 
-// highlightSeverity colours the OTEL severity tokens inside a log line.
+// highlightSeverity colors the OTEL severity tokens inside a log line.
 func (r *Renderer) highlightSeverity(line string) string {
 	return severityTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
 		style := theme.Warn
@@ -365,6 +365,6 @@ func Diagnostic(report diagnostics.Report) { current.Diagnostic(report) }
 
 // severityTokenPattern matches the OTEL severity tokens highlighted in log
 // lines. Kept here rather than shared with the diagnostics package so the
-// renderer has no reason to import the matcher's filtering behaviour.
+// renderer has no reason to import the matcher's filtering behavior.
 var severityTokenPattern = regexp.MustCompile(
 	`(?i)\b(FATAL|CRITICAL|ERROR|ERR|WARNING|WARN|EXCEPTION|TRACEBACK|PANIC)\b`)

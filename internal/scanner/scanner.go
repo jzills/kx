@@ -151,8 +151,8 @@ func (Scout) Name() string { return "scout" }
 func (Scout) PreflightArgv() []string { return []string{"docker", "scout", "version"} }
 
 func (Scout) UnavailableMessage() string {
-	return "docker scout is not available — kx scan needs the Docker Scout " +
-		"CLI plugin. Install it: " + scoutDocsURL
+	return "kx scan needs the Docker Scout CLI plugin, which isn't available — " +
+		"see " + scoutDocsURL + " to install it."
 }
 
 func (Scout) PassthroughArgv(image string, extra []string) []string {
@@ -301,8 +301,8 @@ func (Trivy) Name() string { return "trivy" }
 func (Trivy) PreflightArgv() []string { return []string{"trivy", "--version"} }
 
 func (Trivy) UnavailableMessage() string {
-	return "trivy is not available — kx scan needs the Trivy CLI. " +
-		"Install it: " + trivyDocsURL
+	return "kx scan needs the Trivy CLI, which isn't available — " +
+		"see " + trivyDocsURL + " to install it."
 }
 
 func (Trivy) PassthroughArgv(image string, extra []string) []string {
@@ -376,8 +376,8 @@ func (Grype) Name() string { return "grype" }
 func (Grype) PreflightArgv() []string { return []string{"grype", "version"} }
 
 func (Grype) UnavailableMessage() string {
-	return "grype is not available — kx scan needs the Grype CLI. " +
-		"Install it: " + grypeDocsURL
+	return "kx scan needs the Grype CLI, which isn't available — " +
+		"see " + grypeDocsURL + " to install it."
 }
 
 func (Grype) PassthroughArgv(image string, extra []string) []string {
@@ -482,7 +482,7 @@ func messageField(text, label string) (string, bool) {
 	return "", false
 }
 
-// fixedVersion normalises Scout's "not fixed", which is prose rather than a
+// fixedVersion normalizes Scout's "not fixed", which is prose rather than a
 // version and must not be printed as one.
 func fixedVersion(value string) string {
 	if strings.EqualFold(strings.TrimSpace(value), "not fixed") {

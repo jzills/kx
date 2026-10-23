@@ -108,7 +108,7 @@ func TestYamlShowUnknownKeyYieldsEmpty(t *testing.T) {
 }
 
 // Two sibling subtrees at the same depth both holding the requested key. The
-// walk is breadth-first, and Go randomises map iteration, so the order siblings
+// walk is breadth-first, and Go randomizes map iteration, so the order siblings
 // enter the frontier varies run to run — an unordered walk answers the same
 // manifest differently on different runs.
 const ambiguousManifest = `

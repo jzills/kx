@@ -328,7 +328,7 @@ func (e ContextMismatchError) Error() string {
 var ErrSchemaChanged = errors.New(
 	"kx's saved state format has changed since this file was written. " +
 		"State has been reset (this does not affect your cluster) — run " +
-		"`kx get <resource>` to rebuild it.")
+		"'kx get <resource>' to rebuild it.")
 
 // Service reads and writes the history stack at ~/.kx/state.json.
 type Service struct {
@@ -404,7 +404,7 @@ func File() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot locate home directory: %w", err)
+		return "", fmt.Errorf("Could not find your home directory: %w.", err)
 	}
 	return filepath.Join(home, ".kx", "state.json"), nil
 }
@@ -447,7 +447,7 @@ func (s *Service) readHistory(locked bool) (History, error) {
 	// `kx get` rebuilds state, so this is recoverable, not fatal.
 	unreadable := func(cause error) error {
 		return fmt.Errorf(
-			"State file at %s is unreadable (%v). Run `kx get <resource>` to rebuild it.",
+			"State file at %s is unreadable (%v). Run 'kx get <resource>' to rebuild it.",
 			path, cause,
 		)
 	}
@@ -1031,7 +1031,7 @@ func positionOutOfRange(position, count int) error {
 // where the fix is kx state back.
 //
 // where is the caller's own "what to do next" clause, the same division of
-// labour outOfRange has with describeCurrent: this names what went wrong, the
+// labor outOfRange has with describeCurrent: this names what went wrong, the
 // caller names where to look, because a kind-checking command can offer a
 // relist that a generic one cannot.
 func emptyListing(entry State, where string) error {

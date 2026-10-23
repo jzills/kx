@@ -679,7 +679,7 @@ func TestTableTextRoundTrips(t *testing.T) {
 }
 
 // AddRows numbers rows that were parsed once, upstream. Everything between
-// kubectl and the screen works on rows now; serialising back to padded text so
+// kubectl and the screen works on rows now; serializing back to padded text so
 // the next stage could parse it again is what lost a blank cell.
 func TestAddRowsNumbersAlreadyParsedRows(t *testing.T) {
 	headers, rows, _ := ParseTable(twoContextsOutput)

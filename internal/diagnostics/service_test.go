@@ -490,7 +490,7 @@ func TestGatherDropsEventsOlderThanTheWindow(t *testing.T) {
 }
 
 // Zero is "no window", and it has to stay the zero value's meaning: every
-// caller that builds a Service without setting one gets today's behaviour.
+// caller that builds a Service without setting one gets today's behavior.
 func TestGatherWithoutAWindowKeepsEveryEvent(t *testing.T) {
 	s := service(
 		podWith("solo", "p1", corev1.PodRunning, []corev1.ContainerStatus{running("app")}),
@@ -683,7 +683,7 @@ func TestGatherStillReadsLogsForARecentTermination(t *testing.T) {
 	}
 }
 
-// A sweep analyses the same Data the indexed path does, so it has to stamp
+// A sweep analyzes the same Data the indexed path does, so it has to stamp
 // the window too — otherwise a triage table reports history an indexed run
 // of the same resource would not.
 func TestSweepRecordsTheWindowOnEveryResource(t *testing.T) {

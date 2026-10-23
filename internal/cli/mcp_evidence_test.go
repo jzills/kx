@@ -97,7 +97,7 @@ func TestMCPSinceRefusalsNameTheField(t *testing.T) {
 	} {
 		result := callTool(t, session, tool, args)
 		text := toolText(result)
-		if !result.IsError || !strings.HasPrefix(text, "'since': invalid duration \"soon\"") {
+		if !result.IsError || !strings.HasPrefix(text, "Invalid value for 'since': 'soon' is not a duration") {
 			t.Errorf("%s: result = %q, want a refusal naming 'since'", tool, text)
 		}
 		if strings.Contains(text, "--since") {
@@ -385,7 +385,7 @@ func TestTopToolMetricsServerUnavailableGivesTheSentence(t *testing.T) {
 	kube := &recordingKubectl{probeCode: 1}
 	deps := mcpTestDeps(t, kube)
 	result := callTool(t, connectMCP(t, deps), "top", map[string]any{})
-	if !result.IsError || !strings.Contains(toolText(result), "metrics-server is not available") {
+	if !result.IsError || !strings.Contains(toolText(result), "kx top needs metrics-server, which isn't available") {
 		t.Fatalf("result = %q, want the metrics-server sentence", toolText(result))
 	}
 }

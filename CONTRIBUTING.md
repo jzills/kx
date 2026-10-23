@@ -18,6 +18,14 @@ README's command table from the command tree — it fails if the table has
 drifted from the commands it documents. Tests are not in the hook — run them
 yourself.
 
+## Style
+
+Errors, help text, docs, comments, commits and release notes all share one
+voice, written down in [`STYLE.md`](STYLE.md); `go run ./tools/voicecheck`,
+run by the pre-commit hook, checks the parts of it a machine can. If you work with an AI agent,
+the repo's shared skills in `.claude/skills/` load the relevant parts of it
+for the task at hand; CLAUDE.md lists them.
+
 ## Demos
 
 The demo GIFs are rendered from [VHS](https://github.com/charmbracelet/vhs)

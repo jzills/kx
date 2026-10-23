@@ -103,7 +103,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	info := buildinfo.Resolve(version)
 	root := &cobra.Command{
 		Use:           "kx",
-		Short:         "Select Kubernetes resources by index instead of typing names",
+		Short:         "Select Kubernetes resources by index instead of typing names.",
 		Version:       info.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -112,6 +112,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	installVersion(root, info, services.KubectlClient)
 	root.Flags().BoolP("version", "v", false, "Show the kx version and exit")
 	root.PersistentFlags().Bool("no-color", false, "Disable styled output")
+	root.SetFlagErrorFunc(ownFlagError)
 
 	// `get` is the only command that doesn't consume an index, so a NotFound
 	// from it means the resource type doesn't exist — refreshing the listing
@@ -211,8 +212,8 @@ func installCompletion(root *cobra.Command) {
 	completion.Short = "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
 	completion.Long = "Generates a shell completion script for kx. See each subcommand's " +
 		"own --help for how to install it."
-	// Labelled by shell because the help screen prints each example on its
-	// own "$ " line with nothing between them, so an unlabelled pair reads as
+	// Labeled by shell because the help screen prints each example on its
+	// own "$ " line with nothing between them, so an unlabeled pair reads as
 	// a sequence to run. Someone on zsh ran both: the bash script registers
 	// its own completer over the zsh one where bashcompinit is loaded, and
 	// then fails on a bash-completion helper zsh has no equivalent for.
@@ -321,10 +322,10 @@ func registerFormatFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 }
 
-// registerWatchFlag declares --watch on the listing commands that honour it.
+// registerWatchFlag declares --watch on the listing commands that honor it.
 //
 // kubectl owns the flag and isWatch parses it by hand, but kx gives it its own
-// behaviour — a live-redrawing table instead of a stream — so leaving it
+// behavior — a live-redrawing table instead of a stream — so leaving it
 // unregistered made a kx feature visible only in the README.
 func registerWatchFlag(cmd *cobra.Command) {
 	cmd.Flags().BoolP("watch", "w", false,

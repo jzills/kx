@@ -23,7 +23,7 @@ type mcpTarget struct {
 	Index     int    `json:"index,omitempty" jsonschema:"A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it."`
 }
 
-// resolvedTarget is a target after normalisation. Mark is kept so a result can
+// resolvedTarget is a target after normalization. Mark is kept so a result can
 // say which mark produced it, the way kx diag --json does.
 type resolvedTarget struct {
 	Kind      kinds.Kind
@@ -154,7 +154,7 @@ const (
 func validKind(kind string) error {
 	if !kindPattern.MatchString(kind) {
 		return fmt.Errorf(
-			"kind '%s' is not a resource type — give one such as pods, deploy or a CRD's plural name.", kind)
+			"Kind '%s' is not a resource type — give one such as pods, deploy or a CRD's plural name.", kind)
 	}
 	return nil
 }
@@ -162,7 +162,7 @@ func validKind(kind string) error {
 func validObjectName(name string) error {
 	if len(name) > maxObjectNameLength || !objectNamePattern.MatchString(name) {
 		return fmt.Errorf(
-			"name '%s' is not a Kubernetes name — use lowercase letters, digits, '-', '.' and ':', starting with a letter or digit.",
+			"Name '%s' is not a Kubernetes name — use lowercase letters, digits, '-', '.' and ':', starting with a letter or digit.",
 			name)
 	}
 	return nil
@@ -171,7 +171,7 @@ func validObjectName(name string) error {
 func validNamespace(namespace string) error {
 	if len(namespace) > maxNamespaceLength || !namespacePattern.MatchString(namespace) {
 		return fmt.Errorf(
-			"namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
+			"Namespace '%s' is not a Kubernetes namespace — use lowercase letters, digits and '-', starting and ending with a letter or digit.",
 			namespace)
 	}
 	return nil
@@ -192,7 +192,7 @@ func refuseAll(spelling string) error {
 // kind, name and namespace came from the state file rather than from the
 // caller directly — to exactly the checks a typed target gets as it is
 // parsed: the flag-injection shapes, the 'all' refusal, and the kind
-// normalised — every kubectl spelling of it, secrets.v1. as much as secrets
+// normalized — every kubectl spelling of it, secrets.v1. as much as secrets
 // (kinds.Normalize). It returns the canonical kind, which is what reaches
 // argv and every kind-keyed check (Secret redaction above all). Without it
 // either path was trusted outright.

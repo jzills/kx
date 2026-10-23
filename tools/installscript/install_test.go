@@ -309,7 +309,7 @@ func TestUnknownVersionNamesTheURL(t *testing.T) {
 	mustNotExist(t, filepath.Join(res.home, ".local", "bin", "kx"))
 }
 
-func TestHonoursInstallDir(t *testing.T) {
+func TestHonorsInstallDir(t *testing.T) {
 	hostPlatform(t)
 	r := newRelease(t, "v0.7.0", releaseOptions{})
 	dir := filepath.Join(t.TempDir(), "not", "yet", "there")
