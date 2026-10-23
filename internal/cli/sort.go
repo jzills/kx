@@ -8,16 +8,28 @@ import (
 	"github.com/jzills/kx/internal/index"
 )
 
-// sortUsage describes --sort wherever a listing takes it.
-const sortUsage = "Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest"
+// sortUsage describes kx get's --sort; topSortUsage is kx top's, whose
+// columns are usage rather than status.
+const (
+	sortUsage    = "Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest"
+	topSortUsage = "Sort by the columns shown, before indexing: '-mem%,-cpu%' sorts by MEM% from most to least, then by CPU%"
+)
 
-// sortLong is the help paragraph a listing that takes --sort carries.
-const sortLong = "A `--sort` sorts the table kx draws by its own columns, before numbering it, " +
-	"so row 1 is the first sorted row: name the columns separated by commas, as the header " +
-	"reads them, with a leading `-` to sort one from largest down. Each column sorts as what " +
-	"it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as " +
-	"quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's " +
-	"own `--sort-by` still takes a JSONPath, and applies first."
+// sortLong and topSortLong are the help paragraphs kx get and kx top carry,
+// each naming its own columns and what kubectl's --sort-by takes there.
+const (
+	sortLong = sortHow + "Each column sorts as what " +
+		"it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as " +
+		"quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's " +
+		"own `--sort-by` still takes a JSONPath, and applies first."
+	topSortLong = sortHow + "CPU and MEMORY sort as " +
+		"quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod " +
+		"with no limit sorts last either way. kubectl's own `--sort-by` still takes 'cpu' or " +
+		"'memory', and applies first."
+	sortHow = "A `--sort` sorts the table kx draws by its own columns, before numbering it, " +
+		"so row 1 is the first sorted row: name the columns separated by commas, as the header " +
+		"reads them, with a leading `-` to sort one from largest down. "
+)
 
 // sortArg is how a --sort value travels with the args a listing is run with,
 // and how its saved query records it: beside kubectl's flags, as kx top's

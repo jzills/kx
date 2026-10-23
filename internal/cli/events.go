@@ -136,7 +136,7 @@ func newTopCommand(services Services) *cobra.Command {
 		Use:        "top [resource] [kubectl flags]",
 		SuggestFor: []string{"usage", "metrics", "stats"},
 		Short:      "List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits.",
-		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.\n\n" + sortLong,
+		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.\n\n" + topSortLong,
 		Example: "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits\n" +
 			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort -mem%,-cpu%\n  kx top nodes --sort -cpu%\n  kx top --sort-by=memory",
 		// `resource` means something narrower here than it does to kx get.
@@ -324,7 +324,7 @@ func newTopCommand(services Services) *cobra.Command {
 		return deliverPage(cmd.Context(), page, htmlOpts)
 	}
 	cmd.Flags().StringP("match", "m", "", matchUsage)
-	cmd.Flags().String("sort", "", sortUsage)
+	cmd.Flags().String("sort", "", topSortUsage)
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
 	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")

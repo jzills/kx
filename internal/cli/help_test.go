@@ -1131,3 +1131,32 @@ func TestHelpWritesKindsAsTypes(t *testing.T) {
 		t.Fatalf("checked %d help texts; the walk missed the command tree", checked)
 	}
 }
+
+// kx top once carried kx get's --sort help word for word: an example sorting
+// by STATUS and RESTARTS, columns kx top has none of, and a --sort-by that
+// takes a JSONPath, where kubectl top's takes 'cpu' or 'memory'. kx get's
+// help is the control, so the phrases are known to be the ones it prints.
+func TestTopSortHelpNamesTopsColumns(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	helpOf := func(name string) string {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%s): %v", name, err)
+		}
+		return cmd.Long + "\n" + cmd.Flags().Lookup("sort").Usage
+	}
+	getHelp, topHelp := helpOf("get"), helpOf("top")
+	for _, phrase := range []string{"'status,-restarts'", "`--sort-by` still takes a JSONPath"} {
+		if !strings.Contains(getHelp, phrase) {
+			t.Errorf("kx get --help = %q, want %q", getHelp, phrase)
+		}
+		if strings.Contains(topHelp, phrase) {
+			t.Errorf("kx top --help = %q, want no %q", topHelp, phrase)
+		}
+	}
+	for _, phrase := range []string{"'-mem%,-cpu%'", "`--sort-by` still takes 'cpu' or 'memory'"} {
+		if !strings.Contains(topHelp, phrase) {
+			t.Errorf("kx top --help = %q, want %q", topHelp, phrase)
+		}
+	}
+}
