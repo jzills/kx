@@ -130,7 +130,7 @@ type Query struct {
 	//
 	// Resource and Args mean what that command takes. A sweep — kx diag or
 	// kx tree with no index — has no Resource, and its Args are its scope as
-	// swept (-n with the namespace, or -A) with any --since or --full; a tree
+	// swept (-n with the namespace, or -A) with any --since or --sort; a tree
 	// of one resource names that resource, Kind/name, as its Resource.
 	//
 	// Absent from files written before it existed, which read as `kx get` —

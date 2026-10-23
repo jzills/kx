@@ -49,7 +49,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, " +
 			"Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's " +
 			"kx history, every swept resource in the order returned, and each carries its index there — so " +
-			"without full, the numbers skip the healthy rows left out.",
+			"without showHealthy, the numbers skip the healthy rows left out.",
 		Annotations: listingTool("Diagnose", deps.WriteListings),
 	}, serialized(deps, deps.diagnose))
 	// Registered with an untyped output: a tree node's children are tree
@@ -375,7 +375,7 @@ type diagnoseInput struct {
 	Namespace     string     `json:"namespace,omitempty" jsonschema:"Namespace to sweep when there is no target; defaults to the current namespace."`
 	AllNamespaces bool       `json:"allNamespaces,omitempty" jsonschema:"Sweep every namespace when there is no target."`
 	Since         string     `json:"since,omitempty" jsonschema:"Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting."`
-	Full          bool       `json:"full,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
+	ShowHealthy   bool       `json:"showHealthy,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
 	Match         string     `json:"match,omitempty" jsonschema:"Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target."`
 }
 
@@ -395,9 +395,9 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	if err := validScope(in.Namespace, in.AllNamespaces); err != nil {
 		return nil, diagnoseOutput{}, err
 	}
-	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.Full) {
+	if in.Target != nil && (in.Namespace != "" || in.AllNamespaces || in.ShowHealthy) {
 		return nil, diagnoseOutput{}, errors.New(
-			"'namespace', 'allNamespaces' and 'full' apply to a sweep — a target already names its namespace. Drop them, or drop the target to sweep.")
+			"'namespace', 'allNamespaces' and 'showHealthy' apply to a sweep — a target already names its namespace. Drop them, or drop the target to sweep.")
 	}
 	if in.Target != nil && in.Match != "" {
 		return nil, diagnoseOutput{}, errMCPMatchBesideTarget
@@ -452,7 +452,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// Unlike --json, which carries every resource because nothing scrolls
 	// past a machine: an agent pays for every token of a healthy row, and
 	// checked/healthy already say how many there were.
-	if !in.Full {
+	if !in.ShowHealthy {
 		kept := out.Diagnosis.Resources[:0]
 		for _, resource := range out.Diagnosis.Resources {
 			if resource.Verdict != diagnostics.OK.Token() {

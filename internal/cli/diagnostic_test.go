@@ -232,44 +232,44 @@ func TestTriageScopedSweepKeepsCrossKindNamesakes(t *testing.T) {
 	}
 }
 
-// --full only changes what the terminal table includes; the HTML report's
+// --show-healthy only changes what the terminal table includes; the HTML report's
 // full inventory (result.All) must not depend on it either way.
-func TestTriageFullIncludesHealthyInTerminalReports(t *testing.T) {
+func TestTriageShowHealthyIncludesHealthyInTerminalReports(t *testing.T) {
 	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
 		unhealthy(kinds.Deployment, "web", "prod"),
 		healthy(kinds.Pod, "quiet", "prod"),
 	}}
 	var saved []state.State
 
-	withoutFull, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
+	withoutHealthy, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, false)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(withoutFull.Reports) != 1 {
-		t.Errorf("without --full, Reports = %d rows, want 1 (unhealthy only)", len(withoutFull.Reports))
+	if len(withoutHealthy.Reports) != 1 {
+		t.Errorf("without --show-healthy, Reports = %d rows, want 1 (unhealthy only)", len(withoutHealthy.Reports))
 	}
-	if len(withoutFull.All) != 2 {
-		t.Errorf("All = %d rows, want 2 (every swept resource) regardless of --full", len(withoutFull.All))
+	if len(withoutHealthy.All) != 2 {
+		t.Errorf("All = %d rows, want 2 (every swept resource) regardless of --show-healthy", len(withoutHealthy.All))
 	}
 
-	withFull, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, true)
+	withShowHealthy, err := triageOf(gatherer, &saved).Execute(context.Background(), "prod", false, true)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(withFull.Reports) != 2 {
-		t.Errorf("--full Reports = %d rows, want 2 (every swept resource)", len(withFull.Reports))
+	if len(withShowHealthy.Reports) != 2 {
+		t.Errorf("--show-healthy Reports = %d rows, want 2 (every swept resource)", len(withShowHealthy.Reports))
 	}
-	if !withFull.Full {
-		t.Error("result.Full was not set for a --full sweep")
+	if !withShowHealthy.ShowHealthy {
+		t.Error("result.ShowHealthy was not set for a --show-healthy sweep")
 	}
 }
 
-// Before --full existed, an all-healthy sweep saved no state at all — there
+// Before --show-healthy existed, an all-healthy sweep saved no state at all — there
 // was nothing unhealthy to index. Now the HTML grid always shows every swept
-// resource, so every resource must be indexed too, regardless of --full or
+// resource, so every resource must be indexed too, regardless of --show-healthy or
 // whether anything was unhealthy — otherwise a healthy row's index in the
 // grid would resolve to nothing.
-func TestTriageAlwaysIndexesEveryReportRegardlessOfFull(t *testing.T) {
+func TestTriageAlwaysIndexesEveryReportRegardlessOfShowHealthy(t *testing.T) {
 	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
 		healthy(kinds.Pod, "quiet", "prod"),
 	}}
@@ -280,7 +280,7 @@ func TestTriageAlwaysIndexesEveryReportRegardlessOfFull(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	if len(result.Reports) != 0 {
-		t.Errorf("Reports = %d rows, want 0 (nothing unhealthy, --full not set)", len(result.Reports))
+		t.Errorf("Reports = %d rows, want 0 (nothing unhealthy, --show-healthy not set)", len(result.Reports))
 	}
 	if len(saved) != 1 {
 		t.Fatalf("saved %d states, want one — the healthy resource must still be indexed", len(saved))
@@ -291,10 +291,10 @@ func TestTriageAlwaysIndexesEveryReportRegardlessOfFull(t *testing.T) {
 	}
 }
 
-func TestDiagnosticRegistersFullFlag(t *testing.T) {
+func TestDiagnosticRegistersShowHealthyFlag(t *testing.T) {
 	cmd := newDiagnosticCommand(Services{}, "diagnostic", []string{"diag"})
-	if cmd.Flags().Lookup("full") == nil {
-		t.Error("--full is not registered, so it will not appear in --help")
+	if cmd.Flags().Lookup("show-healthy") == nil {
+		t.Error("--show-healthy is not registered, so it will not appear in --help")
 	}
 }
 
@@ -320,15 +320,15 @@ func TestDiagRejectsAScopeFlagAlongsideAnIndex(t *testing.T) {
 	}
 }
 
-func TestDiagRejectsFullAlongsideAnIndex(t *testing.T) {
+func TestDiagRejectsShowHealthyAlongsideAnIndex(t *testing.T) {
 	quietRender(t)
 	cmd := newDiagnosticCommand(Services{}, "diagnostic", nil)
-	if err := cmd.Flags().Set("full", "true"); err != nil {
-		t.Fatalf("set --full: %v", err)
+	if err := cmd.Flags().Set("show-healthy", "true"); err != nil {
+		t.Fatalf("set --show-healthy: %v", err)
 	}
 	err := cmd.RunE(cmd, []string{"1"})
 	if err == nil {
-		t.Fatal("--full was accepted alongside an index")
+		t.Fatal("--show-healthy was accepted alongside an index")
 	}
 	if !strings.Contains(err.Error(), "cannot be combined with an index") {
 		t.Errorf("err = %v", err)
@@ -370,8 +370,8 @@ func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
 		Namespace:     "prod",
 		AllNamespaces: true,
 		Checked:       12,
-		// Reports is the terminal-only shape (unhealthy, or full when --full);
-		// All is what the HTML page always uses regardless of --full — set to a
+		// Reports is the terminal-only shape (unhealthy, or full when --show-healthy);
+		// All is what the HTML page always uses regardless of --show-healthy — set to a
 		// different report so a page that reads the wrong field is caught.
 		Reports: []render.TriageRow{{Index: 1,
 			Report: diagnostics.Report{Name: "web", Kind: kinds.Deployment}}},
@@ -390,7 +390,7 @@ func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
 	}
 	if len(page.Reports) != 1 || page.Reports[0].Name != "quiet" {
 		t.Errorf("Reports = %+v, want result.All's one healthy report, not result.Reports — "+
-			"the HTML page must show the full inventory regardless of --full", page.Reports)
+			"the HTML page must show the full inventory regardless of --show-healthy", page.Reports)
 	}
 	if page.Meta.Title != "t" {
 		t.Errorf("Meta = %+v, want the meta passed in carried through unchanged", page.Meta)

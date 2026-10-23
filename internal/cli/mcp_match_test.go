@@ -27,7 +27,7 @@ func TestMCPDiagnoseSweepTakesAMatch(t *testing.T) {
 		), nil
 	}
 	_, out, err := deps.diagnose(context.Background(), &mcp.CallToolRequest{},
-		diagnoseInput{Match: "api", Full: true})
+		diagnoseInput{Match: "api", ShowHealthy: true})
 	if err != nil {
 		t.Fatalf("diagnose: %v", err)
 	}
