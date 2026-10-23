@@ -205,7 +205,7 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 		// What follows the resource is kubectl's, then its flags.
 		rest := append(positional[:len(positional):len(positional)], forward...)
-		// --sort travels with the args, as the query records it (sortArg).
+		// --sort is kx's, kept apart from kubectl's args (state.Query.Sort).
 		sortSpec, _ := flags.GetString("sort")
 		if flags.Changed("sort") {
 			if sortSpec == "" {
@@ -214,7 +214,6 @@ func newTopCommand(services Services) *cobra.Command {
 			if err := sortRefusal(sortSpec, rest); err != nil {
 				return err
 			}
-			rest = append(rest, sortArg(sortSpec))
 		}
 
 		// kubectl rejects -A on `top node` with its own error, naming its
@@ -252,7 +251,7 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 
 		output, resourceLabel, namespace, scopedAllNamespaces, err :=
-			topListing(services, nodes, match, rest, noLimits, "")
+			topListing(services, nodes, match, rest, noLimits, "", sortSpec)
 		if err != nil {
 			return err
 		}

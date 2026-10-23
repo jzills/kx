@@ -264,11 +264,6 @@ func runGet(services Services, resource string, args []string, options getOption
 		return decodeSecrets(services, resource, resolved, extra, options)
 	}
 
-	// The sort travels with the args, as the query records it (sortArg).
-	if options.Sort != "" {
-		extra = append(extra, sortArg(options.Sort))
-	}
-
 	// The namespace an index fetch is taken in when the user named none.
 	var scope string
 	if len(refs) > 0 {
@@ -320,7 +315,9 @@ func runGet(services Services, resource string, args []string, options getOption
 		// an index was refused above, so the listing's namespaces are the
 		// only scope there is.
 		if len(groups) > 1 {
-			get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index}
+			get := GetCommand{
+				Kubectl: services.Kubectl, State: services.State, Index: services.Index, Sort: options.Sort,
+			}
 			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
 			stop()
@@ -365,7 +362,9 @@ func runGet(services Services, resource string, args []string, options getOption
 		return err
 	}
 
-	get := GetCommand{Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope}
+	get := GetCommand{
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: options.Sort,
+	}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)
 	stop()

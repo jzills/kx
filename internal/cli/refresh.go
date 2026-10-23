@@ -288,6 +288,7 @@ func replayGet(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+		Sort: query.Sort,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
@@ -306,7 +307,7 @@ func replayTop(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	noLimits, rest := extractBool(query.Args, "--no-limits")
 	table, label, namespace, _, err := topListing(
-		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope)
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope, query.Sort)
 	if err != nil {
 		return nil, err
 	}
@@ -330,11 +331,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 	query := *entry.Query
 	namespace, all, named := sweptScope(services, entry, elsewhere)
 	_, _, rest := recordedScope(query.Args)
-	since, rest, err := extractString(rest, "--since", "")
-	if err != nil {
-		return nil, err
-	}
-	sortSpec, _, err := extractString(rest, "--sort", "")
+	since, _, err := extractString(rest, "--since", "")
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +340,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 		return nil, err
 	}
 	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
-		false, window, since, queryMatch(query), sortSpec)
+		false, window, since, queryMatch(query), query.Sort)
 	if err != nil {
 		return nil, err
 	}
@@ -412,11 +409,11 @@ func queryMatch(query state.Query) string {
 
 // relistCommand is what to run when a listing could not be run again: the
 // command that made it, as it would be typed, in the scope a refresh would
-// take it in (listingScope) and narrowed by its term. A kx get listing is
-// named by its resource, scope and term — not its other arguments, since a
-// relist's are the very names that went stale — and a tree of one resource
-// by the listing of its kind in its namespace, since that resource may be
-// the one that went.
+// take it in (listingScope), sorted and narrowed as it was. A kx get listing
+// is named by its resource, scope, sort and term — not its other arguments,
+// since a relist's are the very names that went stale — and a tree of one
+// resource by the listing of its kind in its namespace, since that resource
+// may be the one that went.
 //
 // "kx get pods" for a listing of prod, typed in kube-system, lists
 // kube-system, so the namespace it was taken in is named — unless it was
@@ -464,6 +461,12 @@ func relistCommand(entry state.State, elsewhere bool) string {
 		words = withScope(words, query.Args, scope)
 	default:
 		words = withScope([]string{"kx", query.Command}, query.Args, scope)
+	}
+	// The order its rows were numbered in: relisted without it, row 3 is
+	// another resource. A fetch records none, since its sort ordered the
+	// fetched rows, not the -A listing named.
+	if query.Sort != "" {
+		words = append(words, sortArg(query.Sort))
 	}
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)

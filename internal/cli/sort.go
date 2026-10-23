@@ -39,25 +39,23 @@ const (
 		"reads them, with a leading `-` to sort one from largest down. "
 )
 
-// sortArg is how a --sort value travels with the args a listing is run with,
-// and how its saved query records it: beside kubectl's flags, as kx top's
-// --no-limits is, so a refresh lists it again in the same order and two
-// listings sorted differently are different listings. takeSort takes it back
-// out before kubectl is asked.
+// sortArg is a --sort as a relist names it, beside the args its query
+// repeats.
 func sortArg(spec string) string { return "--sort=" + spec }
 
-// takeSort reads the --sort a listing's args carry, refusing a value that
-// names no column, and returns the args without it, which are kubectl's.
-func takeSort(args []string) ([]index.SortKey, []string, error) {
-	spec, rest, err := extractString(args, "--sort", "")
-	if err != nil || spec == "" {
-		return nil, rest, err
+// sortKeysOf reads a listing's --sort, refusing a value that names no column.
+// The spec travels apart from kubectl's args, as the query records it
+// (state.Query.Sort): among them, a --sort typed after `--` for kubectl was
+// read as kx's.
+func sortKeysOf(spec string) ([]index.SortKey, error) {
+	if spec == "" {
+		return nil, nil
 	}
 	keys, err := index.ParseSortKeys(spec)
 	if err != nil {
-		return nil, nil, sortSpecError(spec)
+		return nil, sortSpecError(spec)
 	}
-	return keys, rest, nil
+	return keys, nil
 }
 
 // sortFlag renders a --sort for an HTML report's invocation line, so the page
