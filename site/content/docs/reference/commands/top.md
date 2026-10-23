@@ -8,7 +8,7 @@ weight: 27
 
 Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.
 
-A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. Each column sorts as what it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
+A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. CPU and MEMORY sort as quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod with no limit sorts last either way. kubectl's own `--sort-by` still takes 'cpu' or 'memory', and applies first.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
@@ -38,7 +38,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
-| `--sort string` | Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest |
+| `--sort string` | Sort by the columns shown, before indexing: '-mem%,-cpu%' sorts by MEM% from most to least, then by CPU% |
 
 ## Passthrough options
 
