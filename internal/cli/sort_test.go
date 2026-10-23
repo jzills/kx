@@ -202,7 +202,9 @@ func TestScanSortOrdersTheSummary(t *testing.T) {
 
 // The summary's columns are fixed, so a key it lacks — and a key naming
 // nothing — is refused before kubectl or any scanner runs, as is --sort
-// beside --full, whose output is the scanner's own.
+// beside --full, whose output is the scanner's own. A --sort with no value
+// at all is refused as every value flag's is: the check for an empty one
+// once ran first and called it a key naming nothing.
 func TestScanSortRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -212,6 +214,9 @@ func TestScanSortRefusals(t *testing.T) {
 			"Invalid value for '--sort': 'crti'. Accepted values: image, crit, high, med, low, unspec."},
 		{[]string{"--sort="},
 			"Invalid value for '--sort': '' names no column — name each column, separated by commas: 'status,-restarts'."},
+		{[]string{"--sort", ""},
+			"Invalid value for '--sort': '' names no column — name each column, separated by commas: 'status,-restarts'."},
+		{[]string{"--sort"}, "'--sort' needs a value."},
 		{[]string{"--sort", "-crit", "--full"},
 			"'--sort' cannot be combined with '--full' — '--full' streams the scanner's own report, which kx does not parse, so there is no table to sort."},
 	} {

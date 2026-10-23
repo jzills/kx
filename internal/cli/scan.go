@@ -654,15 +654,15 @@ func newScanCommand(services Services) *cobra.Command {
 				engine = services.Config.Engine
 			}
 			full, rest := extractBool(rest, "--full")
-			// By presence, as kx get's: `--sort=` names no column.
-			if hasFlag(rest, "--sort", "") {
-				if spec, _, _ := extractString(rest, "--sort", ""); spec == "" {
-					return sortSpecError("")
-				}
-			}
+			// By presence, as kx get's: `--sort=` names no column. Read after
+			// the value is taken, so a --sort with none is refused as one.
+			sorted := hasFlag(rest, "--sort", "")
 			sortSpec, rest, err := extractString(rest, "--sort", "")
 			if err != nil {
 				return err
+			}
+			if sorted && sortSpec == "" {
+				return sortSpecError("")
 			}
 			html, rest := extractBool(rest, "--html")
 			asJSON, rest := extractBool(rest, "--json")
