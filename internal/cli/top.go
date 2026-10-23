@@ -294,9 +294,15 @@ func (c TopCommand) ExecuteNodes(
 // header rewrite only, so the existing render.UsageStyle-driven coloring in
 // IndexedTable (which looks up cells by the exact header names "CPU%"/
 // "MEM%") applies to nodes without any new coloring code.
+//
+// kubectl before 1.32 heads them CPU% and MEMORY%. Its MEMORY% left as it
+// was keyed to "memory%", so the documented --sort mem% was refused there.
 func relabelPercentColumns(headers []string) []string {
 	cpuCol := index.ColumnIndex(headers, "CPU(%)")
 	memCol := index.ColumnIndex(headers, "MEMORY(%)")
+	if memCol < 0 {
+		memCol = index.ColumnIndex(headers, "MEMORY%")
+	}
 	if cpuCol < 0 && memCol < 0 {
 		return headers
 	}
