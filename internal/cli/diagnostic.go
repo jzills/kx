@@ -194,12 +194,9 @@ func (c TriageCommand) Execute(
 // -A, or -n when the namespace was named, the entry recording where it was
 // swept either way (see NamedNamespace) — and the flags that decide what it
 // saves. --show-healthy, --json, --html and --fail-on decide only what is
-// done with
-// the sweep: the saved listing is every resource swept either way, so they
-// the sweep: the saved listing is every resource swept either way, so they
-// are left out, and a sweep with --show-healthy is the same view as one
-// without. A
-// refresh prints the default table.
+// done with the sweep: the saved listing is every resource swept either way,
+// so they are left out, and a sweep with --show-healthy is the same view as
+// one without. A refresh prints the default table.
 func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query {
 	args := []string{}
 	switch {
@@ -414,13 +411,6 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			since, _ := cmd.Flags().GetString("since")
 			match, _ := cmd.Flags().GetString("match")
 			sortSpec, _ := cmd.Flags().GetString("sort")
-			// Checked up front, as --fail-on is: a sweep's columns are fixed,
-			// so a column it lacks costs nothing to refuse.
-			if cmd.Flags().Changed("sort") {
-				if err := sweepSortError(sortSpec); err != nil {
-					return err
-				}
-			}
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -498,6 +488,15 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					"'--sort' cannot be combined with an index — it sorts a namespace " +
 						"sweep. Drop the flag, or drop the index to sweep the namespace " +
 						"instead.")
+			}
+			// Checked before anything is swept, as --fail-on is: a sweep's
+			// columns are fixed, so a column it lacks costs nothing to refuse.
+			// After the index, which --sort does not apply to at all: checked
+			// first, a column the sweep lacks was the refusal kx diag 1 gave.
+			if cmd.Flags().Changed("sort") {
+				if err := sweepSortError(sortSpec); err != nil {
+					return err
+				}
 			}
 
 			ctx := cmd.Context()

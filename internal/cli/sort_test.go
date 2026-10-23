@@ -281,8 +281,8 @@ func TestDiagSortOrdersTheRankedSweep(t *testing.T) {
 // unhealthy rows lead the sweep — but a --sort key deals healthy rows in
 // between them, and a table numbering its own rows then offered index 1 for a
 // resource saved second: kx diag 1, kx delete 1 and the rest acted on the
-// healthy resource above it. The sorted test above runs with --full, where
-// every swept resource is a row and the two numberings agree again.
+// healthy resource above it. The sorted test above runs with --show-healthy,
+// where every swept resource is a row and the two numberings agree again.
 func TestDiagSortNumbersRowsByTheSavedListing(t *testing.T) {
 	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
 		healthy(kinds.Deployment, "a-ok", "prod"),
@@ -331,11 +331,23 @@ func TestDiagSortRefusals(t *testing.T) {
 	if err := sweepSortError("-verdict,top-finding"); err != nil {
 		t.Errorf("sweepSortError(-verdict,top-finding) = %v, want nil", err)
 	}
+	// Beside an index, --sort is refused for the index whatever it names: a
+	// column the sweep lacks was once the refusal, sending the user to fix a
+	// key for a flag kx diag 1 cannot take.
+	beside := "'--sort' cannot be combined with an index — it sorts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."
+	for _, args := range [][]string{{"1", "--sort", "kind"}, {"1", "--sort", "restarts"}} {
+		services := switchServices(t, &fakeKubectl{namespace: "prod"})
+		err := executeArgv(newDiagnosticCommand(services, "diagnostic", nil), args)
+		if err == nil || err.Error() != beside {
+			t.Errorf("kx diag %s: err = %v, want %q", strings.Join(args, " "), err, beside)
+		}
+	}
+	// The control: without an index, the same key is refused for its column.
 	services := switchServices(t, &fakeKubectl{namespace: "prod"})
-	err := executeArgv(newDiagnosticCommand(services, "diagnostic", nil), []string{"1", "--sort", "kind"})
-	want = "'--sort' cannot be combined with an index — it sorts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."
+	err := executeArgv(newDiagnosticCommand(services, "diagnostic", nil), []string{"--sort", "restarts"})
+	want = "Invalid value for '--sort': 'restarts'. Accepted values: kind, name, namespace, verdict, top-finding."
 	if err == nil || err.Error() != want {
-		t.Errorf("kx diag 1 --sort kind: err = %v, want %q", err, want)
+		t.Errorf("kx diag --sort restarts: err = %v, want %q", err, want)
 	}
 }
 
