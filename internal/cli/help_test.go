@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/spf13/cobra"
@@ -1132,19 +1133,28 @@ func TestHelpWritesKindsAsTypes(t *testing.T) {
 	}
 }
 
+// sortHelpOf is a command's --sort help: the paragraph its Long carries and
+// the flag's own usage, which is what a reader of `kx <name> --help` sees.
+func sortHelpOf(t *testing.T, root *cobra.Command, name string) string {
+	t.Helper()
+	cmd, _, err := root.Find([]string{name})
+	if err != nil {
+		t.Fatalf("root.Find(%s): %v", name, err)
+	}
+	flag := cmd.Flags().Lookup("sort")
+	if flag == nil {
+		t.Fatalf("kx %s has no --sort flag", name)
+	}
+	return cmd.Long + "\n" + flag.Usage
+}
+
 // kx top once carried kx get's --sort help word for word: an example sorting
 // by STATUS and RESTARTS, columns kx top has none of, and a --sort-by that
 // takes a JSONPath, where kubectl top's takes 'cpu' or 'memory'. kx get's
 // help is the control, so the phrases are known to be the ones it prints.
 func TestTopSortHelpNamesTopsColumns(t *testing.T) {
 	root := NewRoot(Services{}, "test")
-	helpOf := func(name string) string {
-		cmd, _, err := root.Find([]string{name})
-		if err != nil {
-			t.Fatalf("root.Find(%s): %v", name, err)
-		}
-		return cmd.Long + "\n" + cmd.Flags().Lookup("sort").Usage
-	}
+	helpOf := func(name string) string { return sortHelpOf(t, root, name) }
 	getHelp, topHelp := helpOf("get"), helpOf("top")
 	for _, phrase := range []string{"'status,-restarts'", "`--sort-by` still takes a JSONPath"} {
 		if !strings.Contains(getHelp, phrase) {
@@ -1158,5 +1168,47 @@ func TestTopSortHelpNamesTopsColumns(t *testing.T) {
 		if !strings.Contains(topHelp, phrase) {
 			t.Errorf("kx top --help = %q, want %q", topHelp, phrase)
 		}
+	}
+}
+
+// kx secret shares kx get's flag registration (registerGetFlags), and with it
+// carried kx get's --sort usage: 'status,-restarts' as the worked example,
+// where a Secret listing is NAME, TYPE, DATA and AGE, so the one value its
+// help offered was one kx secret --sort refuses. Its Long carried no --sort
+// paragraph at all, where kx get and kx top each carry their own. kx get's
+// help is the control, so the phrase is known to be the one it prints.
+func TestSecretSortHelpNamesSecretsColumns(t *testing.T) {
+	root := NewRoot(Services{}, "test")
+	getHelp := sortHelpOf(t, root, "get")
+	secretHelp := sortHelpOf(t, root, "secret")
+	if !strings.Contains(getHelp, "'status,-restarts'") {
+		t.Errorf("kx get --help = %q, want %q", getHelp, "'status,-restarts'")
+	}
+	if strings.Contains(secretHelp, "'status,-restarts'") {
+		t.Errorf("kx secret --help = %q, want no %q", secretHelp, "'status,-restarts'")
+	}
+	for _, phrase := range []string{
+		// The example, and the columns it sorts by.
+		"'type,-age'", "NAME, TYPE, DATA and AGE",
+		// The shared opening, which says what a --sort does at all: without
+		// it kx secret documented the flag nowhere but in its usage line.
+		"sorts the table kx draws by its own columns",
+	} {
+		if !strings.Contains(secretHelp, phrase) {
+			t.Errorf("kx secret --help = %q, want %q", secretHelp, phrase)
+		}
+	}
+	// Every column the example names is one the flag will take, so the help
+	// cannot drift back into offering a value the command refuses.
+	listing, ok := index.ParseListing("NAME   TYPE                DATA   AGE\ntls    kubernetes.io/tls   2      5d\n")
+	if !ok {
+		t.Fatal("the Secret fixture did not parse as a listing")
+	}
+	keys, err := index.ParseSortKeys("type,-age")
+	if err != nil {
+		t.Fatalf("ParseSortKeys: %v", err)
+	}
+	if _, err := listing.Sort(keys); err != nil {
+		t.Errorf("kx secret --sort type,-age over a Secret listing: %v", err)
 	}
 }

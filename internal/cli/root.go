@@ -242,7 +242,7 @@ func newGetCommand(services Services) *cobra.Command {
 		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort status,-restarts\n  kx get pods -A --sort namespace,-age\n  kx get pods --sort-by=.metadata.creationTimestamp",
 		Args:    minArgs(1),
 	}
-	kubectlFlags := registerGetFlags(cmd)
+	kubectlFlags := registerGetFlags(cmd, sortUsage)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
@@ -271,7 +271,11 @@ func newGetCommand(services Services) *cobra.Command {
 
 // registerGetFlags registers the flags kx get and kx secret share: kx's own,
 // then kubectl get's from the table.
-func registerGetFlags(cmd *cobra.Command) *kubectlArgs {
+//
+// sortUsage is the caller's, because a Secret listing has none of the columns
+// kx get's names: shared, kx secret --help offered 'status,-restarts' as its
+// worked example, a value kx secret --sort refuses.
+func registerGetFlags(cmd *cobra.Command, sortUsage string) *kubectlArgs {
 	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().String("sort", "", sortUsage)
 	cmd.Flags().Bool("decode", false,
