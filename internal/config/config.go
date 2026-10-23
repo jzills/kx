@@ -288,11 +288,12 @@ func (l Loader) Load() (Config, error) {
 			cfg.ThemeDisable = false
 		}
 	}
+	themeVar, engineVar := "", ""
 	if value, ok := lookupEnv("KX_THEME"); ok {
-		cfg.Theme = value
+		cfg.Theme, themeVar = value, "KX_THEME"
 	}
 	if value, ok := lookupEnv("KX_ENGINE"); ok {
-		cfg.Engine = value
+		cfg.Engine, engineVar = value, "KX_ENGINE"
 	}
 	if value, ok := lookupEnv("KX_DIAG_MAX_AGE"); ok {
 		window, err := ParseDuration(value)
@@ -313,16 +314,34 @@ func (l Loader) Load() (Config, error) {
 	}
 
 	if l.ThemeKnown != nil && !l.ThemeKnown(cfg.Theme) {
-		return cfg, fmt.Errorf(
-			"Unknown theme '%s'. Run 'kx theme' to list themes.", cfg.Theme,
-		)
+		return cfg, UnknownNameError{Setting: "theme", Name: cfg.Theme, Var: themeVar}
 	}
 	if l.EngineKnown != nil && !l.EngineKnown(cfg.Engine) {
-		return cfg, fmt.Errorf(
-			"Unknown engine '%s'. Run 'kx engine' to list engines.", cfg.Engine,
-		)
+		return cfg, UnknownNameError{Setting: "engine", Name: cfg.Engine, Var: engineVar}
 	}
 	return cfg, nil
+}
+
+// UnknownNameError is a configured theme or engine that kx does not have.
+// Typed so the binary can still run the one command that fixes it — kx theme
+// for a theme, kx engine for an engine — rather than refusing that too.
+type UnknownNameError struct {
+	// Setting is "theme" or "engine", which is also the command that lists
+	// and sets it.
+	Setting string
+	Name    string
+	// Var is the environment variable the name came from, or "" for the
+	// config file. Saving a choice writes the file, which the variable
+	// still overrides, so the message names the variable to unset.
+	Var string
+}
+
+func (e UnknownNameError) Error() string {
+	if e.Var != "" {
+		return fmt.Sprintf("Unknown %s '%s' in '%s'. Unset it, or run 'kx %s' to list %ss.",
+			e.Setting, e.Name, e.Var, e.Setting, e.Setting)
+	}
+	return fmt.Sprintf("Unknown %s '%s'. Run 'kx %s' to list %ss.", e.Setting, e.Name, e.Setting, e.Setting)
 }
 
 // keyError refuses a config key whose value has the wrong type, naming the
