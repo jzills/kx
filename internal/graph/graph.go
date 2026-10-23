@@ -275,7 +275,7 @@ func (b Builder) treeService(
 		return err
 	}
 	if len(list.Items) == 0 {
-		node.Add("(no matching pods)", theme.Muted)
+		node.Add("(no matching Pods)", theme.Muted)
 		return nil
 	}
 	for i := range list.Items {

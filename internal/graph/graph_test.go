@@ -200,8 +200,8 @@ func TestServiceWithNoMatchingPodsSaysSo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildResource: %v", err)
 	}
-	if got := treeOf(t, node); !strings.Contains(got, "(no matching pods)") {
-		t.Errorf("tree =\n%s\nwant a (no matching pods) note", got)
+	if got := treeOf(t, node); !strings.Contains(got, "(no matching Pods)") {
+		t.Errorf("tree =\n%s\nwant a (no matching Pods) note", got)
 	}
 }
 

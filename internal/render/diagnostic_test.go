@@ -473,10 +473,10 @@ func TestTriageAllHealthyCaptionNamesTheWindow(t *testing.T) {
 // a narrower window; one that does not is present state, and no window will
 // ever hide it.
 func TestDatedFindingCarriesItsAge(t *testing.T) {
-	report := reportWithFinding("OOMKilled in pod api-1")
+	report := reportWithFinding("OOMKilled in Pod api-1")
 	report.Findings[0].At = time.Now().Add(-3 * time.Hour)
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
-	if !strings.Contains(out, "OOMKilled in pod api-1 · 3h ago") {
+	if !strings.Contains(out, "OOMKilled in Pod api-1 · 3h ago") {
 		t.Errorf("finding is not dated:\n%s", out)
 	}
 }
@@ -604,16 +604,16 @@ func TestRunningStateStaysBare(t *testing.T) {
 // a narrow enough window will. A row carrying neither is one the cluster
 // gave no way to date.
 func TestOngoingFindingSaysHowLongItHasBeenTrue(t *testing.T) {
-	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in Pod api-1")
 	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
-	if !strings.Contains(out, "in pod api-1 · for 24d") {
+	if !strings.Contains(out, "in Pod api-1 · for 24d") {
 		t.Errorf("ongoing finding does not say how long:\n%s", out)
 	}
 }
 
 func TestOngoingAndFinishedFindingsReadDifferently(t *testing.T) {
-	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in Pod api-1")
 	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
 	report.Findings = append(report.Findings, diagnostics.Finding{
 		Severity: diagnostics.Warning, Rank: diagnostics.Event,
@@ -642,7 +642,7 @@ func TestFindingWithoutADurationStaysBare(t *testing.T) {
 // right choice: it is the half a window acts on, so hiding it behind a
 // duration would hide why the line can disappear.
 func TestAFindingCarryingBothPrefersTheMoment(t *testing.T) {
-	report := reportWithFinding("Image pull failure (ImagePullBackOff) in pod api-1")
+	report := reportWithFinding("Image pull failure (ImagePullBackOff) in Pod api-1")
 	report.Findings[0].At = time.Now().Add(-3 * time.Minute)
 	report.Findings[0].Since = time.Now().Add(-24 * 24 * time.Hour)
 	out := capture(func(r *Renderer) { r.Diagnostic(report) })
@@ -660,7 +660,7 @@ func TestAFindingCarryingBothPrefersTheMoment(t *testing.T) {
 // section header and the block stopped reading as a list.
 const longFinding = "Unschedulable: 0/1 nodes are available: 1 Insufficient cpu. " +
 	"no new claims to deallocate, preemption: 0/1 nodes are available: 1 " +
-	"Preemption is not helpful for scheduling. (pod report-unschedulable-57d7f65ccc-fph56)"
+	"Preemption is not helpful for scheduling. (Pod report-unschedulable-57d7f65ccc-fph56)"
 
 // summaryLines is the SUMMARY block's lines, header excluded.
 func summaryLines(t *testing.T, out string) []string {
