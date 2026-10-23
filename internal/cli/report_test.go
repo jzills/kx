@@ -205,7 +205,7 @@ func TestTriageJSONCarriesEveryResourceNotJustThePrintedRows(t *testing.T) {
 	}
 	result := render.TriageResult{
 		Namespace: "prod", Checked: 2, Healthy: 1,
-		Reports: []diagnostics.Report{broken},
+		Reports: []render.TriageRow{{Index: 1, Report: broken}},
 		All:     []diagnostics.Report{broken, healthy},
 	}
 	out, err := triageJSON(result)

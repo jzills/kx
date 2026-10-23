@@ -21,8 +21,10 @@ type TriageResult struct {
 	// never appear as a row unless Full is set.
 	Checked int
 	// Reports are the terminal table's rows, most severe first: unhealthy
-	// resources only, or every swept resource when Full is set.
-	Reports []diagnostics.Report
+	// resources only, or every swept resource when Full is set. Each carries
+	// the index it was saved under, since the table is a selection from All
+	// and its rows need not be numbered 1..n — see TriageRow.
+	Reports []TriageRow
 	// All is every swept resource, most severe first, regardless of Full — the
 	// HTML report shows the full inventory unconditionally, since its grid can
 	// filter healthy rows away client-side rather than needing them dropped
@@ -41,6 +43,19 @@ type TriageResult struct {
 	// empty sweep names it: there, "nothing to check" would claim the
 	// namespace is empty when it may be full of resources that didn't match.
 	Match string
+}
+
+// TriageRow is one row of the terminal table: a swept resource and the index
+// that resolves it.
+//
+// The index is the report's 1-based position in All, the order the sweep was
+// saved in, and not its position in the table. The two agree only while the
+// unhealthy rows are a prefix of the sweep, which the severity ranking alone
+// makes them; a --sort key interleaves healthy rows, so a table numbered by
+// its own rows would hand out indexes resolving to the resources between them.
+type TriageRow struct {
+	Index int
+	diagnostics.Report
 }
 
 // NothingMatches is the caption for a sweep a --match term narrowed to
@@ -103,25 +118,25 @@ func (r *Renderer) Triage(result TriageResult) {
 	nameBudget := triageNameBudget(r.width(), result)
 
 	rows := make([][]Cell, 0, len(result.Reports))
-	for position, report := range result.Reports {
+	for _, row := range result.Reports {
 		top := ""
-		if len(report.Findings) > 0 {
+		if len(row.Findings) > 0 {
 			// One finding per line keeps the table scannable; the rest is one
 			// `kx diag <index>` away.
-			top = report.Findings[0].Summary
+			top = row.Findings[0].Summary
 		}
 		// The shapes share their last three cells; a cluster-wide sweep adds
 		// the namespace between the kind and the name.
 		lead := []Cell{
-			Styled(strconv.Itoa(position+1), theme.Muted),
-			Plain(string(report.Kind)),
+			Styled(strconv.Itoa(row.Index), theme.Muted),
+			Plain(string(row.Kind)),
 		}
 		if result.AllNamespaces {
-			lead = append(lead, Styled(report.Namespace, theme.Muted))
+			lead = append(lead, Styled(row.Namespace, theme.Muted))
 		}
 		rows = append(rows, append(lead,
-			Plain(ellipsize(report.Name, nameBudget)),
-			Styled(report.Verdict.String(), severityStyle(report.Verdict)),
+			Plain(ellipsize(row.Name, nameBudget)),
+			Styled(row.Verdict.String(), severityStyle(row.Verdict)),
 			Styled(top, theme.Body)))
 	}
 	r.Table(columns, rows)
@@ -177,10 +192,10 @@ func triageNameBudget(width int, result TriageResult) int {
 }
 
 // widestNamespace is how much room the -A shape's NAMESPACE column needs.
-func widestNamespace(reports []diagnostics.Report) int {
+func widestNamespace(rows []TriageRow) int {
 	widest := width("NAMESPACE")
-	for _, report := range reports {
-		if n := width(report.Namespace); n > widest {
+	for _, row := range rows {
+		if n := width(row.Namespace); n > widest {
 			widest = n
 		}
 	}
