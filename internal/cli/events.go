@@ -71,7 +71,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		Use:   "events <index>...",
 		Short: "Show Kubernetes events for one or more indexed resources.",
 		Long: "Shows Kubernetes events recorded against the exact object each index names — " +
-			"unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.\n\n" +
+			"unlike kx logs, this doesn't reach into the Pods a Deployment or StatefulSet owns.\n\n" +
 			"--since bounds how far back the listing looks, in the same vocabulary kx diag reads — " +
 			config.DurationUnits + ": " + config.DurationExamples + ". " +
 			"Without it every event the cluster still holds is listed — on a default cluster roughly the last " +
@@ -135,12 +135,12 @@ func newTopCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "top [resource] [kubectl flags]",
 		SuggestFor: []string{"usage", "metrics", "stats"},
-		Short:      "List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits.",
-		Long:       "Lists pod or node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each pod's limits for pods, native to kubectl for nodes.",
+		Short:      "List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits.",
+		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.",
 		Example: "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits\n" +
 			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort-by=memory",
 		// `resource` means something narrower here than it does to kx get.
-		Annotations: map[string]string{"arg.resource": "pods (the default) or nodes"},
+		Annotations: map[string]string{"arg.resource": "'pods' (the default) or 'nodes'"},
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
@@ -223,7 +223,7 @@ func newTopCommand(services Services) *cobra.Command {
 			if noLimits {
 				return errors.New(
 					"'--no-limits' cannot be combined with 'nodes' — kubectl " +
-						"reports a node's CPU% and MEM% against its capacity, " +
+						"reports a Node's CPU% and MEM% against its capacity, " +
 						"in the same call, so there are no limits to skip.")
 			}
 		}
@@ -325,15 +325,15 @@ func newTopCommand(services Services) *cobra.Command {
 	// kubectl's flags that kx also reads, registered first so they keep kx's
 	// own usage; registerKubectlFlags gives them kubectl's shape.
 	cmd.Flags().StringP("namespace", "n", "",
-		"Namespace to list pods from; defaults to the current namespace. Not for nodes, which are not in a namespace")
+		"Namespace to list Pods from; defaults to the current namespace. Not for Nodes, which are not in a namespace")
 	cmd.Flags().Bool("no-headers", false, "Leave out the header row; kx can't number a table without one")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"List pods across every namespace; each row is indexed and carries its own namespace. Not for nodes, which are not in a namespace")
+		"List Pods across every namespace; each row is indexed and carries its own namespace. Not for Nodes, which are not in a namespace")
 	kubectlFlags = registerKubectlFlags(cmd, "top pod", "top node")
 	// Both subcommands define these and the first to register a flag keeps
 	// its usage, so help described top pod's alone, as if nodes could not
 	// be sorted; these cover both.
-	cmd.Flags().Lookup("sort-by").Usage = "Sort pods or nodes by 'cpu' or 'memory'."
-	cmd.Flags().Lookup("show-swap").Usage = "Show swap memory for the pods or nodes listed."
+	cmd.Flags().Lookup("sort-by").Usage = "Sort Pods or Nodes by 'cpu' or 'memory'."
+	cmd.Flags().Lookup("show-swap").Usage = "Show swap memory for the Pods or Nodes listed."
 	return cmd
 }

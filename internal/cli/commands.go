@@ -227,8 +227,8 @@ func newLogsCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "logs <index>... [kubectl flags]",
 		SuggestFor: []string{"tail"},
-		Short:      "Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
-		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the pods they own.\n\n" +
+		Short:      "Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
+		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the Pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
 		Example:     "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1 --previous\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
 		Args:        minArgs(1),
@@ -324,7 +324,7 @@ func checkFollow(args []string, indexes int) error {
 	follow, _ := extractBool(args, "-f", "--follow")
 	if follow && indexes > 1 {
 		return fmt.Errorf(
-			"'--follow' streams a single pod — give one index, or the workload's index to aggregate its pods.")
+			"'--follow' streams a single Pod — give one index, or the workload's index to aggregate its Pods.")
 	}
 	return nil
 }
@@ -371,7 +371,7 @@ func newExecCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"sh", "shell", "bash", "ssh", "attach"},
 		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
 		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
-			"Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.",
+			"Given a workload rather than a Pod, kubectl picks one of its Pods — the same way kx port-forward leaves the choice to kubectl. Which Pod is not guaranteed to be the same one across the shell probe and the session that follows.",
 		Example:     "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
 		Args:        minArgs(1),
 		Annotations: mutatingDocumentAnnotations,
@@ -409,22 +409,22 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "debug <index> [kubectl flags] [-- command...]",
 		SuggestFor: []string{"ephemeral", "troubleshoot", "inspect"},
-		Short:      "Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host).",
-		Long: "Attaches a container carrying its own shell to a running pod, which is how " +
+		Short:      "Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host).",
+		Long: "Attaches a container carrying its own shell to a running Pod, which is how " +
 			"to get inside an image that has none — distroless or scratch, where kx exec " +
-			"can only report that it found no shell. The pod is not restarted and what it " +
+			"can only report that it found no shell. The Pod is not restarted and what it " +
 			"runs is unchanged.\n\n" +
 			"The image comes from the debug_image config key (busybox unless set); --image " +
 			"overrides it for one run. The container shares the process namespace of the " +
-			"pod's container when there is only one, so its filesystem is reachable at " +
-			"/proc/1/root; name one with --target when the pod has several.\n\n" +
-			"Kubernetes keeps an ephemeral container on the pod's spec for as long as the " +
-			"pod lives — there is no removing one, only replacing the pod.\n\n" +
-			"A Node index — from kx get nodes or kx top nodes — debugs the node instead, " +
+			"Pod's container when there is only one, so its filesystem is reachable at " +
+			"/proc/1/root; name one with --target when the Pod has several.\n\n" +
+			"Kubernetes keeps an ephemeral container on the Pod's spec for as long as the " +
+			"Pod lives — there is no removing one, only replacing the Pod.\n\n" +
+			"A Node index — from kx get nodes or kx top nodes — debugs the Node instead, " +
 			"which is a different operation wearing the same name: kubectl creates a new " +
-			"privileged pod on that node, in the current namespace, with the host's " +
+			"privileged Pod on that Node, in the current namespace, with the host's " +
 			"filesystem mounted at /host and the host namespaces joined. Use it to reach " +
-			"a kubelet, a container runtime, or the node's own logs. That pod outlives the " +
+			"a kubelet, a container runtime, or the Node's own logs. That Pod outlives the " +
 			"shell — kubectl names it on exit, and it is yours to delete. --target does not " +
 			"apply, since there is no container to share a namespace with.",
 		Example: "  kx debug 1\n  kx debug 1 --image alpine\n" +
@@ -437,7 +437,7 @@ func newDebugCommand(services Services) *cobra.Command {
 	cmd.Flags().String("image", "",
 		"Image for the debug container (default: the debug_image config key)")
 	cmd.Flags().String("target", "",
-		"Container to share a process namespace with, for a pod with several; not for nodes")
+		"Container to share a process namespace with, for a Pod with several; not for Nodes")
 	kubectlFlags := registerKubectlFlags(cmd, "debug")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		// Everything after -- is the command to run in the debug container.
@@ -476,7 +476,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 		Short:      "Delete one or more indexed resources (prompts for confirmation unless --yes).",
 		Long: "Deletes one or more indexed resources, confirming each one individually " +
 			"— so declining one doesn't take the rest with it — unless --yes skips every prompt.\n\n" +
-			"kubectl's own flags pass through: --force --grace-period=0 for a pod that " +
+			"kubectl's own flags pass through: --force --grace-period=0 for a Pod that " +
 			"will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still " +
 			"prompts — kx does not read kubectl's flag semantics, and reading " +
 			"--dry-run=none as a dry run would skip the prompt on a real delete.",
@@ -677,7 +677,7 @@ func newPortForwardCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"pf", "portforward", "proxy"},
 		Short:      "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).",
 		Long: "Forwards a local port to an indexed resource. Given a workload rather than a Pod, " +
-			"kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.",
+			"kubectl picks which of its Pods to forward to — the same choice kx exec leaves to kubectl.",
 		Example: "  kx port-forward 1 8080:80\n  kx port-forward 1 8080:80 --address=0.0.0.0",
 		Args:    minArgs(2),
 	}
@@ -711,16 +711,16 @@ func newCopyCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "cp <src> <dest> [kubectl flags]",
 		SuggestFor: []string{"copy"},
-		Short:      "Copy files to or from an indexed pod via kubectl cp.",
-		Long: "Copies files to or from an indexed pod via kubectl cp. Either side of the copy " +
-			"can name a path inside the pod as index:path.",
+		Short:      "Copy files to or from an indexed Pod via kubectl cp.",
+		Long: "Copies files to or from an indexed Pod via kubectl cp. Either side of the copy " +
+			"can name a path inside the Pod as index:path.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
 			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
 		Args:        minArgs(2),
 		Annotations: mutatingAnnotations,
 	}
 	// kubectl's flags, documented in kx's words.
-	cmd.Flags().StringP("container", "c", "", "Container name, if the pod has more than one")
+	cmd.Flags().StringP("container", "c", "", "Container name, if the Pod has more than one")
 	cmd.Flags().Bool("no-preserve", false,
 		"Don't preserve the copied file/directory's ownership and permissions")
 	cmd.Flags().Int("retries", 0, "Number of retries on a copy failure (0 disables)")

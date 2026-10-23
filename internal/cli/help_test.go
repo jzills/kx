@@ -1092,3 +1092,42 @@ func TestContextHelpOmitsTheNamespaceOnlyAdvice(t *testing.T) {
 		t.Error("kx context --help points at kx get ns, which lists namespaces, not contexts")
 	}
 }
+
+// A Kubernetes kind in kx's help is written as the type, capitalized, the way
+// the Kubernetes docs write API objects: "a Pod", "7 Deployments", "one of its
+// Pods". Help mixed the two — kx exec read "rather than a Pod, kubectl picks
+// one of its pods" — so a reader could not tell the type from the word. What
+// the user types keeps its own spelling: quoted values, kx and kubectl
+// commands, flags. Namespace, container and event are deliberately not here:
+// a namespace is mostly the scope a resource lives in, a container is not an
+// API object, and events are read as a stream (STYLE.md).
+func TestHelpWritesKindsAsTypes(t *testing.T) {
+	typed := regexp.MustCompile("'[^']*'|`[^`]*`" + `|\b(kx|kubectl) [a-z-]+( [a-z-]+)?|--?[a-z][a-z-]*|\btop (pod|node)\b|\btree nodes?\b`)
+	lowercase := regexp.MustCompile(`\b(pods?|nodes?|secrets?|deployments?|services?|replicasets?|statefulsets?|daemonsets?|jobs?|cronjobs?|configmaps?)\b`)
+	checked := 0
+	var walk func(cmd *cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		texts := map[string]string{"Short": cmd.Short, "Long": cmd.Long}
+		cmd.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+			// kubectl's own flags carry kubectl's usage, verbatim.
+			if len(flag.Annotations[kubectlFlagAnnotation]) == 0 {
+				texts["--"+flag.Name] = flag.Usage
+			}
+		})
+		for where, text := range texts {
+			checked++
+			// A possessive's apostrophe is not a quote.
+			prose := typed.ReplaceAllString(strings.ReplaceAll(text, "'s ", "s "), "")
+			for _, word := range lowercase.FindAllString(prose, -1) {
+				t.Errorf("%s %s writes the kind %q in lowercase: %q", cmd.CommandPath(), where, word, text)
+			}
+		}
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+	}
+	walk(NewRoot(Services{}, "test"))
+	if checked < 100 {
+		t.Fatalf("checked %d help texts; the walk missed the command tree", checked)
+	}
+}

@@ -18,6 +18,16 @@ Explain *why* when the reason is not obvious, because a reader who knows the rea
 - An em dash ( — ) joins a statement to its consequence or its fix. It is used freely and consistently, with a space on each side.
 - No label prefixes: no `note:`, `warning:`, `info:`, `error:`, `kx:` or `<command>:` in front of a message. The glyph, or the muted style, already says what kind of message it is.
 
+### Kubernetes names
+
+- A resource kind is written as the type, capitalized, the way the Kubernetes docs write API objects: "a Pod", "7 Deployments", "one of its Pods", "evicts the Pods on a Node". It is never lowercase as an ordinary word, so a reader can always tell the type from the English.
+- What the user types keeps its own spelling, in quotes: `'kx get pods'`, `'pods' (the default) or 'nodes'`.
+- Three words stay lowercase. "namespace" stays lowercase when it means the scope a resource lives in ("in the current namespace"), and is capitalized only for Namespace objects ("List Namespaces"). "container" stays lowercase because it is not an API object. "event" stays lowercase because events are read as a stream ("No Warning events in prod"). A node of the ownership graph is a "tree node".
+- Condition and status values take the API's spelling, unquoted, since quotes mean the user typed it: "its Available condition is True", "a Pending Pod", "CrashLoopBackOff".
+- None of these are styled. Casing carries the distinction, so it survives `--no-color`.
+
+`TestHelpWritesKindsAsTypes` checks help text. Messages are held to it by review.
+
 ## Errors
 
 Errors go to stderr after a ✗ (`render.Error`). Every one is a sentence or two:

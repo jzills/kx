@@ -6,7 +6,7 @@ description: "Forward a local port to an indexed resource (Pod, Deployment, Repl
 weight: 20
 ---
 
-Forwards a local port to an indexed resource. Given a workload rather than a Pod, kubectl picks which of its pods to forward to — the same choice kx exec leaves to kubectl.
+Forwards a local port to an indexed resource. Given a workload rather than a Pod, kubectl picks which of its Pods to forward to — the same choice kx exec leaves to kubectl.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 

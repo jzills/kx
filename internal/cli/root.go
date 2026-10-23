@@ -185,7 +185,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newMetadataWriteCommand(services, "annotate", "annotations",
 			"Set or remove annotations on an indexed resource.",
 			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key."),
-		newSwitchCommand(services, "namespace", "ns", "List namespaces, or switch to an indexed one; alias: kx ns.", false),
+		newSwitchCommand(services, "namespace", "ns", "List Namespaces, or switch to an indexed one; alias: kx ns.", false),
 		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.", true),
 	} {
 		root.AddCommand(withRefresh(services, cmd))

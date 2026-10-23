@@ -157,7 +157,7 @@ func TestDrainConfirmNamesAnMCPListing(t *testing.T) {
 	if err := command.Execute(state.Ref{Index: 1}, false, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if want := "Evict all pods from Node/node-a — from a kx mcp listing?"; prompted != want {
+	if want := "Evict all Pods from Node/node-a — from a kx mcp listing?"; prompted != want {
 		t.Errorf("prompt = %q, want %q", prompted, want)
 	}
 }
@@ -172,7 +172,7 @@ func TestDrainConfirmOmitsProvenanceForAUserMadeListing(t *testing.T) {
 	if err := command.Execute(state.Ref{Index: 1}, false, nil); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if want := "Evict all pods from Node/node-a?"; prompted != want {
+	if want := "Evict all Pods from Node/node-a?"; prompted != want {
 		t.Errorf("prompt = %q, want %q", prompted, want)
 	}
 }
@@ -196,7 +196,7 @@ func TestDrainResolvesTargetAndProvenanceInOneRead(t *testing.T) {
 	if resolver.resolveWithSourceCalls != 1 {
 		t.Errorf("ResolveWithSource called %d times, want exactly 1", resolver.resolveWithSourceCalls)
 	}
-	if want := "Evict all pods from Node/node-a — from a kx mcp listing?"; prompted != want {
+	if want := "Evict all Pods from Node/node-a — from a kx mcp listing?"; prompted != want {
 		t.Errorf("prompt = %q, want %q", prompted, want)
 	}
 }
@@ -365,7 +365,7 @@ func TestCordonAppliesAWholeNodeBatch(t *testing.T) {
 // Drain streams rather than captures, so kubectl's own "not found" reaches the
 // terminal and only an exit code comes back — which withRefresh does not treat
 // as stale. Drain was therefore the one node command that could not relist,
-// and it asked "Evict all pods from Node/node-a?" about a node that had not
+// and it asked "Evict all Pods from Node/node-a?" about a node that had not
 // existed for a while before saying so.
 func TestDrainReportsAVanishedNodeAsStale(t *testing.T) {
 	kubectl := &recordingKubectl{err: kube.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}}

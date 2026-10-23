@@ -24,7 +24,7 @@ kx tree [OPTIONS] [index]
 
 | Option | Description |
 |---|---|
-| `-A, --all-namespaces` | Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it |
+| `-A, --all-namespaces` | Sweep every namespace, as a forest of per-namespace trees; tree nodes are indexed continuously across it |
 | `--html` | Render the tree as HTML and serve it in a browser |
 | `--json` | Print the ownership graph as JSON instead of a tree |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
