@@ -8,7 +8,7 @@ weight: 13
 
 Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.
 
-Given a workload rather than a Pod, kubectl picks one of its pods — the same way kx port-forward leaves the choice to kubectl. Which pod is not guaranteed to be the same one across the shell probe and the session that follows.
+Given a workload rather than a Pod, kubectl picks one of its Pods — the same way kx port-forward leaves the choice to kubectl. Which Pod is not guaranteed to be the same one across the shell probe and the session that follows.
 
 A flag kx doesn't know is refused.
 
@@ -23,7 +23,7 @@ kx exec [OPTIONS] <index> [kubectl flags] [-- command...]
 | Argument | Description |
 |---|---|
 | `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
-| `[command]...` | Command to run in the pod instead of a shell |
+| `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Passthrough options
 

@@ -8,7 +8,7 @@ weight: 7
 
 Deletes one or more indexed resources, confirming each one individually — so declining one doesn't take the rest with it — unless --yes skips every prompt.
 
-kubectl's own flags pass through: --force --grace-period=0 for a pod that will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still prompts — kx does not read kubectl's flag semantics, and reading --dry-run=none as a dry run would skip the prompt on a real delete.
+kubectl's own flags pass through: --force --grace-period=0 for a Pod that will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still prompts — kx does not read kubectl's flag semantics, and reading --dry-run=none as a dry run would skip the prompt on a real delete.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 

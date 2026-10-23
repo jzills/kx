@@ -1152,8 +1152,8 @@ func TestSharedSubcommandFlagsDescribeEverySubcommand(t *testing.T) {
 		flag string
 		want []string
 	}{
-		{top, "sort-by", []string{"pods", "nodes"}},
-		{top, "show-swap", []string{"pods", "nodes"}},
+		{top, "sort-by", []string{"Pods", "Nodes"}},
+		{top, "show-swap", []string{"Pods", "Nodes"}},
 		{rollout, "revision", []string{"status", "history"}},
 	} {
 		usage := tc.cmd.Flags().Lookup(tc.flag).Usage

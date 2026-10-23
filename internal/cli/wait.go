@@ -167,7 +167,7 @@ func (c WaitCommand) plan(ctx context.Context, target Resolved, extraArgs []stri
 	case rolloutKinds.Has(target.Kind):
 		return waitPlan{}, fmt.Errorf(
 			"A %s is waited for with 'kx rollout status %s' — its Available condition "+
-				"is true mid-rollout, so it can't say the rollout finished. "+
+				"is True mid-rollout, so it can't say the rollout finished. "+
 				"Pass '--for' to wait on a condition anyway.",
 			target.Kind, target.Ref)
 	}

@@ -201,7 +201,7 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 	}
 
 	for position, target := range resolved {
-		stop := render.Status("fetching secret")
+		stop := render.Status("fetching Secret")
 		secret, err := command.Execute(target.Ref)
 		stop()
 		if err != nil {
@@ -239,7 +239,7 @@ func decodeSecrets(services Services, resource string, resolved []Resolved, extr
 // listing people run by reflex. Fetching before prompting costs nothing and
 // discloses nothing, and lets the prompt name the blast radius.
 func decodeNamespace(services Services, command SecretCommand, extra []string, match string, yes bool) error {
-	stop := render.Status("fetching secrets")
+	stop := render.Status("fetching Secrets")
 	secrets, err := command.ExecuteAll(extra)
 	stop()
 	if err != nil {

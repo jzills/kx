@@ -14,7 +14,7 @@ A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes a
 
 --since bounds how far back the report looks, in s, m, h or d: 90s, 30m, 12h, 7d. A fraction or a mixture works too — 1.5h, 1h30m — except with d, which takes a fraction but not a mixture: 1.5d, never 1d12h. Without it everything is reported, however old — which is what holds a resource at warnings, and a --fail-on gate red, over a failure from last month. Set diag_max_age in config.toml to choose a window once rather than per run.
 
-A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.
+A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending Pod, a Service with no endpoints.
 
 Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.
 

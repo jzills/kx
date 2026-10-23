@@ -67,7 +67,7 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	registerEvidenceTools(server, deps)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "top",
-		Description: "Current CPU and memory usage of pods (percent of their limits) or nodes " +
+		Description: "Current CPU and memory usage of Pods (percent of their limits) or Nodes " +
 			"(percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the " +
 			"listing is saved to the user's kx history, as kx top would save it, and each row carries " +
 			"its index there.",

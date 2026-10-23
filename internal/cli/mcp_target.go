@@ -18,7 +18,7 @@ import (
 type mcpTarget struct {
 	Kind      string `json:"kind,omitempty" jsonschema:"Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given."`
 	Name      string `json:"name,omitempty" jsonschema:"Resource name. Required unless mark or index is given."`
-	Namespace string `json:"namespace,omitempty" jsonschema:"Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes."`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes."`
 	Mark      string `json:"mark,omitempty" jsonschema:"A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them."`
 	Index     int    `json:"index,omitempty" jsonschema:"A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it."`
 }

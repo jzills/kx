@@ -442,7 +442,7 @@ func newTreeCommand(services Services) *cobra.Command {
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,
-		"Sweep every namespace, as a forest of per-namespace trees; nodes are indexed continuously across it")
+		"Sweep every namespace, as a forest of per-namespace trees; tree nodes are indexed continuously across it")
 	cmd.Flags().Bool("html", false,
 		"Render the tree as HTML and serve it in a browser")
 	cmd.Flags().Int("port", 0,

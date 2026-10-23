@@ -6,7 +6,7 @@ description: "Mark one or more indexed Nodes unschedulable."
 weight: 4
 ---
 
-Marks a node unschedulable, so the scheduler places no new pods on it. Pods already running there are left alone — use kx drain to evict those.
+Marks a Node unschedulable, so the scheduler places no new Pods on it. Pods already running there are left alone — use kx drain to evict those.
 
 Takes several indexes, and ranges, like kx delete.
 

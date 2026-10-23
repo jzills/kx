@@ -6,7 +6,7 @@ description: "Show Kubernetes events for one or more indexed resources."
 weight: 12
 ---
 
-Shows Kubernetes events recorded against the exact object each index names — unlike kx logs, this doesn't reach into the pods a Deployment or StatefulSet owns.
+Shows Kubernetes events recorded against the exact object each index names — unlike kx logs, this doesn't reach into the Pods a Deployment or StatefulSet owns.
 
 --since bounds how far back the listing looks, in the same vocabulary kx diag reads — s, m, h or d: 90s, 30m, 12h, 7d. Without it every event the cluster still holds is listed — on a default cluster roughly the last hour, since that is how long the API server keeps an event before dropping it. Set events_max_age in config.toml to choose a window once rather than per run.
 
