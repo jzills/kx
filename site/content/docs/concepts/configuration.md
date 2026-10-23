@@ -27,7 +27,7 @@ Running `kx --version` prints the path it resolved, which is the quickest way to
 | `engine` | `KX_ENGINE` | `scout` | Default scanner for `kx scan` — `scout`, `trivy` or `grype`. |
 | `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](../state/) keeps. |
 | `shells` | `KX_SHELLS` | `bash, sh` | Shell candidates `kx exec` tries, in order. |
-| `debug_image` | `KX_DEBUG_IMAGE` | `busybox` | Image `kx debug` attaches to a pod; `--image` overrides it per run. |
+| `debug_image` | `KX_DEBUG_IMAGE` | `busybox` | Image `kx debug` attaches to a Pod; `--image` overrides it per run. |
 | `diag_max_age` | `KX_DIAG_MAX_AGE` | unset | How far back [`kx diag`](../../reference/commands/diagnostic/) looks for evidence; unset reports everything, `--since` overrides it per run. |
 | `events_max_age` | `KX_EVENTS_MAX_AGE` | unset | How far back [`kx events`](../../reference/commands/events/) lists events; unset lists everything the cluster still holds, `--since` overrides it per run. |
 | `theme_disable` | `KX_THEME_DISABLE` | `false` | Turn off styling entirely — the same as `--no-color`. |

@@ -106,8 +106,8 @@ See the [indexes guide](https://jzills.github.io/kx/docs/concepts/indexes/) for 
 
 ## Triage a namespace
 
-Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
-It reads live usage too, so a pod running hot against its memory limit is flagged as an OOMKill risk before it dies.
+Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and Pods nothing owns — and ranks what's unhealthy.
+It reads live usage too, so a Pod running hot against its memory limit is flagged as an OOMKill risk before it dies.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
@@ -147,7 +147,7 @@ See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for m
 
 ## See what owns what
 
-The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods — and indexes every node it draws, so anything in the tree is one number away.
+The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods — and indexes every tree node it draws, so anything in the tree is one number away.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>

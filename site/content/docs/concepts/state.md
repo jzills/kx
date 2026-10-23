@@ -34,7 +34,7 @@ The `--all` flag only clears what accumulates on its own, one `kx get` at a time
 
 Re-running the listing you are already on refreshes that entry instead of pushing another copy of it, whether it came from `kx get`, `kx top`, a `kx diag` sweep or a `kx tree`.
 Re-running `kx get` is how you see what changed, so without that the stack filled with one listing — five runs of `kx get pods` around a single `kx get deploy` left nine entries, eight of them the same, and `kx state back` could not reach the Deployments listing.
-The same session now leaves three: pods, deployments, pods.
+The same session now leaves three: Pods, Deployments, Pods.
 
 ## Reading an index back out
 
@@ -61,7 +61,7 @@ Like `kx ref`, it never contacts the cluster, and with nothing listed yet it pri
 ## A listing that found nothing is still a listing
 
 A listing like `kx get pods -n empty-namespace` saves its result like any other, even though the result is nothing.
-It has to: an empty listing that saved no entry would leave the *previous* one resolving indexes, so `kx get pods -n a` followed by `kx get pods -n b` and then `kx delete 1` deleted a pod in `a` — a namespace and two commands away from anything on screen.
+It has to: an empty listing that saved no entry would leave the *previous* one resolving indexes, so `kx get pods -n a` followed by `kx get pods -n b` and then `kx delete 1` deleted a Pod in `a` — a namespace and two commands away from anything on screen.
 
 So the numbers retire when a listing finds nothing, and kx says so on the spot:
 

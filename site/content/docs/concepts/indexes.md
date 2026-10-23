@@ -118,7 +118,7 @@ Being wrong about a caption is cheaper than resolving every index into the wrong
 ## Every namespace
 
 A listing made with `-A` is indexed like any other.
-Each row records the namespace it came from, so an index reaches a resource in a namespace you aren't currently in, and two pods sharing a name in different namespaces each keep their own number.
+Each row records the namespace it came from, so an index reaches a resource in a namespace you aren't currently in, and two Pods sharing a name in different namespaces each keep their own number.
 
 ```bash
 kx get pods -A

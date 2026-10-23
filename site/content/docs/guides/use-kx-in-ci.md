@@ -61,11 +61,11 @@ A sweep carries `namespace`, or `allNamespaces: true` for `-A`; an indexed run c
 A resource that was named by index carries that `index`, so a consumer finding something worth acting on can name it — `kx diag 4` — without listing again.
 A resource named by a mark carries `mark` instead, because a mark has no position in a listing; the two never appear together, and a document built from neither carries neither.
 
-The `kx tree --json` document names every node with `kind` and `name` rather than the `rs/web-7d8f` label the terminal draws, carries the same `index` the tree printed, and always returns a `roots` list — one entry for an indexed resource or a single namespace, one per namespace for `-A`.
-A pod's containers appear as children with a name and no kind, because a container is part of a pod rather than a resource of its own.
+The `kx tree --json` document names every tree node with `kind` and `name` rather than the `rs/web-7d8f` label the terminal draws, carries the same `index` the tree printed, and always returns a `roots` list — one entry for an indexed resource or a single namespace, one per namespace for `-A`.
+A Pod's containers appear as children with a name and no kind, because a container is part of a Pod rather than a resource of its own.
 
-The `kx top --json` document reports percentages as numbers, and as `null` where there is none — a pod with no limit set has no percentage, and `0` would read as idle.
-Its `resource` field says whether the listing was pods or nodes, since a pod's percentage is against its limits and a node's against its capacity.
+The `kx top --json` document reports percentages as numbers, and as `null` where there is none — a Pod with no limit set has no percentage, and `0` would read as idle.
+Its `resource` field says whether the listing was Pods or Nodes, since a Pod's percentage is against its limits and a Node's against its capacity.
 
 Severities are lower case throughout — `critical`, `high`, `medium`, `low` for image findings, `critical`, `warning`, `healthy` for verdicts — which is exactly what `--fail-on` accepts, so a value read out of a document can be typed straight back at the gate.
 
@@ -99,7 +99,7 @@ A gate is the place this matters most: without `--since`, a job that went red on
 A schedule longer than the window wants `--since` widened: a weekly CronJob whose last run failed six days ago needs `--since 7d` to fail the gate on it.
 
 Set it once with `diag_max_age` in [`config.toml`](../../reference/configuration/), or `KX_DIAG_MAX_AGE` in the job's environment.
-Events are the least of it — most clusters discard those after an hour anyway; what a window really reaches is a container's own history, which the kubelet keeps for as long as the pod lives.
+Events are the least of it — most clusters discard those after an hour anyway; what a window really reaches is a container's own history, which the kubelet keeps for as long as the Pod lives.
 
 ## The exit code is 2
 
