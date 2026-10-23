@@ -35,8 +35,8 @@ The house voice — errors, captions, help text, docs, comments, commits, releas
 - `kx-pr` — branch names, commit messages, PR titles and descriptions, and when a change takes `!`.
 - `kx-release` — choosing the version, writing `release-notes/vX.Y.Z.md`, and fact-checking it against built binaries.
 - `kx-tests` — writing a test that can fail, proving it does, and running the gate apart from the commit.
+- `kx-verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
 - `kx-voice` — writing or rewording any text kx shows or ships: errors, captions, help, docs, comments, commits, release notes.
-- `verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
 
 Two hooks in `.claude/settings.json` (scripts in `.claude/hooks/`, no-ops without `jq`): after an Edit or Write to a `.go` file, `gofmt.sh` reports, without rewriting, a file gofmt would change; before a Bash call, `gate.sh` refuses a `git commit` sent in the same command as `go test`, `go vet`, `gofmt` or `pre-commit run`, or with `--no-verify`.
 
