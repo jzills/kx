@@ -11,17 +11,18 @@
 # go test in its body is not mistaken for running it.
 command -v jq >/dev/null 2>&1 || exit 0
 cmd=$(jq -r '.tool_input.command // empty' | sed '/<</q')
-case "$cmd" in
-*"git commit"*) ;;
-*) exit 0 ;;
-esac
+# git's own options can sit between git and commit: git -C dir commit.
+printf '%s\n' "$cmd" | grep -Eq 'git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)*[[:space:]]+commit([[:space:]]|$)' || exit 0
 case "$cmd" in
 *--no-verify*)
 	echo "Commit without '--no-verify' — the pre-commit hooks regenerate files CI checks." >&2
 	exit 2
 	;;
 esac
-if printf '%s\n' "$cmd" | grep -Eq '(^|[;&|(])[[:space:]]*(go (test|vet)|gofmt|pre-commit run)([[:space:]]|$)'; then
+# A check counts in command position, after any VAR=value assignments and the
+# wrappers that run a command (env, time, command, nice): CGO_ENABLED=1 go test
+# is go test. Anchored there so a commit message saying "go test" is not one.
+if printf '%s\n' "$cmd" | grep -Eq '(^|[;&|(])[[:space:]]*(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|env|time|command|nice)[[:space:]]+)*(go (test|vet)|gofmt|pre-commit run)([[:space:]]|$)'; then
 	echo "Run the checks on their own, read the result, then commit in a separate command." >&2
 	exit 2
 fi
