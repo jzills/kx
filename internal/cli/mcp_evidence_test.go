@@ -385,7 +385,7 @@ func TestTopToolMetricsServerUnavailableGivesTheSentence(t *testing.T) {
 	kube := &recordingKubectl{probeCode: 1}
 	deps := mcpTestDeps(t, kube)
 	result := callTool(t, connectMCP(t, deps), "top", map[string]any{})
-	if !result.IsError || !strings.Contains(toolText(result), "metrics-server is not available") {
+	if !result.IsError || !strings.Contains(toolText(result), "kx top needs metrics-server, which isn't available") {
 		t.Fatalf("result = %q, want the metrics-server sentence", toolText(result))
 	}
 }

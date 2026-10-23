@@ -53,10 +53,17 @@ func TestMetadataWriteRefusesExistingKeys(t *testing.T) {
 	if err == nil {
 		t.Fatal("overwrote existing labels without --overwrite")
 	}
-	for _, key := range []string{"env", "app"} {
-		if !strings.Contains(err.Error(), key) {
-			t.Errorf("error = %q, want it to name %q", err, key)
-		}
+	if want := "'env' and 'app' are already set — add '--overwrite' to replace them."; err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+
+	// One conflict reads in the singular.
+	kubectl = &recordingKubectl{output: `{"metadata":{"labels":{"env":"dev"}}}`}
+	_, _, err = MetadataWriteCommand{
+		Kubectl: kubectl, State: pod("nginx"), Verb: "label", Field: "labels",
+	}.Execute(state.Ref{Index: 1}, []string{"env"}, map[string]string{"env": "prod"}, nil, false, nil)
+	if want := "'env' is already set — add '--overwrite' to replace it."; err == nil || err.Error() != want {
+		t.Errorf("error = %v, want %q", err, want)
 	}
 }
 

@@ -272,9 +272,14 @@ func (c MetadataWriteCommand) Execute(
 			}
 		}
 		if len(conflicts) > 0 {
-			return "", "", fmt.Errorf(
-				"%s already set — add '--overwrite' to replace it.", strings.Join(conflicts, ", "),
-			)
+			quoted := make([]string, len(conflicts))
+			for i, key := range conflicts {
+				quoted[i] = "'" + key + "'"
+			}
+			if len(conflicts) == 1 {
+				return "", "", fmt.Errorf("%s is already set — add '--overwrite' to replace it.", quoted[0])
+			}
+			return "", "", fmt.Errorf("%s are already set — add '--overwrite' to replace them.", joinAnd(quoted))
 		}
 	}
 

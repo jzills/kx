@@ -664,3 +664,15 @@ func findingFor(t *testing.T, findings []Finding, pkg string) Finding {
 	t.Fatalf("no finding has Package %q", pkg)
 	return Finding{}
 }
+
+// An engine's missing-CLI message is an error kx prints, so it takes kx's
+// error shape: it opens with the command it is about and ends with a period,
+// not on the install link.
+func TestUnavailableMessagesAreSentences(t *testing.T) {
+	for _, engine := range []interface{ UnavailableMessage() string }{Scout{}, Trivy{}, Grype{}} {
+		message := engine.UnavailableMessage()
+		if !strings.HasPrefix(message, "kx scan needs ") || !strings.HasSuffix(message, " to install it.") {
+			t.Errorf("UnavailableMessage() = %q, want \"kx scan needs … to install it.\"", message)
+		}
+	}
+}

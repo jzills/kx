@@ -1789,3 +1789,16 @@ func TestYamlParsesKubectlFlags(t *testing.T) {
 		}
 	}
 }
+
+// --all and --empty each name what is dropped, so a position beside one is
+// refused, in a sentence that quotes the flag wherever it appears.
+func TestDropRefusesAPositionBesideAllOrEmpty(t *testing.T) {
+	for _, flag := range []string{"--all", "--empty"} {
+		err := executeArgv(NewRoot(argvServices(t), "test"), []string{"state", "drop", flag, "1"})
+		want := "kx state drop takes no position with '" + flag + "' — drop the position, or drop '" +
+			flag + "' to drop that one entry."
+		if err == nil || err.Error() != want {
+			t.Errorf("kx state drop %s 1: err = %v, want %q", flag, err, want)
+		}
+	}
+}

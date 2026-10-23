@@ -18,6 +18,7 @@ import (
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/kubectlflags"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
@@ -118,7 +119,7 @@ func TestTopEnsureAvailableReturnsAFriendlyErrorWhenMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("EnsureAvailable returned nil with the metrics API unavailable")
 	}
-	if !strings.Contains(err.Error(), "metrics-server is not available") {
+	if !strings.Contains(err.Error(), "kx top needs metrics-server, which isn't available") {
 		t.Errorf("err = %q, want it to name metrics-server", err.Error())
 	}
 	if !strings.Contains(err.Error(), "https://github.com/kubernetes-sigs/metrics-server") {
@@ -135,7 +136,7 @@ func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute succeeded with the metrics API unavailable")
 	}
-	if !strings.Contains(err.Error(), "metrics-server is not available") {
+	if !strings.Contains(err.Error(), "kx top needs metrics-server, which isn't available") {
 		t.Errorf("err = %q, want the friendly message", err.Error())
 	}
 	if len(kubectl.calls) != 0 {
@@ -218,7 +219,7 @@ func TestExecuteNodesFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	kubectl := &scriptedKubectl{probeCode: 1}
 	_, _, err := (TopCommand{Kubectl: kubectl, State: &fakeState{}, Index: indexService()}).
 		ExecuteNodes("", nil)
-	if err == nil || !strings.Contains(err.Error(), "metrics-server is not available") {
+	if err == nil || !strings.Contains(err.Error(), "kx top needs metrics-server, which isn't available") {
 		t.Errorf("err = %v, want the friendly metrics-server message", err)
 	}
 	if len(kubectl.calls) != 0 {
@@ -1173,6 +1174,43 @@ func TestSharedSubcommandFlagsDescribeEverySubcommand(t *testing.T) {
 	if len(nodes.calls) == 0 || joinArgs(nodes.calls[0]) != "top nodes --show-swap" {
 		t.Errorf("kubectl = %q, want top nodes --show-swap", nodes.calls)
 	}
+}
+
+// The guard for the test above: a regenerated kubectl table can bring a new
+// shared flag that its subcommands word differently, and nothing else would
+// notice help describing only one of them. Every such flag must carry usage
+// of kx's own, which is to say none of its definers' wording verbatim.
+func TestEverySharedFlagWordedPerSubcommandIsReworded(t *testing.T) {
+	var walk func(*cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+		subcommands := strings.Split(cmd.Annotations[kubectlCommandAnnotation], ",")
+		if len(subcommands) < 2 {
+			return
+		}
+		usages := map[string]map[string]bool{}
+		for _, subcommand := range subcommands {
+			own, _ := kubectlflags.Command(subcommand)
+			for _, flag := range own {
+				if usages[flag.Name] == nil {
+					usages[flag.Name] = map[string]bool{}
+				}
+				usages[flag.Name][flag.Usage] = true
+			}
+		}
+		for name, wordings := range usages {
+			if len(wordings) < 2 {
+				continue
+			}
+			if flag := cmd.Flags().Lookup(name); flag != nil && wordings[flag.Usage] {
+				t.Errorf("%s --%s: kubectl words it differently per subcommand, and help shows one of them: %q",
+					cmd.CommandPath(), name, flag.Usage)
+			}
+		}
+	}
+	walk(NewRoot(argvServices(t), "test"))
 }
 
 func TestTopRefusesAnUnknownFlag(t *testing.T) {
