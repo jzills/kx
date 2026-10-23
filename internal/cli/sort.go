@@ -9,14 +9,17 @@ import (
 )
 
 // sortUsage describes kx get's --sort; topSortUsage is kx top's, whose
-// columns are usage rather than status.
+// columns are usage rather than status, and secretSortUsage kx secret's,
+// whose listing is the four columns kubectl prints for a Secret.
 const (
-	sortUsage    = "Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest"
-	topSortUsage = "Sort by the columns shown, before indexing: '-mem%,-cpu%' sorts by MEM% from most to least, then by CPU%"
+	sortUsage       = "Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest"
+	topSortUsage    = "Sort by the columns shown, before indexing: '-mem%,-cpu%' sorts by MEM% from most to least, then by CPU%"
+	secretSortUsage = "Sort by the columns shown, before indexing: 'type,-age' sorts by TYPE, then by AGE from oldest to newest"
 )
 
-// sortLong and topSortLong are the help paragraphs kx get and kx top carry,
-// each naming its own columns and what kubectl's --sort-by takes there.
+// sortLong, topSortLong and secretSortLong are the help paragraphs kx get, kx
+// top and kx secret carry, each naming its own columns and what kubectl's
+// --sort-by takes there.
 const (
 	sortLong = sortHow + "Each column sorts as what " +
 		"it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as " +
@@ -26,6 +29,11 @@ const (
 		"quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod " +
 		"with no limit sorts last either way. kubectl's own `--sort-by` still takes 'cpu' or " +
 		"'memory', and applies first."
+	secretSortLong = sortHow + "A Secret listing's columns are NAME, " +
+		"TYPE, DATA and AGE, which sort as what they hold — DATA as a count, AGE as a " +
+		"duration — and ties keep kubectl's order. With `--decode` there is no listing to " +
+		"sort, only one Secret's data, so the two cannot be combined. kubectl's own " +
+		"`--sort-by` still takes a JSONPath, and applies first."
 	sortHow = "A `--sort` sorts the table kx draws by its own columns, before numbering it, " +
 		"so row 1 is the first sorted row: name the columns separated by commas, as the header " +
 		"reads them, with a leading `-` to sort one from largest down. "
