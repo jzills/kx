@@ -285,6 +285,9 @@ func (c GetCommand) Execute(
 	// listing than a full one: saved, kx get pods -l app=x -o name replaced
 	// the listing behind it, where one that found pods left it alone.
 	if !tabular {
+		if err := unsortableError(output, keys, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
 		text, err := narrowText(output, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, "", err
@@ -334,6 +337,9 @@ func unnumberedListing(
 	}
 	listing, ok := index.ParseListing(output)
 	if !ok {
+		if err := unsortableError(output, keys, args); err != nil {
+			return index.Table{}, err
+		}
 		text, err := narrowText(output, filterTerm, args)
 		if err != nil {
 			return index.Table{}, err

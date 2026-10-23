@@ -77,6 +77,23 @@ func sortError(err error) error {
 	return err
 }
 
+// unsortableError is a --sort over a reply kx could not read as a table, or
+// nil when there is no sort or nothing came back: kx finds a table's rows by
+// its NAME column, and a table without one was printed in kubectl's order
+// as though sorted. Refused as --match is over the same reply (narrowText).
+func unsortableError(output string, keys []index.SortKey, args []string) error {
+	if len(keys) == 0 || strings.TrimSpace(output) == "" {
+		return nil
+	}
+	if strings.HasPrefix(outputFormat(args), "custom-columns") {
+		return errors.New("'--sort' reads a table by its NAME column, and kubectl's reply has " +
+			"none — add one to the custom columns (NAME:.metadata.name), or use '--sort-by' " +
+			"for kubectl's own order.")
+	}
+	return errors.New("'--sort' reads a table by its NAME column, and kubectl's table for " +
+		"this resource has none. Use '--sort-by' for kubectl's own order.")
+}
+
 // sortRefusal is --sort beside a flag that leaves no table of kx's to sort,
 // or "" for none: a watch, which streams rows as they change, and output for
 // a program, which is kubectl's to order (--sort-by).

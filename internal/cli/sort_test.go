@@ -139,6 +139,43 @@ func TestGetSortRefusals(t *testing.T) {
 	}
 }
 
+// A table with no NAME column is one kx cannot read, and was printed in
+// kubectl's order as though sorted, here and from another cluster alike.
+// The control is the same columns with a NAME among them, which do sort.
+func TestGetSortRefusesATableWithNoNameColumn(t *testing.T) {
+	const columns = "custom-columns=POD:.metadata.name,NODE:.spec.nodeName"
+	const reply = "POD     NODE\nweb-b   node-2\napi     node-1\n"
+	want := "'--sort' reads a table by its NAME column, and kubectl's reply has none — " +
+		"add one to the custom columns (NAME:.metadata.name), or use '--sort-by' for kubectl's own order."
+	for _, args := range [][]string{
+		{"pods", "-o", columns, "--sort", "node"},
+		{"pods", "-o", columns, "--sort", "node", "--context=b"},
+	} {
+		kube := &fakeKubectl{output: reply, namespace: "prod"}
+		err := executeArgv(newGetCommand(switchServices(t, kube)), args)
+		if err == nil || err.Error() != want {
+			t.Errorf("kx get %s: err = %v, want %q", strings.Join(args, " "), err, want)
+		}
+	}
+	// A kind's own table without one, as kubectl's events table is.
+	kube := &fakeKubectl{output: "LAST SEEN   TYPE      REASON\n3m          Warning   BackOff\n", namespace: "prod"}
+	err := executeArgv(newGetCommand(switchServices(t, kube)), []string{"events", "--sort", "type"})
+	if want := "'--sort' reads a table by its NAME column, and kubectl's table for this resource has none. " +
+		"Use '--sort-by' for kubectl's own order."; err == nil || err.Error() != want {
+		t.Errorf("kx get events --sort type: err = %v, want %q", err, want)
+	}
+
+	kube = &fakeKubectl{output: "NAME    NODE\nweb-b   node-2\napi     node-1\n", namespace: "prod"}
+	services := switchServices(t, kube)
+	args := []string{"pods", "-o", "custom-columns=NAME:.metadata.name,NODE:.spec.nodeName", "--sort", "node"}
+	if err := executeArgv(newGetCommand(services), args); err != nil {
+		t.Fatalf("kx get %s: %v", strings.Join(args, " "), err)
+	}
+	if got, want := names(t, services.State), []string{"api", "web-b"}; !slices.Equal(got, want) {
+		t.Errorf("indexes resolve to %v, want %v", got, want)
+	}
+}
+
 // kx top sorts after its own percentage columns are added, so they sort —
 // which kubectl top's --sort-by, cpu or memory only, cannot do — and a node
 // listing sorts by its relabeled CPU%.
