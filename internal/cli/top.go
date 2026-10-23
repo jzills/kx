@@ -262,8 +262,10 @@ func (c TopCommand) ExecuteNodes(
 		rows = index.FilterRows(headers, rows, filterTerm)
 	}
 	headers = relabelPercentColumns(headers)
-	// After the relabel: kubectl's CPU(%) would otherwise read as "cpu",
-	// which is CPU(cores).
+	// After the relabel: a key names a column as the table prints it, and
+	// this table prints MEM%, which keys to "mem%", not kubectl's MEMORY(%).
+	// Another cluster's table prints kubectl's headers, so its key is
+	// "memory%".
 	if rows, err = index.SortRows(headers, rows, keys); err != nil {
 		return index.Table{}, "", sortError(err)
 	}
