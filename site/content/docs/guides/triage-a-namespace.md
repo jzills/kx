@@ -11,7 +11,7 @@ The kubectl version of this is four commands and a lot of scrolling: `get pods`,
 kx diag
 ```
 
-sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims and Ingresses, plus pods nothing owns — and prints what's unhealthy, worst first.
+sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims and Ingresses, plus Pods nothing owns — and prints what's unhealthy, worst first.
 
 Healthy resources are left out of the terminal table.
 The `--full` flag puts them back.
@@ -41,16 +41,16 @@ With an index, `kx diag` diagnoses a single resource and prints, on one screen:
 - recent log tails from broken containers
 - warning events
 
-The findings it looks for include CrashLoopBackOff, image pull failures, OOMKills, unschedulable pods, stalled rollouts, Services with no endpoints, Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that don't exist.
-Each problem is reported once, on the row it belongs to: a Service's row is about the Service — its endpoints — while the pods behind it are reported under the workload that owns them.
+The findings it looks for include CrashLoopBackOff, image pull failures, OOMKills, unschedulable Pods, stalled rollouts, Services with no endpoints, Pending PVCs, failed CronJob runs, and Ingresses pointing at Services that don't exist.
+Each problem is reported once, on the row it belongs to: a Service's row is about the Service — its endpoints — while the Pods behind it are reported under the workload that owns them.
 
 ## Now, not once
 
-Everything is reported by default, however old — and `--since` bounds it to what happened recently: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed.
+Everything is reported by default, however old — and `--since` bounds it to what happened recently: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed.
 What is still going wrong is always reported, window or not, however long it has been going wrong: a container in CrashLoopBackOff, a Pending PVC, a Service with no endpoints.
 
 The line is *finished* versus *ongoing*, not past versus present.
-A container that terminated with an error stopped at a moment and stays stopped, so it is dated and bounded; an `ImagePullBackOff` from three weeks ago is a pod that has never run, which is a problem now.
+A container that terminated with an error stopped at a moment and stays stopped, so it is dated and bounded; an `ImagePullBackOff` from three weeks ago is a Pod that has never run, which is a problem now.
 
 Every finding says which it is, and the shape tells you whether a window can reach it:
 
@@ -62,7 +62,7 @@ Every finding says which it is, and the shape tells you whether a window can rea
 
 A `· for 25d` is how long something has been true — no `--since` will hide it.
 A `· 1m ago` is when something happened, and a narrow enough window will.
-A pod that flaps counts from its current episode, not its whole history: a crashlooping container is briefly ready on each restart, so `· for 46s` beside 4675 restarts is the last crash, not the first.
+A Pod that flaps counts from its current episode, not its whole history: a crashlooping container is briefly ready on each restart, so `· for 46s` beside 4675 restarts is the last crash, not the first.
 
 That line matters because a finding drives the verdict and the verdict drives [`--fail-on`](../use-kx-in-ci/).
 Without it, one `FailedScheduling` from three weeks ago holds a healthy workload at `warnings` forever.
@@ -79,7 +79,7 @@ Set the window once with `diag_max_age` in [config.toml](../../reference/configu
 ## Usage as a signal, not just state
 
 Findings also draw on live resource usage, the same data [`kx top`](../../reference/commands/top/) reports.
-A pod running hot against its memory limit is flagged as an OOMKill risk *before* it gets killed, which is the one finding you cannot get from `describe`.
+A Pod running hot against its memory limit is flagged as an OOMKill risk *before* it gets killed, which is the one finding you cannot get from `describe`.
 
 ## Nodes
 

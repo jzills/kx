@@ -25,9 +25,9 @@ The `-m` flag keeps the top-level workloads whose name matches, each with everyt
 
 A Namespace index graphs that namespace — so `kx get ns` then `kx tree 3` works.
 
-## The nodes are indexed too
+## The tree nodes are indexed too
 
-By default `kx tree` numbers the nodes it draws and saves them as the current listing, so the tree is a way to *select* things and not only to look at them:
+By default `kx tree` numbers the tree nodes it draws and saves them as the current listing, so the tree is a way to *select* things and not only to look at them:
 
 ```bash
 kx tree          # 1  api (Deployment)
@@ -36,7 +36,7 @@ kx tree          # 1  api (Deployment)
 kx logs 3
 ```
 
-With `-A`, nodes are indexed continuously across the whole forest.
+With `-A`, tree nodes are indexed continuously across the whole forest.
 
 The `--no-index` flag skips the numbering and leaves your existing listing alone — useful when you want to look at the structure without losing the indexes you were working with.
 

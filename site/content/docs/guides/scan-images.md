@@ -4,7 +4,7 @@ description: kx scan resolves a workload's unique images and scans each one, wit
 weight: 2
 ---
 
-Scanning a workload means knowing which images it actually runs — including init containers, and the pod template inside a CronJob.
+Scanning a workload means knowing which images it actually runs — including init containers, and the Pod template inside a CronJob.
 The `kx scan` command works that out from the resource and scans each unique image once.
 
 ```bash

@@ -64,7 +64,7 @@ Detail the terminal has no room for:
   Unlike the terminal table, the page always includes healthy resources.
 - **scan** — per-image severity counts up top; the CVE table below groups by image and expands each row into the vulnerabilities behind its counts.
 - **tree** — the ownership graph as a collapsible tree.
-- **top** — usage as a percentage of limits, for pods or nodes.
+- **top** — usage as a percentage of limits, for Pods or Nodes.
 
 ## It follows your theme
 

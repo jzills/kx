@@ -4,7 +4,7 @@ description: Diagnose a node, stop the scheduler using it, and evict what is alr
 weight: 7
 ---
 
-Between listing nodes and reaching for kubectl there used to be nothing.
+Between listing Nodes and reaching for kubectl there used to be nothing.
 These work off the same index [`kx get nodes`](../../reference/commands/get/) and [`kx top nodes`](../../reference/commands/top/) hand out.
 
 ```bash
@@ -15,23 +15,23 @@ kx drain 1       # and evict the ones already running
 kx uncordon 1    # put it back
 ```
 
-## Diagnosing a node
+## Diagnosing a Node
 
 On a Node, `kx diag <index>` reports its conditions, whether it is cordoned, and a tally of what is scheduled on it.
 
 The Ready condition is tri-state, and the two bad states are worded apart.
-A `False` is the kubelet saying the node is not ready.
-An `Unknown` is the kubelet not saying anything — the node may be running everything on it perfectly behind a kubelet that has stopped talking, and calling that "not ready" would assert something kx cannot see.
+A `False` is the kubelet saying the Node is not ready.
+An `Unknown` is the kubelet not saying anything — the Node may be running everything on it perfectly behind a kubelet that has stopped talking, and calling that "not ready" would assert something kx cannot see.
 Both are critical.
 MemoryPressure, DiskPressure, PIDPressure and NetworkUnavailable are inverted relative to Ready, and `True` on any of them is critical too.
 
 Cordoned is a warning rather than a critical: it is usually deliberate, and it is exactly what `kx cordon` just did.
 
-The pods are a tally rather than a table — a real node runs hundreds, and a table that long is not a diagnosis.
-It counts the pods that are stuck: pending, or in a phase the kubelet has not reported.
+The Pods are a tally rather than a table — a real Node runs hundreds, and a table that long is not a diagnosis.
+It counts the Pods that are stuck: pending, or in a phase the kubelet has not reported.
 Pods that have finished, successfully or not, are left out.
-Kubernetes keeps a terminated pod's object on the node until garbage collection, so counting those would leave a node reporting a problem long after the pod that caused it stopped mattering.
-A pod that failed is a fact about the workload that owns it, and `kx diag` on that workload reports it.
+Kubernetes keeps a terminated Pod's object on the Node until garbage collection, so counting those would leave a Node reporting a problem long after the Pod that caused it stopped mattering.
+A Pod that failed is a fact about the workload that owns it, and `kx diag` on that workload reports it.
 
 ## Cordon takes several, drain takes one
 
@@ -60,9 +60,9 @@ A Node is cluster-scoped, so its listing records no namespace and its captions d
 The same is true of PersistentVolumes, StorageClasses, ClusterRoles, CRDs and Namespaces themselves.
 Nodes also stay out of a namespace sweep and out of `-A`; you reach one by index, from `kx get nodes` or `kx top nodes`.
 
-## Getting onto the node
+## Getting onto the Node
 
-The `kx debug` command takes a Node index too, and does something different from what it does to a pod: kubectl creates a privileged pod on that node, with the host's filesystem mounted at `/host` and the host namespaces joined.
+The `kx debug` command takes a Node index too, and does something different from what it does to a Pod: kubectl creates a privileged Pod on that Node, with the host's filesystem mounted at `/host` and the host namespaces joined.
 
 ```bash
 kx get nodes
@@ -70,5 +70,5 @@ kx debug 1                      # a shell on the node
 kx debug 1 -- ls /host/var/log  # or one command
 ```
 
-That is how to reach a kubelet, a container runtime, or the node's own logs when the reason a node is unhealthy is not visible through the API.
-The debug pod outlives the shell — kubectl names it on exit, and it is yours to delete.
+That is how to reach a kubelet, a container runtime, or the Node's own logs when the reason a Node is unhealthy is not visible through the API.
+The debug Pod outlives the shell — kubectl names it on exit, and it is yours to delete.
