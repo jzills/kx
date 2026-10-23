@@ -77,6 +77,11 @@ type GetCommand struct {
 	// Sort is the listing's --sort, empty for none. kx's, so it is never
 	// among extraArgs, which are kubectl's.
 	Sort string
+	// Replay is a refresh running a saved listing again. Its --sort was
+	// accepted when it was typed, so a key no table has now is dropped
+	// rather than refused: kx get all's RESTARTS is gone from a namespace
+	// whose Pods have, and refused, the refresh fell back to a hint.
+	Replay bool
 }
 
 // replayScope is the -n a listing is taken under when its arguments name no
@@ -258,6 +263,9 @@ func (c GetCommand) Execute(
 	}
 
 	listing, tabular := c.Index.Parse(output)
+	if c.Replay {
+		keys = listing.Present(keys)
+	}
 	// Rows the caller asked for without a header are for a program, so they
 	// are narrowed and printed bare — never numbered, since an index column
 	// would corrupt what they asked for.

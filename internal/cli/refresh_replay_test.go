@@ -263,3 +263,29 @@ func TestAFailedReplayNamesTheNamespaceTheListingWasTakenIn(t *testing.T) {
 		}
 	}
 }
+
+// A saved kx get all --sort restarts listing whose Pods have all gone came
+// back with no table holding RESTARTS, and the replay refused the key it was
+// saved with, so the refresh fell back to a hint. The replay drops a key no
+// table has now, and keeps it in the query for the next one; the control is
+// the same reply typed fresh, which is still refused.
+func TestStaleRefreshKeepsASortedListingWhoseColumnHasGone(t *testing.T) {
+	const reply = "NAME           TYPE        CLUSTER-IP\nservice/idle   ClusterIP   10.96.0.1\n\n" +
+		"NAME                   READY   UP-TO-DATE\ndeployment.apps/idle   0/0     0\n"
+	query := &state.Query{Resource: "all", Args: []string{"-n", "prod"}, Sort: "restarts"}
+	services := staleServices(t, &fakeKubectl{output: reply}, query)
+	out := runStale(t, services)
+	if !strings.Contains(out, "State was stale") || !strings.Contains(out, "service/idle") {
+		t.Errorf("output = %q, want the refreshed listing", out)
+	}
+	if got := currentQuery(t, services); got == nil || got.Sort != "restarts" {
+		t.Errorf("saved query = %+v, want its --sort kept", got)
+	}
+
+	err := executeArgv(newGetCommand(switchServices(t, &fakeKubectl{output: reply, namespace: "prod"})),
+		[]string{"all", "--sort", "restarts"})
+	want := "Invalid value for '--sort': 'restarts'. Accepted values: name, type, cluster-ip, ready, up-to-date."
+	if err == nil || err.Error() != want {
+		t.Errorf("kx get all --sort restarts: err = %v, want %q", err, want)
+	}
+}

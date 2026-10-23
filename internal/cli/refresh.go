@@ -288,7 +288,8 @@ func replayGet(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
-		Sort: query.Sort,
+		Sort:   query.Sort,
+		Replay: true,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
