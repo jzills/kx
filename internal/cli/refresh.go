@@ -413,10 +413,10 @@ func queryMatch(query state.Query) string {
 // relistCommand is what to run when a listing could not be run again: the
 // command that made it, as it would be typed, in the scope a refresh would
 // take it in (listingScope) and narrowed by its term. A kx get listing is
-// named by its resource, scope and term — not its other arguments, since a
-// relist's are the very names that went stale — and a tree of one resource
-// by the listing of its kind in its namespace, since that resource may be
-// the one that went.
+// named by its resource, scope, sort and term — not its other arguments,
+// since a relist's are the very names that went stale — and a tree of one
+// resource by the listing of its kind in its namespace, since that resource
+// may be the one that went.
 //
 // "kx get pods" for a listing of prod, typed in kube-system, lists
 // kube-system, so the namespace it was taken in is named — unless it was
@@ -437,6 +437,11 @@ func relistCommand(entry state.State, elsewhere bool) string {
 			return "kx get <resource>"
 		}
 		words = append([]string{"kx", "get", query.Resource}, scope...)
+		// Its sort, though, is how its rows were numbered: the listing
+		// relisted without it numbers them in kubectl's order.
+		if spec, _, _ := extractString(query.Args, "--sort", ""); spec != "" {
+			words = append(words, sortArg(spec))
+		}
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
 		// indexes into that listing — narrowed by its term, below, or the

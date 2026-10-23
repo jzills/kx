@@ -186,6 +186,11 @@ func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 			"Run 'kx get pods -n prod' to refresh the list."},
 		{state.Query{Resource: "deploy", Args: []string{"-A", "-o", "wide"}},
 			"Run 'kx get deploy -A' to refresh the list."},
+		// A sorted listing numbered its rows by the sort; the same listing
+		// unsorted numbers them in kubectl's order, so the row a user read
+		// as 3 is another resource there.
+		{state.Query{Resource: "pods", Args: []string{"-n", "prod", sortArg("-restarts")}, Match: &term},
+			"Run 'kx get pods -n prod --sort=-restarts -m api' to refresh the list."},
 	} {
 		query := tc.query
 		out := runStale(t, staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, &query))
