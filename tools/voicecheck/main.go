@@ -283,11 +283,14 @@ func checkMarkdown(path string, content []byte) []Finding {
 // "kx's errors" opens with kx as surely as "kx refuses" does.
 var lowercaseKx = regexp.MustCompile(`^kx($|[\s'’,.:;])`)
 
+// abbreviation is a line ending in a word whose period ends no sentence.
+var abbreviation = regexp.MustCompile(`(^|[\s(])(e\.g|i\.e|vs|cf)\.$`)
+
 // sentences splits a line into the sentences it holds. A README line is one
 // sentence, but a release note is a paragraph to a line, so its later
 // sentences have to be found to be checked at all. A sentence ends at . ? or
 // ! followed by a space, outside inline code, where `kx yaml 1. 2` is not an
-// ending.
+// ending, and not after an abbreviation: "e.g. `--force`" goes on.
 func sentences(line string) []string {
 	var out []string
 	inCode, start := false, 0
@@ -296,6 +299,9 @@ func sentences(line string) []string {
 		case c == '`':
 			inCode = !inCode
 		case !inCode && (c == '.' || c == '?' || c == '!') && i+1 < len(line) && line[i+1] == ' ':
+			if c == '.' && abbreviation.MatchString(line[:i+1]) {
+				continue
+			}
 			out = append(out, line[start:i+1])
 			start = i + 2
 		}
