@@ -103,8 +103,10 @@ func TestReleaseNoteSentencesOpenLikeProse(t *testing.T) {
 		t.Errorf("findings = %v, want inline code then lowercase kx", got)
 	}
 	findings(t, "release-notes/v9.9.9.md", "A patch. The help for `kx top` was wrong. Errors in kx changed.\n", 0)
-	// A period inside inline code ends no sentence.
+	// A period inside inline code ends no sentence, and neither does an
+	// abbreviation's.
 	findings(t, "release-notes/v9.9.9.md", "Run `kx yaml 1. 2` to see both.\n", 0)
+	findings(t, "release-notes/v9.9.9.md", "Some flags pass through, e.g. `--force`, i.e. kx's own (vs. `--now`).\n", 0)
 }
 
 // Code, front matter, tables and headings are not sentences, and the command
