@@ -373,8 +373,9 @@ func TestSweepPageMapsEveryFieldFromTheResult(t *testing.T) {
 		// Reports is the terminal-only shape (unhealthy, or full when --full);
 		// All is what the HTML page always uses regardless of --full — set to a
 		// different report so a page that reads the wrong field is caught.
-		Reports: []diagnostics.Report{{Name: "web", Kind: kinds.Deployment}},
-		All:     []diagnostics.Report{{Name: "quiet", Kind: kinds.Pod, Verdict: diagnostics.OK}},
+		Reports: []render.TriageRow{{Index: 1,
+			Report: diagnostics.Report{Name: "web", Kind: kinds.Deployment}}},
+		All: []diagnostics.Report{{Name: "quiet", Kind: kinds.Pod, Verdict: diagnostics.OK}},
 	}
 	page := sweepPage(result, web.Meta{Title: "t"})
 

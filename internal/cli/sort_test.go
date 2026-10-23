@@ -275,6 +275,52 @@ func TestDiagSortOrdersTheRankedSweep(t *testing.T) {
 	}
 }
 
+// The default table prints the unhealthy rows of a sweep that saved every
+// swept resource, so each row's number is its place in the saved listing and
+// not its place in the table. Severity alone keeps the two the same — the
+// unhealthy rows lead the sweep — but a --sort key deals healthy rows in
+// between them, and a table numbering its own rows then offered index 1 for a
+// resource saved second: kx diag 1, kx delete 1 and the rest acted on the
+// healthy resource above it. The sorted test above runs with --full, where
+// every swept resource is a row and the two numberings agree again.
+func TestDiagSortNumbersRowsByTheSavedListing(t *testing.T) {
+	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
+		healthy(kinds.Deployment, "a-ok", "prod"),
+		unhealthy(kinds.StatefulSet, "db", "prod"),
+		unhealthy(kinds.Deployment, "z-bad", "prod"),
+		healthy(kinds.StatefulSet, "cache", "prod"),
+	}}
+	var saved []state.State
+	command := triageOf(gatherer, &saved)
+	command.Sort = "name"
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// a-ok, cache, db, z-bad by name; the two unhealthy ones are printed.
+	if len(result.Reports) != 2 {
+		t.Fatalf("printed %d rows, want the two unhealthy ones", len(result.Reports))
+	}
+	var got []int
+	for _, row := range result.Reports {
+		got = append(got, row.Index)
+	}
+	if want := []int{3, 4}; !slices.Equal(got, want) {
+		t.Errorf("row indexes = %v, want %v — the rows' places in the sorted sweep", got, want)
+	}
+	listing := saved[len(saved)-1].Resources
+	for _, row := range result.Reports {
+		resource, ok := listing.At(row.Index)
+		if !ok {
+			t.Fatalf("index %d resolves to nothing in a listing of %d", row.Index, listing.Len())
+		}
+		if resource.Name != row.Name || resource.Kind != row.Kind {
+			t.Errorf("index %d resolves to %s/%s, but the table prints it as %s/%s",
+				row.Index, resource.Kind, resource.Name, row.Kind, row.Name)
+		}
+	}
+}
+
 // A sweep's columns are fixed, so its --sort is checked before anything is
 // swept, and refused beside an index, whose report has no rows to order.
 func TestDiagSortRefusals(t *testing.T) {

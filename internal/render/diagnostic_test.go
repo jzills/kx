@@ -128,6 +128,17 @@ func TestRestartsColumnStaysBareWithoutAPreviousInstance(t *testing.T) {
 	}
 }
 
+// triageRows numbers reports the way a sweep with nothing hidden between them
+// does: 1..n, in the order given. A test about the index itself sets its own
+// numbers instead, since the point there is that they need not run 1..n.
+func triageRows(reports []diagnostics.Report) []TriageRow {
+	rows := make([]TriageRow, 0, len(reports))
+	for position, report := range reports {
+		rows = append(rows, TriageRow{Index: position + 1, Report: report})
+	}
+	return rows
+}
+
 func TestTriageAllHealthy(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{Namespace: "prod", Checked: 5, Healthy: 5})
@@ -144,11 +155,11 @@ func TestTriageFullOmitsNotShownFooter(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			Namespace: "prod", Checked: 2, Healthy: 1, Full: true,
-			Reports: []diagnostics.Report{
+			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
 				{Kind: kinds.Pod, Name: "quiet", Verdict: diagnostics.OK},
-			},
+			}),
 		})
 	})
 	if strings.Contains(out, "not shown") {
@@ -167,10 +178,10 @@ func TestTriageWithNothingHealthySaysNothingAboutHealthy(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			Namespace: "prod", Checked: 1, Healthy: 0,
-			Reports: []diagnostics.Report{
+			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
-			},
+			}),
 		})
 	})
 	if strings.Contains(out, "not shown") {
@@ -194,10 +205,10 @@ func TestTriageCountsTheHealthyItDidHide(t *testing.T) {
 		out := capture(func(r *Renderer) {
 			r.Triage(TriageResult{
 				Namespace: "prod", Checked: tc.healthy + 1, Healthy: tc.healthy,
-				Reports: []diagnostics.Report{
+				Reports: triageRows([]diagnostics.Report{
 					{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 						Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
-				},
+				}),
 			})
 		})
 		if !strings.Contains(out, tc.want) {
@@ -213,9 +224,9 @@ func TestTriageFullAllNamespacesClaimsNothingIsHidden(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			AllNamespaces: true, Checked: 1, Full: true,
-			Reports: []diagnostics.Report{
+			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Pod, Name: "quiet", Namespace: "prod", Verdict: diagnostics.OK},
-			},
+			}),
 		})
 	})
 	if strings.Contains(out, "not shown") {
@@ -240,15 +251,40 @@ func TestTriageIndexColumnIsLabeled(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			Namespace: "prod", Checked: 2, Healthy: 1,
-			Reports: []diagnostics.Report{{
+			Reports: triageRows([]diagnostics.Report{{
 				Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
-			}},
+			}}),
 		})
 	})
 	header := strings.Split(out, "\n")[1]
 	if !strings.HasPrefix(strings.TrimLeft(header, " "), "X") {
 		t.Errorf("header = %q, want it to start with the X index column", header)
+	}
+}
+
+// The X column prints the index the row was given, not the row's place in the
+// table. A default sweep shows the unhealthy rows of a listing that saved
+// every swept resource, so under --sort the numbers run with gaps; numbering
+// the rows 1..n here would print indexes resolving to the healthy resources
+// the table left out.
+func TestTriageNumbersRowsByTheirIndexNotTheirPosition(t *testing.T) {
+	out := capture(func(r *Renderer) {
+		r.Triage(TriageResult{
+			Namespace: "prod", Checked: 5, Healthy: 3,
+			Reports: []TriageRow{
+				{Index: 2, Report: diagnostics.Report{
+					Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical}},
+				{Index: 5, Report: diagnostics.Report{
+					Kind: kinds.Pod, Name: "web", Verdict: diagnostics.Warning}},
+			},
+		})
+	})
+	rows := strings.Split(out, "\n")[2:4]
+	for at, want := range []string{"2", "5"} {
+		if got := strings.Fields(rows[at])[0]; got != want {
+			t.Errorf("row %q leads with index %q, want %q", rows[at], got, want)
+		}
 	}
 }
 
@@ -260,11 +296,11 @@ func TestTriageAllNamespacesLeadsWithIndexThenNamespace(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			AllNamespaces: true, Checked: 3, Healthy: 1,
-			Reports: []diagnostics.Report{{
+			Reports: triageRows([]diagnostics.Report{{
 				Kind: kinds.Pod, Name: "api", Namespace: "prod",
 				Verdict:  diagnostics.Critical,
 				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
-			}},
+			}}),
 		})
 	})
 	lines := strings.Split(out, "\n")
@@ -293,7 +329,7 @@ func TestTriageNameBudgetChargesForOneScopeColumn(t *testing.T) {
 	reports := []diagnostics.Report{{Namespace: "prod"}}
 
 	indexed := triageNameBudget(terminal, TriageResult{})
-	all := triageNameBudget(terminal, TriageResult{AllNamespaces: true, Reports: reports})
+	all := triageNameBudget(terminal, TriageResult{AllNamespaces: true, Reports: triageRows(reports)})
 
 	if want := indexed + triageIndexWidth - width("NAMESPACE"); all != want {
 		t.Errorf("all-namespaces budget = %d, want %d — the dropped index column"+
@@ -308,10 +344,10 @@ func TestTriageHasNoBlankLineAfterCaption(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			Namespace: "prod", Checked: 2, Healthy: 1,
-			Reports: []diagnostics.Report{{
+			Reports: triageRows([]diagnostics.Report{{
 				Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 				Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}},
-			}},
+			}}),
 		})
 	})
 	lines := strings.Split(out, "\n")
@@ -329,12 +365,12 @@ func TestTriageAllNamespacesKeepsBothIndexAndNamespaceColumns(t *testing.T) {
 			AllNamespaces: true,
 			Checked:       2,
 			Full:          true,
-			Reports: []diagnostics.Report{
+			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
 					Verdict: diagnostics.Critical},
 				{Kind: kinds.Deployment, Name: "web", Namespace: "staging",
 					Verdict: diagnostics.Critical},
-			},
+			}),
 		})
 	})
 
@@ -357,10 +393,10 @@ func TestTriageAllNamespacesHintsAtTheIndex(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
 			AllNamespaces: true, Checked: 1, Full: true,
-			Reports: []diagnostics.Report{
+			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
 					Verdict: diagnostics.Critical},
-			},
+			}),
 		})
 	})
 
@@ -446,10 +482,10 @@ func TestNoWarningEventsUnqualifiedWithoutAWindow(t *testing.T) {
 func TestTriageCaptionNamesTheWindow(t *testing.T) {
 	result := TriageResult{
 		Namespace: "prod", Checked: 2, Window: 7 * 24 * time.Hour,
-		Reports: []diagnostics.Report{{
+		Reports: triageRows([]diagnostics.Report{{
 			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
 			Verdict: diagnostics.Critical,
-		}},
+		}}),
 	}
 	out := capture(func(r *Renderer) { r.Triage(result) })
 	if !strings.Contains(out, "last 7d") {

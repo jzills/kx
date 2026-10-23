@@ -134,38 +134,39 @@ func (c TriageCommand) Execute(
 		return render.TriageResult{}, err
 	}
 
-	var unhealthy []diagnostics.Report
-	for _, report := range reports {
-		if report.Verdict != diagnostics.OK {
-			unhealthy = append(unhealthy, report)
+	// Every swept resource is indexed, not just the unhealthy ones printed by
+	// default, so an index resolves whatever row the HTML grid's full
+	// inventory shows. The terminal table is a selection from that order, and
+	// each of its rows carries the index given here rather than counting its
+	// own: under --sort the unhealthy rows are no longer a prefix of the
+	// sweep, so the two numberings part company.
+	var entries []state.Resource
+	var terminalRows []render.TriageRow
+	healthy := 0
+	for position, report := range reports {
+		if report.Verdict == diagnostics.OK {
+			healthy++
 		}
-	}
-	terminalReports := unhealthy
-	if full {
-		terminalReports = reports
+		if full || report.Verdict != diagnostics.OK {
+			terminalRows = append(terminalRows, render.TriageRow{
+				Index: position + 1, Report: report,
+			})
+		}
+		entries = append(entries, state.Resource{
+			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
+		})
 	}
 
 	result := render.TriageResult{
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
 		Checked:       len(reports),
-		Reports:       terminalReports,
+		Reports:       terminalRows,
 		All:           reports,
-		Healthy:       len(reports) - len(unhealthy),
+		Healthy:       healthy,
 		Full:          full,
 		Window:        c.Window,
 		Match:         c.Match,
-	}
-
-	// Every swept resource is indexed, not just the unhealthy ones printed by
-	// default, so an index resolves whatever row the HTML grid's full
-	// inventory shows — reports is severity-sorted, so unhealthy's own
-	// positions are unaffected, a prefix of this same order.
-	var entries []state.Resource
-	for _, report := range reports {
-		entries = append(entries, state.Resource{
-			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
-		})
 	}
 
 	// namespace is already "" for a cluster-wide sweep — blanked above, the way
