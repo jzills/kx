@@ -109,6 +109,29 @@ func TestSortRefusesAnUnknownColumn(t *testing.T) {
 	}
 }
 
+// A reply with no table in it is the one exception: an empty namespace has
+// no columns to name the key against, and refusing the key there turned a
+// namespace that was merely empty into an error. A table that has headers but
+// no rows still refuses, since those headers can answer for the key.
+func TestSortPassesAnEmptyReplyThrough(t *testing.T) {
+	empty, tabular := ParseListing("")
+	if tabular {
+		t.Fatal("an empty reply parsed as a table, so this is not the shape the fix is about")
+	}
+	if _, err := empty.Sort([]SortKey{{Column: "name"}}); err != nil {
+		t.Errorf("Sort of an empty listing = %v, want it passed through", err)
+	}
+	if _, err := SortRows(nil, nil, []SortKey{{Column: "name"}}); err != nil {
+		t.Errorf("SortRows of an empty reply = %v, want it passed through", err)
+	}
+
+	// The control: the same key, against headers that came back without rows,
+	// is still refused by name.
+	if _, err := SortRows([]string{"NAME", "AGE"}, nil, []SortKey{{Column: "restart"}}); err == nil {
+		t.Error("SortRows accepted 'restart' against NAME and AGE, want it refused")
+	}
+}
+
 // An empty key — a doubled or trailing comma, a lone "-" — names nothing.
 func TestParseSortKeysRefusesAnEmptyKey(t *testing.T) {
 	for _, spec := range []string{"", "status,", "status,,age", "-"} {

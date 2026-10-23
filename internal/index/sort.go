@@ -69,7 +69,13 @@ var separators = regexp.MustCompile(`[\s_-]+`)
 // table by table: their columns differ, so a key one table lacks leaves its
 // rows to the keys it has. A key no table has is refused.
 func (l Listing) Sort(keys []SortKey) (Listing, error) {
-	if len(keys) == 0 {
+	// A listing with no table in it has nothing to order and no columns to
+	// name the key against. That is what an empty namespace reads as, since
+	// kubectl puts "No resources found" on stderr and leaves stdout bare, and
+	// refusing the key there made `kx get pods --sort name` an error over a
+	// namespace that was merely empty — one that skipped the save, leaving
+	// the listing before it resolving indexes.
+	if len(keys) == 0 || len(l.sections) == 0 {
 		return l, nil
 	}
 	var accepted []string
@@ -97,8 +103,12 @@ func (l Listing) Sort(keys []SortKey) (Listing, error) {
 
 // SortRows is Sort for one table already parsed into headers and rows, as kx
 // top holds it once its percentage columns are added. A key the headers lack
-// is refused.
+// is refused — unless there are no headers at all, which is the empty reply
+// Sort passes through for the same reason.
 func SortRows(headers []string, rows [][]string, keys []SortKey) ([][]string, error) {
+	if len(headers) == 0 {
+		return rows, nil
+	}
 	for _, key := range keys {
 		if columnOf(headers, key.Column) < 0 {
 			return nil, UnknownColumnError{Column: key.Column, Accepted: appendKeys(nil, headers)}

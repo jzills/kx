@@ -338,3 +338,49 @@ func TestDiagSortRefusals(t *testing.T) {
 		t.Errorf("kx diag 1 --sort kind: err = %v, want %q", err, want)
 	}
 }
+
+// An empty namespace is a listing with no rows, not an error, and --sort has
+// nothing to order there: kubectl puts "No resources found" on stderr, so the
+// reply kx sorts has no columns to name the key against. The key was refused
+// against those absent headers — "Accepted values: ." — and the refusal took
+// the save with it, so the listing before it went on resolving indexes into a
+// namespace the screen had left.
+func TestSortAnEmptyListingOrdersNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"get", []string{"pods", "--sort", "name"}},
+		{"top", []string{"--sort", "name"}},
+		{"top nodes", []string{"nodes", "--sort", "name"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := &fakeKubectl{output: sortPods, namespace: "prod"}
+			services := switchServices(t, kube)
+			// Seeded with a listing that found something, under a query of
+			// its own so the empty one pushes rather than replacing it.
+			if err := executeArgv(newGetCommand(services), []string{"pods", "-m", "web"}); err != nil {
+				t.Fatalf("seeding kx get pods -m web: %v", err)
+			}
+			if got := names(t, services.State); len(got) == 0 {
+				t.Fatal("the seeded listing resolves nothing, so there is no stale index to retire")
+			}
+
+			kube.output = ""
+			command := newGetCommand(services)
+			if tc.name != "get" {
+				command = newTopCommand(services)
+			}
+			if err := executeArgv(command, tc.argv); err != nil {
+				t.Fatalf("kx %s: %v", tc.name, err)
+			}
+			entry, err := services.State.Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if entry.Resources.Len() != 0 {
+				t.Errorf("the empty listing resolves to %v, want the seeded rows retired", entry.Resources)
+			}
+		})
+	}
+}
