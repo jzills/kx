@@ -53,9 +53,9 @@ func TestTriageRecordsTheSweepThatMadeIt(t *testing.T) {
 			wantQuery("diag", "", []string{"-n", "prod"}, "")},
 		{"every namespace, narrowed", TriageCommand{Match: "api"}, "prod", true, false,
 			wantQuery("diag", "", []string{"-A"}, "api")},
-		// --full decides only what the table prints; the listing saved is
+		// --show-healthy decides only what the table prints; the listing saved is
 		// every resource swept either way.
-		{"a window, and --full left out", TriageCommand{Since: "7d"}, "prod", false, true,
+		{"a window, and --show-healthy left out", TriageCommand{Since: "7d"}, "prod", false, true,
 			wantQuery("diag", "", []string{"--since", "7d"}, "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -534,7 +534,7 @@ func TestDiagnoseSweepIsUnhealthyOnlyUnindexedAndSavesNothing(t *testing.T) {
 	}
 
 	var full diagnoseResult
-	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"full": true}), &full)
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"showHealthy": true}), &full)
 	if len(full.Diagnosis.Resources) != 2 {
 		t.Errorf("full sweep returned %d resources, want 2", len(full.Diagnosis.Resources))
 	}
@@ -549,11 +549,11 @@ func TestDiagnoseRefusesContradictoryArguments(t *testing.T) {
 	session := connectMCP(t, mcpDiagDeps(t, &recordingKubectl{}))
 	target := map[string]any{"kind": "deploy", "name": "api"}
 	for name, args := range map[string]map[string]any{
-		"target and namespace": {"target": target, "namespace": "prod"},
-		"target and all":       {"target": target, "allNamespaces": true},
-		"target and full":      {"target": target, "full": true},
-		"namespace and all":    {"namespace": "prod", "allNamespaces": true},
-		"bad since":            {"since": "soon"},
+		"target and namespace":   {"target": target, "namespace": "prod"},
+		"target and all":         {"target": target, "allNamespaces": true},
+		"target and showHealthy": {"target": target, "showHealthy": true},
+		"namespace and all":      {"namespace": "prod", "allNamespaces": true},
+		"bad since":              {"since": "soon"},
 	} {
 		if result := callTool(t, session, "diagnose", args); !result.IsError {
 			t.Errorf("%s: diagnosed, want a refusal", name)

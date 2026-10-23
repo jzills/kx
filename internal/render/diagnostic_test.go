@@ -148,13 +148,13 @@ func TestTriageAllHealthy(t *testing.T) {
 	}
 }
 
-// --full's Reports already includes healthy resources, so the footer must
+// --show-healthy's Reports already includes healthy resources, so the footer must
 // not also claim some were left out — only the index/all-namespaces hint
 // survives.
-func TestTriageFullOmitsNotShownFooter(t *testing.T) {
+func TestTriageShowHealthyOmitsNotShownFooter(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
-			Namespace: "prod", Checked: 2, Healthy: 1, Full: true,
+			Namespace: "prod", Checked: 2, Healthy: 1, ShowHealthy: true,
 			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Pod, Name: "api", Verdict: diagnostics.Critical,
 					Findings: []diagnostics.Finding{{Severity: diagnostics.Critical, Summary: "broken"}}},
@@ -163,10 +163,10 @@ func TestTriageFullOmitsNotShownFooter(t *testing.T) {
 		})
 	})
 	if strings.Contains(out, "not shown") {
-		t.Errorf("--full footer still claims resources are not shown:\n%s", out)
+		t.Errorf("--show-healthy footer still claims resources are not shown:\n%s", out)
 	}
 	if !strings.Contains(out, "kx diag <index> for detail") {
-		t.Errorf("--full footer dropped the index hint:\n%s", out)
+		t.Errorf("--show-healthy footer dropped the index hint:\n%s", out)
 	}
 }
 
@@ -217,23 +217,23 @@ func TestTriageCountsTheHealthyItDidHide(t *testing.T) {
 	}
 }
 
-// --full shows everything, so its footer must not also claim a healthy count is
+// --show-healthy shows everything, so its footer must not also claim a healthy count is
 // hidden — cluster-wide sweeps included, which now carry the same index hint as
 // every other sweep.
-func TestTriageFullAllNamespacesClaimsNothingIsHidden(t *testing.T) {
+func TestTriageShowHealthyAllNamespacesClaimsNothingIsHidden(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
-			AllNamespaces: true, Checked: 1, Full: true,
+			AllNamespaces: true, Checked: 1, ShowHealthy: true,
 			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Pod, Name: "quiet", Namespace: "prod", Verdict: diagnostics.OK},
 			}),
 		})
 	})
 	if strings.Contains(out, "not shown") {
-		t.Errorf("--full footer still claims resources are not shown:\n%s", out)
+		t.Errorf("--show-healthy footer still claims resources are not shown:\n%s", out)
 	}
 	if !strings.Contains(out, "kx diag <index> for detail") {
-		t.Errorf("--full footer dropped the index hint:\n%s", out)
+		t.Errorf("--show-healthy footer dropped the index hint:\n%s", out)
 	}
 }
 
@@ -364,7 +364,7 @@ func TestTriageAllNamespacesKeepsBothIndexAndNamespaceColumns(t *testing.T) {
 		r.Triage(TriageResult{
 			AllNamespaces: true,
 			Checked:       2,
-			Full:          true,
+			ShowHealthy:   true,
 			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
 					Verdict: diagnostics.Critical},
@@ -392,7 +392,7 @@ func TestTriageAllNamespacesKeepsBothIndexAndNamespaceColumns(t *testing.T) {
 func TestTriageAllNamespacesHintsAtTheIndex(t *testing.T) {
 	out := capture(func(r *Renderer) {
 		r.Triage(TriageResult{
-			AllNamespaces: true, Checked: 1, Full: true,
+			AllNamespaces: true, Checked: 1, ShowHealthy: true,
 			Reports: triageRows([]diagnostics.Report{
 				{Kind: kinds.Deployment, Name: "web", Namespace: "prod",
 					Verdict: diagnostics.Critical},

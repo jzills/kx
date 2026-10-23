@@ -270,7 +270,7 @@ func TestWriteListingsDiagnoseSweepIndexesResolveWithHealthyRowsLeftOut(t *testi
 	}
 
 	var full diagnoseResult
-	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"full": true}), &full)
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"showHealthy": true}), &full)
 	if len(full.Diagnosis.Resources) != 3 || full.Diagnosis.Resources[2].Name != "web" ||
 		full.Diagnosis.Resources[2].Index != 3 {
 		t.Fatalf("full sweep = %+v, want the healthy web last at 3", full.Diagnosis.Resources)
@@ -299,7 +299,7 @@ func TestWriteListingsDiagnoseSweepAcrossNamespacesSavesLikeKxDiagA(t *testing.T
 	deps.WriteListings = true
 	var out diagnoseResult
 	decodeStructured(t, callTool(t, connectMCP(t, deps), "diagnose",
-		map[string]any{"allNamespaces": true, "full": true}), &out)
+		map[string]any{"allNamespaces": true, "showHealthy": true}), &out)
 
 	entry := onlyTaggedEntry(t, deps.State)
 	client, err := deps.Kubernetes()

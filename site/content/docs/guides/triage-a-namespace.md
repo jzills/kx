@@ -14,7 +14,7 @@ kx diag
 sweeps the current namespace — Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, PersistentVolumeClaims and Ingresses, plus Pods nothing owns — and prints what's unhealthy, worst first.
 
 Healthy resources are left out of the terminal table.
-The `--full` flag puts them back.
+The `--show-healthy` flag puts them back.
 
 Each row shows one finding, so which of several equally severe findings sorts first decides what the whole sweep reads like.
 Rows are ordered by severity, and within a severity by how specific the finding is: a concrete cause — a container state, a scheduling refusal, an exceeded limit — outranks a rollup like "Only 0/3 replicas ready", which outranks a raw warning event.

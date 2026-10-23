@@ -26,7 +26,7 @@ kx scan --json | jq '.images[] | select(.counts.critical > 0)'
 The `kx diag --json` document has one shape whether the command was pointed at an index or a namespace, so that first expression reads `kx diag 1 --json` too — an indexed run is a sweep of one, and counts itself that way.
 
 It is built from the same values the terminal and `--html` render, so the three views cannot disagree about what is wrong.
-A sweep serializes every resource regardless of `--full`: that flag governs how much of a table fits on a screen, and nothing is scrolling past a machine.
+A sweep serializes every resource regardless of `--show-healthy`: that flag governs how much of a table fits on a screen, and nothing is scrolling past a machine.
 
 The document carries a `schemaVersion`, because this is a public surface the moment it ships — something will parse it in a pipeline, and a field moving underneath that is worse than one it can check for.
 
@@ -128,7 +128,7 @@ Plain `--html` without `--out` serves the report and blocks until Ctrl-C, which 
 {{% kx-note kind="warn" %}}
 Combining `kx scan --full --fail-on` is refused rather than ignored.
 The `--full` flag streams the scanner's own report, which kx never parses, so the gate would have nothing to read.
-The `--json` and `--full` flags are refused together for the same reason, and `kx diag --json --full` is refused because a document already carries every resource swept — `--full` has nothing to add to one.
+The `--json` and `--full` flags are refused together for the same reason, and `kx diag --json --show-healthy` is refused because a document already carries every resource swept — `--show-healthy` has nothing to add to one.
 {{% /kx-note %}}
 
 ## A whole cluster

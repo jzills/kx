@@ -18,22 +18,23 @@ type TriageResult struct {
 	// separates two rows whose names are unique only within their own.
 	AllNamespaces bool
 	// Checked is the number of resources swept, most of which are healthy and
-	// never appear as a row unless Full is set.
+	// never appear as a row unless ShowHealthy is set.
 	Checked int
 	// Reports are the terminal table's rows, most severe first: unhealthy
-	// resources only, or every swept resource when Full is set. Each carries
+	// resources only, or every swept resource when ShowHealthy is set. Each carries
 	// the index it was saved under, since the table is a selection from All
 	// and its rows need not be numbered 1..n — see TriageRow.
 	Reports []TriageRow
-	// All is every swept resource, most severe first, regardless of Full — the
+	// All is every swept resource, most severe first, regardless of ShowHealthy
+	// — the
 	// HTML report shows the full inventory unconditionally, since its grid can
 	// filter healthy rows away client-side rather than needing them dropped
 	// before they ever reach the page.
 	All     []diagnostics.Report
 	Healthy int
-	// Full mirrors kx diag --full: Reports already includes healthy resources,
-	// so the footer must not also claim some were left out.
-	Full bool
+	// ShowHealthy mirrors kx diag --show-healthy: Reports already includes the
+	// healthy resources, so the footer must not also claim some were left out.
+	ShowHealthy bool
 	// Window is how far back the sweep was allowed to look. "12 checked"
 	// and "all healthy" are both claims about what was looked at, and this
 	// is the only line the table has to qualify them on. Zero means no
@@ -67,7 +68,7 @@ func NothingMatches(term string) string {
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
 // match the saved state, with healthy resources collapsed into the footer —
-// or one row per every swept resource, healthy included, when Full is set.
+// or one row per every swept resource, healthy included, when ShowHealthy is set.
 //
 // The caption follows the same "{kind} · {namespace} · {count} {noun}" shape as
 // kx get and kx state, with "Mixed" as the kind since a sweep spans whatever
@@ -144,11 +145,11 @@ func (r *Renderer) Triage(result TriageResult) {
 	r.Blank()
 	hint := "kx diag <index> for detail"
 	footer := hint
-	// Nothing hidden, nothing to say: --full hides none by definition, and a
+	// Nothing hidden, nothing to say: --show-healthy hides none by definition, and a
 	// sweep where nothing was healthy has no healthy count to withhold. The
 	// footer used to count first and print regardless, so a namespace with
 	// every resource unhealthy got "0 healthy resources not shown".
-	if !result.Full && result.Healthy > 0 {
+	if !result.ShowHealthy && result.Healthy > 0 {
 		label := "resources"
 		if result.Healthy == 1 {
 			label = "resource"

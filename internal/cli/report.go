@@ -178,9 +178,9 @@ type diagnosticDocument struct {
 
 // triageJSON serializes a sweep.
 //
-// Every resource swept, healthy ones included, regardless of --full: --full
-// governs how much of a table fits on a screen, and nothing is scrolling past
-// a machine. The HTML report takes the same view for the same reason.
+// Every resource swept, healthy ones included, regardless of --show-healthy:
+// that flag governs how much of a table fits on a screen, and nothing is
+// scrolling past a machine. The HTML report takes the same view for the same reason.
 func triageJSON(result render.TriageResult) (string, error) {
 	return encode(triageDocument(result, true))
 }
