@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jzills/kx/internal/cli"
 	"github.com/jzills/kx/internal/config"
@@ -33,6 +34,35 @@ func hasNoColorFlag(args []string) bool {
 	return false
 }
 
+// fixesUnknownName lets kx theme run despite an unknown configured theme, and
+// kx engine despite an unknown engine, on the default in its place. The error
+// sends the user to that command, and refusing it too left editing the file
+// by hand as the only way out. Every other command still refuses.
+func fixesUnknownName(err error, cfg *config.Config, args []string) bool {
+	var unknown config.UnknownNameError
+	if !errors.As(err, &unknown) || firstPositional(args) != unknown.Setting {
+		return false
+	}
+	switch unknown.Setting {
+	case "theme":
+		cfg.Theme = theme.Default
+	case "engine":
+		cfg.Engine = config.DefaultEngine
+	}
+	return true
+}
+
+// firstPositional is the first argument that is not a flag: the command name,
+// since kx's root flags take no value.
+func firstPositional(args []string) string {
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+	}
+	return ""
+}
+
 // run renders expected failures as a styled error and returns the exit code,
 // so no path calls os.Exit while defers are pending.
 //
@@ -41,7 +71,7 @@ func hasNoColorFlag(args []string) bool {
 func run() int {
 	loader := config.Loader{ThemeKnown: theme.Exists, EngineKnown: scanner.Exists}
 	cfg, err := loader.Load()
-	if err != nil {
+	if err != nil && !fixesUnknownName(err, &cfg, os.Args[1:]) {
 		render.Configure(theme.Default, hasNoColorFlag(os.Args[1:]))
 		render.Error(err.Error())
 		return 1

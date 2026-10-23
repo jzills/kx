@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -172,6 +173,30 @@ func TestUnknownThemeRejectedWhenValidatorSupplied(t *testing.T) {
 	_, err := loader.Load()
 	if err == nil || !strings.Contains(err.Error(), "Unknown theme 'nonexistent'") {
 		t.Errorf("error = %v, want an unknown-theme complaint", err)
+	}
+}
+
+// The binary tells an unknown name from any other config failure by type, so
+// kx theme and kx engine can still run to fix it. A name from the environment
+// says so, since saving a choice writes the file, which the variable overrides.
+func TestUnknownNameErrorNamesItsSource(t *testing.T) {
+	loader := writeConfig(t, `theme = "nonexistent"`)
+	loader.ThemeKnown = func(string) bool { return false }
+	_, err := loader.Load()
+	var unknown UnknownNameError
+	if !errors.As(err, &unknown) || unknown.Setting != "theme" || unknown.Name != "nonexistent" {
+		t.Fatalf("error = %#v, want an UnknownNameError for theme 'nonexistent'", err)
+	}
+	if want := "Unknown theme 'nonexistent'. Run 'kx theme' to list themes."; err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+
+	t.Setenv("KX_ENGINE", "nope")
+	loader = writeConfig(t, ``)
+	loader.EngineKnown = func(string) bool { return false }
+	_, err = loader.Load()
+	if want := "Unknown engine 'nope' in 'KX_ENGINE'. Unset it, or run 'kx engine' to list engines."; err == nil || err.Error() != want {
+		t.Errorf("error = %v, want %q", err, want)
 	}
 }
 
