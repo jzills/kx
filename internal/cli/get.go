@@ -533,7 +533,15 @@ func (c GetCommand) ExecuteGroups(
 	// unfiltered tables, printing exactly the rows the term had excluded.
 	listing, stitched := c.Index.Stitch(tables)
 	if !tabular || !stitched {
-		text, err := narrowText(joinReplies(raw, extraArgs), filterTerm, extraArgs)
+		joined := joinReplies(raw, extraArgs)
+		// A --sort over a reply kx cannot read is refused here as it is on
+		// the single-namespace paths: takeSort has already taken it off
+		// kubectl's arguments, so printing the replies as they came answered
+		// a sort nothing had performed.
+		if err := unsortableError(joined, keys, extraArgs); err != nil {
+			return index.Table{}, err
+		}
+		text, err := narrowText(joined, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, err
 		}
