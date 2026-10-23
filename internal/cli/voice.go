@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -50,9 +49,11 @@ func unknownCommandError(cmd *cobra.Command, name string, suggestions []string) 
 
 // cobraUnknownCommand matches the one refusal cobra raises from inside
 // Execute, before any hook of kx's runs: an unknown command under the root.
+// Only the root raises it: cobra.NoArgs words a subcommand's refusal the same
+// way, but kx never uses it, since its own arity helpers speak in kx's words.
 // Cobra exports no type for it, so the message is all there is to go on;
 // TestUnknownCommandSpeaksInKxsVoice fails if cobra ever rewords it.
-var cobraUnknownCommand = regexp.MustCompile(`^unknown command "(.*)" for "(.*?)"`)
+var cobraUnknownCommand = regexp.MustCompile(`^unknown command "(.*)" for "`)
 
 // rewriteUnknownCommand puts cobra's unknown-command refusal into kx's words.
 // The suggestions are asked for again rather than parsed out of cobra's
@@ -65,13 +66,7 @@ func rewriteUnknownCommand(root *cobra.Command, err error) error {
 	if match == nil {
 		return err
 	}
-	cmd := root
-	if path := strings.Fields(match[2]); len(path) > 1 {
-		if found, _, findErr := root.Find(path[1:]); findErr == nil {
-			cmd = found
-		}
-	}
-	return unknownCommandError(cmd, match[1], cmd.SuggestionsFor(match[1]))
+	return unknownCommandError(root, match[1], root.SuggestionsFor(match[1]))
 }
 
 // ownFlagError is the root's flag-error function, inherited by every command
