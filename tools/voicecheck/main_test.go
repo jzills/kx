@@ -93,6 +93,20 @@ func TestSentenceOpeningWithLowercaseKx(t *testing.T) {
 	findings(t, "site/content/docs/guides/x.md", "Settings live in your kubeconfig.\n", 0)
 }
 
+// A release note is a paragraph to a line, so the rule has to reach the
+// sentences after the first. v0.9.2 shipped "kx's errors now share…" and
+// "`kx top --help` described…" because only a line's first word was read, only
+// in the README and site, and only as "kx " with a space.
+func TestReleaseNoteSentencesOpenLikeProse(t *testing.T) {
+	got := findings(t, "release-notes/v9.9.9.md", "A patch. `kx top --help` was wrong. kx's errors changed.\n", 2)
+	if !strings.Contains(got[0].Message, "inline code") || !strings.Contains(got[1].Message, `lowercase "kx"`) {
+		t.Errorf("findings = %v, want inline code then lowercase kx", got)
+	}
+	findings(t, "release-notes/v9.9.9.md", "A patch. The help for `kx top` was wrong. Errors in kx changed.\n", 0)
+	// A period inside inline code ends no sentence.
+	findings(t, "release-notes/v9.9.9.md", "Run `kx yaml 1. 2` to see both.\n", 0)
+}
+
 // Code, front matter, tables and headings are not sentences, and the command
 // reference is generated from help strings, which have rules of their own.
 func TestNonProseIsNotReadAsASentence(t *testing.T) {

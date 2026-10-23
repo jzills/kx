@@ -99,7 +99,7 @@ The README command table and the site's command pages are generated from these s
 
 - One sentence per line, with no hard wrap. A list item continues on the next line with a two-space indent.
 - No sentence opens with inline code. Name what the code is ("The `--html` flag…"), or reword ("With `--key`, …").
-- No sentence opens with a lowercase "kx" either. Reword so kx is not first.
+- No sentence opens with a lowercase "kx" either, "kx's" included. Reword so kx is not first.
 - kx the product is plain text. Code formatting is for things you type.
 - Code blocks are 80 columns or narrower, because GitHub never wraps them.
 - The README is a pitch and the site is the reference. The README has no sample-output blocks or worked examples; GIFs and short prose carry the features, and the generated command table is the reference.
@@ -149,4 +149,5 @@ Neither carries attribution trailers or session links.
 - Write one line per paragraph, never hard-wrapped. GitHub turns every newline in a release body into a line break.
 - No headings.
 - Write in the second person, for someone using kx, with commands in backticks and concrete before-and-after examples.
+- Sentences open the way README and site sentences do: never with inline code, and never with a lowercase "kx", possessive included. A paragraph is one line here, so this holds for every sentence in it, not just the first; `tools/voicecheck` reads each one.
 - The last paragraph says what upgrading asks of the reader, even when the answer is nothing.

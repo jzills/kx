@@ -214,8 +214,8 @@ var generatedDocs = regexp.MustCompile(`^site/content/docs/reference/commands/`)
 var listMarker = regexp.MustCompile(`^\s*([-*+]|\d+\.)\s+`)
 
 func checkMarkdown(path string, content []byte) []Finding {
-	opensSentences := pitchDocs.MatchString(path) && !generatedDocs.MatchString(path)
 	releaseNotes := strings.HasPrefix(path, "release-notes/")
+	opensSentences := releaseNotes || pitchDocs.MatchString(path) && !generatedDocs.MatchString(path)
 
 	var findings []Finding
 	inFence, inFrontMatter := false, false
@@ -259,22 +259,50 @@ func checkMarkdown(path string, content []byte) []Finding {
 		if !opensSentences || !prose {
 			continue
 		}
-		sentence := listMarker.ReplaceAllString(line, "")
-		sentence = strings.TrimLeft(sentence, " ")
-		switch {
-		case strings.HasPrefix(sentence, "`"):
-			findings = append(findings, Finding{
-				File: path, Line: n,
-				Message: "sentence opens with inline code — name what it is first (\"The `--x` flag…\") or reword",
-				Section: "README and site docs",
-			})
-		case strings.HasPrefix(sentence, "kx "):
-			findings = append(findings, Finding{
-				File: path, Line: n,
-				Message: "sentence opens with a lowercase \"kx\" — reword so kx is not first",
-				Section: "README and site docs",
-			})
+		for _, sentence := range sentences(listMarker.ReplaceAllString(line, "")) {
+			switch {
+			case strings.HasPrefix(sentence, "`"):
+				findings = append(findings, Finding{
+					File: path, Line: n,
+					Message: "sentence opens with inline code — name what it is first (\"The `--x` flag…\") or reword",
+					Section: "README and site docs",
+				})
+			case lowercaseKx.MatchString(sentence):
+				findings = append(findings, Finding{
+					File: path, Line: n,
+					Message: "sentence opens with a lowercase \"kx\" — reword so kx is not first",
+					Section: "README and site docs",
+				})
+			}
 		}
 	}
 	return findings
+}
+
+// lowercaseKx is a sentence whose first word is kx, possessive included:
+// "kx's errors" opens with kx as surely as "kx refuses" does.
+var lowercaseKx = regexp.MustCompile(`^kx($|[\s'’,.:;])`)
+
+// sentences splits a line into the sentences it holds. A README line is one
+// sentence, but a release note is a paragraph to a line, so its later
+// sentences have to be found to be checked at all. A sentence ends at . ? or
+// ! followed by a space, outside inline code, where `kx yaml 1. 2` is not an
+// ending.
+func sentences(line string) []string {
+	var out []string
+	inCode, start := false, 0
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case c == '`':
+			inCode = !inCode
+		case !inCode && (c == '.' || c == '?' || c == '!') && i+1 < len(line) && line[i+1] == ' ':
+			out = append(out, line[start:i+1])
+			start = i + 2
+		}
+	}
+	out = append(out, line[start:])
+	for i := range out {
+		out[i] = strings.TrimLeft(out[i], " ")
+	}
+	return out
 }
