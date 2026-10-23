@@ -64,11 +64,14 @@ func main() {
 }
 
 func trackedFiles() ([]string, error) {
-	out, err := exec.Command("git", "ls-files").Output()
+	// -z: NUL-separated and unquoted, so a path with a space or a non-ASCII
+	// character is read whole rather than split, or read in git's quoting,
+	// and skipped as unreadable.
+	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
-	return strings.Fields(string(out)), nil
+	return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 }), nil
 }
 
 // skipped are paths kx ships but did not write — vendored libraries keep the
@@ -95,9 +98,10 @@ func Check(path string, content []byte) []Finding {
 
 // british maps each British spelling kx has used to its American one. Listed
 // rather than derived from a suffix rule, because "-ise" also ends promise,
-// exercise and otherwise.
+// exercise and otherwise. A spelling both varieties share is left out:
+// "analyses" is the British verb, and also everyone's plural of analysis.
 var british = map[string]string{
-	"analyse": "analyze", "analysed": "analyzed", "analyses": "analyzes", "analogue": "analog",
+	"analyse": "analyze", "analysed": "analyzed", "analogue": "analog",
 	"behaviour": "behavior", "behaviours": "behaviors", "behavioural": "behavioral",
 	"cancelled": "canceled", "cancelling": "canceling",
 	"catalogue": "catalog", "categorised": "categorized",
@@ -241,7 +245,9 @@ func checkMarkdown(path string, content []byte) []Finding {
 		findings = append(findings, spelling(path, n, line)...)
 
 		prose := trimmed != "" && !strings.ContainsAny(trimmed[:1], "|#<>!")
-		if releaseNotes && prose && previousProse {
+		// A list item starts a line of its own; a line after one that is
+		// not an item is the item wrapped.
+		if releaseNotes && prose && previousProse && !listMarker.MatchString(line) {
 			findings = append(findings, Finding{
 				File: path, Line: n,
 				Message: "paragraph is hard-wrapped — keep each paragraph on one line",

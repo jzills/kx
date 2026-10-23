@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,6 +53,8 @@ func TestBritishSpellingInsideACamelCaseNameInAComment(t *testing.T) {
 // Words that merely end like a British spelling are not one.
 func TestLookalikesAreNotBritish(t *testing.T) {
 	findings(t, "internal/x/x.go", "package x\n\n// A promise, an exercise, otherwise a premise.\n", 0)
+	// The plural of analysis is the same in both.
+	findings(t, "internal/x/x.go", "package x\n\n// The two analyses agree.\n", 0)
 }
 
 // MCP names a method notifications/cancelled; kx has to spell it MCP's way.
@@ -105,6 +110,13 @@ func TestHardWrappedReleaseNotes(t *testing.T) {
 		t.Errorf("finding = %v, want the wrap on line 2", got[0])
 	}
 	findings(t, "release-notes/v9.9.9.md", "A patch that fixes the banner order.\n\nUpgrading asks nothing of you.\n", 0)
+	// A list is one item per line, not a wrapped paragraph; an item wrapped
+	// onto a second line still is one.
+	findings(t, "release-notes/v9.9.9.md", "Two fixes:\n\n- one\n- two\n1. three\n", 0)
+	got = findings(t, "release-notes/v9.9.9.md", "- one item that\n  wraps\n", 1)
+	if got[0].Line != 2 {
+		t.Errorf("finding = %v, want the wrapped item on line 2", got[0])
+	}
 	// Consecutive lines are only a wrap in a release note; README prose is
 	// one sentence per line by design.
 	findings(t, "README.md", "One sentence.\nAnother sentence.\n", 0)
@@ -120,5 +132,31 @@ func TestFindingNamesItsSection(t *testing.T) {
 	got := findings(t, "internal/x/x.go", "package x\n\n// grey\n", 1)
 	if want := "internal/x/x.go:3: British spelling 'grey' — write 'gray' (STYLE.md: The voice)"; got[0].String() != want {
 		t.Errorf("String() = %q, want %q", got[0].String(), want)
+	}
+}
+
+// A tracked path with a space or a non-ASCII character is read whole. Split on
+// whitespace, or read in git's quoting, it named no file, and every rule
+// skipped it without a word.
+func TestTrackedFilesReadsEveryPathWhole(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	want := []string{"My Guide.md", "naïve.md"}
+	for _, name := range want {
+		if err := os.WriteFile(name, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	got, err := trackedFiles()
+	if err != nil {
+		t.Fatalf("trackedFiles: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("trackedFiles() = %q, want %q", got, want)
 	}
 }
