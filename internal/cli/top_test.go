@@ -144,6 +144,30 @@ func TestTopExecuteFailsFastWhenMetricsAPIIsUnavailable(t *testing.T) {
 	}
 }
 
+// kubectl before 1.32 heads the percentages CPU% and MEMORY%. Its MEMORY%
+// was printed as it came and keyed to "memory%", so the --sort mem% the
+// help names was refused there. The control is the CPU(%)/MEMORY(%) kubectl
+// prints now.
+func TestExecuteNodesRelabelsOlderKubectlsPercentColumns(t *testing.T) {
+	older := strings.NewReplacer("CPU(%)", "CPU% ", "MEMORY(%)", "MEMORY% ").Replace(nodesOutput)
+	for _, reply := range []string{older, nodesOutput} {
+		kubectl := &scriptedKubectl{outputs: []string{reply}}
+		output, _, err := TopCommand{
+			Kubectl: kubectl, State: &fakeState{}, Index: indexService(), Sort: "-mem%",
+		}.ExecuteNodes("", nil)
+		if err != nil {
+			t.Errorf("kx top nodes --sort -mem%% over\n%s\nerr = %v", reply, err)
+			continue
+		}
+		if got := index.ColumnIndex(output.Headers, "MEM%"); got < 0 {
+			t.Errorf("headers = %q, want MEM%%", output.Headers)
+		}
+		if len(output.Rows) != 2 || output.Rows[0][1] != "node-b" {
+			t.Errorf("rows = %q, want node-b's 40%% first", output.Rows)
+		}
+	}
+}
+
 func TestExecuteNodesRelabelsPercentColumnsAndIndexes(t *testing.T) {
 	kubectl := &scriptedKubectl{outputs: []string{nodesOutput}}
 	states := &fakeState{}
