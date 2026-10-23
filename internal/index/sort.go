@@ -111,6 +111,21 @@ func (l Listing) Sort(keys []SortKey) (Listing, error) {
 	return Listing{sections: sorted}, nil
 }
 
+// Present is the keys some table of the listing has a column for, in order:
+// what Sort would sort by, short of refusing the rest.
+func (l Listing) Present(keys []SortKey) []SortKey {
+	var present []SortKey
+	for _, key := range keys {
+		for _, section := range l.sections {
+			if columnOf(section.shape.Headers, key.Column) >= 0 {
+				present = append(present, key)
+				break
+			}
+		}
+	}
+	return present
+}
+
 // SortRows is Sort for one table already parsed into headers and rows, as kx
 // top holds it once its percentage columns are added. A key the headers lack
 // is refused — unless there are no headers at all, which is the empty reply
