@@ -55,11 +55,21 @@ func ParseSortKeys(spec string) ([]SortKey, error) {
 // MEMORY(bytes) "memory", and NOMINATED NODE "nominated-node" (or
 // "nominated_node", or "nominated node" quoted). CPU% and MEM% keep their
 // percent sign, which is what sets them apart from CPU and MEMORY.
+//
+// A percent sign survives the unit note it is written inside, so kubectl's own
+// CPU(%) is "cpu%" and MEMORY(%) is "memory%". The note is dropped as a unit,
+// and a percentage is not one: dropped with it, kubectl top nodes' CPU(%)
+// keyed to "cpu" like the CPU(cores) column beside it, so the percentage had
+// no key of its own and the bare one silently took whichever came first.
 func ColumnKey(name string) string {
+	percent := ""
 	if open := strings.Index(name, "("); open > 0 {
+		if strings.Contains(name[open:], "%") {
+			percent = "%"
+		}
 		name = name[:open]
 	}
-	return strings.ToLower(separators.ReplaceAllString(strings.TrimSpace(name), "-"))
+	return strings.ToLower(separators.ReplaceAllString(strings.TrimSpace(name), "-")) + percent
 }
 
 var separators = regexp.MustCompile(`[\s_-]+`)
