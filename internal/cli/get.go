@@ -533,7 +533,11 @@ func (c GetCommand) ExecuteGroups(
 	// unfiltered tables, printing exactly the rows the term had excluded.
 	listing, stitched := c.Index.Stitch(tables)
 	if !tabular || !stitched {
-		text, err := narrowText(joinReplies(raw, extraArgs), filterTerm, extraArgs)
+		joined := joinReplies(raw, extraArgs)
+		if err := unsortableError(joined, keys, extraArgs); err != nil {
+			return index.Table{}, err
+		}
+		text, err := narrowText(joined, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, err
 		}

@@ -267,6 +267,36 @@ func TestExecuteGroupsFetchesEveryGroupWhenTheReplyIsNotATable(t *testing.T) {
 	}
 }
 
+// Rows fetched from several namespaces in a table with no NAME column were
+// printed as kubectl's replies, in kubectl's order, under a --sort that one
+// namespace's rows were refused for. The control is the same fetch with a
+// NAME column, which sorts across the namespaces.
+func TestExecuteGroupsSortRefusesATableWithNoNameColumn(t *testing.T) {
+	groups := []namespaceGroup{
+		{Namespace: "prod", Names: []string{"web"}},
+		{Namespace: "staging", Names: []string{"api"}},
+	}
+	const columns = "custom-columns=PHASE:.status.phase"
+	kubectl := &fakeKubectl{outputs: []string{"PHASE\nRunning\n", "PHASE\nPending\n"}}
+	_, err := newGet(kubectl, &fakeState{}).ExecuteGroups(
+		"pods", "", groups, []string{"-o", columns, sortArg("phase")})
+	want := "'--sort' reads a table by its NAME column, and kubectl's reply has none — " +
+		"add one to the custom columns (NAME:.metadata.name), or use '--sort-by' for kubectl's own order."
+	if err == nil || err.Error() != want {
+		t.Errorf("ExecuteGroups: err = %v, want %q", err, want)
+	}
+
+	kubectl = &fakeKubectl{outputs: []string{"NAME   PHASE\nweb    Running\n", "NAME   PHASE\napi    Pending\n"}}
+	table, err := newGet(kubectl, &fakeState{}).ExecuteGroups(
+		"pods", "", groups, []string{"-o", "custom-columns=NAME:.metadata.name,PHASE:.status.phase", sortArg("phase")})
+	if err != nil {
+		t.Fatalf("ExecuteGroups with a NAME column: %v", err)
+	}
+	if len(table.Rows) != 2 || table.Rows[0][2] != "api" {
+		t.Errorf("rows = %q, want api's Pending row first", table.Rows)
+	}
+}
+
 // An -A listing records the scope it was taken at, rather than leaving it to be
 // inferred from whether its resources carry namespaces — which a walk that
 // never left one namespace also does.
