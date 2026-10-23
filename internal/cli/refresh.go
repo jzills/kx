@@ -472,7 +472,49 @@ func relistCommand(entry state.State, elsewhere bool) string {
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)
 	}
-	return strings.Join(words, " ")
+	return joinWords(words)
+}
+
+// joinWords is the words of a relist as a line to paste back: one holding a
+// space, or anything else a shell reads, is quoted. Unquoted, the
+// `--sort=nominated node` of `kx get pods --sort "nominated node"` pasted
+// back looked up a Pod named node, and a -m term reads the same way.
+func joinWords(words []string) string {
+	quoted := make([]string, len(words))
+	for i, word := range words {
+		// A --flag=value is quoted around its value, so the flag it sets
+		// still reads as one.
+		if flag, value, ok := strings.Cut(word, "="); ok && strings.HasPrefix(word, "-") {
+			quoted[i] = flag + "=" + shellWord(value)
+			continue
+		}
+		quoted[i] = shellWord(word)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellWord is a word as a shell reads it back: itself when every character
+// is its own, double-quoted otherwise — the hint around it is in single
+// quotes already — with a backslash before what a shell still reads inside
+// them.
+func shellWord(word string) string {
+	if word != "" && !strings.ContainsFunc(word, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' ||
+			r == ',' || r == '=' || r == '%' || r == '+' || r == '@' ||
+			(r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'))
+	}) {
+		return word
+	}
+	var quoted strings.Builder
+	quoted.WriteByte('"')
+	for _, r := range word {
+		if r == '"' || r == '\\' || r == '$' || r == '`' {
+			quoted.WriteByte('\\')
+		}
+		quoted.WriteRune(r)
+	}
+	quoted.WriteByte('"')
+	return quoted.String()
 }
 
 // withScope is a relist of a command whose arguments it repeats: them, and
