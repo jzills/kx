@@ -560,6 +560,53 @@ func scanPage(scope, match string, rows []scanner.ImageScan, meta web.Meta) web.
 	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Images: rows}
 }
 
+// scanSortKeys reads kx scan's --sort against the summary's own columns,
+// which are fixed: a column the table lacks is refused before anything is
+// scanned, not after every image has been.
+func scanSortKeys(spec string) ([]index.SortKey, error) {
+	if spec == "" {
+		return nil, nil
+	}
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return nil, sortSpecError(spec)
+	}
+	if _, err := index.SortRows(render.ScanHeaders(), nil, keys); err != nil {
+		return nil, sortError(err)
+	}
+	return keys, nil
+}
+
+// sortScans orders scan rows by keys over the summary's columns, the counts
+// as the table prints them: a failed scan's "—" is no count, and sorts last.
+// The row's position rides along past the headers, so the rows themselves
+// can be put back in the sorted order.
+func sortScans(rows []scanner.ImageScan, keys []index.SortKey) []scanner.ImageScan {
+	if len(keys) == 0 {
+		return rows
+	}
+	cells := make([][]string, len(rows))
+	for i, row := range rows {
+		line := []string{row.Image}
+		for _, severity := range scanner.Severities {
+			if row.Counts == nil {
+				line = append(line, "—")
+			} else {
+				line = append(line, strconv.Itoa(row.Counts[severity]))
+			}
+		}
+		cells[i] = append(line, strconv.Itoa(i))
+	}
+	// The keys were checked against these headers by scanSortKeys.
+	sorted, _ := index.SortRows(render.ScanHeaders(), cells, keys)
+	ordered := make([]scanner.ImageScan, len(rows))
+	for i, line := range sorted {
+		at, _ := strconv.Atoi(line[len(line)-1])
+		ordered[i] = rows[at]
+	}
+	return ordered
+}
+
 // sweepPageScope captions a namespace sweep's page with the same "Mixed · "
 // cross-kind label render.ScopeBanner already printed to the terminal above
 // it. scan.gohtml renders Scope verbatim rather than assuming every scan is a
@@ -585,8 +632,12 @@ func newScanCommand(services Services) *cobra.Command {
 			"Requires the CLI for the selected engine. Docker Scout is the default: https://docs.docker.com/scout/\n" +
 			"Trivy is available via --engine trivy: https://trivy.dev/\n" +
 			"Grype is available via --engine grype: https://github.com/anchore/grype\n" +
-			"Run 'kx engine' to see or change the default.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan 1 --full\n" +
+			"Run 'kx engine' to see or change the default.\n\n" +
+			"A --sort orders the summary by its columns, IMAGE, CRIT, HIGH, MED, LOW and UNSPEC, " +
+			"with a leading - for largest first: --sort -crit,-high puts the most critical images " +
+			"first. The order carries into --json and the --html page, and an image that failed " +
+			"to scan sorts last.",
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
@@ -603,6 +654,16 @@ func newScanCommand(services Services) *cobra.Command {
 				engine = services.Config.Engine
 			}
 			full, rest := extractBool(rest, "--full")
+			// By presence, as kx get's: `--sort=` names no column.
+			if hasFlag(rest, "--sort", "") {
+				if spec, _, _ := extractString(rest, "--sort", ""); spec == "" {
+					return sortSpecError("")
+				}
+			}
+			sortSpec, rest, err := extractString(rest, "--sort", "")
+			if err != nil {
+				return err
+			}
 			html, rest := extractBool(rest, "--html")
 			asJSON, rest := extractBool(rest, "--json")
 			failOn, rest, err := extractString(rest, "--fail-on", "")
@@ -651,6 +712,20 @@ func newScanCommand(services Services) *cobra.Command {
 					"'--full' cannot be combined with '--fail-on' — '--full' streams " +
 						"the scanner's own report, which kx does not parse, so the " +
 						"gate has nothing to read.")
+			}
+			// The table --sort orders is kx's summary, which --full replaces
+			// with the scanner's own report.
+			if sortSpec != "" && full {
+				return errors.New(
+					"'--sort' cannot be combined with '--full' — '--full' streams " +
+						"the scanner's own report, which kx does not parse, so there is " +
+						"no table to sort.")
+			}
+			// Validated up front, as --fail-on is, so a typo fails before any
+			// image is scanned. A column the summary lacks is known now too.
+			sortKeys, err := scanSortKeys(sortSpec)
+			if err != nil {
+				return err
 			}
 			// Validated up front so a typo fails before any image is scanned
 			// rather than after every one of them has been.
@@ -811,6 +886,9 @@ func newScanCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Sorted once, before any of the three views is built from it, so
+			// the table, the document and the page agree.
+			rows = sortScans(rows, sortKeys)
 			if asJSON {
 				document, err := scanJSON(subject, rows)
 				if err != nil {
@@ -836,17 +914,19 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
 					invocation("scan", indexArg, scopeArgs(namespace, all),
-						matchFlag(match), portFlag(port)))
+						matchFlag(match), sortFlag(sortSpec), portFlag(port)))
 				if err != nil {
 					return err
 				}
-				page, err := web.RenderScan(scanPage(pageScope, match, rows, meta))
+				page := scanPage(pageScope, match, rows, meta)
+				page.Sorted = len(sortKeys) > 0
+				rendered, err := web.RenderScan(page)
 				if err != nil {
 					return err
 				}
 				// After the server stops, so Ctrl-C ends the command with the
 				// exit code the scan earned rather than the server's nil.
-				if err := deliverPage(cmd.Context(), page, htmlOpts); err != nil {
+				if err := deliverPage(cmd.Context(), rendered, htmlOpts); err != nil {
 					return err
 				}
 			}
@@ -858,6 +938,8 @@ func newScanCommand(services Services) *cobra.Command {
 		"Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default")
 	cmd.Flags().Bool("full", false,
 		"Stream the scanner's full output instead of the summary table")
+	cmd.Flags().String("sort", "",
+		"Sort the summary by its columns: '-crit,-high' puts the most critical images first")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,

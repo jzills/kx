@@ -330,7 +330,11 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 	query := *entry.Query
 	namespace, all, named := sweptScope(services, entry, elsewhere)
 	_, _, rest := recordedScope(query.Args)
-	since, _, err := extractString(rest, "--since", "")
+	since, rest, err := extractString(rest, "--since", "")
+	if err != nil {
+		return nil, err
+	}
+	sortSpec, _, err := extractString(rest, "--sort", "")
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +343,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 		return nil, err
 	}
 	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
-		false, window, since, queryMatch(query))
+		false, window, since, queryMatch(query), sortSpec)
 	if err != nil {
 		return nil, err
 	}

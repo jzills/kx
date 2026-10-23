@@ -15,6 +15,8 @@ Trivy is available via --engine trivy: https://trivy.dev/
 Grype is available via --engine grype: https://github.com/anchore/grype
 Run 'kx engine' to see or change the default.
 
+A --sort orders the summary by its columns, IMAGE, CRIT, HIGH, MED, LOW and UNSPEC, with a leading - for largest first: --sort -crit,-high puts the most critical images first. The order carries into --json and the --html page, and an image that failed to scan sorts last.
+
 Unrecognized flags are passed through to the scanner.
 
 ## Usage
@@ -44,6 +46,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
+| `--sort string` | Sort the summary by its columns: '-crit,-high' puts the most critical images first |
 
 ## Global options
 
@@ -59,6 +62,7 @@ kx scan
 kx scan 1
 kx scan -n prod
 kx scan -m api
+kx scan --sort -crit,-high
 kx scan 1 --full
 kx scan --html
 kx scan -A --json

@@ -20,6 +20,8 @@ Every finding says which it is. '· for 24d' is how long something has been true
 
 A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.
 
+A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.
+
 ## Usage
 
 ```text
@@ -51,6 +53,7 @@ kx diagnostic [OPTIONS] [index]
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
 | `--since string` | Ignore anything that happened longer ago than this — events, past restarts, failed runs; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to diag_max_age, which is unset: everything is reported |
+| `--sort string` | Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each |
 
 ## Global options
 
@@ -66,6 +69,7 @@ kx diagnostic
 kx diagnostic 1
 kx diagnostic -n prod
 kx diagnostic -m api
+kx diagnostic -A --sort namespace,kind
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json

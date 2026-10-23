@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -162,5 +168,127 @@ func TestTopSortNumbersTheSortedRows(t *testing.T) {
 	entry, _ := services.State.Load()
 	if !slices.Contains(entry.Query.Args, "--sort=-cpu%") {
 		t.Errorf("saved query args = %q, want --sort=-cpu%% recorded", entry.Query.Args)
+	}
+}
+
+// kx scan's rows come back in the order images were resolved, not by
+// severity, so --sort -crit,-high is how a sweep answers which image is
+// worst. A failed scan has no counts and sorts last, as its dashes say.
+func TestScanSortOrdersTheSummary(t *testing.T) {
+	counts := func(critical, high int) map[string]int {
+		return map[string]int{"CRITICAL": critical, "HIGH": high}
+	}
+	rows := []scanner.ImageScan{
+		{Image: "a", Counts: counts(0, 9)},
+		{Image: "failed", Error: "pull failed"},
+		{Image: "b", Counts: counts(3, 1)},
+		{Image: "c", Counts: counts(3, 4)},
+		// Clean, and after the failed scan: read as zeroes, the failed scan
+		// would tie with it and stay ahead of it.
+		{Image: "clean", Counts: counts(0, 0)},
+	}
+	keys, err := scanSortKeys("-crit,-high")
+	if err != nil {
+		t.Fatalf("scanSortKeys: %v", err)
+	}
+	var got []string
+	for _, row := range sortScans(rows, keys) {
+		got = append(got, row.Image)
+	}
+	if want := []string{"c", "b", "a", "clean", "failed"}; !slices.Equal(got, want) {
+		t.Errorf("sorted images = %v, want %v", got, want)
+	}
+}
+
+// The summary's columns are fixed, so a key it lacks — and a key naming
+// nothing — is refused before kubectl or any scanner runs, as is --sort
+// beside --full, whose output is the scanner's own.
+func TestScanSortRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--sort", "crti"},
+			"Invalid value for '--sort': 'crti'. Accepted values: image, crit, high, med, low, unspec."},
+		{[]string{"--sort="},
+			"Invalid value for '--sort': '' names no column — name each column, separated by commas: 'status,-restarts'."},
+		{[]string{"--sort", "-crit", "--full"},
+			"'--sort' cannot be combined with '--full' — '--full' streams the scanner's own report, which kx does not parse, so there is no table to sort."},
+	} {
+		kube := &fakeKubectl{namespace: "prod", output: `{"items":[]}`}
+		fake := &fakeScanner{}
+		cmd := newScanCommand(Services{
+			Kubectl: kube, Config: config.Default(), Scanner: fake,
+			State: &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")},
+		})
+		// kx scan parses its own argv (DisableFlagParsing), so RunE takes it
+		// whole, as the other scan tests drive it.
+		err := cmd.RunE(cmd, tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("kx scan %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+		if len(kube.calls) > 0 || len(fake.argv) > 0 {
+			t.Errorf("kx scan %s: ran kubectl %q or the scanner %q", strings.Join(tc.args, " "), kube.calls, fake.argv)
+		}
+	}
+}
+
+// A sweep is ranked most severe first, and --sort orders it on top: the keys
+// decide, and the ranking orders what they tie on. VERDICT sorts by severity
+// — as text, -verdict put warning above critical — and the indexes saved
+// follow the sorted order, with the query recording the sort for a refresh.
+func TestDiagSortOrdersTheRankedSweep(t *testing.T) {
+	gatherer := &fakeGatherer{sweep: []diagnostics.Data{
+		healthy(kinds.Deployment, "a-ok", "prod"),
+		unhealthy(kinds.StatefulSet, "db", "prod"),
+		unhealthy(kinds.Deployment, "z-bad", "prod"),
+		healthy(kinds.StatefulSet, "cache", "prod"),
+	}}
+	var saved []state.State
+	command := triageOf(gatherer, &saved)
+	command.Sort = "kind"
+	result, err := command.Execute(context.Background(), "prod", false, true)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var got []string
+	for _, report := range result.All {
+		got = append(got, report.Name)
+	}
+	// Deployments, then StatefulSets; the critical one first within each.
+	if want := []string{"z-bad", "a-ok", "db", "cache"}; !slices.Equal(got, want) {
+		t.Errorf("sorted sweep = %v, want %v", got, want)
+	}
+	last := saved[len(saved)-1]
+	if first, ok := last.Resources.At(1); last.Resources.Len() != 4 || !ok || first.Name != "z-bad" {
+		t.Errorf("saved listing = %v, want index 1 to be z-bad", last.Resources)
+	}
+	if !slices.Contains(last.Query.Args, "--sort=kind") {
+		t.Errorf("saved query args = %q, want --sort=kind recorded", last.Query.Args)
+	}
+
+	reports := result.All
+	ascending, _ := sortReports(reports, "verdict,name")
+	if ascending[0].Name != "a-ok" || ascending[len(ascending)-1].Name != "z-bad" {
+		t.Errorf("verdict,name = %v first and %v last, want healthy first and z-bad last",
+			ascending[0].Name, ascending[len(ascending)-1].Name)
+	}
+}
+
+// A sweep's columns are fixed, so its --sort is checked before anything is
+// swept, and refused beside an index, whose report has no rows to order.
+func TestDiagSortRefusals(t *testing.T) {
+	want := "Invalid value for '--sort': 'severity'. Accepted values: kind, name, namespace, verdict, top-finding."
+	if err := sweepSortError("severity"); err == nil || err.Error() != want {
+		t.Errorf("sweepSortError(severity) = %v, want %q", err, want)
+	}
+	if err := sweepSortError("-verdict,top-finding"); err != nil {
+		t.Errorf("sweepSortError(-verdict,top-finding) = %v, want nil", err)
+	}
+	services := switchServices(t, &fakeKubectl{namespace: "prod"})
+	err := executeArgv(newDiagnosticCommand(services, "diagnostic", nil), []string{"1", "--sort", "kind"})
+	want = "'--sort' cannot be combined with an index — it sorts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."
+	if err == nil || err.Error() != want {
+		t.Errorf("kx diag 1 --sort kind: err = %v, want %q", err, want)
 	}
 }

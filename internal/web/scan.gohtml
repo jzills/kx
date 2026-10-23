@@ -3,7 +3,7 @@
   <p class="caption">{{.Scope}} · {{if and .Match (not .Images)}}{{nothingMatches .Match}}{{else}}{{len .Images}} {{if eq (len .Images) 1}}image{{else}}images{{end}}{{end}}</p>
 
   <p class="label">Images</p>
-  <div class="grid-mount" data-kx-grid="scan-images"></div>
+  <div class="grid-mount" data-kx-grid="scan-images" data-sorted="{{.Sorted}}"></div>
   <script type="application/json" id="kx-scan-images-data">{{scanImageRowsJSON .Images}}</script>
 
   <p class="label">Vulnerabilities</p>

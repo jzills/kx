@@ -206,15 +206,15 @@ func newTopCommand(services Services) *cobra.Command {
 		// What follows the resource is kubectl's, then its flags.
 		rest := append(positional[:len(positional):len(positional)], forward...)
 		// --sort travels with the args, as the query records it (sortArg).
+		sortSpec, _ := flags.GetString("sort")
 		if flags.Changed("sort") {
-			spec, _ := flags.GetString("sort")
-			if spec == "" {
+			if sortSpec == "" {
 				return sortSpecError("")
 			}
-			if err := sortRefusal(spec, rest); err != nil {
+			if err := sortRefusal(sortSpec, rest); err != nil {
 				return err
 			}
-			rest = append(rest, sortArg(spec))
+			rest = append(rest, sortArg(sortSpec))
 		}
 
 		// kubectl rejects -A on `top node` with its own error, naming its
@@ -309,7 +309,8 @@ func newTopCommand(services Services) *cobra.Command {
 
 		label := kinds.PluralDisplay(resourceLabel)
 		meta, err := pageMeta(services.Config.Theme, "top · "+label,
-			invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), matchFlag(match), portFlag(port)))
+			invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), matchFlag(match),
+				sortFlag(sortSpec), portFlag(port)))
 		if err != nil {
 			return err
 		}
