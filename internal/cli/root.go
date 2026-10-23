@@ -238,8 +238,8 @@ func newGetCommand(services Services) *cobra.Command {
 			"A `--match` term narrows the table, a watch's live table, `-o name` or a " +
 			"`-o json`/`-o yaml` collection by each row's name. A template is a shape " +
 			"you chose, which kx cannot assume has names in it, so it refuses the term " +
-			"there rather than printing everything.",
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort-by=.metadata.creationTimestamp",
+			"there rather than printing everything.\n\n" + sortLong,
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort status,-restarts\n  kx get pods -A --sort namespace,-age\n  kx get pods --sort-by=.metadata.creationTimestamp",
 		Args:    minArgs(1),
 	}
 	kubectlFlags := registerGetFlags(cmd)
@@ -273,6 +273,7 @@ func newGetCommand(services Services) *cobra.Command {
 // then kubectl get's from the table.
 func registerGetFlags(cmd *cobra.Command) *kubectlArgs {
 	cmd.Flags().StringP("match", "m", "", matchUsage)
+	cmd.Flags().String("sort", "", sortUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
@@ -310,6 +311,13 @@ func getOptionsFrom(cmd *cobra.Command) (getOptions, error) {
 		options.HasKey = true
 		if options.Key, err = flags.GetString("key"); err != nil {
 			return options, err
+		}
+	}
+	// By presence, as --key: `--sort ""` names no column, and is refused
+	// rather than read as no sort at all.
+	if flags.Changed("sort") {
+		if options.Sort, _ = flags.GetString("sort"); options.Sort == "" {
+			return options, sortSpecError("")
 		}
 	}
 	return options, nil

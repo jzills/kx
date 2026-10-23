@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,7 +15,9 @@ import (
 // same body so that shadowing the `secret` kind spelling costs none of the
 // listing behavior.
 type getOptions struct {
-	Match  string
+	Match string
+	// Sort is a --sort value, empty for none.
+	Sort   string
 	Decode bool
 	Key    string
 	HasKey bool
@@ -142,6 +145,11 @@ func runGet(services Services, resource string, args []string, options getOption
 	// way to relist anything — including the hint a kind mismatch prints.
 	switch strings.ToLower(resource) {
 	case "context", "contexts":
+		// kubeconfig's contexts are listed by kx itself, not from a kubectl
+		// table, and in the order kubeconfig holds them.
+		if options.Sort != "" {
+			return errors.New("kx get contexts does not support '--sort' — only a resource listing can be sorted.")
+		}
 		if len(refs) == 0 {
 			return listContexts(services, options.Match)
 		}
@@ -224,6 +232,18 @@ func runGet(services Services, resource string, args []string, options getOption
 		}
 	}
 
+	// A --sort orders a listing, which a Secret's data is not.
+	if options.Sort != "" && (options.Decode || options.HasKey) {
+		flag := "--decode"
+		if !options.Decode {
+			flag = "--key"
+		}
+		return fmt.Errorf("'--sort' cannot be combined with '%s' — it sorts a listing, "+
+			"and '%s' prints a Secret's data.", flag, flag)
+	}
+	if err := sortRefusal(options.Sort, extra); err != nil {
+		return err
+	}
 	if options.Decode || options.HasKey {
 		// Resolved only when the command already names a Secret-shaped
 		// resource and carries indexes: otherwise decodeSecrets's own guards
@@ -242,6 +262,11 @@ func runGet(services Services, resource string, args []string, options getOption
 			}
 		}
 		return decodeSecrets(services, resource, resolved, extra, options)
+	}
+
+	// The sort travels with the args, as the query records it (sortArg).
+	if options.Sort != "" {
+		extra = append(extra, sortArg(options.Sort))
 	}
 
 	// The namespace an index fetch is taken in when the user named none.

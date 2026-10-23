@@ -136,9 +136,9 @@ func newTopCommand(services Services) *cobra.Command {
 		Use:        "top [resource] [kubectl flags]",
 		SuggestFor: []string{"usage", "metrics", "stats"},
 		Short:      "List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits.",
-		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.",
+		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.\n\n" + sortLong,
 		Example: "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits\n" +
-			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort-by=memory",
+			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort -mem%,-cpu%\n  kx top nodes --sort -cpu%\n  kx top --sort-by=memory",
 		// `resource` means something narrower here than it does to kx get.
 		Annotations: map[string]string{"arg.resource": "'pods' (the default) or 'nodes'"},
 	}
@@ -205,6 +205,17 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 		// What follows the resource is kubectl's, then its flags.
 		rest := append(positional[:len(positional):len(positional)], forward...)
+		// --sort travels with the args, as the query records it (sortArg).
+		if flags.Changed("sort") {
+			spec, _ := flags.GetString("sort")
+			if spec == "" {
+				return sortSpecError("")
+			}
+			if err := sortRefusal(spec, rest); err != nil {
+				return err
+			}
+			rest = append(rest, sortArg(spec))
+		}
 
 		// kubectl rejects -A on `top node` with its own error, naming its
 		// own command; -n it accepts and ignores. Both are refused here
@@ -312,6 +323,7 @@ func newTopCommand(services Services) *cobra.Command {
 		return deliverPage(cmd.Context(), page, htmlOpts)
 	}
 	cmd.Flags().StringP("match", "m", "", matchUsage)
+	cmd.Flags().String("sort", "", sortUsage)
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
 	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")

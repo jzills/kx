@@ -50,6 +50,13 @@ func (c TopCommand) EnsureAvailable() error {
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table index.Table, namespace string, err error) {
+	// A --sort is recorded with the query and kept from kubectl, as kx get
+	// does with it.
+	recorded := extraArgs
+	keys, extraArgs, err := takeSort(extraArgs)
+	if err != nil {
+		return index.Table{}, "", err
+	}
 	// Another cluster's usage is printed as kubectl gives it and never saved,
 	// as kx get prints another cluster's listing. The metrics probe and the
 	// pod limits the percentages come from both read the current cluster, so
@@ -68,7 +75,7 @@ func (c TopCommand) Execute(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
 		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
@@ -124,11 +131,17 @@ func (c TopCommand) Execute(
 			return index.Table{}, "", err
 		}
 	}
+	// After the percentages, so CPU% and MEM% — the columns kubectl top
+	// cannot sort by — can be sorted by here.
+	if rows, err = index.SortRows(headers, rows, keys); err != nil {
+		return index.Table{}, "", sortError(err)
+	}
 
 	indexed := c.Index.AddRows(headers, rows)
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
+	extraArgs = recorded
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -141,7 +154,7 @@ func (c TopCommand) Execute(
 	}
 	// --no-limits is kx's flag, not kubectl's, and recorded beside them: it
 	// decides the columns the listing was read from.
-	recorded := extraArgs
+	recorded = extraArgs
 	if noLimits {
 		recorded = append(append([]string{}, extraArgs...), "--no-limits")
 	}
@@ -197,6 +210,11 @@ func topListing(
 func (c TopCommand) ExecuteNodes(
 	filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
+	recorded := extraArgs
+	keys, extraArgs, err := takeSort(extraArgs)
+	if err != nil {
+		return index.Table{}, "", err
+	}
 	// Another cluster's nodes print unnumbered and unsaved; see Execute.
 	crossCluster := clusterFlagIn(extraArgs) != ""
 	if !crossCluster {
@@ -210,7 +228,7 @@ func (c TopCommand) ExecuteNodes(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
 		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
@@ -244,10 +262,16 @@ func (c TopCommand) ExecuteNodes(
 		rows = index.FilterRows(headers, rows, filterTerm)
 	}
 	headers = relabelPercentColumns(headers)
+	// After the relabel: kubectl's CPU(%) would otherwise read as "cpu",
+	// which is CPU(cores).
+	if rows, err = index.SortRows(headers, rows, keys); err != nil {
+		return index.Table{}, "", sortError(err)
+	}
 
 	indexed := c.Index.AddRows(headers, rows)
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed; see Execute above.
+	extraArgs = recorded
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
