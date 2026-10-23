@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"html"
 	"strings"
 	"testing"
@@ -1573,5 +1574,41 @@ func TestRenderTopCarriesTheContainersPod(t *testing.T) {
 	rows := decodeTopRows(t, string(out))
 	if len(rows) != 1 || rows[0].Pod != "web-1" || rows[0].Name != "nginx" {
 		t.Fatalf("rows = %+v, want pod web-1 beside container nginx", rows)
+	}
+}
+
+// A --sort hands the images over in its order, and the grid keeps it on load
+// rather than sorting by Crit; without one, the Crit sort stands. The page
+// says which on the grid's mount, where kx-grid.js reads it.
+func TestRenderScanMarksASortedPage(t *testing.T) {
+	for _, sorted := range []bool{true, false} {
+		page := scanPage(t)
+		page.Sorted = sorted
+		out, err := RenderScan(page)
+		if err != nil {
+			t.Fatalf("RenderScan returned %v", err)
+		}
+		want := fmt.Sprintf(`data-kx-grid="scan-images" data-sorted="%t"`, sorted)
+		if !strings.Contains(string(out), want) {
+			t.Errorf("Sorted=%t: page lacks %s", sorted, want)
+		}
+	}
+}
+
+// As the scan page: a sorted sweep's grid keeps the order its rows arrived
+// in rather than sorting by verdict on load, and says so on its mount.
+func TestRenderDiagMarksASortedSweep(t *testing.T) {
+	for _, sorted := range []bool{true, false} {
+		out, err := RenderDiag(DiagPage{
+			Meta: testMeta(t), Scope: "diagnostics", Checked: 1, Sorted: sorted,
+			Reports: []diagnostics.Report{criticalReport(t)},
+		})
+		if err != nil {
+			t.Fatalf("RenderDiag returned %v", err)
+		}
+		want := fmt.Sprintf(`data-all-namespaces="false" data-sorted="%t"`, sorted)
+		if !strings.Contains(string(out), want) {
+			t.Errorf("Sorted=%t: page lacks %s", sorted, want)
+		}
 	}
 }

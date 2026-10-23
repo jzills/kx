@@ -40,6 +40,15 @@ func takeSort(args []string) ([]index.SortKey, []string, error) {
 	return keys, rest, nil
 }
 
+// sortFlag renders a --sort for an HTML report's invocation line, so the page
+// says what order its rows arrived in.
+func sortFlag(spec string) string {
+	if spec == "" {
+		return ""
+	}
+	return "--sort " + spec
+}
+
 func sortSpecError(spec string) error {
 	return fmt.Errorf("Invalid value for '--sort': '%s' names no column — name each column, "+
 		"separated by commas: 'status,-restarts'.", spec)

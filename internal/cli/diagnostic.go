@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/jzills/kx/internal/config"
@@ -75,6 +76,11 @@ type TriageCommand struct {
 	// Window is what the sweep used. A refresh runs the sweep again with this
 	// and resolves the window afresh, as typing the command again would.
 	Since string
+	// Sort is a --sort over the sweep's columns, empty for none. Applied on
+	// top of the severity ranking, so it decides the order and the ranking
+	// the order of what it ties on; recorded in the query, so a refresh
+	// sweeps into the same order.
+	Sort string
 	// NamedNamespace is whether the namespace swept was named — -n, or an
 	// agent's namespace — rather than the context's own. Only a named one is
 	// recorded in the query; the entry records where the sweep was taken
@@ -124,6 +130,9 @@ func (c TriageCommand) Execute(
 	sort.SliceStable(reports, func(i, j int) bool {
 		return reports[i].Verdict > reports[j].Verdict
 	})
+	if reports, err = sortReports(reports, c.Sort); err != nil {
+		return render.TriageResult{}, err
+	}
 
 	var unhealthy []diagnostics.Report
 	for _, report := range reports {
@@ -197,7 +206,60 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 	if c.Since != "" {
 		args = append(args, "--since", c.Since)
 	}
+	if c.Sort != "" {
+		args = append(args, sortArg(c.Sort))
+	}
 	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match)}
+}
+
+// sweepSortError refuses a sweep's --sort before anything is swept: one that
+// names no column, or a column the sweep has none of.
+func sweepSortError(spec string) error {
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return sortSpecError(spec)
+	}
+	if _, err := index.SortRows(sweepHeaders, nil, keys); err != nil {
+		return sortError(err)
+	}
+	return nil
+}
+
+// sweepHeaders are the columns a sweep's --sort names: the triage table's,
+// with NAMESPACE whether or not the table shows it.
+var sweepHeaders = []string{"KIND", "NAME", "NAMESPACE", "VERDICT", "TOP FINDING"}
+
+// sortReports orders a ranked sweep by a --sort over its columns, stably, so
+// the severity ranking orders whatever the keys tie on. VERDICT sorts by
+// severity, not spelling — as text, -verdict put warning above critical — so
+// its cell is the severity's number; the cells are only sorted, never shown.
+func sortReports(reports []diagnostics.Report, spec string) ([]diagnostics.Report, error) {
+	if spec == "" {
+		return reports, nil
+	}
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return nil, sortSpecError(spec)
+	}
+	cells := make([][]string, len(reports))
+	for i, report := range reports {
+		top := ""
+		if len(report.Findings) > 0 {
+			top = report.Findings[0].Summary
+		}
+		cells[i] = []string{string(report.Kind), report.Name, report.Namespace,
+			strconv.Itoa(int(report.Verdict)), top, strconv.Itoa(i)}
+	}
+	sorted, err := index.SortRows(sweepHeaders, cells, keys)
+	if err != nil {
+		return nil, sortError(err)
+	}
+	ordered := make([]diagnostics.Report, len(reports))
+	for i, line := range sorted {
+		at, _ := strconv.Atoi(line[len(line)-1])
+		ordered[i] = reports[at]
+	}
+	return ordered, nil
 }
 
 // runSweep sweeps a namespace, or every namespace, under a spinner, and saves
@@ -215,7 +277,7 @@ type sweepScope struct {
 
 func runSweep(
 	ctx context.Context, services Services, scope sweepScope, full bool,
-	window time.Duration, since, match string,
+	window time.Duration, since, match, sortSpec string,
 ) (render.TriageResult, error) {
 	client, err := services.Kubernetes()
 	if err != nil {
@@ -230,7 +292,7 @@ func runSweep(
 	stop := render.Status(sweeping)
 	result, err := TriageCommand{
 		Diagnostics: service, Save: services.State.Save, Window: window,
-		Match: match, Since: since, NamedNamespace: scope.Named,
+		Match: match, Since: since, Sort: sortSpec, NamedNamespace: scope.Named,
 	}.Execute(ctx, scope.Namespace, scope.All, full)
 	stop()
 	return result, err
@@ -324,9 +386,11 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
 			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending Pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
-			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
+			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.\n\n" +
+			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -m api\n" +
+			"  kx " + use + " -A --sort namespace,kind\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
@@ -343,6 +407,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			failOn, _ := cmd.Flags().GetString("fail-on")
 			since, _ := cmd.Flags().GetString("since")
 			match, _ := cmd.Flags().GetString("match")
+			sortSpec, _ := cmd.Flags().GetString("sort")
+			// Checked up front, as --fail-on is: a sweep's columns are fixed,
+			// so a column it lacks costs nothing to refuse.
+			if cmd.Flags().Changed("sort") {
+				if err := sweepSortError(sortSpec); err != nil {
+					return err
+				}
+			}
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -414,6 +486,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"the namespace instead.")
 			}
 
+			// --sort orders a sweep's rows; one resource's report has none.
+			if len(args) > 0 && cmd.Flags().Changed("sort") {
+				return errors.New(
+					"'--sort' cannot be combined with an index — it sorts a namespace " +
+						"sweep. Drop the flag, or drop the index to sweep the namespace " +
+						"instead.")
+			}
+
 			ctx := cmd.Context()
 
 			if len(args) == 0 {
@@ -423,7 +503,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				result, err := runSweep(ctx, services,
 					sweepScope{Namespace: namespace, All: allNamespaces, Named: named},
-					full, window, since, match)
+					full, window, since, match, sortSpec)
 				if err != nil {
 					return err
 				}
@@ -447,11 +527,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 						invocation(use, scopeArgs(namespace, allNamespaces),
-							matchFlag(match), sinceFlag(window), portFlag(port)))
+							matchFlag(match), sinceFlag(window), sortFlag(sortSpec), portFlag(port)))
 					if err != nil {
 						return err
 					}
-					page, err := web.RenderDiag(sweepPage(result, meta))
+					diagPage := sweepPage(result, meta)
+					diagPage.Sorted = sortSpec != ""
+					page, err := web.RenderDiag(diagPage)
 					if err != nil {
 						return err
 					}
@@ -514,6 +596,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().StringP("match", "m", "", matchUsage)
+	cmd.Flags().String("sort", "",
+		"Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each")
 	cmd.Flags().Bool("full", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,

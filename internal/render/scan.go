@@ -19,6 +19,16 @@ var scanSeverity = map[string]struct{ Header, Style string }{
 	"UNSPECIFIED": {"UNSPEC", theme.Muted},
 }
 
+// ScanHeaders are the summary table's column headers, IMAGE and then one per
+// severity, as ScanSummary draws them: what kx scan's --sort names.
+func ScanHeaders() []string {
+	headers := []string{"IMAGE"}
+	for _, severity := range scanner.Severities {
+		headers = append(headers, scanSeverity[severity].Header)
+	}
+	return headers
+}
+
 // ScanSummary renders one row per unique image: severity counts colored by
 // bucket, with a trailing status cell for images that failed to scan.
 //

@@ -207,6 +207,8 @@
     var data = kxData("kx-diag-data");
     if (!data) return;
     var allNamespaces = mount.getAttribute("data-all-namespaces") === "true";
+    // A --sort ordered the rows already; keep its order on load.
+    var sorted = mount.getAttribute("data-sorted") === "true";
 
     var columns = [];
     // "X", not "#": every indexed listing in kx (internal/render/history.go,
@@ -282,7 +284,7 @@
       data: data,
       layout: "fitColumns",
       columns: columns,
-      initialSort: [{ column: "Verdict", dir: "desc" }],
+      initialSort: sorted ? [] : [{ column: "Verdict", dir: "desc" }],
       rowFormatter: diagRowFormatter,
       // Tabulator's default virtual-DOM renderer calculates every row's
       // height once, up front, to absolutely position rows and size the
@@ -376,6 +378,9 @@
     if (!mount) return;
     var data = kxData("kx-scan-images-data");
     if (!data) return;
+    // A --sort ordered the rows already; keep its order on load. Clicking a
+    // header sorts either way.
+    var sorted = mount.getAttribute("data-sorted") === "true";
 
     new Tabulator(mount, {
       data: data,
@@ -390,7 +395,7 @@
         { title: "Unspec", field: "Unspecified", width: 80, hozAlign: "right", sorter: "number", formatter: countFormatter(null) },
         { title: "Status", field: "Error", width: 120, formatter: imageStatusFormatter, headerSort: false },
       ],
-      initialSort: [{ column: "Critical", dir: "desc" }],
+      initialSort: sorted ? [] : [{ column: "Critical", dir: "desc" }],
     });
   }
 
