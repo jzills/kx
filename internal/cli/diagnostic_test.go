@@ -1055,7 +1055,7 @@ func TestDiagJSONDatesTheFindingsThatHaveAMoment(t *testing.T) {
 		Verdict: diagnostics.Critical,
 		Findings: []diagnostics.Finding{
 			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, At: at,
-				Summary: "OOMKilled in pod web-1"},
+				Summary: "OOMKilled in Pod web-1"},
 			{Severity: diagnostics.Critical, Rank: diagnostics.Aggregate,
 				Summary: "Only 0/1 replicas ready"},
 		},
@@ -1117,7 +1117,7 @@ func TestDiagJSONSeparatesAMomentFromADuration(t *testing.T) {
 		Verdict: diagnostics.Critical,
 		Findings: []diagnostics.Finding{
 			{Severity: diagnostics.Critical, Rank: diagnostics.Cause, Since: start,
-				Summary: "Image pull failure (ImagePullBackOff) in pod web-1"},
+				Summary: "Image pull failure (ImagePullBackOff) in Pod web-1"},
 			{Severity: diagnostics.Warning, Rank: diagnostics.Event, At: moment,
 				Summary: "Failed ×46154 on Pod/web-1"},
 		},

@@ -55,7 +55,7 @@ A container that terminated with an error stopped at a moment and stays stopped,
 Every finding says which it is, and the shape tells you whether a window can reach it:
 
 ```
-✗ Image pull failure (ImagePullBackOff) in pod api-badimage-… · for 25d
+✗ Image pull failure (ImagePullBackOff) in Pod api-badimage-… · for 25d
 ✗ Only 0/1 replicas ready · for 53d
 ! Failed ×46241 on Pod/api-badimage-… · 1m ago
 ```
