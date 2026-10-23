@@ -138,6 +138,14 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 			"Run 'kx top -A --no-limits -m api' to refresh the list."},
 		{"a sweep", &state.Query{Command: state.CommandDiag, Args: []string{"-A"}, Match: matchOf("api")},
 			"Run 'kx diag -A -m api' to refresh the list."},
+		// Sorted, its rows were numbered in that order; relisted without
+		// the sort, row 3 is another resource.
+		{"kx get, sorted", &state.Query{Resource: "pods", Args: []string{}, Sort: "-restarts"},
+			"Run 'kx get pods -n prod --sort=-restarts' to refresh the list."},
+		{"kx top, sorted", &state.Query{Command: state.CommandTop, Resource: "nodes", Args: []string{}, Sort: "-mem%"},
+			"Run 'kx top nodes --sort=-mem%' to refresh the list."},
+		{"a sweep, sorted", &state.Query{Command: state.CommandDiag, Args: []string{"-A"}, Sort: "kind", Match: matchOf("api")},
+			"Run 'kx diag -A --sort=kind -m api' to refresh the list."},
 		{"a namespace's tree", &state.Query{Command: state.CommandTree, Args: []string{"-n", "prod"}},
 			"Run 'kx tree -n prod' to refresh the list."},
 		// The root itself may be what went: list its kind to find it again,

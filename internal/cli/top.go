@@ -27,6 +27,8 @@ type TopCommand struct {
 	// saved — a refresh's (listingScope), or the one the context gives an
 	// agent's top call.
 	Scope string
+	// Sort is the listing's --sort, empty for none; see GetCommand.Sort.
+	Sort string
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -50,10 +52,7 @@ func (c TopCommand) EnsureAvailable() error {
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table index.Table, namespace string, err error) {
-	// A --sort is recorded with the query and kept from kubectl, as kx get
-	// does with it.
-	recorded := extraArgs
-	keys, extraArgs, err := takeSort(extraArgs)
+	keys, err := sortKeysOf(c.Sort)
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -141,7 +140,6 @@ func (c TopCommand) Execute(
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
-	extraArgs = recorded
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -154,7 +152,7 @@ func (c TopCommand) Execute(
 	}
 	// --no-limits is kx's flag, not kubectl's, and recorded beside them: it
 	// decides the columns the listing was read from.
-	recorded = extraArgs
+	recorded := extraArgs
 	if noLimits {
 		recorded = append(append([]string{}, extraArgs...), "--no-limits")
 	}
@@ -168,6 +166,7 @@ func (c TopCommand) Execute(
 		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
 			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
+			Sort: c.Sort,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -181,10 +180,10 @@ func (c TopCommand) Execute(
 // stale kx top listing is listed again exactly as it was — in the namespace
 // it was taken in, which a refresh passes as scope (TopCommand.Scope).
 func topListing(
-	services Services, nodes bool, match string, rest []string, noLimits bool, scope string,
+	services Services, nodes bool, match string, rest []string, noLimits bool, scope, sort string,
 ) (table index.Table, label, namespace string, spanning bool, err error) {
 	command := TopCommand{
-		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: sort,
 	}
 	if nodes {
 		table, namespace, err = command.ExecuteNodes(match, rest)
@@ -210,8 +209,7 @@ func topListing(
 func (c TopCommand) ExecuteNodes(
 	filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	recorded := extraArgs
-	keys, extraArgs, err := takeSort(extraArgs)
+	keys, err := sortKeysOf(c.Sort)
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -273,7 +271,6 @@ func (c TopCommand) ExecuteNodes(
 	indexed := c.Index.AddRows(headers, rows)
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed; see Execute above.
-	extraArgs = recorded
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
@@ -284,6 +281,7 @@ func (c TopCommand) ExecuteNodes(
 		// Execute's entry does.
 		Query: &state.Query{
 			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
+			Sort: c.Sort,
 		},
 	}); err != nil {
 		return index.Table{}, "", err

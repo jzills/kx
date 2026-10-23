@@ -54,8 +54,8 @@ func TestGetSortNumbersTheSortedRows(t *testing.T) {
 		t.Errorf("kubectl = %q, want no --sort", got)
 	}
 	entry, _ := services.State.Load()
-	if !slices.Contains(entry.Query.Args, "--sort=-restarts") {
-		t.Errorf("saved query args = %q, want --sort=-restarts recorded", entry.Query.Args)
+	if entry.Query.Sort != "-restarts" || slices.Contains(entry.Query.Args, "--sort=-restarts") {
+		t.Errorf("saved query = %+v, want its sort -restarts, apart from kubectl's args", entry.Query)
 	}
 
 	// The control: unsorted, the same reply numbers in kubectl's order.
@@ -67,17 +67,20 @@ func TestGetSortNumbersTheSortedRows(t *testing.T) {
 	}
 }
 
-// A saved listing that records a sort is listed again in that order: the
-// args a refresh replays are the ones Execute recorded.
+// A saved listing that records a sort is listed again in that order, by the
+// replay a refresh runs.
 func TestGetSortIsReplayedFromTheSavedQuery(t *testing.T) {
 	kube := &fakeKubectl{output: sortPods, namespace: "prod"}
 	services := switchServices(t, kube)
-	get := GetCommand{Kubectl: kube, State: services.State, Index: services.Index}
-	if _, _, err := get.Execute("pods", "", []string{"--sort=age"}); err != nil {
-		t.Fatalf("Execute: %v", err)
+	entry := state.State{Namespace: "prod", Query: &state.Query{Resource: "pods", Args: []string{}, Sort: "age"}}
+	if _, err := replayGet(services, entry, false); err != nil {
+		t.Fatalf("replayGet: %v", err)
 	}
 	if got, want := names(t, services.State), []string{"web-a", "api", "web-b"}; !slices.Equal(got, want) {
 		t.Errorf("replayed listing resolves to %v, want %v", got, want)
+	}
+	if got := joinArgs(kube.args); strings.Contains(got, "--sort") {
+		t.Errorf("kubectl = %q, want no --sort", got)
 	}
 }
 
@@ -178,9 +181,9 @@ func TestGetSortRefusesATableWithNoNameColumn(t *testing.T) {
 
 // Indexes resolving into several namespaces are fetched one namespace at a
 // time and stitched (ExecuteGroups), and that reply is as unreadable without a
-// NAME column as a single namespace's. Refused there too: the sort was taken
-// off the arguments for kubectl and then dropped, so `kx get pods 1 2 --sort
-// node -o custom-columns=POD:…,NODE:…` printed both namespaces in kubectl's
+// NAME column as a single namespace's. Refused there too: the fallback left
+// the sort unapplied rather than saying so, so `kx get pods 1 2 --sort node
+// -o custom-columns=POD:…,NODE:…` printed both namespaces in kubectl's
 // order and exited 0. The control is the same columns with a NAME among them,
 // which stitch and sort.
 func TestGetSortAcrossNamespacesRefusesATableWithNoNameColumn(t *testing.T) {
@@ -216,6 +219,38 @@ func TestGetSortAcrossNamespacesRefusesATableWithNoNameColumn(t *testing.T) {
 	}
 }
 
+// What follows `--` is kubectl's, forwarded unparsed. A --sort carried among
+// kubectl's args was taken back out of them as kx's own, so `-- --sort=x`
+// sorted the listing, or was refused as a column, and saved as kx's. The
+// control is TestGetSortNumbersTheSortedRows and TestTopSortNumbersTheSortedRows,
+// the same flag before `--`.
+func TestSortAfterDashIsKubectls(t *testing.T) {
+	kube := &fakeKubectl{output: sortPods, namespace: "prod"}
+	services := switchServices(t, kube)
+	if err := executeArgv(newGetCommand(services), []string{"pods", "--", "--sort=-restarts"}); err != nil {
+		t.Fatalf("kx get pods -- --sort=-restarts: %v", err)
+	}
+	if got := joinArgs(kube.args); !strings.Contains(got, "--sort=-restarts") {
+		t.Errorf("kubectl = %q, want --sort=-restarts forwarded", got)
+	}
+	if got, want := names(t, services.State), []string{"web-b", "api", "web-a"}; !slices.Equal(got, want) {
+		t.Errorf("indexes resolve to %v, want kubectl's order %v", got, want)
+	}
+	if entry, _ := services.State.Load(); entry.Query.Sort != "" {
+		t.Errorf("saved sort = %q, want none of kx's", entry.Query.Sort)
+	}
+
+	quietRender(t)
+	pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	services = topServices(t, pods)
+	if err := executeArgv(newTopCommand(services), []string{"--", "--sort=x"}); err != nil {
+		t.Fatalf("kx top -- --sort=x: %v", err)
+	}
+	if got := joinArgs(pods.calls[0]); !strings.Contains(got, "--sort=x") {
+		t.Errorf("kubectl = %q, want --sort=x forwarded", got)
+	}
+}
+
 // kx top sorts after its own percentage columns are added, so they sort —
 // which kubectl top's --sort-by, cpu or memory only, cannot do — and a node
 // listing sorts by its relabeled CPU%.
@@ -243,8 +278,8 @@ func TestTopSortNumbersTheSortedRows(t *testing.T) {
 		t.Errorf("node indexes resolve to %v, want %v", got, want)
 	}
 	entry, _ := services.State.Load()
-	if !slices.Contains(entry.Query.Args, "--sort=-cpu%") {
-		t.Errorf("saved query args = %q, want --sort=-cpu%% recorded", entry.Query.Args)
+	if entry.Query.Sort != "-cpu%" || slices.Contains(entry.Query.Args, "--sort=-cpu%") {
+		t.Errorf("saved query = %+v, want its sort -cpu%%, apart from kubectl's args", entry.Query)
 	}
 }
 
@@ -345,8 +380,8 @@ func TestDiagSortOrdersTheRankedSweep(t *testing.T) {
 	if first, ok := last.Resources.At(1); last.Resources.Len() != 4 || !ok || first.Name != "z-bad" {
 		t.Errorf("saved listing = %v, want index 1 to be z-bad", last.Resources)
 	}
-	if !slices.Contains(last.Query.Args, "--sort=kind") {
-		t.Errorf("saved query args = %q, want --sort=kind recorded", last.Query.Args)
+	if last.Query.Sort != "kind" || slices.Contains(last.Query.Args, "--sort=kind") {
+		t.Errorf("saved query = %+v, want its sort kind, apart from the sweep's args", last.Query)
 	}
 
 	reports := result.All

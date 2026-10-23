@@ -74,6 +74,9 @@ type GetCommand struct {
 	// current namespace, as kx get does. The query is saved as typed either
 	// way, so the refresh replaces the stale entry.
 	Scope string
+	// Sort is the listing's --sort, empty for none. kx's, so it is never
+	// among extraArgs, which are kubectl's.
+	Sort string
 }
 
 // replayScope is the -n a listing is taken under when its arguments name no
@@ -200,10 +203,7 @@ func namesKind(arg string) bool {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
-	// A --sort is kx's, and recorded with the query (sortArg); kubectl is
-	// asked without it.
-	recorded := extraArgs
-	keys, extraArgs, err := takeSort(extraArgs)
+	keys, err := sortKeysOf(c.Sort)
 	if err != nil {
 		return index.Table{}, "", err
 	}
@@ -311,7 +311,9 @@ func (c GetCommand) Execute(
 	// `kx delete 1` deleted a pod in a — a namespace and two commands away
 	// from anything the screen had shown. The entry carries its query, so the
 	// refusal it produces can name what found nothing.
-	if err := c.State.Save(getListing(resource, filterTerm, recorded, namespace, indexed.Entries)); err != nil {
+	listed := getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)
+	listed.Query.Sort = c.Sort
+	if err := c.State.Save(listed); err != nil {
 		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
@@ -469,7 +471,7 @@ func getListing(
 func (c GetCommand) ExecuteGroups(
 	resource, filterTerm string, groups []namespaceGroup, extraArgs []string,
 ) (table index.Table, err error) {
-	keys, extraArgs, err := takeSort(extraArgs)
+	keys, err := sortKeysOf(c.Sort)
 	if err != nil {
 		return index.Table{}, err
 	}

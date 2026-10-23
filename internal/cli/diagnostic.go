@@ -208,10 +208,7 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 	if c.Since != "" {
 		args = append(args, "--since", c.Since)
 	}
-	if c.Sort != "" {
-		args = append(args, sortArg(c.Sort))
-	}
-	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match)}
+	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match), Sort: c.Sort}
 }
 
 // sweepSortError refuses a sweep's --sort before anything is swept: one that

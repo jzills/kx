@@ -2073,13 +2073,16 @@ func TestSaveKeepsListingsWithDifferentQueriesApart(t *testing.T) {
 		Query: &Query{Resource: "deploy"}})
 	save(t, service, State{Resources: pods("api"), Namespace: "staging",
 		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}}})
+	// Sorted, the same rows are numbered differently.
+	save(t, service, State{Resources: pods("api"), Namespace: "staging",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}, Sort: "age"}})
 
 	history, err := service.LoadHistory()
 	if err != nil {
 		t.Fatalf("LoadHistory: %v", err)
 	}
-	if len(history.States) != 3 {
-		t.Errorf("len(States) = %d, want 3 — three different queries", len(history.States))
+	if len(history.States) != 4 {
+		t.Errorf("len(States) = %d, want 4 — four different queries", len(history.States))
 	}
 }
 

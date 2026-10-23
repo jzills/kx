@@ -46,7 +46,7 @@ func TestStateJSONPrintsTheCurrentEntry(t *testing.T) {
 	mustSave(t, services, state.State{
 		Resources: state.NewResources([]string{"api-7f9", "worker-2c1"}, kinds.Pod),
 		Namespace: "prod",
-		Query:     &state.Query{Resource: "pods", Args: []string{}, Match: matchOf("a")},
+		Query:     &state.Query{Resource: "pods", Args: []string{}, Match: matchOf("a"), Sort: "-restarts"},
 	})
 
 	got, err := runStateJSON(t, services, "--json")
@@ -65,7 +65,8 @@ func TestStateJSONPrintsTheCurrentEntry(t *testing.T) {
       "command": "get",
       "resource": "pods",
       "args": [],
-      "match": "a"
+      "match": "a",
+      "sort": "-restarts"
     },
     "resources": [
       {
