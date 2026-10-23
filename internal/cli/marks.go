@@ -106,7 +106,7 @@ func newUnmarkCommand(services Services) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if len(args) > 0 {
-					return fmt.Errorf("kx unmark --all takes no name — drop the name, or drop '--all' to remove that one mark.")
+					return fmt.Errorf("kx unmark takes no name with '--all' — drop the name, or drop '--all' to remove that one mark.")
 				}
 				if err := services.confirm()(
 					"Remove every mark? Listings and slots are untouched.",

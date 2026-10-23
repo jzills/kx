@@ -37,9 +37,9 @@ type TopCommand struct {
 // (internal/cli/scan.go): a cheap probe, a friendly message on failure.
 func (c TopCommand) EnsureAvailable() error {
 	if c.Kubectl.Probe([]string{"get", "--raw", "/apis/metrics.k8s.io/v1beta1"}) != 0 {
-		return errors.New("metrics-server is not available — kx top needs it " +
-			"installed in the cluster. Install it: " +
-			"https://github.com/kubernetes-sigs/metrics-server#installation")
+		return errors.New("kx top needs metrics-server, which isn't available in " +
+			"this cluster — see " +
+			"https://github.com/kubernetes-sigs/metrics-server#installation to install it.")
 	}
 	return nil
 }

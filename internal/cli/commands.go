@@ -1282,7 +1282,7 @@ func newDropCommand(services Services) *cobra.Command {
 			}
 			if empty {
 				if len(args) > 0 {
-					return fmt.Errorf("%s --empty takes no position — drop the position, or drop '--empty' to drop that one entry.", cmd.CommandPath())
+					return fmt.Errorf("%s takes no position with '--empty' — drop the position, or drop '--empty' to drop that one entry.", cmd.CommandPath())
 				}
 				history, dropped, err := services.State.DropEmpty()
 				if err != nil {
@@ -1297,7 +1297,7 @@ func newDropCommand(services Services) *cobra.Command {
 			}
 			if all {
 				if len(args) > 0 {
-					return fmt.Errorf("%s --all takes no position — drop the position, or drop '--all' to drop that one entry.", cmd.CommandPath())
+					return fmt.Errorf("%s takes no position with '--all' — drop the position, or drop '--all' to drop that one entry.", cmd.CommandPath())
 				}
 				if err := services.confirm()(
 					"Clear all kx history, including namespace and context slots? Marks are untouched — run 'kx unmark --all' for those.",
