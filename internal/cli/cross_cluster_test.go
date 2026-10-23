@@ -237,3 +237,39 @@ func TestWatchStreamLeavesMachineOutputAlone(t *testing.T) {
 		}
 	}
 }
+
+// Another cluster's nodes print kubectl's own table, where a percentage
+// column is spelled CPU(%) beside CPU(cores). Dropping the unit note from
+// both left them the same sort key: --sort cpu% was refused outright, and
+// --sort cpu took whichever column came first rather than the one named.
+// The fixture's cores and percentages disagree on the order, so a key
+// reaching the wrong column of the pair shows up as the wrong node first.
+func TestTopNodesFromAnotherClusterSortsByPercentColumns(t *testing.T) {
+	const nodes = "NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)\n" +
+		"node-a     196m         50%      3200Mi          10%\n" +
+		"node-b     500m         5%       1864Mi          80%"
+	for _, tc := range []struct {
+		key   string
+		first string
+	}{
+		{"cpu", "node-a"},
+		{"cpu%", "node-b"},
+		{"memory", "node-b"},
+		{"memory%", "node-a"},
+	} {
+		kube := &recordingKubectl{output: nodes}
+		stdout, _, err := runCaptured(t, newTopCommand(crossClusterServices(t, kube)),
+			[]string{"nodes", "--context=b", "--sort", tc.key})
+		if err != nil {
+			t.Fatalf("kx top nodes --context=b --sort %s: %v", tc.key, err)
+		}
+		// The caption, the header, then the rows.
+		lines := strings.Split(strings.TrimSpace(stdout), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("--sort %s printed %q, want a caption, a header and two nodes", tc.key, stdout)
+		}
+		if got := strings.Fields(lines[2])[0]; got != tc.first {
+			t.Errorf("--sort %s leads with %q, want %q", tc.key, got, tc.first)
+		}
+	}
+}

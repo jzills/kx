@@ -95,6 +95,44 @@ func TestSortMatchesColumnsAsTyped(t *testing.T) {
 	}
 }
 
+// kubectl writes a percentage column's sign inside the unit note — CPU(%)
+// beside CPU(cores) — and the note is dropped as a unit. Taken with it, both
+// columns keyed to "cpu": the percentage had no key of its own, and the bare
+// key took whichever column came first. The sign survives the note, so the
+// pair reads as the two keys it is, each ordering its own column.
+func TestSortTellsKubectlsPercentColumnFromItsUnitColumn(t *testing.T) {
+	headers := []string{"NAME", "CPU(cores)", "CPU(%)", "MEMORY(bytes)", "MEMORY(%)"}
+	rows := [][]string{
+		{"node-a", "196m", "50%", "3200Mi", "10%"},
+		{"node-b", "500m", "5%", "1864Mi", "80%"},
+	}
+	for spec, want := range map[string][]string{
+		"cpu":     {"node-a", "node-b"},
+		"cpu%":    {"node-b", "node-a"},
+		"memory":  {"node-b", "node-a"},
+		"memory%": {"node-a", "node-b"},
+	} {
+		keys, _ := ParseSortKeys(spec)
+		sorted, err := SortRows(headers, rows, keys)
+		if err != nil {
+			t.Fatalf("SortRows(%q): %v", spec, err)
+		}
+		if got := []string{sorted[0][0], sorted[1][0]}; !slices.Equal(got, want) {
+			t.Errorf("--sort %s = %v, want %v", spec, got, want)
+		}
+	}
+	// Each column is offered under the key that reaches it, so a refusal
+	// lists the percentages as well as the units.
+	_, err := SortRows(headers, rows, []SortKey{{Column: "cores"}})
+	var unknown UnknownColumnError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("err = %v, want an UnknownColumnError", err)
+	}
+	if got := strings.Join(unknown.Accepted, ", "); got != "name, cpu, cpu%, memory, memory%" {
+		t.Errorf("Accepted = %q, want each column under its own key", got)
+	}
+}
+
 // A key no column answers to is refused with the columns there are, typed as
 // a key would be, rather than quietly leaving the order alone.
 func TestSortRefusesAnUnknownColumn(t *testing.T) {
