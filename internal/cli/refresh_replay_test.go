@@ -289,3 +289,39 @@ func TestStaleRefreshKeepsASortedListingWhoseColumnHasGone(t *testing.T) {
 		t.Errorf("kx get all --sort restarts: err = %v, want %q", err, want)
 	}
 }
+
+// A relist hint is a line to paste back, so a value holding a space is
+// quoted. `kx get pods --sort "nominated node"` hinted `kx get pods -n prod
+// --sort=nominated node`, which pasted back looked up a Pod named node and
+// failed; a -m term read the same way. Double quotes, since the hint around
+// the command is in single ones. The control is a one-word value, which is
+// still named plainly.
+func TestARelistHintQuotesAValueHoldingASpace(t *testing.T) {
+	const wide = "NAME    READY   STATUS    RESTARTS   AGE   NOMINATED NODE\n" +
+		"web-b   1/1     Running   0          5d    node-2\n" +
+		"api     1/1     Running   0          3h    <none>\n"
+	relist := func(t *testing.T, argv ...string) string {
+		t.Helper()
+		quietRender(t)
+		services := switchServices(t, &fakeKubectl{output: wide, namespace: "prod"})
+		if err := executeArgv(newGetCommand(services), argv); err != nil {
+			t.Fatalf("kx get %s: %v", strings.Join(argv, " "), err)
+		}
+		return relistCommand(currentEntry(t, services), false)
+	}
+
+	got := relist(t, "pods", "--sort", "nominated node")
+	if want := `kx get pods -n prod --sort="nominated node"`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+	got = relist(t, "pods", "--sort", "restarts")
+	if want := "kx get pods -n prod --sort=restarts"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+
+	term := "web b"
+	entry := state.State{Namespace: "prod", Query: &state.Query{Resource: "pods", Match: &term}}
+	if got, want := relistCommand(entry, false), `kx get pods -n prod -m "web b"`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+}
