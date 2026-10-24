@@ -190,9 +190,9 @@ func TestDiagnosticJSONCarriesTheFindingsInOrder(t *testing.T) {
 }
 
 // Every swept resource, healthy ones included — not just the rows the terminal
-// table printed. --full governs what fits on a screen, and a machine is not
+// table printed. --show-healthy governs what fits on a screen, and a machine is not
 // scrolling. Reports here holds only the unhealthy row, as it does without
-// --full, so a serializer reading Reports instead of All loses the healthy one.
+// --show-healthy, so a serializer reading Reports instead of All loses the healthy one.
 func TestTriageJSONCarriesEveryResourceNotJustThePrintedRows(t *testing.T) {
 	broken := diagnostics.Report{
 		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
@@ -205,7 +205,7 @@ func TestTriageJSONCarriesEveryResourceNotJustThePrintedRows(t *testing.T) {
 	}
 	result := render.TriageResult{
 		Namespace: "prod", Checked: 2, Healthy: 1,
-		Reports: []diagnostics.Report{broken},
+		Reports: []render.TriageRow{{Index: 1, Report: broken}},
 		All:     []diagnostics.Report{broken, healthy},
 	}
 	out, err := triageJSON(result)

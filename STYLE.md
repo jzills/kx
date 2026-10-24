@@ -18,6 +18,16 @@ Explain *why* when the reason is not obvious, because a reader who knows the rea
 - An em dash ( — ) joins a statement to its consequence or its fix. It is used freely and consistently, with a space on each side.
 - No label prefixes: no `note:`, `warning:`, `info:`, `error:`, `kx:` or `<command>:` in front of a message. The glyph, or the muted style, already says what kind of message it is.
 
+### Kubernetes names
+
+- A resource kind is written as the type, capitalized, the way the Kubernetes docs write API objects: "a Pod", "7 Deployments", "one of its Pods", "evicts the Pods on a Node". It is never lowercase as an ordinary word, so a reader can always tell the type from the English.
+- What the user types keeps its own spelling, in quotes: `'kx get pods'`, `'pods' (the default) or 'nodes'`.
+- Three words stay lowercase. "namespace" stays lowercase when it means the scope a resource lives in ("in the current namespace"), and is capitalized only for Namespace objects ("List Namespaces"). "container" stays lowercase because it is not an API object. "event" stays lowercase because events are read as a stream ("No Warning events in prod"). A node of the ownership graph is a "tree node".
+- Condition and status values take the API's spelling, unquoted, since quotes mean the user typed it: "its Available condition is True", "a Pending Pod", "CrashLoopBackOff".
+- None of these are styled. Casing carries the distinction, so it survives `--no-color`.
+
+`TestHelpWritesKindsAsTypes` checks help text. Messages are held to it by review.
+
 ## Errors
 
 Errors go to stderr after a ✗ (`render.Error`). Every one is a sentence or two:
@@ -89,7 +99,7 @@ The README command table and the site's command pages are generated from these s
 
 - One sentence per line, with no hard wrap. A list item continues on the next line with a two-space indent.
 - No sentence opens with inline code. Name what the code is ("The `--html` flag…"), or reword ("With `--key`, …").
-- No sentence opens with a lowercase "kx" either. Reword so kx is not first.
+- No sentence opens with a lowercase "kx" either, "kx's" included. Reword so kx is not first.
 - kx the product is plain text. Code formatting is for things you type.
 - Code blocks are 80 columns or narrower, because GitHub never wraps them.
 - The README is a pitch and the site is the reference. The README has no sample-output blocks or worked examples; GIFs and short prose carry the features, and the generated command table is the reference.
@@ -139,4 +149,5 @@ Neither carries attribution trailers or session links.
 - Write one line per paragraph, never hard-wrapped. GitHub turns every newline in a release body into a line break.
 - No headings.
 - Write in the second person, for someone using kx, with commands in backticks and concrete before-and-after examples.
+- Sentences open the way README and site sentences do: never with inline code, and never with a lowercase "kx", possessive included. A paragraph is one line here, so this holds for every sentence in it, not just the first; `tools/voicecheck` reads each one.
 - The last paragraph says what upgrading asks of the reader, even when the answer is nothing.

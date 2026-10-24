@@ -185,10 +185,10 @@ var argDocs = map[string]string{
 	"replicas":  "Number of replicas to scale to",
 	"image":     "The new image, for a workload with one container, or container=image; repeatable",
 	"port":      "Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port",
-	"src":       "Source path, or <index>:<path> inside the pod",
-	"dest":      "Destination path, or <index>:<path> inside the pod",
+	"src":       "Source path, or <index>:<path> inside the Pod",
+	"dest":      "Destination path, or <index>:<path> inside the Pod",
 	"key=value": "Key and value to set; repeatable",
-	"command":   "Command to run in the pod instead of a shell",
+	"command":   "Command to run in the Pod instead of a shell",
 }
 
 // argDoc describes one argument, preferring a command's own annotation.

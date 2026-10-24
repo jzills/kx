@@ -1337,7 +1337,7 @@ func TestLogsParsesKubectlFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-f", "1", "2"}, "'--follow' streams a single pod"},
+		{[]string{"-f", "1", "2"}, "'--follow' streams a single Pod"},
 		{[]string{"1", "--since", "soon"}, "'--since'"},
 		{[]string{"1", "-o", "json"}, "'-o' isn't a flag of kubectl logs"},
 		{[]string{"-n", "other", "1"}, "'--namespace' cannot be combined with an index"},

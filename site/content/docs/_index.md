@@ -6,7 +6,7 @@ weight: 1
 ---
 
 A kubectl wrapper that gives every row of a listing a number.
-Run `kx get pods` once and the pods are 1, 2, 3; from then on every other command takes those numbers instead of a name you have to read off the screen and retype.
+Run `kx get pods` once and the Pods are 1, 2, 3; from then on every other command takes those numbers instead of a name you have to read off the screen and retype.
 
 ```bash
 kx get pods          # 1  api-7d8f...   2  billing-5c4b...   3  cache-9a1e...

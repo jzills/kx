@@ -54,6 +54,7 @@ type stateQueryJSON struct {
 	Resource string   `json:"resource"`
 	Args     []string `json:"args"`
 	Match    *string  `json:"match,omitempty"`
+	Sort     string   `json:"sort,omitempty"`
 }
 
 // stateRowJSON is one row: what kx ref would print for its index, as fields.
@@ -94,7 +95,7 @@ func stateJSONOf(entry state.State, place, cursor int) stateJSON {
 			args = []string{}
 		}
 		document.Query = &stateQueryJSON{
-			Command: command, Resource: query.Resource, Args: args, Match: query.Match,
+			Command: command, Resource: query.Resource, Args: args, Match: query.Match, Sort: query.Sort,
 		}
 	}
 	return document

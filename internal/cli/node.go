@@ -99,7 +99,7 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict all pods from Node/%s%s?", name, listingProvenance(source))); err != nil {
+			"Evict all Pods from Node/%s%s?", name, listingProvenance(source))); err != nil {
 			return err
 		}
 	}
@@ -122,12 +122,12 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 	switch verb {
 	case "cordon":
 		short = "Mark one or more indexed Nodes unschedulable."
-		long = "Marks a node unschedulable, so the scheduler places no new pods on it. " +
+		long = "Marks a Node unschedulable, so the scheduler places no new Pods on it. " +
 			"Pods already running there are left alone — use kx drain to evict those.\n\n" +
 			"Takes several indexes, and ranges, like kx delete."
 	default:
 		short = "Mark one or more indexed Nodes schedulable again."
-		long = "Reverses kx cordon, letting the scheduler place pods on the node again."
+		long = "Reverses kx cordon, letting the scheduler place Pods on the Node again."
 	}
 	long += "\n\nkubectl's own " + verb + " flags pass through, --dry-run among them."
 	cmd := &cobra.Command{
@@ -177,11 +177,11 @@ func newDrainCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "drain <index> [kubectl flags]",
 		SuggestFor: []string{"evict", "evacuate"},
-		Short:      "Evict the pods from an indexed Node (prompts for confirmation unless --yes).",
-		Long: "Cordons a node and evicts the pods running on it, waiting for each to " +
+		Short:      "Evict the Pods from an indexed Node (prompts for confirmation unless --yes).",
+		Long: "Cordons a Node and evicts the Pods running on it, waiting for each to " +
 			"terminate. Streams kubectl's own progress, which can run for minutes.\n\n" +
 			"One index only, unlike kx cordon: a drain evicts running workloads and " +
-			"blocks until they are gone, so applying it to a range of nodes in one " +
+			"blocks until they are gone, so applying it to a range of Nodes in one " +
 			"command is a way to take a cluster down by typo.\n\n" +
 			"kubectl's own drain flags pass through — a drain usually needs " +
 			"--ignore-daemonsets, and often --delete-emptydir-data.",
@@ -192,13 +192,13 @@ func newDrainCommand(services Services) *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 	// kubectl's drain flags, documented in kx's words.
 	cmd.Flags().Bool("ignore-daemonsets", false,
-		"Continue even though DaemonSet-managed pods cannot be evicted")
+		"Continue even though DaemonSet-managed Pods cannot be evicted")
 	cmd.Flags().Bool("delete-emptydir-data", false,
-		"Continue even though pods use emptyDir volumes, whose data is lost")
+		"Continue even though Pods use emptyDir volumes, whose data is lost")
 	cmd.Flags().Bool("force", false,
-		"Evict pods no controller manages, which will not come back")
+		"Evict Pods no controller manages, which will not come back")
 	cmd.Flags().Int("grace-period", -1,
-		"Seconds to give each pod to terminate; -1 uses the pod's own")
+		"Seconds to give each Pod to terminate; -1 uses the Pod's own")
 	cmd.Flags().Duration("timeout", 0, "Give up waiting after this long")
 	kubectlFlags := registerKubectlFlags(cmd, "drain")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {

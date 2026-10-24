@@ -23,13 +23,13 @@ func registerEvidenceTools(server *mcp.Server, deps mcpDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "events",
 		Description: "Warning and normal events recorded against exactly this object. Unlike logs, " +
-			"a Deployment's events are its own, not its pods' — use tree to find the pods.",
+			"a Deployment's events are its own, not its Pods' — use tree to find the Pods.",
 		Annotations: readOnlyTool("Events"),
 	}, serialized(deps, deps.events))
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "logs",
-		Description: "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/" +
-			"DaemonSet/Job/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+		Description: "Recent container logs: one Pod's, or every Pod of a Deployment/StatefulSet/" +
+			"DaemonSet/Job/Service, prefixed by Pod. Capped by tail (per Pod) and 256 KiB.",
 		Annotations: readOnlyTool("Logs"),
 	}, serialized(deps, deps.logs))
 }
@@ -171,10 +171,10 @@ func countLines(text string) int {
 }
 
 type logsInput struct {
-	Target    mcpTarget `json:"target" jsonschema:"The Pod, or workload whose pods to aggregate, to show logs for."`
-	Container string    `json:"container,omitempty" jsonschema:"Container name, for a Pod with more than one. Not valid with an aggregate target — pick one pod instead."`
+	Target    mcpTarget `json:"target" jsonschema:"The Pod, or workload whose Pods to aggregate, to show logs for."`
+	Container string    `json:"container,omitempty" jsonschema:"Container name, for a Pod with more than one. Not valid with an aggregate target — pick one Pod instead."`
 	Since     string    `json:"since,omitempty" jsonschema:"Only log lines from this far back — 30m, 24h, 7d."`
-	Tail      int       `json:"tail,omitempty" jsonschema:"Lines to keep per pod, most recent first; default 200, at most 2000."`
+	Tail      int       `json:"tail,omitempty" jsonschema:"Lines to keep per Pod, most recent first; default 200, at most 2000."`
 	Previous  bool      `json:"previous,omitempty" jsonschema:"Show the previous (crashed) container's logs instead of the current one's."`
 }
 
@@ -228,7 +228,7 @@ func (d mcpDeps) logs(_ context.Context, _ *mcp.CallToolRequest, in logsInput) (
 	case aggregateLogKinds.Has(target.Kind):
 		if in.Container != "" {
 			return nil, logsOutput{}, errors.New(
-				"'container' applies to a Pod target — pick one of the workload's pods with tree.")
+				"'container' applies to a Pod target — pick one of the workload's Pods with tree.")
 		}
 		selector, err := (LogsCommand{Kubectl: d.Kubectl, Status: silentStatus}).
 			selector(target.Name, target.Namespace, target.Kind)
@@ -263,9 +263,9 @@ const (
 )
 
 type topInput struct {
-	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to read; defaults to the current namespace. Not valid with nodes."`
-	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"Read across every namespace. Not valid with nodes."`
-	Nodes         bool   `json:"nodes,omitempty" jsonschema:"Report node usage against capacity instead of pod usage against limits."`
+	Namespace     string `json:"namespace,omitempty" jsonschema:"Namespace to read; defaults to the current namespace. Not valid with Nodes."`
+	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"Read across every namespace. Not valid with Nodes."`
+	Nodes         bool   `json:"nodes,omitempty" jsonschema:"Report Node usage against capacity instead of Pod usage against limits."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000."`
 }
 

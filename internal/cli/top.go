@@ -27,6 +27,8 @@ type TopCommand struct {
 	// saved — a refresh's (listingScope), or the one the context gives an
 	// agent's top call.
 	Scope string
+	// Sort is the listing's --sort, empty for none; see GetCommand.Sort.
+	Sort string
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -50,6 +52,10 @@ func (c TopCommand) EnsureAvailable() error {
 func (c TopCommand) Execute(
 	filterTerm string, extraArgs []string, noLimits bool,
 ) (table index.Table, namespace string, err error) {
+	keys, err := sortKeysOf(c.Sort)
+	if err != nil {
+		return index.Table{}, "", err
+	}
 	// Another cluster's usage is printed as kubectl gives it and never saved,
 	// as kx get prints another cluster's listing. The metrics probe and the
 	// pod limits the percentages come from both read the current cluster, so
@@ -68,7 +74,7 @@ func (c TopCommand) Execute(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
 		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
@@ -124,6 +130,11 @@ func (c TopCommand) Execute(
 			return index.Table{}, "", err
 		}
 	}
+	// After the percentages, so CPU% and MEM% — the columns kubectl top
+	// cannot sort by — can be sorted by here.
+	if rows, err = index.SortRows(headers, rows, keys); err != nil {
+		return index.Table{}, "", sortError(err)
+	}
 
 	indexed := c.Index.AddRows(headers, rows)
 	indexed.Match = filterTerm
@@ -155,6 +166,7 @@ func (c TopCommand) Execute(
 		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
 			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
+			Sort: c.Sort,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -168,10 +180,10 @@ func (c TopCommand) Execute(
 // stale kx top listing is listed again exactly as it was — in the namespace
 // it was taken in, which a refresh passes as scope (TopCommand.Scope).
 func topListing(
-	services Services, nodes bool, match string, rest []string, noLimits bool, scope string,
+	services Services, nodes bool, match string, rest []string, noLimits bool, scope, sort string,
 ) (table index.Table, label, namespace string, spanning bool, err error) {
 	command := TopCommand{
-		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: sort,
 	}
 	if nodes {
 		table, namespace, err = command.ExecuteNodes(match, rest)
@@ -197,6 +209,10 @@ func topListing(
 func (c TopCommand) ExecuteNodes(
 	filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
+	keys, err := sortKeysOf(c.Sort)
+	if err != nil {
+		return index.Table{}, "", err
+	}
 	// Another cluster's nodes print unnumbered and unsaved; see Execute.
 	crossCluster := clusterFlagIn(extraArgs) != ""
 	if !crossCluster {
@@ -210,7 +226,7 @@ func (c TopCommand) ExecuteNodes(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
 		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
@@ -244,6 +260,13 @@ func (c TopCommand) ExecuteNodes(
 		rows = index.FilterRows(headers, rows, filterTerm)
 	}
 	headers = relabelPercentColumns(headers)
+	// After the relabel: a key names a column as the table prints it, and
+	// this table prints MEM%, which keys to "mem%", not kubectl's MEMORY(%).
+	// Another cluster's table prints kubectl's headers, so its key is
+	// "memory%".
+	if rows, err = index.SortRows(headers, rows, keys); err != nil {
+		return index.Table{}, "", sortError(err)
+	}
 
 	indexed := c.Index.AddRows(headers, rows)
 	indexed.Match = filterTerm
@@ -258,6 +281,7 @@ func (c TopCommand) ExecuteNodes(
 		// Execute's entry does.
 		Query: &state.Query{
 			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
+			Sort: c.Sort,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -270,9 +294,15 @@ func (c TopCommand) ExecuteNodes(
 // header rewrite only, so the existing render.UsageStyle-driven coloring in
 // IndexedTable (which looks up cells by the exact header names "CPU%"/
 // "MEM%") applies to nodes without any new coloring code.
+//
+// kubectl before 1.32 heads them CPU% and MEMORY%. Its MEMORY% left as it
+// was keyed to "memory%", so the documented --sort mem% was refused there.
 func relabelPercentColumns(headers []string) []string {
 	cpuCol := index.ColumnIndex(headers, "CPU(%)")
 	memCol := index.ColumnIndex(headers, "MEMORY(%)")
+	if memCol < 0 {
+		memCol = index.ColumnIndex(headers, "MEMORY%")
+	}
 	if cpuCol < 0 && memCol < 0 {
 		return headers
 	}

@@ -106,8 +106,8 @@ See the [indexes guide](https://jzills.github.io/kx/docs/concepts/indexes/) for 
 
 ## Triage a namespace
 
-Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and pods nothing owns — and ranks what's unhealthy.
-It reads live usage too, so a pod running hot against its memory limit is flagged as an OOMKill risk before it dies.
+Bare `kx diag` sweeps the current namespace — every workload kind, plus Services, PVCs, Ingresses and Pods nothing owns — and ranks what's unhealthy.
+It reads live usage too, so a Pod running hot against its memory limit is flagged as an OOMKill risk before it dies.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/demo/diag.gif" alt="kx diag demo" width="800"/>
@@ -147,7 +147,7 @@ See the [scan guide](https://jzills.github.io/kx/docs/guides/scan-images/) for m
 
 ## See what owns what
 
-The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods — and indexes every node it draws, so anything in the tree is one number away.
+The `kx tree <index>` command walks the ownership graph — Deployment to ReplicaSet to Pods — and indexes every tree node it draws, so anything in the tree is one number away.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/jzills/kx/main/assets/tree-html.png" alt="kx tree dashboard" width="800"/>
@@ -290,21 +290,21 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx annotations <index>...` | Show annotations for one or more indexed resources. |
 | `kx context [<index>]` | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | `kx cordon <index>...` | Mark one or more indexed Nodes unschedulable. |
-| `kx cp <src> <dest>` | Copy files to or from an indexed pod via kubectl cp. |
-| `kx debug <index> [<command>...]` | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged pod on the host). |
+| `kx cp <src> <dest>` | Copy files to or from an indexed Pod via kubectl cp. |
+| `kx debug <index> [<command>...]` | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host). |
 | `kx delete <index>...` | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | `kx describe <index>...` | Show full kubectl describe output for one or more indexed resources. |
 | `kx diagnostic [<index>]` | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
-| `kx drain <index>` | Evict the pods from an indexed Node (prompts for confirmation unless --yes). |
+| `kx drain <index>` | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
 | `kx edit <index>` | Open an indexed resource in your editor via kubectl edit. |
 | `kx events <index>...` | Show Kubernetes events for one or more indexed resources. |
 | `kx exec <index> [<command>...]` | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | `kx get <resource> [<index>...]` | List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3). |
 | `kx label <index> [<key=value>...]` | Set or remove labels on an indexed resource. |
 | `kx labels <index>...` | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| `kx logs <index>...` | Stream logs for an indexed resource; aggregates across pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
+| `kx logs <index>...` | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | `kx mark [<name>] [<index>]` | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
-| `kx namespace [<index>]` | List namespaces, or switch to an indexed one; alias: kx ns. |
+| `kx namespace [<index>]` | List Namespaces, or switch to an indexed one; alias: kx ns. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx ref <index>...` | Print what an index refers to, for commands kx doesn't wrap. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
@@ -312,7 +312,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | `kx secret [<index>...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx set` | Change an indexed workload's container images with kx set image, printing each one before and after. |
-| `kx top [<resource>]` | List CPU/memory usage for pods (default) or nodes and assign index numbers, like kx get; shows usage as a percent of limits (pods) or capacity (nodes) unless --no-limits. |
+| `kx top [<resource>]` | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |
 | `kx unmark [<name>...]` | Remove marks by name; --all removes every mark. |

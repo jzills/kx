@@ -3,7 +3,7 @@
   "tools": [
     {
       "name": "diagnose",
-      "description": "Diagnose Kubernetes health. With a target, analyzes that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without full, the numbers skip the healthy rows left out.",
+      "description": "Diagnose Kubernetes health. With a target, analyzes that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without showHealthy, the numbers skip the healthy rows left out.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -16,10 +16,6 @@
             "description": "Sweep every namespace when there is no target.",
             "type": "boolean"
           },
-          "full": {
-            "description": "Include healthy resources in a sweep's results.",
-            "type": "boolean"
-          },
           "match": {
             "description": "Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target.",
             "type": "string"
@@ -27,6 +23,10 @@
           "namespace": {
             "description": "Namespace to sweep when there is no target; defaults to the current namespace.",
             "type": "string"
+          },
+          "showHealthy": {
+            "description": "Include healthy resources in a sweep's results.",
+            "type": "boolean"
           },
           "since": {
             "description": "Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting.",
@@ -53,7 +53,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -184,7 +184,7 @@
     },
     {
       "name": "events",
-      "description": "Warning and normal events recorded against exactly this object. Unlike logs, a Deployment's events are its own, not its pods' — use tree to find the pods.",
+      "description": "Warning and normal events recorded against exactly this object. Unlike logs, a Deployment's events are its own, not its Pods' — use tree to find the Pods.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -222,7 +222,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -347,7 +347,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -554,7 +554,7 @@
     },
     {
       "name": "logs",
-      "description": "Recent container logs: one pod's, or every pod of a Deployment/StatefulSet/DaemonSet/Job/Service, prefixed by pod. Capped by tail (per pod) and 256 KiB.",
+      "description": "Recent container logs: one Pod's, or every Pod of a Deployment/StatefulSet/DaemonSet/Job/Service, prefixed by Pod. Capped by tail (per Pod) and 256 KiB.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -564,7 +564,7 @@
         "additionalProperties": false,
         "properties": {
           "container": {
-            "description": "Container name, for a Pod with more than one. Not valid with an aggregate target — pick one pod instead.",
+            "description": "Container name, for a Pod with more than one. Not valid with an aggregate target — pick one Pod instead.",
             "type": "string"
           },
           "previous": {
@@ -576,12 +576,12 @@
             "type": "string"
           },
           "tail": {
-            "description": "Lines to keep per pod, most recent first; default 200, at most 2000.",
+            "description": "Lines to keep per Pod, most recent first; default 200, at most 2000.",
             "type": "integer"
           },
           "target": {
             "additionalProperties": false,
-            "description": "The Pod, or workload whose pods to aggregate, to show logs for.",
+            "description": "The Pod, or workload whose Pods to aggregate, to show logs for.",
             "properties": {
               "index": {
                 "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
@@ -600,7 +600,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -688,7 +688,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -806,7 +806,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },
@@ -933,7 +933,7 @@
     },
     {
       "name": "top",
-      "description": "Current CPU and memory usage of pods (percent of their limits) or nodes (percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx top would save it, and each row carries its index there.",
+      "description": "Current CPU and memory usage of Pods (percent of their limits) or Nodes (percent of capacity), from metrics-server. When kx mcp runs with --write-listings, the listing is saved to the user's kx history, as kx top would save it, and each row carries its index there.",
       "annotations": {
         "idempotentHint": true,
         "readOnlyHint": true,
@@ -943,7 +943,7 @@
         "additionalProperties": false,
         "properties": {
           "allNamespaces": {
-            "description": "Read across every namespace. Not valid with nodes.",
+            "description": "Read across every namespace. Not valid with Nodes.",
             "type": "boolean"
           },
           "limit": {
@@ -951,11 +951,11 @@
             "type": "integer"
           },
           "namespace": {
-            "description": "Namespace to read; defaults to the current namespace. Not valid with nodes.",
+            "description": "Namespace to read; defaults to the current namespace. Not valid with Nodes.",
             "type": "string"
           },
           "nodes": {
-            "description": "Report node usage against capacity instead of pod usage against limits.",
+            "description": "Report Node usage against capacity instead of Pod usage against limits.",
             "type": "boolean"
           }
         },
@@ -1101,7 +1101,7 @@
                 "type": "string"
               },
               "namespace": {
-                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as nodes.",
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
                 "type": "string"
               }
             },

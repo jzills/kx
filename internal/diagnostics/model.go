@@ -333,7 +333,7 @@ type PodPhaseCounts struct {
 // Failed is excluded for exactly the same reason, which the original wording
 // gave and then did not act on. Kubernetes keeps a terminated pod's object on
 // the node until the terminated-pod GC threshold — 12500 by default — so one
-// preemption or OOM eviction left a node reporting "1/40 pods not running"
+// preemption or OOM eviction left a node reporting "1/40 Pods not running"
 // indefinitely, its verdict never returning to healthy, and (since --fail-on
 // shipped) failing a CI gate forever on a cluster with nothing wrong with it.
 //
@@ -351,7 +351,7 @@ func (c PodPhaseCounts) Stalled() int { return c.Pending + c.Unknown }
 // This is Stalled's denominator, and has to be. Stalled excludes Succeeded and
 // Failed for the reasons above; a ratio whose numerator excludes them but
 // whose denominator counts them is false to anyone who checks. A node with 23
-// running, 5 failed and 1 pending reported "1/29 pods not running" when six of
+// running, 5 failed and 1 pending reported "1/29 Pods not running" when six of
 // the 29 were not running. It reports "1/24" now, and 23 of those 24 are
 // indeed running.
 //
@@ -419,7 +419,7 @@ func outsideWindow(at, since time.Time) bool {
 // The triage table shows one finding per row, so which of several equally
 // severe findings sorts first decides what a whole sweep reads like. A
 // Deployment whose only pod is crashlooping produces both "Only 0/1 replicas
-// ready" and "CrashLoopBackOff in pod x" at Critical; the first is true of
+// ready" and "CrashLoopBackOff in Pod x" at Critical; the first is true of
 // every broken Deployment and the second is why this one is broken.
 //
 // Values ascend from most specific to least, so the zero value would be Cause

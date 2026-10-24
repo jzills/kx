@@ -13,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/graph"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/kubectlflags"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -288,6 +290,8 @@ func replayGet(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
+		Sort:   query.Sort,
+		Replay: true,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
@@ -306,7 +310,7 @@ func replayTop(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	noLimits, rest := extractBool(query.Args, "--no-limits")
 	table, label, namespace, _, err := topListing(
-		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope)
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope, query.Sort)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +343,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 		return nil, err
 	}
 	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
-		false, window, since, queryMatch(query))
+		false, window, since, queryMatch(query), query.Sort)
 	if err != nil {
 		return nil, err
 	}
@@ -408,11 +412,11 @@ func queryMatch(query state.Query) string {
 
 // relistCommand is what to run when a listing could not be run again: the
 // command that made it, as it would be typed, in the scope a refresh would
-// take it in (listingScope) and narrowed by its term. A kx get listing is
-// named by its resource, scope and term — not its other arguments, since a
-// relist's are the very names that went stale — and a tree of one resource
-// by the listing of its kind in its namespace, since that resource may be
-// the one that went.
+// take it in (listingScope), sorted and narrowed as it was. A kx get listing
+// is named by its resource, scope, sort, term and the flags that shaped it
+// (listingFlags) — not the names it fetched, which are the very ones that
+// went stale — and a tree of one resource by the listing of its kind in its
+// namespace, since that resource may be the one that went.
 //
 // "kx get pods" for a listing of prod, typed in kube-system, lists
 // kube-system, so the namespace it was taken in is named — unless it was
@@ -433,6 +437,7 @@ func relistCommand(entry state.State, elsewhere bool) string {
 			return "kx get <resource>"
 		}
 		words = append([]string{"kx", "get", query.Resource}, scope...)
+		words = append(words, listingFlags(entry)...)
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
 		// indexes into that listing — narrowed by its term, below, or the
@@ -461,11 +466,125 @@ func relistCommand(entry state.State, elsewhere bool) string {
 	default:
 		words = withScope([]string{"kx", query.Command}, query.Args, scope)
 	}
+	// The order its rows were numbered in: relisted without it, row 3 is
+	// another resource. A fetch records none, since its sort ordered the
+	// fetched rows, not the -A listing named.
+	if query.Sort != "" {
+		words = append(words, sortArg(query.Sort))
+	}
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)
 	}
-	return strings.Join(words, " ")
+	return joinWords(words)
 }
+
+// joinWords is the words of a relist as a line to paste back: one holding a
+// space, or anything else a shell reads, is quoted. Unquoted, the
+// `--sort=nominated node` of `kx get pods --sort "nominated node"` pasted
+// back looked up a Pod named node, and a -m term reads the same way.
+func joinWords(words []string) string {
+	quoted := make([]string, len(words))
+	for i, word := range words {
+		// A --flag=value is quoted around its value, so the flag it sets
+		// still reads as one.
+		if flag, value, ok := strings.Cut(word, "="); ok && strings.HasPrefix(word, "-") {
+			quoted[i] = flag + "=" + shellWord(value)
+			continue
+		}
+		quoted[i] = shellWord(word)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// shellWord is a word as a shell reads it back: itself when every character
+// is its own, double-quoted otherwise — the hint around it is in single
+// quotes already — with a backslash before what a shell still reads inside
+// them.
+func shellWord(word string) string {
+	if word != "" && !strings.ContainsFunc(word, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' ||
+			r == ',' || r == '=' || r == '%' || r == '+' || r == '@' ||
+			(r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'))
+	}) {
+		return word
+	}
+	var quoted strings.Builder
+	quoted.WriteByte('"')
+	for _, r := range word {
+		if r == '"' || r == '\\' || r == '$' || r == '`' {
+			quoted.WriteByte('\\')
+		}
+		quoted.WriteRune(r)
+	}
+	quoted.WriteByte('"')
+	return quoted.String()
+}
+
+// listingFlags is what a kx get relist repeats of the listing's arguments:
+// the flags that shaped its table — an -o, a -l, a --field-selector — with
+// the value of any written as a word of its own. The scope is left out,
+// since the relist names it from listingScope rather than twice.
+//
+// A sort is read off the columns the shape printed: relisted without the
+// `-o wide` that printed NOMINATED NODE, `--sort "nominated node"` is
+// refused for a column the table lacks.
+//
+// Nothing is repeated of a fetch by index or name, whose arguments open with
+// the rows themselves — the very ones that went stale. What a relist names
+// is the listing those rows came from, whose shape this entry does not hold.
+func listingFlags(entry state.State) []string {
+	args := entry.Query.Args
+	var flags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			return nil
+		}
+		// Taken, not non-empty: a flag given an empty value was given one,
+		// and emitted bare it is a relist a shell refuses for the argument
+		// the flag still needs.
+		var value string
+		taken := false
+		if !strings.Contains(arg, "=") && getFlagTakesValue(arg) && i+1 < len(args) {
+			i++
+			value, taken = args[i], true
+		}
+		if scopeFlagIn([]string{arg}) != "" {
+			continue
+		}
+		flags = append(flags, arg)
+		if taken {
+			flags = append(flags, value)
+		}
+	}
+	return flags
+}
+
+// getFlagTakesValue reports whether a kubectl get flag written without "="
+// reads the word after it as its value, as pflag does (Flag.TakesValue):
+// `--field-selector status.phase=Running` is two words of one flag, while
+// `--show-kind` is one of its own. A flag the table doesn't name — typed
+// after `--` for a kubectl newer than the table was generated from — is
+// read as taking one, since a flag relisted without its value is refused,
+// where one relisted with a word too many lists the wrong rows silently.
+func getFlagTakesValue(arg string) bool {
+	flag, named := getFlags()[strings.TrimLeft(strings.Split(arg, "=")[0], "-")]
+	return !named || flag.TakesValue()
+}
+
+// getFlags is kubectl get's flags and the global ones, by every spelling
+// they are written in argv: read once, since the table is generated.
+var getFlags = sync.OnceValue(func() map[string]kubectlflags.Flag {
+	own, _ := kubectlflags.Command("get")
+	byName := map[string]kubectlflags.Flag{}
+	for _, flag := range append(kubectlflags.Global(), own...) {
+		byName[flag.Name] = flag
+		if flag.Shorthand != "" {
+			byName[flag.Shorthand] = flag
+		}
+	}
+	return byName
+})
 
 // withScope is a relist of a command whose arguments it repeats: them, and
 // the scope after them when they name none of their own.

@@ -130,12 +130,16 @@ type Query struct {
 	//
 	// Resource and Args mean what that command takes. A sweep — kx diag or
 	// kx tree with no index — has no Resource, and its Args are its scope as
-	// swept (-n with the namespace, or -A) with any --since or --full; a tree
-	// of one resource names that resource, Kind/name, as its Resource.
+	// swept (-n with the namespace, or -A) with any --since; a tree of one
+	// resource names that resource, Kind/name, as its Resource.
 	//
 	// Absent from files written before it existed, which read as `kx get` —
 	// the command that wrote all but a handful of them.
 	Command string `json:"command,omitempty"`
+	// Sort is the listing's --sort, empty for none: kx's, so kept apart from
+	// Args, which are kubectl's. Carried among them, a --sort typed after
+	// `--` for kubectl was taken as kx's own, and replayed as one.
+	Sort string `json:"sort,omitempty"`
 }
 
 // The commands a listing can come from, as Query.Command records them. kx get
@@ -797,6 +801,10 @@ func sameQuery(current, next Query) bool {
 	// pods` query it replays as, and without this it read as the `kx get pods`
 	// it followed and replaced it.
 	if current.Command != next.Command {
+		return false
+	}
+	// Sorted differently, the same rows are numbered differently.
+	if current.Sort != next.Sort {
 		return false
 	}
 	for i := range current.Args {

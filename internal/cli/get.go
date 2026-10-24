@@ -74,6 +74,14 @@ type GetCommand struct {
 	// current namespace, as kx get does. The query is saved as typed either
 	// way, so the refresh replaces the stale entry.
 	Scope string
+	// Sort is the listing's --sort, empty for none. kx's, so it is never
+	// among extraArgs, which are kubectl's.
+	Sort string
+	// Replay is a refresh running a saved listing again. Its --sort was
+	// accepted when it was typed, so a key no table has now is dropped
+	// rather than refused: kx get all's RESTARTS is gone from a namespace
+	// whose Pods have, and refused, the refresh fell back to a hint.
+	Replay bool
 }
 
 // replayScope is the -n a listing is taken under when its arguments name no
@@ -200,6 +208,10 @@ func namesKind(arg string) bool {
 func (c GetCommand) Execute(
 	resource, filterTerm string, extraArgs []string,
 ) (table index.Table, namespace string, err error) {
+	keys, err := sortKeysOf(c.Sort)
+	if err != nil {
+		return index.Table{}, "", err
+	}
 	// A cluster-scoped kind is listed in no namespace, replayed or not.
 	scope := replayScope(c.Scope, extraArgs)
 	if clusterScoped(string(listingKind(resource))) {
@@ -223,7 +235,7 @@ func (c GetCommand) Execute(
 	// namespace is only the one named, if any: the current one is this
 	// cluster's, not that one's.
 	if clusterFlagIn(extraArgs) != "" {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
 		return table, extractNamespace(extraArgs), err
 	}
 	// An -A listing has no single namespace to record on the entry; each
@@ -251,6 +263,9 @@ func (c GetCommand) Execute(
 	}
 
 	listing, tabular := c.Index.Parse(output)
+	if c.Replay {
+		keys = listing.Present(keys)
+	}
 	// Rows the caller asked for without a header are for a program, so they
 	// are narrowed and printed bare — never numbered, since an index column
 	// would corrupt what they asked for.
@@ -260,7 +275,8 @@ func (c GetCommand) Execute(
 	// A table kx cannot number is printed unnumbered, narrowed by the term
 	// all the same (see numberable).
 	if tabular && !numberable(listing, resource, extraArgs) {
-		return unnumbered(listing, output, filterTerm), namespace, nil
+		table, err := unnumbered(listing, output, filterTerm, keys)
+		return table, namespace, err
 	}
 	// Output kx cannot number leaves the current listing alone: `-o json`,
 	// `-o yaml` and `-o name` are printed as they arrived, and the numbers on
@@ -277,6 +293,9 @@ func (c GetCommand) Execute(
 	// listing than a full one: saved, kx get pods -l app=x -o name replaced
 	// the listing behind it, where one that found pods left it alone.
 	if !tabular {
+		if err := unsortableError(output, keys, extraArgs); err != nil {
+			return index.Table{}, "", err
+		}
 		text, err := narrowText(output, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, "", err
@@ -286,7 +305,12 @@ func (c GetCommand) Execute(
 			return raw, namespace, nil
 		}
 	}
-	indexed := listing.Narrow(filterTerm).Number()
+	// Sorted before it is numbered, so the indexes follow the order shown.
+	sorted, err := listing.Narrow(filterTerm).Sort(keys)
+	if err != nil {
+		return index.Table{}, "", sortError(err)
+	}
+	indexed := sorted.Number()
 	indexed.Raw = output
 	indexed.Match = filterTerm
 	// Saved unconditionally, including when the listing found nothing. An
@@ -295,7 +319,9 @@ func (c GetCommand) Execute(
 	// `kx delete 1` deleted a pod in a — a namespace and two commands away
 	// from anything the screen had shown. The entry carries its query, so the
 	// refusal it produces can name what found nothing.
-	if err := c.State.Save(getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)); err != nil {
+	listed := getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)
+	listed.Query.Sort = c.Sort
+	if err := c.State.Save(listed); err != nil {
 		return index.Table{}, "", err
 	}
 	return indexed, namespace, nil
@@ -310,12 +336,20 @@ func (c GetCommand) Execute(
 // (withheldNoHeaders), so a table's header is dropped on the way out. Only a
 // table's: a reply that is not one — -o name, -o json — had no header to
 // drop, and read as a table it lost every row to "nothing matches".
-func unnumberedListing(output, filterTerm string, args []string, headerless bool) (index.Table, error) {
-	if filterTerm == "" {
+//
+// keys are a --sort, which re-lays the rows in order: kubectl's text, kept
+// as it came when nothing narrows it, is in kubectl's order.
+func unnumberedListing(
+	output, filterTerm string, args []string, headerless bool, keys []index.SortKey,
+) (index.Table, error) {
+	if filterTerm == "" && len(keys) == 0 {
 		return index.Table{Raw: output, Unnumbered: true}, nil
 	}
 	listing, ok := index.ParseListing(output)
 	if !ok {
+		if err := unsortableError(output, keys, args); err != nil {
+			return index.Table{}, err
+		}
 		text, err := narrowText(output, filterTerm, args)
 		if err != nil {
 			return index.Table{}, err
@@ -328,23 +362,26 @@ func unnumberedListing(output, filterTerm string, args []string, headerless bool
 	if headerless {
 		return headerlessRows(listing, filterTerm), nil
 	}
-	return unnumbered(listing, output, filterTerm), nil
+	return unnumbered(listing, output, filterTerm, keys)
 }
 
 // unnumbered is a parsed listing kx prints but does not index: text, as it
 // came, when there is no term, and otherwise the listing narrowed by
 // filterTerm — every matching row of it, since nothing here is numbered (see
 // index.Listing) — or, when the term matched none, an empty listing that
-// names it.
-func unnumbered(listing index.Listing, text, filterTerm string) index.Table {
-	if filterTerm == "" {
-		return index.Table{Raw: text, Unnumbered: true}
+// names it. keys are a --sort, laid out in order as a term's rows are.
+func unnumbered(listing index.Listing, text, filterTerm string, keys []index.SortKey) (index.Table, error) {
+	if filterTerm == "" && len(keys) == 0 {
+		return index.Table{Raw: text, Unnumbered: true}, nil
 	}
-	narrowed := listing.Narrow(filterTerm)
-	if narrowed.Empty() {
-		return index.Table{Match: filterTerm, Unnumbered: true}
+	narrowed, err := listing.Narrow(filterTerm).Sort(keys)
+	if err != nil {
+		return index.Table{}, sortError(err)
 	}
-	return index.Table{Raw: narrowed.Unnumbered(), Unnumbered: true}
+	if narrowed.Empty() && filterTerm != "" {
+		return index.Table{Match: filterTerm, Unnumbered: true}, nil
+	}
+	return index.Table{Raw: narrowed.Unnumbered(), Unnumbered: true}, nil
 }
 
 // numberable reports whether kx can number a listing kubectl replied with to
@@ -442,6 +479,10 @@ func getListing(
 func (c GetCommand) ExecuteGroups(
 	resource, filterTerm string, groups []namespaceGroup, extraArgs []string,
 ) (table index.Table, err error) {
+	keys, err := sortKeysOf(c.Sort)
+	if err != nil {
+		return index.Table{}, err
+	}
 	// The stitched tables, one per kind, in the order each was first seen.
 	var tables []index.RawTable
 	at := map[string]int{}
@@ -502,7 +543,15 @@ func (c GetCommand) ExecuteGroups(
 	// unfiltered tables, printing exactly the rows the term had excluded.
 	listing, stitched := c.Index.Stitch(tables)
 	if !tabular || !stitched {
-		text, err := narrowText(joinReplies(raw, extraArgs), filterTerm, extraArgs)
+		joined := joinReplies(raw, extraArgs)
+		// A --sort over a reply kx cannot read is refused here as it is on
+		// the single-namespace paths: takeSort has already taken it off
+		// kubectl's arguments, so printing the replies as they came answered
+		// a sort nothing had performed.
+		if err := unsortableError(joined, keys, extraArgs); err != nil {
+			return index.Table{}, err
+		}
+		text, err := narrowText(joined, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, err
 		}
@@ -521,10 +570,14 @@ func (c GetCommand) ExecuteGroups(
 	// back. No -A among args: each namespace is fetched with its own -n, and
 	// the NAMESPACE column put back places every row.
 	if !numberable(listing, resource, extraArgs) {
-		return unnumbered(listing, listing.Unnumbered(), filterTerm), nil
+		return unnumbered(listing, listing.Unnumbered(), filterTerm, keys)
 	}
 
-	indexed := listing.Narrow(filterTerm).Number()
+	sorted, err := listing.Narrow(filterTerm).Sort(keys)
+	if err != nil {
+		return index.Table{}, sortError(err)
+	}
+	indexed := sorted.Number()
 	indexed.Match = filterTerm
 	// Saved even when the term left nothing, as GetCommand.Execute saves an
 	// empty listing: otherwise the -A listing these indexes came from stays

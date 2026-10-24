@@ -206,7 +206,7 @@ func TestContainerWaitingReasons(t *testing.T) {
 		want     Severity
 		contains string
 	}{
-		"crashloop":    {"CrashLoopBackOff", Critical, "CrashLoopBackOff in pod nginx"},
+		"crashloop":    {"CrashLoopBackOff", Critical, "CrashLoopBackOff in Pod nginx"},
 		"image pull":   {"ImagePullBackOff", Critical, "Image pull failure"},
 		"bad image":    {"InvalidImageName", Critical, "Image pull failure"},
 		"config error": {"CreateContainerConfigError", Critical, "Container config error"},
@@ -751,10 +751,10 @@ func TestNodePodRollupReportsWhatIsNotRunning(t *testing.T) {
 			Pods:       PodPhaseCounts{Total: 20, Running: 17, Pending: 2, Unknown: 1},
 		},
 	})
-	if !hasSummaryContaining(report.Findings, "3/20 pods not running") {
+	if !hasSummaryContaining(report.Findings, "3/20 Pods not running") {
 		t.Errorf("findings = %v, want a pod rollup", summaries(report.Findings))
 	}
-	if severityOf(t, report.Findings, "pods not running") != Warning {
+	if severityOf(t, report.Findings, "Pods not running") != Warning {
 		t.Error("the pod rollup should be a warning, not a critical")
 	}
 }
@@ -815,7 +815,7 @@ func TestNodeRollupIgnoresPodsThatAlreadyFailed(t *testing.T) {
 			Pods:       PodPhaseCounts{Total: 40, Running: 39, Failed: 1},
 		},
 	})
-	if hasSummaryContaining(report.Findings, "pods not running") {
+	if hasSummaryContaining(report.Findings, "Pods not running") {
 		t.Errorf("findings = %v, want no rollup for a node whose only non-running pod failed",
 			summaries(report.Findings))
 	}
@@ -834,7 +834,7 @@ func TestNodeRollupStillCountsPendingAndUnknown(t *testing.T) {
 			Pods:       PodPhaseCounts{Total: 45, Running: 37, Pending: 2, Unknown: 1, Failed: 5},
 		},
 	})
-	if !hasSummaryContaining(report.Findings, "3/40 pods not running") {
+	if !hasSummaryContaining(report.Findings, "3/40 Pods not running") {
 		t.Errorf("findings = %v, want the pending and unknown pods counted and the failed ones not",
 			summaries(report.Findings))
 	}
@@ -855,7 +855,7 @@ func TestNodeRollupDenominatorExcludesTerminatedPods(t *testing.T) {
 			Pods:       PodPhaseCounts{Total: 29, Running: 23, Failed: 5, Pending: 1},
 		},
 	})
-	if !hasSummaryContaining(report.Findings, "1/24 pods not running") {
+	if !hasSummaryContaining(report.Findings, "1/24 Pods not running") {
 		t.Errorf("findings = %v,\n  want the terminated pods out of the denominator",
 			summaries(report.Findings))
 	}

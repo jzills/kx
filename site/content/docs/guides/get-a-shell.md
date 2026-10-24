@@ -4,7 +4,7 @@ description: kx exec takes a Deployment as readily as a Pod, so you don't have t
 weight: 6
 ---
 
-Running a command inside something usually means finding a pod first: list them, read a generated name off the table, then type it.
+Running a command inside something usually means finding a Pod first: list them, read a generated name off the table, then type it.
 The `kx exec` command takes the index of the workload itself.
 
 ```bash
@@ -24,9 +24,9 @@ Services are refused.
 Since `kubectl exec` does not accept one, kx says so itself rather than letting kubectl produce a worse message about it.
 
 {{% kx-note %}}
-The pod is not kx's choice — `kubectl exec` resolves the workload, the same way [`kx port-forward`](../../reference/commands/port-forward/) leaves that choice to kubectl.
-Which pod you get is therefore not guaranteed to be the same one across the shell probe and the session that follows.
-For a Deployment whose replicas are interchangeable that is what you want; when it isn't, address a pod directly.
+The Pod is not kx's choice — `kubectl exec` resolves the workload, the same way [`kx port-forward`](../../reference/commands/port-forward/) leaves that choice to kubectl.
+Which Pod you get is therefore not guaranteed to be the same one across the shell probe and the session that follows.
+For a Deployment whose replicas are interchangeable that is what you want; when it isn't, address a Pod directly.
 {{% /kx-note %}}
 
 ## Exit codes come back

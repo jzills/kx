@@ -433,7 +433,7 @@ func completeKind(_ Services, _ string) []string {
 }
 
 func completeTopResource(Services, string) []string {
-	return []string{"pods\tCPU and memory per pod", "nodes\tCPU and memory per node"}
+	return []string{"pods\tCPU and memory per Pod", "nodes\tCPU and memory per Node"}
 }
 
 func completeRolloutAction(Services, string) []string {

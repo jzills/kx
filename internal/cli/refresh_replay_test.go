@@ -138,6 +138,14 @@ func TestStaleRefreshNamesTheListingsCommandWhenItCannotRunIt(t *testing.T) {
 			"Run 'kx top -A --no-limits -m api' to refresh the list."},
 		{"a sweep", &state.Query{Command: state.CommandDiag, Args: []string{"-A"}, Match: matchOf("api")},
 			"Run 'kx diag -A -m api' to refresh the list."},
+		// Sorted, its rows were numbered in that order; relisted without
+		// the sort, row 3 is another resource.
+		{"kx get, sorted", &state.Query{Resource: "pods", Args: []string{}, Sort: "-restarts"},
+			"Run 'kx get pods -n prod --sort=-restarts' to refresh the list."},
+		{"kx top, sorted", &state.Query{Command: state.CommandTop, Resource: "nodes", Args: []string{}, Sort: "-mem%"},
+			"Run 'kx top nodes --sort=-mem%' to refresh the list."},
+		{"a sweep, sorted", &state.Query{Command: state.CommandDiag, Args: []string{"-A"}, Sort: "kind", Match: matchOf("api")},
+			"Run 'kx diag -A --sort=kind -m api' to refresh the list."},
 		{"a namespace's tree", &state.Query{Command: state.CommandTree, Args: []string{"-n", "prod"}},
 			"Run 'kx tree -n prod' to refresh the list."},
 		// The root itself may be what went: list its kind to find it again,
@@ -171,9 +179,10 @@ func TestStaleRefreshOfAnAllNamespacesListingSaysSo(t *testing.T) {
 	}
 }
 
-// A kx get listing that could not be run again is named with its scope and
-// term. Its names are left out — they are what went stale — but "kx get pods"
-// for a listing of prod, typed in default, lists default.
+// A kx get listing that could not be run again is named with its scope, term
+// and the flags it was shaped by. Its names are left out — they are what went
+// stale — but "kx get pods" for a listing of prod, typed in default, lists
+// default.
 func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 	term := "api"
 	for _, tc := range []struct {
@@ -185,7 +194,7 @@ func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 		{state.Query{Resource: "pods", Args: []string{"--namespace=prod"}},
 			"Run 'kx get pods -n prod' to refresh the list."},
 		{state.Query{Resource: "deploy", Args: []string{"-A", "-o", "wide"}},
-			"Run 'kx get deploy -A' to refresh the list."},
+			"Run 'kx get deploy -A -o wide' to refresh the list."},
 	} {
 		query := tc.query
 		out := runStale(t, staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, &query))
@@ -253,5 +262,150 @@ func TestAFailedReplayNamesTheNamespaceTheListingWasTakenIn(t *testing.T) {
 		if out := runStale(t, staleServices(t, kube, tc.query)); !strings.Contains(out, tc.want) {
 			t.Errorf("output = %q\n  want %q", out, tc.want)
 		}
+	}
+}
+
+// A saved kx get all --sort restarts listing whose Pods have all gone came
+// back with no table holding RESTARTS, and the replay refused the key it was
+// saved with, so the refresh fell back to a hint. The replay drops a key no
+// table has now, and keeps it in the query for the next one; the control is
+// the same reply typed fresh, which is still refused.
+func TestStaleRefreshKeepsASortedListingWhoseColumnHasGone(t *testing.T) {
+	const reply = "NAME           TYPE        CLUSTER-IP\nservice/idle   ClusterIP   10.96.0.1\n\n" +
+		"NAME                   READY   UP-TO-DATE\ndeployment.apps/idle   0/0     0\n"
+	query := &state.Query{Resource: "all", Args: []string{"-n", "prod"}, Sort: "restarts"}
+	services := staleServices(t, &fakeKubectl{output: reply}, query)
+	out := runStale(t, services)
+	if !strings.Contains(out, "State was stale") || !strings.Contains(out, "service/idle") {
+		t.Errorf("output = %q, want the refreshed listing", out)
+	}
+	if got := currentQuery(t, services); got == nil || got.Sort != "restarts" {
+		t.Errorf("saved query = %+v, want its --sort kept", got)
+	}
+
+	err := executeArgv(newGetCommand(switchServices(t, &fakeKubectl{output: reply, namespace: "prod"})),
+		[]string{"all", "--sort", "restarts"})
+	want := "Invalid value for '--sort': 'restarts'. Accepted values: name, type, cluster-ip, ready, up-to-date."
+	if err == nil || err.Error() != want {
+		t.Errorf("kx get all --sort restarts: err = %v, want %q", err, want)
+	}
+}
+
+// A relist hint is a line to paste back, so a value holding a space is
+// quoted. `kx get pods --sort "nominated node"` hinted `kx get pods -n prod
+// --sort=nominated node`, which pasted back looked up a Pod named node and
+// failed; a -m term read the same way. Double quotes, since the hint around
+// the command is in single ones. The control is a one-word value, which is
+// still named plainly.
+func TestARelistHintQuotesAValueHoldingASpace(t *testing.T) {
+	const wide = "NAME    READY   STATUS    RESTARTS   AGE   NOMINATED NODE\n" +
+		"web-b   1/1     Running   0          5d    node-2\n" +
+		"api     1/1     Running   0          3h    <none>\n"
+	relist := func(t *testing.T, argv ...string) string {
+		t.Helper()
+		quietRender(t)
+		services := switchServices(t, &fakeKubectl{output: wide, namespace: "prod"})
+		if err := executeArgv(newGetCommand(services), argv); err != nil {
+			t.Fatalf("kx get %s: %v", strings.Join(argv, " "), err)
+		}
+		return relistCommand(currentEntry(t, services), false)
+	}
+
+	got := relist(t, "pods", "--sort", "nominated node")
+	if want := `kx get pods -n prod --sort="nominated node"`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+	got = relist(t, "pods", "--sort", "restarts")
+	if want := "kx get pods -n prod --sort=restarts"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+
+	term := "web b"
+	entry := state.State{Namespace: "prod", Query: &state.Query{Resource: "pods", Match: &term}}
+	if got, want := relistCommand(entry, false), `kx get pods -n prod -m "web b"`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+}
+
+// shapedKubectl answers as kubectl does — the wide table under -o wide, the
+// default one without it — so a hint run without the shape its listing was
+// taken in is read off the columns kubectl would really have printed.
+type shapedKubectl struct {
+	*fakeKubectl
+	wide, plain string
+}
+
+func (s *shapedKubectl) Run(args []string) (string, error) {
+	s.fakeKubectl.output = s.plain
+	if strings.Contains(strings.Join(args, " "), "--output=wide") {
+		s.fakeKubectl.output = s.wide
+	}
+	return s.fakeKubectl.Run(args)
+}
+
+// A relist hint names the shape the listing was taken in, since its sort was
+// read off the columns that shape printed. `kx get pods -o wide --sort node`
+// hinted `kx get pods -n prod --sort=node`, which run was refused — NODE is
+// a column of -o wide alone — so the hint named no way back. The control is
+// a fetch by index, whose arguments are the rows that went stale and are
+// still left out.
+func TestARelistHintNamesTheShapeTheListingWasTakenIn(t *testing.T) {
+	const wide = "NAME    READY   STATUS    RESTARTS   AGE   IP           NODE\n" +
+		"web-b   1/1     Running   0          5d    10.0.0.11    node-2\n" +
+		"api     1/1     Running   0          3h    10.0.0.12    node-1\n"
+	const plain = "NAME    READY   STATUS    RESTARTS   AGE\n" +
+		"web-b   1/1     Running   0          5d\n" +
+		"api     1/1     Running   0          3h\n"
+	shaped := func() *shapedKubectl {
+		return &shapedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod"}, wide: wide, plain: plain}
+	}
+	quietRender(t)
+	services := switchServices(t, shaped())
+	if err := executeArgv(newGetCommand(services), []string{"pods", "-o", "wide", "--sort", "node"}); err != nil {
+		t.Fatalf("kx get pods -o wide --sort node: %v", err)
+	}
+	hint := relistCommand(currentEntry(t, services), false)
+	if want := "kx get pods -n prod --output=wide --sort=node"; hint != want {
+		t.Errorf("relist = %q, want %q", hint, want)
+	}
+	// The hint as a command: run against the shape it names, its sort reads
+	// a column that is there.
+	if err := executeArgv(newGetCommand(switchServices(t, shaped())), strings.Fields(hint)[2:]); err != nil {
+		t.Errorf("%s: %v", hint, err)
+	}
+
+	if err := executeArgv(newGetCommand(services), []string{"pods", "1", "2"}); err != nil {
+		t.Fatalf("kx get pods 1 2: %v", err)
+	}
+	if got, want := relistCommand(currentEntry(t, services), false), "kx get pods -n prod"; got != want {
+		t.Errorf("relist of a fetch = %q, want %q", got, want)
+	}
+}
+
+// A flag given an empty value was given one, and a relist that repeats the
+// flag without it is a line a shell refuses. `kx get pods -- --field-selector
+// ""` hinted `kx get pods -n prod --field-selector`, which pasted back failed
+// with "flag needs an argument". The control is the same flag with a value,
+// which is repeated as it was typed.
+func TestARelistHintKeepsAnEmptyFlagValue(t *testing.T) {
+	const pods = "NAME    READY   STATUS    RESTARTS   AGE\n" +
+		"web-b   1/1     Running   0          5d\n"
+	relist := func(t *testing.T, argv ...string) string {
+		t.Helper()
+		quietRender(t)
+		services := switchServices(t, &fakeKubectl{output: pods, namespace: "prod"})
+		if err := executeArgv(newGetCommand(services), argv); err != nil {
+			t.Fatalf("kx get %s: %v", strings.Join(argv, " "), err)
+		}
+		return relistCommand(currentEntry(t, services), false)
+	}
+
+	got := relist(t, "pods", "--", "--field-selector", "")
+	if want := `kx get pods -n prod --field-selector ""`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+	got = relist(t, "pods", "--", "--field-selector", "status.phase=Running")
+	if want := "kx get pods -n prod --field-selector status.phase=Running"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
 	}
 }

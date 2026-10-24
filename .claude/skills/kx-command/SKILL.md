@@ -23,6 +23,7 @@ A command touches more than its own file. Pinning tests walk the whole tree, sev
    - Mark with `ownFlag` any kubectl-named flag that kx builds into the argv itself.
    - Split the argv with `kubectlArgv`, `indexArgv` or `splitIndexArgv`. A mutating command refuses leftover positionals with `refuseStray`.
    - Never set `DisableFlagParsing`, and never give a forwarding command an `Args` validator.
+   - A command registering several subcommands (`top`, `rollout`) gets each shared flag's usage from the first to define it. Where kubectl words it differently per subcommand, set the flag's `Usage` *after* `registerKubectlFlags` to cover them all, as `kx top --sort-by` does. Registering it kx-first instead lists it in the command's signature as one of kx's own. `TestEverySharedFlagWordedPerSubcommandIsReworded` fails until you do.
 8. **Errors.** Use the `STYLE.md` Errors shapes, through the `kx-voice` skill.
 
 ## Wiring and annotations
@@ -58,4 +59,4 @@ A command touches more than its own file. Pinning tests walk the whole tree, sev
 
 ## Before you finish
 
-Run `gofmt -l ./cmd ./internal ./tools`, `go vet ./...` and `go test -race ./...`. Then drive the command against a cluster with the `verify` skill, including its `--help` and `kx __complete <cmd> ""`.
+Run `gofmt -l ./cmd ./internal ./tools`, `go vet ./...` and `go test -race ./...`. Then drive the command against a cluster with the `kx-verify` skill, including its `--help` and `kx __complete <cmd> ""`.

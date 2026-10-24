@@ -6,7 +6,9 @@ description: "List Secrets like kx get, or show an indexed Secret's data with --
 weight: 25
 ---
 
-Lists Secrets exactly as kx get does. With --decode, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.
+Lists Secrets exactly as kx get does. With `--decode`, prints an indexed Secret's data in plaintext, or every Secret in the namespace when no index is given.
+
+A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. A Secret listing's columns are NAME, TYPE, DATA and AGE, which sort as what they hold — DATA as a count, AGE as a duration — and ties keep kubectl's order. With `--decode` there is no listing to sort, only one Secret's data, so the two cannot be combined. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
@@ -37,6 +39,7 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
 | `-o, --output string` | Output format, as kubectl takes it; kx numbers only a table |
+| `--sort string` | Sort by the columns shown, before indexing: 'type,-age' sorts by TYPE, then by AGE from oldest to newest |
 | `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 
@@ -81,4 +84,5 @@ kx secret 1 --decode -k tls.crt
 kx secret 1..3
 kx secret 3..
 kx secret -l app=web
+kx secret --sort type,-age
 ```

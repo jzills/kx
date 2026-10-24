@@ -237,3 +237,82 @@ func TestWatchStreamLeavesMachineOutputAlone(t *testing.T) {
 		}
 	}
 }
+
+// Another cluster's nodes print kubectl's own table, where a percentage
+// column is spelled CPU(%) beside CPU(cores). Dropping the unit note from
+// both left them the same sort key: --sort cpu% was refused outright, and
+// --sort cpu took whichever column came first rather than the one named.
+// The fixture's cores and percentages disagree on the order, so a key
+// reaching the wrong column of the pair shows up as the wrong node first.
+func TestTopNodesFromAnotherClusterSortsByPercentColumns(t *testing.T) {
+	const nodes = "NAME       CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)\n" +
+		"node-a     196m         50%      3200Mi          10%\n" +
+		"node-b     500m         5%       1864Mi          80%"
+	for _, tc := range []struct {
+		key   string
+		first string
+	}{
+		{"cpu", "node-a"},
+		{"cpu%", "node-b"},
+		{"memory", "node-b"},
+		{"memory%", "node-a"},
+	} {
+		kube := &recordingKubectl{output: nodes}
+		stdout, _, err := runCaptured(t, newTopCommand(crossClusterServices(t, kube)),
+			[]string{"nodes", "--context=b", "--sort", tc.key})
+		if err != nil {
+			t.Fatalf("kx top nodes --context=b --sort %s: %v", tc.key, err)
+		}
+		// The caption, the header, then the rows.
+		lines := strings.Split(strings.TrimSpace(stdout), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("--sort %s printed %q, want a caption, a header and two nodes", tc.key, stdout)
+		}
+		if got := strings.Fields(lines[2])[0]; got != tc.first {
+			t.Errorf("--sort %s leads with %q, want %q", tc.key, got, tc.first)
+		}
+	}
+}
+
+// kx top --help works '-mem%,-cpu%' as the example, and another cluster's
+// listing has no such column: kx adds its percentage columns to the current
+// cluster's table only, so a Pod listing from elsewhere sorts by CPU and
+// MEMORY alone and a Node one by kubectl's own CPU(%) and MEMORY(%). The
+// help names both sets, and the refusals below are where those spellings
+// come from, so the paragraph cannot drift from what kx accepts.
+func TestTopSortHelpNamesWhatAnotherClusterAccepts(t *testing.T) {
+	help := sortHelpOf(t, NewRoot(Services{}, "test"), "top")
+	for _, phrase := range []string{
+		"`--context`", "'cpu' or 'memory' there for Pods", "'cpu%' or 'memory%' for Nodes",
+	} {
+		if !strings.Contains(help, phrase) {
+			t.Errorf("kx top --help = %q, want %q", help, phrase)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--context=b", "--sort", "-mem%"},
+			"Invalid value for '--sort': 'mem%'. Accepted values: name, cpu, memory."},
+		{[]string{"nodes", "--context=b", "--sort", "-mem%"},
+			"Invalid value for '--sort': 'mem%'. Accepted values: name, cpu, cpu%, memory, memory%."},
+	} {
+		output := topPodsFixture
+		if tc.args[0] == "nodes" {
+			output = nodesOutput
+		}
+		kube := &recordingKubectl{output: output}
+		_, _, err := runCaptured(t, newTopCommand(crossClusterServices(t, kube)), tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("kx top %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+	}
+	// The control: the same keys on the current cluster's listing, where the
+	// columns the help's example names do exist.
+	quietRender(t)
+	pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	if err := executeArgv(newTopCommand(topServices(t, pods)), []string{"--sort", "-mem%,-cpu%"}); err != nil {
+		t.Errorf("kx top --sort -mem%%,-cpu%%: %v", err)
+	}
+}

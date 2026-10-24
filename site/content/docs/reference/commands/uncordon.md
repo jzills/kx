@@ -6,7 +6,7 @@ description: "Mark one or more indexed Nodes schedulable again."
 weight: 29
 ---
 
-Reverses kx cordon, letting the scheduler place pods on the node again.
+Reverses kx cordon, letting the scheduler place Pods on the Node again.
 
 kubectl's own uncordon flags pass through, --dry-run among them.
 

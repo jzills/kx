@@ -18,20 +18,23 @@ type TriageResult struct {
 	// separates two rows whose names are unique only within their own.
 	AllNamespaces bool
 	// Checked is the number of resources swept, most of which are healthy and
-	// never appear as a row unless Full is set.
+	// never appear as a row unless ShowHealthy is set.
 	Checked int
 	// Reports are the terminal table's rows, most severe first: unhealthy
-	// resources only, or every swept resource when Full is set.
-	Reports []diagnostics.Report
-	// All is every swept resource, most severe first, regardless of Full — the
+	// resources only, or every swept resource when ShowHealthy is set. Each carries
+	// the index it was saved under, since the table is a selection from All
+	// and its rows need not be numbered 1..n — see TriageRow.
+	Reports []TriageRow
+	// All is every swept resource, most severe first, regardless of ShowHealthy
+	// — the
 	// HTML report shows the full inventory unconditionally, since its grid can
 	// filter healthy rows away client-side rather than needing them dropped
 	// before they ever reach the page.
 	All     []diagnostics.Report
 	Healthy int
-	// Full mirrors kx diag --full: Reports already includes healthy resources,
-	// so the footer must not also claim some were left out.
-	Full bool
+	// ShowHealthy mirrors kx diag --show-healthy: Reports already includes the
+	// healthy resources, so the footer must not also claim some were left out.
+	ShowHealthy bool
 	// Window is how far back the sweep was allowed to look. "12 checked"
 	// and "all healthy" are both claims about what was looked at, and this
 	// is the only line the table has to qualify them on. Zero means no
@@ -43,6 +46,19 @@ type TriageResult struct {
 	Match string
 }
 
+// TriageRow is one row of the terminal table: a swept resource and the index
+// that resolves it.
+//
+// The index is the report's 1-based position in All, the order the sweep was
+// saved in, and not its position in the table. The two agree only while the
+// unhealthy rows are a prefix of the sweep, which the severity ranking alone
+// makes them; a --sort key interleaves healthy rows, so a table numbered by
+// its own rows would hand out indexes resolving to the resources between them.
+type TriageRow struct {
+	Index int
+	diagnostics.Report
+}
+
 // NothingMatches is the caption for a sweep a --match term narrowed to
 // nothing — kx diag, kx scan and kx tree alike. Named for the term so the
 // screen can't be mistaken for an empty namespace, which it may well not be.
@@ -52,7 +68,7 @@ func NothingMatches(term string) string {
 
 // Triage renders a namespace sweep: one row per unhealthy resource, indexed to
 // match the saved state, with healthy resources collapsed into the footer —
-// or one row per every swept resource, healthy included, when Full is set.
+// or one row per every swept resource, healthy included, when ShowHealthy is set.
 //
 // The caption follows the same "{kind} · {namespace} · {count} {noun}" shape as
 // kx get and kx state, with "Mixed" as the kind since a sweep spans whatever
@@ -103,25 +119,25 @@ func (r *Renderer) Triage(result TriageResult) {
 	nameBudget := triageNameBudget(r.width(), result)
 
 	rows := make([][]Cell, 0, len(result.Reports))
-	for position, report := range result.Reports {
+	for _, row := range result.Reports {
 		top := ""
-		if len(report.Findings) > 0 {
+		if len(row.Findings) > 0 {
 			// One finding per line keeps the table scannable; the rest is one
 			// `kx diag <index>` away.
-			top = report.Findings[0].Summary
+			top = row.Findings[0].Summary
 		}
 		// The shapes share their last three cells; a cluster-wide sweep adds
 		// the namespace between the kind and the name.
 		lead := []Cell{
-			Styled(strconv.Itoa(position+1), theme.Muted),
-			Plain(string(report.Kind)),
+			Styled(strconv.Itoa(row.Index), theme.Muted),
+			Plain(string(row.Kind)),
 		}
 		if result.AllNamespaces {
-			lead = append(lead, Styled(report.Namespace, theme.Muted))
+			lead = append(lead, Styled(row.Namespace, theme.Muted))
 		}
 		rows = append(rows, append(lead,
-			Plain(ellipsize(report.Name, nameBudget)),
-			Styled(report.Verdict.String(), severityStyle(report.Verdict)),
+			Plain(ellipsize(row.Name, nameBudget)),
+			Styled(row.Verdict.String(), severityStyle(row.Verdict)),
 			Styled(top, theme.Body)))
 	}
 	r.Table(columns, rows)
@@ -129,11 +145,11 @@ func (r *Renderer) Triage(result TriageResult) {
 	r.Blank()
 	hint := "kx diag <index> for detail"
 	footer := hint
-	// Nothing hidden, nothing to say: --full hides none by definition, and a
+	// Nothing hidden, nothing to say: --show-healthy hides none by definition, and a
 	// sweep where nothing was healthy has no healthy count to withhold. The
 	// footer used to count first and print regardless, so a namespace with
 	// every resource unhealthy got "0 healthy resources not shown".
-	if !result.Full && result.Healthy > 0 {
+	if !result.ShowHealthy && result.Healthy > 0 {
 		label := "resources"
 		if result.Healthy == 1 {
 			label = "resource"
@@ -177,10 +193,10 @@ func triageNameBudget(width int, result TriageResult) int {
 }
 
 // widestNamespace is how much room the -A shape's NAMESPACE column needs.
-func widestNamespace(reports []diagnostics.Report) int {
+func widestNamespace(rows []TriageRow) int {
 	widest := width("NAMESPACE")
-	for _, report := range reports {
-		if n := width(report.Namespace); n > widest {
+	for _, row := range rows {
+		if n := width(row.Namespace); n > widest {
 			widest = n
 		}
 	}

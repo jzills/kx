@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/jzills/kx/internal/config"
@@ -75,6 +76,11 @@ type TriageCommand struct {
 	// Window is what the sweep used. A refresh runs the sweep again with this
 	// and resolves the window afresh, as typing the command again would.
 	Since string
+	// Sort is a --sort over the sweep's columns, empty for none. Applied on
+	// top of the severity ranking, so it decides the order and the ranking
+	// the order of what it ties on; recorded in the query, so a refresh
+	// sweeps into the same order.
+	Sort string
 	// NamedNamespace is whether the namespace swept was named — -n, or an
 	// agent's namespace — rather than the context's own. Only a named one is
 	// recorded in the query; the entry records where the sweep was taken
@@ -85,7 +91,8 @@ type TriageCommand struct {
 
 // Execute sweeps one namespace, or every namespace when allNamespaces is set —
 // which the sweep spells as an empty namespace, the way client-go's listers do.
-// full mirrors kx diag --full: it decides only what the terminal table prints
+// showHealthy mirrors kx diag --show-healthy: it decides only what the
+// terminal table prints
 // (every resource vs. unhealthy ones); the HTML report and the saved index
 // state always cover every swept resource regardless of it, since the HTML
 // grid filters healthy rows away client-side and an index must resolve
@@ -96,7 +103,7 @@ type TriageCommand struct {
 // since there is no single namespace the listing came from. kx get -A follows
 // the same rule.
 func (c TriageCommand) Execute(
-	ctx context.Context, namespace string, allNamespaces, full bool,
+	ctx context.Context, namespace string, allNamespaces, showHealthy bool,
 ) (render.TriageResult, error) {
 	if allNamespaces {
 		namespace = ""
@@ -124,39 +131,43 @@ func (c TriageCommand) Execute(
 	sort.SliceStable(reports, func(i, j int) bool {
 		return reports[i].Verdict > reports[j].Verdict
 	})
-
-	var unhealthy []diagnostics.Report
-	for _, report := range reports {
-		if report.Verdict != diagnostics.OK {
-			unhealthy = append(unhealthy, report)
-		}
+	if reports, err = sortReports(reports, c.Sort); err != nil {
+		return render.TriageResult{}, err
 	}
-	terminalReports := unhealthy
-	if full {
-		terminalReports = reports
+
+	// Every swept resource is indexed, not just the unhealthy ones printed by
+	// default, so an index resolves whatever row the HTML grid's full
+	// inventory shows. The terminal table is a selection from that order, and
+	// each of its rows carries the index given here rather than counting its
+	// own: under --sort the unhealthy rows are no longer a prefix of the
+	// sweep, so the two numberings part company.
+	var entries []state.Resource
+	var terminalRows []render.TriageRow
+	healthy := 0
+	for position, report := range reports {
+		if report.Verdict == diagnostics.OK {
+			healthy++
+		}
+		if showHealthy || report.Verdict != diagnostics.OK {
+			terminalRows = append(terminalRows, render.TriageRow{
+				Index: position + 1, Report: report,
+			})
+		}
+		entries = append(entries, state.Resource{
+			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
+		})
 	}
 
 	result := render.TriageResult{
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
 		Checked:       len(reports),
-		Reports:       terminalReports,
+		Reports:       terminalRows,
 		All:           reports,
-		Healthy:       len(reports) - len(unhealthy),
-		Full:          full,
+		Healthy:       healthy,
+		ShowHealthy:   showHealthy,
 		Window:        c.Window,
 		Match:         c.Match,
-	}
-
-	// Every swept resource is indexed, not just the unhealthy ones printed by
-	// default, so an index resolves whatever row the HTML grid's full
-	// inventory shows — reports is severity-sorted, so unhealthy's own
-	// positions are unaffected, a prefix of this same order.
-	var entries []state.Resource
-	for _, report := range reports {
-		entries = append(entries, state.Resource{
-			Name: report.Name, Kind: report.Kind, Namespace: report.Namespace,
-		})
 	}
 
 	// namespace is already "" for a cluster-wide sweep — blanked above, the way
@@ -182,10 +193,10 @@ func (c TriageCommand) Execute(
 // query records the sweep so it can be run again: its scope as named —
 // -A, or -n when the namespace was named, the entry recording where it was
 // swept either way (see NamedNamespace) — and the flags that decide what it
-// saves. --full, --json, --html and --fail-on decide only what is done with
-// the sweep: the saved listing is every resource swept either way, so they
-// are left out, and a sweep with --full is the same view as one without. A
-// refresh prints the default table.
+// saves. --show-healthy, --json, --html and --fail-on decide only what is
+// done with the sweep: the saved listing is every resource swept either way,
+// so they are left out, and a sweep with --show-healthy is the same view as
+// one without. A refresh prints the default table.
 func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query {
 	args := []string{}
 	switch {
@@ -197,7 +208,57 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 	if c.Since != "" {
 		args = append(args, "--since", c.Since)
 	}
-	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match)}
+	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match), Sort: c.Sort}
+}
+
+// sweepSortError refuses a sweep's --sort before anything is swept: one that
+// names no column, or a column the sweep has none of.
+func sweepSortError(spec string) error {
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return sortSpecError(spec)
+	}
+	if _, err := index.SortRows(sweepHeaders, nil, keys); err != nil {
+		return sortError(err)
+	}
+	return nil
+}
+
+// sweepHeaders are the columns a sweep's --sort names: the triage table's,
+// with NAMESPACE whether or not the table shows it.
+var sweepHeaders = []string{"KIND", "NAME", "NAMESPACE", "VERDICT", "TOP FINDING"}
+
+// sortReports orders a ranked sweep by a --sort over its columns, stably, so
+// the severity ranking orders whatever the keys tie on. VERDICT sorts by
+// severity, not spelling — as text, -verdict put warning above critical — so
+// its cell is the severity's number; the cells are only sorted, never shown.
+func sortReports(reports []diagnostics.Report, spec string) ([]diagnostics.Report, error) {
+	if spec == "" {
+		return reports, nil
+	}
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return nil, sortSpecError(spec)
+	}
+	cells := make([][]string, len(reports))
+	for i, report := range reports {
+		top := ""
+		if len(report.Findings) > 0 {
+			top = report.Findings[0].Summary
+		}
+		cells[i] = []string{string(report.Kind), report.Name, report.Namespace,
+			strconv.Itoa(int(report.Verdict)), top, strconv.Itoa(i)}
+	}
+	sorted, err := index.SortRows(sweepHeaders, cells, keys)
+	if err != nil {
+		return nil, sortError(err)
+	}
+	ordered := make([]diagnostics.Report, len(reports))
+	for i, line := range sorted {
+		at, _ := strconv.Atoi(line[len(line)-1])
+		ordered[i] = reports[at]
+	}
+	return ordered, nil
 }
 
 // runSweep sweeps a namespace, or every namespace, under a spinner, and saves
@@ -214,8 +275,8 @@ type sweepScope struct {
 }
 
 func runSweep(
-	ctx context.Context, services Services, scope sweepScope, full bool,
-	window time.Duration, since, match string,
+	ctx context.Context, services Services, scope sweepScope, showHealthy bool,
+	window time.Duration, since, match, sortSpec string,
 ) (render.TriageResult, error) {
 	client, err := services.Kubernetes()
 	if err != nil {
@@ -230,8 +291,8 @@ func runSweep(
 	stop := render.Status(sweeping)
 	result, err := TriageCommand{
 		Diagnostics: service, Save: services.State.Save, Window: window,
-		Match: match, Since: since, NamedNamespace: scope.Named,
-	}.Execute(ctx, scope.Namespace, scope.All, full)
+		Match: match, Since: since, Sort: sortSpec, NamedNamespace: scope.Named,
+	}.Execute(ctx, scope.Namespace, scope.All, showHealthy)
 	stop()
 	return result, err
 }
@@ -242,7 +303,7 @@ func runSweep(
 // re-threaded through the caller's own namespace/allNamespaces variables.
 //
 // Reports comes from result.All, not result.Reports: the HTML grid shows
-// every swept resource unconditionally, regardless of whether --full was
+// every swept resource unconditionally, regardless of whether --show-healthy was
 // passed for the terminal table.
 func sweepPage(result render.TriageResult, meta web.Meta) web.DiagPage {
 	scope := result.Namespace
@@ -319,14 +380,17 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Short:      "Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.",
 		Aliases:    aliases,
 		Long: "Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
-			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --full includes them. The HTML report (--html) always includes them.\n\n" +
+			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) always includes them.\n\n" +
 			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
 			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
-			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending pod, a Service with no endpoints.\n\n" +
+			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending Pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
-			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.",
+			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.\n\n" +
+			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -m api\n" +
+			"  kx " + use + " --show-healthy\n" +
+			"  kx " + use + " -A --sort namespace,kind\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
@@ -334,7 +398,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		RunE: func(cmd *cobra.Command, args []string) error {
 			namespace, _ := cmd.Flags().GetString("namespace")
 			allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
-			full, _ := cmd.Flags().GetBool("full")
+			showHealthy, _ := cmd.Flags().GetBool("show-healthy")
 			html, _ := cmd.Flags().GetBool("html")
 			port, _ := cmd.Flags().GetInt("port")
 			noOpen, _ := cmd.Flags().GetBool("no-open")
@@ -343,6 +407,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			failOn, _ := cmd.Flags().GetString("fail-on")
 			since, _ := cmd.Flags().GetString("since")
 			match, _ := cmd.Flags().GetString("match")
+			sortSpec, _ := cmd.Flags().GetString("sort")
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -356,14 +421,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"machine and the other for a browser.", htmlFlagName(html))
 			}
 			// Unlike kx scan's, this pair is redundant rather than impossible:
-			// a document always carries every swept resource, so --full has
-			// nothing to add to one. Refused rather than ignored all the same,
+			// a document always carries every swept resource, so --show-healthy
+			// has nothing to add to one. Refused rather than ignored all the same,
 			// so a flag that changes nothing never looks as though it did.
-			if asJSON && cmd.Flags().Changed("full") {
+			if asJSON && cmd.Flags().Changed("show-healthy") {
 				return errors.New(
-					"'--json' cannot be combined with '--full' — a document " +
+					"'--json' cannot be combined with '--show-healthy' — a document " +
 						"already carries every resource swept, healthy ones " +
-						"included, so '--full' has nothing to add to it.")
+						"included, so '--show-healthy' has nothing to add to it.")
 			}
 			// Parsed up front so a typo fails before the cluster is read
 			// rather than after a report has already been printed.
@@ -405,13 +470,30 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if len(args) > 0 && match != "" {
 				return errMatchBesideIndex
 			}
-			// --full only changes what a sweep's terminal table includes; a single
+			// --show-healthy only changes what a sweep's terminal table includes; a single
 			// indexed resource has nothing to include or leave out.
-			if len(args) > 0 && cmd.Flags().Changed("full") {
+			if len(args) > 0 && cmd.Flags().Changed("show-healthy") {
 				return errors.New(
-					"'--full' cannot be combined with an index — it only affects a " +
+					"'--show-healthy' cannot be combined with an index — it only affects a " +
 						"namespace sweep. Drop the flag, or drop the index to sweep " +
 						"the namespace instead.")
+			}
+
+			// --sort orders a sweep's rows; one resource's report has none.
+			if len(args) > 0 && cmd.Flags().Changed("sort") {
+				return errors.New(
+					"'--sort' cannot be combined with an index — it sorts a namespace " +
+						"sweep. Drop the flag, or drop the index to sweep the namespace " +
+						"instead.")
+			}
+			// Checked before anything is swept, as --fail-on is: a sweep's
+			// columns are fixed, so a column it lacks costs nothing to refuse.
+			// After the index, which --sort does not apply to at all: checked
+			// first, a column the sweep lacks was the refusal kx diag 1 gave.
+			if cmd.Flags().Changed("sort") {
+				if err := sweepSortError(sortSpec); err != nil {
+					return err
+				}
 			}
 
 			ctx := cmd.Context()
@@ -423,7 +505,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				result, err := runSweep(ctx, services,
 					sweepScope{Namespace: namespace, All: allNamespaces, Named: named},
-					full, window, since, match)
+					showHealthy, window, since, match, sortSpec)
 				if err != nil {
 					return err
 				}
@@ -447,11 +529,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 						invocation(use, scopeArgs(namespace, allNamespaces),
-							matchFlag(match), sinceFlag(window), portFlag(port)))
+							matchFlag(match), sinceFlag(window), sortFlag(sortSpec), portFlag(port)))
 					if err != nil {
 						return err
 					}
-					page, err := web.RenderDiag(sweepPage(result, meta))
+					diagPage := sweepPage(result, meta)
+					diagPage.Sorted = sortSpec != ""
+					page, err := web.RenderDiag(diagPage)
 					if err != nil {
 						return err
 					}
@@ -514,7 +598,9 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().StringP("match", "m", "", matchUsage)
-	cmd.Flags().Bool("full", false,
+	cmd.Flags().String("sort", "",
+		"Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each")
+	cmd.Flags().Bool("show-healthy", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
 		"Print the report as JSON instead of a table")
@@ -549,7 +635,7 @@ func verdictGate(verdict diagnostics.Severity, failOn string, threshold diagnost
 
 // sweepGate applies the same gate to a sweep, over the worst verdict in it.
 //
-// Every swept resource, not just the rows the table printed: --full governs
+// Every swept resource, not just the rows the table printed: --show-healthy governs
 // what fits on a screen, and a gate that changed answer with a display flag
 // would be a trap.
 func sweepGate(result render.TriageResult, failOn string, threshold diagnostics.Severity) error {

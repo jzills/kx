@@ -54,6 +54,9 @@ type DiagPage struct {
 	AllNamespaces bool
 	Single        bool
 	Checked       int
+	// Sorted is a --sort: the rows arrive in its order, which the grid keeps
+	// rather than sorting by verdict on load. A header click still sorts.
+	Sorted bool
 	// Window is the resolved --since window, already spelled the way the
 	// terminal spells it ("last 24h"), or "" when the report is unbounded.
 	//
@@ -78,6 +81,9 @@ type ScanPage struct {
 	// named on the page when it left no images, as DiagPage's is.
 	Match  string
 	Images []scanner.ImageScan
+	// Sorted is a --sort: the images arrive in its order, which the grid
+	// keeps rather than sorting by Crit on load. A header click still sorts.
+	Sorted bool
 }
 
 // TreePage is one ownership-graph rendering, for a single resource, a whole

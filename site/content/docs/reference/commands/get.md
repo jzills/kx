@@ -14,6 +14,8 @@ A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a cluster-sc
 
 A `--match` term narrows the table, a watch's live table, `-o name` or a `-o json`/`-o yaml` collection by each row's name. A template is a shape you chose, which kx cannot assume has names in it, so it refuses the term there rather than printing everything.
 
+A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. Each column sorts as what it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -40,6 +42,7 @@ kx get [OPTIONS] <resource> [index]... [kubectl flags]
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
 | `-o, --output string` | Output format, as kubectl takes it; kx numbers only a table |
+| `--sort string` | Sort by the columns shown, before indexing: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest |
 | `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 
@@ -84,5 +87,7 @@ kx get deploy -m api
 kx get pods 1..3
 kx get pods 3..
 kx get pods --watch
+kx get pods --sort status,-restarts
+kx get pods -A --sort namespace,-age
 kx get pods --sort-by=.metadata.creationTimestamp
 ```

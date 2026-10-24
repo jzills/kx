@@ -252,27 +252,27 @@ func TestTopPodsStillAcceptsNoLimits(t *testing.T) {
 	}
 }
 
-// kx scan already refuses --json with --full. kx diag accepted the pair and
+// kx scan already refuses --json with its own --full. kx diag accepted the pair and
 // ignored the second: a document always carries every swept resource, so
-// --full has nothing to add to one. Refused rather than ignored, so a flag
+// --show-healthy has nothing to add to one. Refused rather than ignored, so a flag
 // that changes nothing never looks as though it did.
-func TestDiagnosticRefusesJSONWithFull(t *testing.T) {
+func TestDiagnosticRefusesJSONWithShowHealthy(t *testing.T) {
 	quietRender(t)
-	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--json", "--full"})
+	err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", "--json", "--show-healthy"})
 	if err == nil {
-		t.Fatal("kx diag accepted --json with --full")
+		t.Fatal("kx diag accepted --json with --show-healthy")
 	}
-	for _, want := range []string{"--json", "--full"} {
+	for _, want := range []string{"--json", "--show-healthy"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to name %q", err, want)
 		}
 	}
 }
 
-// Each still works alone: --full is the sweep's own display flag, and --json
+// Each still works alone: --show-healthy is the sweep's own display flag, and --json
 // is the document. Only together are they contradictory.
-func TestDiagnosticAcceptsJSONAndFullSeparately(t *testing.T) {
-	for _, flag := range []string{"--json", "--full"} {
+func TestDiagnosticAcceptsJSONAndShowHealthySeparately(t *testing.T) {
+	for _, flag := range []string{"--json", "--show-healthy"} {
 		t.Run(flag, func(t *testing.T) {
 			quietRender(t)
 			err := Execute(NewRoot(argvServices(t), "test"), []string{"diag", flag})

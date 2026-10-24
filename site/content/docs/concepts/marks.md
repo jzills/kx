@@ -5,8 +5,8 @@ weight: 3
 ---
 
 An index is a position in a listing, not an identity.
-The moment you run `kx get` again, every number is reassigned — row 3 is whatever sorts third this time, not the pod you meant.
-That is fine for a command you type and spend in the same breath, but it falls apart the moment something else relists in between: a script that watches logs across a redeploy, or a pod you want to come back to after checking something else.
+The moment you run `kx get` again, every number is reassigned — row 3 is whatever sorts third this time, not the Pod you meant.
+That is fine for a command you type and spend in the same breath, but it falls apart the moment something else relists in between: a script that watches logs across a redeploy, or a Pod you want to come back to after checking something else.
 
 A mark is the fix: a name you choose, pinned to one resource, that keeps resolving no matter how many listings happen after it.
 

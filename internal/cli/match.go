@@ -63,12 +63,15 @@ func matchOf(term string) *string {
 }
 
 // matchFlag renders a term for an HTML report's invocation line, so the page
-// says it covers only what matched.
+// says it covers only what matched. The line is one to paste back, so a term
+// holding a space is quoted as a shell reads it (shellWord), as a relist
+// hint's is: unquoted, the -m web b of a page headed `kx top -m "web b"`
+// pasted back narrowed by web and listed a Pod named b besides.
 func matchFlag(term string) string {
 	if term == "" {
 		return ""
 	}
-	return "-m " + term
+	return "-m " + shellWord(term)
 }
 
 // A --match term narrows what kx prints, or the command is refused: a term

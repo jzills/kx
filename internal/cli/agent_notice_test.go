@@ -277,7 +277,7 @@ func TestAgentIndexNoticeDeleteAndDrainOnlyWithYes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("drain 1: %v", err)
 			}
-			if want := "Evict all pods from Node/node-a — from a kx mcp listing?"; prompted != want {
+			if want := "Evict all Pods from Node/node-a — from a kx mcp listing?"; prompted != want {
 				t.Errorf("prompt = %q, want %q", prompted, want)
 			}
 			if strings.Contains(stderr, noticeSubstring) {

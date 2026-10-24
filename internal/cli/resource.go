@@ -478,7 +478,7 @@ func (c LogsCommand) Execute(ref state.Ref, extraArgs []string) error {
 
 // selector builds the label selector that matches a workload's pods.
 func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, error) {
-	stop := c.Status("resolving pod selector")
+	stop := c.Status("resolving Pod selector")
 	raw, err := c.Kubectl.Run([]string{"get", string(kind), name, "-n", namespace, "-o", "json"})
 	stop()
 	if err != nil {
@@ -508,7 +508,7 @@ func (c LogsCommand) selector(name, namespace string, kind kinds.Kind) (string, 
 		labels = selector.MatchLabels
 	}
 	if len(labels) == 0 {
-		return "", fmt.Errorf("%s/%s has no pod selector, so there are no pods to aggregate logs from.", kind, name)
+		return "", fmt.Errorf("%s/%s has no Pod selector, so there are no Pods to aggregate logs from.", kind, name)
 	}
 
 	// Sorted so the selector is stable run to run, which matters when it shows
@@ -686,8 +686,8 @@ func (c DebugCommand) Execute(ref state.Ref, command, extraArgs []string) error 
 		if hasFlag(extraArgs, "--target", "") {
 			return errors.New(
 				"'--target' cannot be combined with a Node — it names a container " +
-					"to share a process namespace with, and debugging a node " +
-					"creates a pod of its own rather than joining one.")
+					"to share a process namespace with, and debugging a Node " +
+					"creates a Pod of its own rather than joining one.")
 		}
 	} else {
 		target, err := c.target(name, namespace, extraArgs)
