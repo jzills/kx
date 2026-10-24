@@ -381,3 +381,31 @@ func TestARelistHintNamesTheShapeTheListingWasTakenIn(t *testing.T) {
 		t.Errorf("relist of a fetch = %q, want %q", got, want)
 	}
 }
+
+// A flag given an empty value was given one, and a relist that repeats the
+// flag without it is a line a shell refuses. `kx get pods -- --field-selector
+// ""` hinted `kx get pods -n prod --field-selector`, which pasted back failed
+// with "flag needs an argument". The control is the same flag with a value,
+// which is repeated as it was typed.
+func TestARelistHintKeepsAnEmptyFlagValue(t *testing.T) {
+	const pods = "NAME    READY   STATUS    RESTARTS   AGE\n" +
+		"web-b   1/1     Running   0          5d\n"
+	relist := func(t *testing.T, argv ...string) string {
+		t.Helper()
+		quietRender(t)
+		services := switchServices(t, &fakeKubectl{output: pods, namespace: "prod"})
+		if err := executeArgv(newGetCommand(services), argv); err != nil {
+			t.Fatalf("kx get %s: %v", strings.Join(argv, " "), err)
+		}
+		return relistCommand(currentEntry(t, services), false)
+	}
+
+	got := relist(t, "pods", "--", "--field-selector", "")
+	if want := `kx get pods -n prod --field-selector ""`; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+	got = relist(t, "pods", "--", "--field-selector", "status.phase=Running")
+	if want := "kx get pods -n prod --field-selector status.phase=Running"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+}

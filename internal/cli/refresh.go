@@ -540,16 +540,20 @@ func listingFlags(entry state.State) []string {
 		if !strings.HasPrefix(arg, "-") {
 			return nil
 		}
+		// Taken, not non-empty: a flag given an empty value was given one,
+		// and emitted bare it is a relist a shell refuses for the argument
+		// the flag still needs.
 		var value string
+		taken := false
 		if !strings.Contains(arg, "=") && getFlagTakesValue(arg) && i+1 < len(args) {
 			i++
-			value = args[i]
+			value, taken = args[i], true
 		}
 		if scopeFlagIn([]string{arg}) != "" {
 			continue
 		}
 		flags = append(flags, arg)
-		if value != "" {
+		if taken {
 			flags = append(flags, value)
 		}
 	}
