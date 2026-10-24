@@ -1,11 +1,23 @@
 ---
 title: Install
-description: The install script, krew, uv, pipx, pip, or a standalone binary — all the same build.
+description: Homebrew, the install script, krew, uv, pipx, pip, or a standalone binary — all the same build.
 weight: 1
 ---
 
 The only requirement is `kubectl` on your `PATH`.
 Every method below installs the same prebuilt Go binary.
+
+## With Homebrew
+
+The tap is `jzills/tap`, and the formula installs the same release archive on macOS and on Linux:
+
+```bash
+brew install jzills/tap/kx
+```
+
+There is no `brew tap` to run first — naming the tap in the install does it — and `brew upgrade jzills/tap/kx` takes the next release.
+The formula is bumped by kx's release workflow and carries the published checksums, so Homebrew verifies the archive it downloads.
+Shell completions come with it, since the formula installs the ones `kx completion` generates.
 
 ## With the install script
 

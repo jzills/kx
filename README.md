@@ -30,7 +30,13 @@ Run `kx get <resource>` once, then reference any result by number instead of typ
 Requires `kubectl` on your PATH.
 Every install method delivers the same prebuilt binary.
 
-On Linux or macOS, the install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```bash
+brew install jzills/tap/kx
+```
+
+Or the install script, which fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
 
 ```bash
 curl -fsSL https://jzills.github.io/kx/install.sh | sh
