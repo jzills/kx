@@ -8,7 +8,7 @@ weight: 27
 
 Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.
 
-A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. CPU and MEMORY sort as quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod with no limit sorts last either way. kubectl's own `--sort-by` still takes 'cpu' or 'memory', and applies first.
+A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. CPU and MEMORY sort as quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod with no limit sorts last either way. Another cluster's listing — `--context`, `--kubeconfig` — prints kubectl's own table, which kx never adds its percentage columns to: name 'cpu' or 'memory' there for Pods, and kubectl's own 'cpu%' or 'memory%' for Nodes. kubectl's own `--sort-by` still takes 'cpu' or 'memory', and applies first.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
