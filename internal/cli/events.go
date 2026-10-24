@@ -249,6 +249,11 @@ func newTopCommand(services Services) *cobra.Command {
 				"'%s' cannot be combined with '%s' — it is a flag of %s only.",
 				flag, resource, joinAnd(kubectlFlags.definers(flag)))
 		}
+		// After that check, so --sum beside nodes is still refused as the
+		// Pod flag it is rather than for the sort.
+		if err := sumSortRefusal(sortSpec, rest); err != nil {
+			return err
+		}
 
 		output, resourceLabel, namespace, scopedAllNamespaces, err :=
 			topListing(services, nodes, match, rest, noLimits, "", sortSpec)

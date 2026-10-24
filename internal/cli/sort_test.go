@@ -513,3 +513,53 @@ func TestSortAnEmptyListingOrdersNothing(t *testing.T) {
 		})
 	}
 }
+
+// kubectl top's --sum ends the table with a total row of underscores, which
+// kx reads as a Pod's. One such cell turned MEMORY(bytes) to text, where 9Mi
+// sorted above 100Mi and the total row itself took an index, so the two flags
+// are refused together — however --sum is spelled, and before kubectl is
+// asked. The controls are each flag alone, which still work.
+func TestTopSortBesideSum(t *testing.T) {
+	want := "'--sort' cannot be combined with '--sum' — kubectl's total row is no Pod to " +
+		"sort among the rest. Use '--sort-by' for kubectl's own order."
+	for _, args := range [][]string{
+		{"--sum", "--sort", "-memory"},
+		{"--sum=true", "--sort", "-memory"},
+		{"pods", "--sort", "-memory", "--", "--sum"},
+	} {
+		quietRender(t)
+		pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+		err := executeArgv(newTopCommand(topServices(t, pods)), args)
+		if err == nil || err.Error() != want {
+			t.Errorf("kx top %s: err = %v, want %q", strings.Join(args, " "), err, want)
+		}
+		if len(pods.calls) > 0 {
+			t.Errorf("kx top %s: kubectl was called: %q", strings.Join(args, " "), pods.calls)
+		}
+	}
+
+	// --sum alone is forwarded, and the sort alone is taken.
+	quietRender(t)
+	pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	if err := executeArgv(newTopCommand(topServices(t, pods)), []string{"--sum"}); err != nil {
+		t.Fatalf("kx top --sum: %v", err)
+	}
+	if got := joinArgs(pods.calls[0]); !strings.Contains(got, "--sum") {
+		t.Errorf("kubectl = %q, want --sum forwarded", got)
+	}
+	quietRender(t)
+	pods = &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	if err := executeArgv(newTopCommand(topServices(t, pods)), []string{"--sort", "-memory"}); err != nil {
+		t.Fatalf("kx top --sort -memory: %v", err)
+	}
+
+	// On nodes, where --sum is no flag of kubectl's at all, it is still
+	// refused as the Pod flag it is.
+	quietRender(t)
+	nodes := &scriptedKubectl{outputs: []string{nodesOutput}}
+	err := executeArgv(newTopCommand(topServices(t, nodes)), []string{"nodes", "--sum", "--sort", "-cpu%"})
+	if want := "'--sum' cannot be combined with 'nodes' — it is a flag of kubectl top pod only."; err == nil ||
+		err.Error() != want {
+		t.Errorf("kx top nodes --sum --sort -cpu%%: err = %v, want %q", err, want)
+	}
+}
