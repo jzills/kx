@@ -59,12 +59,14 @@ func sortKeysOf(spec string) ([]index.SortKey, error) {
 }
 
 // sortFlag renders a --sort for an HTML report's invocation line, so the page
-// says what order its rows arrived in.
+// says what order its rows arrived in. Quoted as a relist hint's is
+// (shellWord): a column spelled with a space is one word of the flag, and
+// `--sort nominated node` pasted back looked up a Pod named node.
 func sortFlag(spec string) string {
 	if spec == "" {
 		return ""
 	}
-	return "--sort " + spec
+	return "--sort " + shellWord(spec)
 }
 
 func sortSpecError(spec string) error {
