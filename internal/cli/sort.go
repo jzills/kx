@@ -124,3 +124,19 @@ func sortRefusal(spec string, args []string) error {
 	return fmt.Errorf("'--sort' cannot be combined with '%s' — it sorts the table kx draws, "+
 		"and that output is for a program; use '--sort-by' for kubectl's own order.", flag)
 }
+
+// sumSortRefusal is kx top's --sort beside kubectl's --sum, which ends the
+// table with a total row of underscores. kx reads that row as a Pod's, and a
+// column has one kind of value throughout or none (index.columnValues), so
+// the underscores turned MEMORY(bytes) to text: 9Mi sorted above 100Mi, and
+// the total row itself landed wherever its text fell, numbered 1.
+func sumSortRefusal(spec string, args []string) error {
+	if spec == "" {
+		return nil
+	}
+	if sum, _ := extractBool(args, "--sum"); !sum {
+		return nil
+	}
+	return errors.New("'--sort' cannot be combined with '--sum' — kubectl's total row is " +
+		"no Pod to sort among the rest. Use '--sort-by' for kubectl's own order.")
+}
