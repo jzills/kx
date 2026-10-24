@@ -1190,3 +1190,45 @@ func TestTriageEmptySweepSavesTheEmptyEntry(t *testing.T) {
 		t.Errorf("entry.Namespace = %q, want prod", saved[0].Namespace)
 	}
 }
+
+// A report's invocation line is a command to paste back, as a relist hint is,
+// so a value holding a space is quoted. `kx diag --sort "top finding" -m
+// "web b"` headed its page `kx diag -n prod -m web b --sort top finding`,
+// which run looks up a resource named b and sorts by a column named top. The
+// controls are one-word values, still named plainly.
+func TestAReportsInvocationQuotesAValueHoldingASpace(t *testing.T) {
+	if got, want := sortFlag("top finding"), `--sort "top finding"`; got != want {
+		t.Errorf("sortFlag = %q, want %q", got, want)
+	}
+	if got, want := matchFlag("web b"), `-m "web b"`; got != want {
+		t.Errorf("matchFlag = %q, want %q", got, want)
+	}
+	if got, want := sortFlag("-verdict"), "--sort -verdict"; got != want {
+		t.Errorf("sortFlag = %q, want %q", got, want)
+	}
+	if got, want := matchFlag("web"), "-m web"; got != want {
+		t.Errorf("matchFlag = %q, want %q", got, want)
+	}
+
+	quietRender(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	services := diagnosticHTMLServices(t, stalePod("web", "prod")...)
+	cmd := newDiagnosticCommand(services, "diagnostic", []string{"diag"})
+	for name, value := range map[string]string{
+		"namespace": "prod", "sort": "top finding", "out": out,
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(page), `--sort &#34;top finding&#34;`) {
+		t.Errorf("the report's invocation line does not quote the sort it was built with")
+	}
+}
