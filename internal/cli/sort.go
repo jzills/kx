@@ -27,7 +27,10 @@ const (
 		"own `--sort-by` still takes a JSONPath, and applies first."
 	topSortLong = sortHow + "CPU and MEMORY sort as " +
 		"quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod " +
-		"with no limit sorts last either way. kubectl's own `--sort-by` still takes 'cpu' or " +
+		"with no limit sorts last either way. Another cluster's listing — `--context`, " +
+		"`--kubeconfig` — prints kubectl's own table, which kx never adds its percentage " +
+		"columns to: name 'cpu' or 'memory' there for Pods, and kubectl's own 'cpu%' or " +
+		"'memory%' for Nodes. kubectl's own `--sort-by` still takes 'cpu' or " +
 		"'memory', and applies first."
 	secretSortLong = sortHow + "A Secret listing's columns are NAME, " +
 		"TYPE, DATA and AGE, which sort as what they hold — DATA as a count, AGE as a " +

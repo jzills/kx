@@ -273,3 +273,46 @@ func TestTopNodesFromAnotherClusterSortsByPercentColumns(t *testing.T) {
 		}
 	}
 }
+
+// kx top --help works '-mem%,-cpu%' as the example, and another cluster's
+// listing has no such column: kx adds its percentage columns to the current
+// cluster's table only, so a Pod listing from elsewhere sorts by CPU and
+// MEMORY alone and a Node one by kubectl's own CPU(%) and MEMORY(%). The
+// help names both sets, and the refusals below are where those spellings
+// come from, so the paragraph cannot drift from what kx accepts.
+func TestTopSortHelpNamesWhatAnotherClusterAccepts(t *testing.T) {
+	help := sortHelpOf(t, NewRoot(Services{}, "test"), "top")
+	for _, phrase := range []string{
+		"`--context`", "'cpu' or 'memory' there for Pods", "'cpu%' or 'memory%' for Nodes",
+	} {
+		if !strings.Contains(help, phrase) {
+			t.Errorf("kx top --help = %q, want %q", help, phrase)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--context=b", "--sort", "-mem%"},
+			"Invalid value for '--sort': 'mem%'. Accepted values: name, cpu, memory."},
+		{[]string{"nodes", "--context=b", "--sort", "-mem%"},
+			"Invalid value for '--sort': 'mem%'. Accepted values: name, cpu, cpu%, memory, memory%."},
+	} {
+		output := topPodsFixture
+		if tc.args[0] == "nodes" {
+			output = nodesOutput
+		}
+		kube := &recordingKubectl{output: output}
+		_, _, err := runCaptured(t, newTopCommand(crossClusterServices(t, kube)), tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("kx top %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+	}
+	// The control: the same keys on the current cluster's listing, where the
+	// columns the help's example names do exist.
+	quietRender(t)
+	pods := &scriptedKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	if err := executeArgv(newTopCommand(topServices(t, pods)), []string{"--sort", "-mem%,-cpu%"}); err != nil {
+		t.Errorf("kx top --sort -mem%%,-cpu%%: %v", err)
+	}
+}
