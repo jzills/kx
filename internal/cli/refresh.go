@@ -13,10 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/graph"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
+	"github.com/jzills/kx/internal/kubectlflags"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -411,10 +413,10 @@ func queryMatch(query state.Query) string {
 // relistCommand is what to run when a listing could not be run again: the
 // command that made it, as it would be typed, in the scope a refresh would
 // take it in (listingScope), sorted and narrowed as it was. A kx get listing
-// is named by its resource, scope, sort and term — not its other arguments,
-// since a relist's are the very names that went stale — and a tree of one
-// resource by the listing of its kind in its namespace, since that resource
-// may be the one that went.
+// is named by its resource, scope, sort, term and the flags that shaped it
+// (listingFlags) — not the names it fetched, which are the very ones that
+// went stale — and a tree of one resource by the listing of its kind in its
+// namespace, since that resource may be the one that went.
 //
 // "kx get pods" for a listing of prod, typed in kube-system, lists
 // kube-system, so the namespace it was taken in is named — unless it was
@@ -435,6 +437,7 @@ func relistCommand(entry state.State, elsewhere bool) string {
 			return "kx get <resource>"
 		}
 		words = append([]string{"kx", "get", query.Resource}, scope...)
+		words = append(words, listingFlags(entry)...)
 	case state.CommandFetch:
 		// The -A listing its indexes came from, since its own arguments were
 		// indexes into that listing — narrowed by its term, below, or the
@@ -516,6 +519,68 @@ func shellWord(word string) string {
 	quoted.WriteByte('"')
 	return quoted.String()
 }
+
+// listingFlags is what a kx get relist repeats of the listing's arguments:
+// the flags that shaped its table — an -o, a -l, a --field-selector — with
+// the value of any written as a word of its own. The scope is left out,
+// since the relist names it from listingScope rather than twice.
+//
+// A sort is read off the columns the shape printed: relisted without the
+// `-o wide` that printed NOMINATED NODE, `--sort "nominated node"` is
+// refused for a column the table lacks.
+//
+// Nothing is repeated of a fetch by index or name, whose arguments open with
+// the rows themselves — the very ones that went stale. What a relist names
+// is the listing those rows came from, whose shape this entry does not hold.
+func listingFlags(entry state.State) []string {
+	args := entry.Query.Args
+	var flags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			return nil
+		}
+		var value string
+		if !strings.Contains(arg, "=") && getFlagTakesValue(arg) && i+1 < len(args) {
+			i++
+			value = args[i]
+		}
+		if scopeFlagIn([]string{arg}) != "" {
+			continue
+		}
+		flags = append(flags, arg)
+		if value != "" {
+			flags = append(flags, value)
+		}
+	}
+	return flags
+}
+
+// getFlagTakesValue reports whether a kubectl get flag written without "="
+// reads the word after it as its value, as pflag does (Flag.TakesValue):
+// `--field-selector status.phase=Running` is two words of one flag, while
+// `--show-kind` is one of its own. A flag the table doesn't name — typed
+// after `--` for a kubectl newer than the table was generated from — is
+// read as taking one, since a flag relisted without its value is refused,
+// where one relisted with a word too many lists the wrong rows silently.
+func getFlagTakesValue(arg string) bool {
+	flag, named := getFlags()[strings.TrimLeft(strings.Split(arg, "=")[0], "-")]
+	return !named || flag.TakesValue()
+}
+
+// getFlags is kubectl get's flags and the global ones, by every spelling
+// they are written in argv: read once, since the table is generated.
+var getFlags = sync.OnceValue(func() map[string]kubectlflags.Flag {
+	own, _ := kubectlflags.Command("get")
+	byName := map[string]kubectlflags.Flag{}
+	for _, flag := range append(kubectlflags.Global(), own...) {
+		byName[flag.Name] = flag
+		if flag.Shorthand != "" {
+			byName[flag.Shorthand] = flag
+		}
+	}
+	return byName
+})
 
 // withScope is a relist of a command whose arguments it repeats: them, and
 // the scope after them when they name none of their own.

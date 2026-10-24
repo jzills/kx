@@ -179,9 +179,10 @@ func TestStaleRefreshOfAnAllNamespacesListingSaysSo(t *testing.T) {
 	}
 }
 
-// A kx get listing that could not be run again is named with its scope and
-// term. Its names are left out — they are what went stale — but "kx get pods"
-// for a listing of prod, typed in default, lists default.
+// A kx get listing that could not be run again is named with its scope, term
+// and the flags it was shaped by. Its names are left out — they are what went
+// stale — but "kx get pods" for a listing of prod, typed in default, lists
+// default.
 func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 	term := "api"
 	for _, tc := range []struct {
@@ -193,7 +194,7 @@ func TestAFailedGetReplayNamesItsScopeAndTerm(t *testing.T) {
 		{state.Query{Resource: "pods", Args: []string{"--namespace=prod"}},
 			"Run 'kx get pods -n prod' to refresh the list."},
 		{state.Query{Resource: "deploy", Args: []string{"-A", "-o", "wide"}},
-			"Run 'kx get deploy -A' to refresh the list."},
+			"Run 'kx get deploy -A -o wide' to refresh the list."},
 	} {
 		query := tc.query
 		out := runStale(t, staleServices(t, &fakeKubectl{err: errors.New("connection refused")}, &query))
@@ -323,5 +324,60 @@ func TestARelistHintQuotesAValueHoldingASpace(t *testing.T) {
 	entry := state.State{Namespace: "prod", Query: &state.Query{Resource: "pods", Match: &term}}
 	if got, want := relistCommand(entry, false), `kx get pods -n prod -m "web b"`; got != want {
 		t.Errorf("relist = %q, want %q", got, want)
+	}
+}
+
+// shapedKubectl answers as kubectl does — the wide table under -o wide, the
+// default one without it — so a hint run without the shape its listing was
+// taken in is read off the columns kubectl would really have printed.
+type shapedKubectl struct {
+	*fakeKubectl
+	wide, plain string
+}
+
+func (s *shapedKubectl) Run(args []string) (string, error) {
+	s.fakeKubectl.output = s.plain
+	if strings.Contains(strings.Join(args, " "), "--output=wide") {
+		s.fakeKubectl.output = s.wide
+	}
+	return s.fakeKubectl.Run(args)
+}
+
+// A relist hint names the shape the listing was taken in, since its sort was
+// read off the columns that shape printed. `kx get pods -o wide --sort node`
+// hinted `kx get pods -n prod --sort=node`, which run was refused — NODE is
+// a column of -o wide alone — so the hint named no way back. The control is
+// a fetch by index, whose arguments are the rows that went stale and are
+// still left out.
+func TestARelistHintNamesTheShapeTheListingWasTakenIn(t *testing.T) {
+	const wide = "NAME    READY   STATUS    RESTARTS   AGE   IP           NODE\n" +
+		"web-b   1/1     Running   0          5d    10.0.0.11    node-2\n" +
+		"api     1/1     Running   0          3h    10.0.0.12    node-1\n"
+	const plain = "NAME    READY   STATUS    RESTARTS   AGE\n" +
+		"web-b   1/1     Running   0          5d\n" +
+		"api     1/1     Running   0          3h\n"
+	shaped := func() *shapedKubectl {
+		return &shapedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod"}, wide: wide, plain: plain}
+	}
+	quietRender(t)
+	services := switchServices(t, shaped())
+	if err := executeArgv(newGetCommand(services), []string{"pods", "-o", "wide", "--sort", "node"}); err != nil {
+		t.Fatalf("kx get pods -o wide --sort node: %v", err)
+	}
+	hint := relistCommand(currentEntry(t, services), false)
+	if want := "kx get pods -n prod --output=wide --sort=node"; hint != want {
+		t.Errorf("relist = %q, want %q", hint, want)
+	}
+	// The hint as a command: run against the shape it names, its sort reads
+	// a column that is there.
+	if err := executeArgv(newGetCommand(switchServices(t, shaped())), strings.Fields(hint)[2:]); err != nil {
+		t.Errorf("%s: %v", hint, err)
+	}
+
+	if err := executeArgv(newGetCommand(services), []string{"pods", "1", "2"}); err != nil {
+		t.Fatalf("kx get pods 1 2: %v", err)
+	}
+	if got, want := relistCommand(currentEntry(t, services), false), "kx get pods -n prod"; got != want {
+		t.Errorf("relist of a fetch = %q, want %q", got, want)
 	}
 }
