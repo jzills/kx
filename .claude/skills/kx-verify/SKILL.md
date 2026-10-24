@@ -1,5 +1,5 @@
 ---
-name: verify
+name: kx-verify
 description: Use when running, demoing or verifying a kx CLI change end-to-end against a real cluster rather than only in tests. Covers building the binary, isolating state with KX_STATE/KX_CONFIG, seeding the diagnostics namespace, scenarios, the flows worth driving, and the exit codes to assert on.
 ---
 
@@ -119,6 +119,20 @@ put it after `--` to reach kubectl.
 
 - zsh expands bare `=word` — quote separators like `"===LOGS==="` in
   compound commands.
+- zsh does not split an unquoted variable into words, so a loop such as
+  `for a in "theme dracula" "get pods"; do /tmp/kx $a; done` passes each as
+  *one* argument, and kx refuses `'theme dracula'` as an unknown command. It
+  reads as a broken fix. Write each argv out, or pass it through a function
+  that uses `"$@"`:
+
+  ```bash
+  run() { KX_STATE=$tmp/state.json KX_CONFIG=$tmp/config.toml /tmp/kx "$@"; echo "exit=$?"; }
+  run theme dracula
+  ```
+
+- `$?` after a pipe is the last command's: `/tmp/kx theme dracula | head -1;
+  echo $?` prints `head`'s 0 whatever kx did. Redirect to a file and read it
+  instead, as `run` above does.
 - The pty from `script` inherits the current terminal width; long resource
   names truncate with `…`. That is the flex-column fitting in
   `internal/render/table.go`, not a bug.
