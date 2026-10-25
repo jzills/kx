@@ -323,6 +323,9 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"set": true,
 	}
 	nonMutating := map[string]bool{
+		// docs resolves no index and reads no cluster — it prints
+		// documentation built into the binary.
+		"docs":        true,
 		"annotations": true, "completion": true, "context": true, "describe": true,
 		"diagnostic": true, "engine": true, "events": true, "get": true,
 		"labels": true, "logs": true, "mark": true, "mcp": true,

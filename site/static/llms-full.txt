@@ -1840,6 +1840,12 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 |---|---|
 | [`kx mcp [--write-listings]`](https://jzills.github.io/kx/docs/reference/commands/mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 
+## Documentation
+
+| Command | Description |
+|---|---|
+| [`kx docs [<topic>]`](https://jzills.github.io/kx/docs/reference/commands/docs/) | Read kx's documentation in the terminal: a topic, or the list of them. |
+
 ## Shell
 
 | Command | Description |
@@ -3976,6 +3982,50 @@ kx mcp [OPTIONS]
 ```bash
 claude mcp add kx -- kx mcp
 claude mcp add kx -- kx mcp --write-listings
+```
+
+---
+
+# kx docs
+
+Source: https://jzills.github.io/kx/docs/reference/commands/docs/
+
+Read kx's documentation in the terminal: a topic, or the list of them.
+
+Prints a documentation page from the copy built into this binary.
+
+With no topic, lists every page by section. A topic is a page's path — `concepts/state` — or just its last part where that is unambiguous, so `kx docs top` reaches the reference page for `kx top`.
+
+A topic that names no page is searched for instead, and the closest pages are listed. 'state' names two, a concept and a command, so both are offered rather than one of them chosen.
+
+The pages describe the kx that is printing them, not the current website: they are built into the binary, so they work offline and never describe a flag this version does not have. `kx <command> --help` remains the shorter answer for one command's flags.
+
+## Usage
+
+```text
+kx docs [OPTIONS] [topic]
+```
+
+## Arguments
+
+| Argument | Description |
+|---|---|
+| `[topic]` | Documentation page: its path, or its last part — kx docs lists them |
+
+## Global options
+
+| Option | Description |
+|---|---|
+| `--no-color` | Disable styled output |
+| `-h, --help` | Show this message and exit |
+
+## Examples
+
+```bash
+kx docs
+kx docs top
+kx docs concepts/state
+kx docs marks
 ```
 
 ---

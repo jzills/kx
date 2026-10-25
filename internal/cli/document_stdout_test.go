@@ -104,7 +104,9 @@ func TestSeveralManifestsAreSeparatedByADocumentMarker(t *testing.T) {
 // index through withRefresh, so neither has a listing or a banner to misplace.
 func TestDocumentAnnotationAllowlistIsPinned(t *testing.T) {
 	document := map[string]bool{
-		"debug": true, "exec": true, "logs": true, "yaml": true,
+		// docs prints a documentation page: always a document, whoever is
+		// reading, and nothing kx would paste a listing into.
+		"debug": true, "docs": true, "exec": true, "logs": true, "yaml": true,
 	}
 	other := map[string]bool{
 		"annotate": true, "annotations": true, "completion": true,

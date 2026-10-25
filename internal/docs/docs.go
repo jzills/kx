@@ -232,3 +232,66 @@ func split(body string) []string {
 	}
 	return sections
 }
+
+// Slug is the topic a page is reached by on the command line: its path under
+// the documentation, without the site around it — "concepts/state",
+// "reference/commands/top". Derived from the URL rather than stored, so it
+// cannot disagree with where the page actually is.
+func (p Page) Slug() string {
+	path := p.URL
+	if _, after, found := strings.Cut(path, "/docs/"); found {
+		path = after
+	}
+	return strings.Trim(path, "/")
+}
+
+// Find returns the pages a topic names: the one whose slug is exactly it, or
+// failing that every page whose slug ends in it, so "top" reaches
+// reference/commands/top without anyone typing the path.
+//
+// Several, rather than a best guess, because the ambiguity is real: "state" is
+// both a concept and a command, and answering one of them silently is the
+// wrong half of the answer as often as not.
+func Find(topic string) ([]Page, error) {
+	pages, err := Pages()
+	if err != nil {
+		return nil, err
+	}
+
+	topic = strings.Trim(strings.ToLower(strings.TrimSpace(topic)), "/")
+	if topic == "" {
+		return nil, nil
+	}
+
+	var suffix []Page
+	for _, page := range pages {
+		slug := strings.ToLower(page.Slug())
+		if slug == topic {
+			return []Page{page}, nil
+		}
+		if strings.HasSuffix(slug, "/"+topic) {
+			suffix = append(suffix, page)
+		}
+	}
+	return suffix, nil
+}
+
+// Topics is every page that can be named on the command line, in the site's
+// own order.
+//
+// The documentation's own front page is left out: it publishes at /docs/ and
+// so has no slug to name it by, and what it holds is the navigation the site
+// draws rather than anything to read.
+func Topics() ([]Page, error) {
+	pages, err := Pages()
+	if err != nil {
+		return nil, err
+	}
+	topics := make([]Page, 0, len(pages))
+	for _, page := range pages {
+		if page.Slug() != "" {
+			topics = append(topics, page)
+		}
+	}
+	return topics, nil
+}

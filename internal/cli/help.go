@@ -35,6 +35,7 @@ var helpSections = []struct {
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
 	{"Integrations", []string{"mcp"}},
+	{"Documentation", []string{"docs"}},
 	{"Shell", []string{"completion"}},
 }
 
@@ -189,6 +190,7 @@ var argDocs = map[string]string{
 	"dest":      "Destination path, or <index>:<path> inside the Pod",
 	"key=value": "Key and value to set; repeatable",
 	"command":   "Command to run in the Pod instead of a shell",
+	"topic":     "Documentation page: its path, or its last part — kx docs lists them",
 }
 
 // argDoc describes one argument, preferring a command's own annotation.
