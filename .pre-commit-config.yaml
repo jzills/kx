@@ -75,6 +75,18 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: gen-docs-context
+        name: Regenerate the docs an agent reads
+        language: system
+        # llms.txt and llms-full.txt, rendered from site/content/docs — which
+        # already holds the generated command reference, so this runs after
+        # gen-site-docs rather than reading the command tree a second time.
+        # pre-commit fails when a hook rewrites a tracked file, which is how a
+        # page edited without regenerating is caught.
+        entry: go run ./tools/gen-docs-context
+        pass_filenames: false
+        always_run: true
+
       - id: gen-kubectl-flags
         name: Regenerate kubectl flag table
         language: system

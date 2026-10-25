@@ -16,6 +16,7 @@ on:
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
       - "tools/gen-site-docs/**"
+      - "tools/gen-docs-context/**"
       - "tools/internal/cmddoc/**"
       - "internal/theme/**"
       # The command reference is generated from the command tree, so a flag
@@ -29,6 +30,7 @@ on:
       - "demo/*.gif"
       - "tools/gen-site-theme/**"
       - "tools/gen-site-docs/**"
+      - "tools/gen-docs-context/**"
       - "tools/internal/cmddoc/**"
       - "internal/theme/**"
       # The command reference is generated from the command tree, so a flag
@@ -103,6 +105,19 @@ jobs:
           if [ -n "$(git status --porcelain -- site/content/docs/reference/commands)" ]; then
             echo "::error::the site command reference gained or lost a page — run 'go run ./tools/gen-site-docs' and commit the result"
             git status --porcelain -- site/content/docs/reference/commands
+            exit 1
+          fi
+
+      # The files an agent reads instead of these pages. Same contract as the
+      # command-reference check above, and it runs after it: gen-docs-context
+      # reads site/content/docs, so a stale command page would otherwise be
+      # copied into a stale llms-full.txt and both would pass separately.
+      - name: Check the generated agent docs are current
+        run: |
+          go run ./tools/gen-docs-context
+          if ! git diff --quiet -- site/static/llms.txt site/static/llms-full.txt; then
+            echo "::error::the agent docs are stale — run 'go run ./tools/gen-docs-context' and commit the result"
+            git diff --stat -- site/static/llms.txt site/static/llms-full.txt
             exit 1
           fi
 
