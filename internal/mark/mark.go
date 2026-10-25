@@ -1,12 +1,15 @@
 // Package mark holds the kx logo, as the one set of lines every drawing of it
 // is made from, and the geometry that turns those lines into shapes.
 //
-// kx draws its mark in three ways: render prints the lines to a terminal,
+// kx draws its mark in two ways: render prints the lines to a terminal, and
 // tools/gen-marks redraws them as the SVG files the README banner, the site
-// and the --html report masthead embed, and web builds a favicon from them at
-// render time, in the palette the report was rendered with. The lines used to
-// be a literal copied into each drawing, which is exactly the arrangement
-// where one gets edited and the others don't.
+// and the --html report masthead embed. The lines used to be a literal copied
+// into each drawing, which is exactly the arrangement where one gets edited
+// and the others don't.
+//
+// The icon slots — a browser tab, a home screen, a launcher, the favicon web
+// builds at render time in the palette the report was rendered with — are
+// drawn from the icon in icon.go instead, which says why.
 package mark
 
 import (
@@ -72,27 +75,6 @@ func Shapes() (shapes []Rect, width, height float64) {
 	return shapes, float64(columns) * cellWidth, float64(len(Lines)) * cellHeight
 }
 
-// Blocks returns only the filled cells — the mark without its shadow.
-//
-// What a favicon is drawn from. The shadow is a single stroke of a cell's
-// width, so at the 16 and 32 pixels a browser tab renders it at, it is thinner
-// than a pixel: it stops reading as an outline and just muddies the
-// letterforms it is drawn around. The blocks alone stay legible all the way
-// down.
-func Blocks() []Rect {
-	var shapes []Rect
-	for row, line := range Lines {
-		for column, glyph := range []rune(line) {
-			if glyph != '█' {
-				continue
-			}
-			shapes = append(shapes,
-				cell(glyph, float64(column)*cellWidth, float64(row)*cellHeight)...)
-		}
-	}
-	return shapes
-}
-
 // cell returns the shapes one character contributes, positioned at x,y.
 func cell(glyph rune, x, y float64) []Rect {
 	var (
@@ -128,11 +110,6 @@ func cell(glyph rune, x, y float64) []Rect {
 	}
 }
 
-// faviconPadding is the margin left around the mark in a favicon tile, in grid
-// units — half a cell, enough that the letterforms don't sit flush against the
-// edge of the tile at large sizes without spending pixels that matter at 16.
-const faviconPadding = cellWidth / 2
-
 // opticalDrop is how far below the tile's center the mark sits in an icon that
 // is drawn beside text.
 //
@@ -148,44 +125,36 @@ const faviconPadding = cellWidth / 2
 // drawing the same icon at 32.
 const opticalDrop = cellHeight / 2
 
-// FaviconShapes returns the blocks centered in a square tile, with the tile's
-// side. What an icon standing on its own — a home screen, a launcher — is
-// drawn from; TabIconShapes is the same tile for one drawn beside a title.
+// FaviconShapes returns the icon (icon.go) centered in a square tile, with
+// the tile's side. What an icon standing on its own — a home screen, a
+// launcher — is drawn from; TabIconShapes is the same tile for one drawn
+// beside a title.
 //
-// Square because every consumer of a favicon is: the mark's own 15:5 block
-// grid is centered in the tile rather than stretched to it, and the tile is
-// sized from the blocks actually drawn rather than the full line grid, whose
-// last row and column are shadow the favicon leaves out.
+// The icon rather than the lettermark, because an icon slot is where the
+// lettermark fails: see icon.go. Square because every consumer of a favicon
+// is, and the icon's own 11:10 box is centered in the tile rather than
+// stretched to it.
 //
 // Separate from Favicon so the SVG and the PNGs tools/gen-marks rasterizes are
 // the same shapes in the same tile — an icon set whose sizes disagreed about
 // where the mark sits would be visible as a jump when a browser switched
 // between them.
 func FaviconShapes() (shapes []Rect, side float64) {
-	blocks := Blocks()
-	var maxX, maxY float64
-	for _, block := range blocks {
-		if right := block.X + block.Width; right > maxX {
-			maxX = right
-		}
-		if bottom := block.Y + block.Height; bottom > maxY {
-			maxY = bottom
-		}
-	}
+	drawn, width, height := iconShapes()
 
-	side = maxX
-	if maxY > side {
-		side = maxY
+	side = width
+	if height > side {
+		side = height
 	}
-	side += 2 * faviconPadding
+	side += 2 * iconPadding
 
-	shapes = make([]Rect, 0, len(blocks))
-	for _, block := range blocks {
+	shapes = make([]Rect, 0, len(drawn))
+	for _, shape := range drawn {
 		shapes = append(shapes, Rect{
-			X:      block.X + (side-maxX)/2,
-			Y:      block.Y + (side-maxY)/2,
-			Width:  block.Width,
-			Height: block.Height,
+			X:      shape.X + (side-width)/2,
+			Y:      shape.Y + (side-height)/2,
+			Width:  shape.Width,
+			Height: shape.Height,
 		})
 	}
 	return shapes, side

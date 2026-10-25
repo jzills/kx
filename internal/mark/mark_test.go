@@ -6,33 +6,83 @@ import (
 	"unicode/utf8"
 )
 
-// The favicon is the mark with its shadow left off, centered in a square tile.
+// The favicon is the icon centered in a square tile, every rectangle of it
+// inside the tile and the tile no wider than the icon plus its margin.
 //
-// Each half of that is load-bearing and neither shows up in a diff: a favicon
-// that let the shadow through would go muddy at the 16 pixels a tab draws it
-// at, which is the whole reason it is drawn from Blocks, and one whose tile
-// clipped the mark would lose a letter in every place the icon appears.
-func TestFaviconTileHoldsTheWholeMark(t *testing.T) {
-	blocks := 0
-	for _, line := range Lines {
-		blocks += strings.Count(line, "█")
-	}
+// Both halves are load-bearing and neither shows in a diff: a tile that
+// clipped would cut a bracket off in every place the icon appears, and one
+// sized past the icon would shrink it in the sixteen pixels a tab gives it,
+// which is the size the icon exists for.
+func TestFaviconTileHoldsTheWholeIcon(t *testing.T) {
+	drawn, width, height := iconShapes()
 
 	shapes, side := FaviconShapes()
-	if len(shapes) != blocks {
-		t.Errorf("tile holds %d shapes, want the %d blocks in the art",
-			len(shapes), blocks)
+	if len(shapes) != len(drawn) {
+		t.Errorf("tile holds %d shapes, want the icon's %d", len(shapes), len(drawn))
 	}
 	for _, shape := range shapes {
-		if shape.Width != cellWidth || shape.Height != cellHeight {
-			t.Errorf("tile holds a %gx%g shape; a favicon is whole cells only, "+
-				"so no shadow stroke should have reached it",
-				shape.Width, shape.Height)
-		}
 		if shape.X < 0 || shape.Y < 0 ||
 			shape.X+shape.Width > side || shape.Y+shape.Height > side {
-			t.Errorf("block at %g,%g falls outside the %gx%g tile",
-				shape.X, shape.Y, side, side)
+			t.Errorf("a %gx%g rectangle at %g,%g falls outside the %gx%g tile",
+				shape.Width, shape.Height, shape.X, shape.Y, side, side)
+		}
+	}
+
+	longest := width
+	if height > longest {
+		longest = height
+	}
+	if want := longest + 2*iconPadding; side != want {
+		t.Errorf("tile is %g across for a %gx%g icon, want %g", side, width, height, want)
+	}
+
+	// The tile the lettermark's icons were drawn in, which opticalDrop is one
+	// pixel of at 16. The icon is a different shape in the same tile, and the
+	// drop stays true only while the number does.
+	if side != 288 {
+		t.Errorf("tile is %g units, want 288 — opticalDrop is no longer one "+
+			"pixel of a 16-pixel icon", side)
+	}
+}
+
+// What makes the icon the kx mark rather than nine rectangles: the eye sits
+// centered on both axes, clear of both brackets, and the feet stand under
+// them. Each of those is a thing a careless edit to iconCells breaks while
+// leaving a plausible-looking shape behind, and no test of the tile would
+// notice.
+func TestIconHoldsItsEyeBetweenTheBrackets(t *testing.T) {
+	shapes, width, height := iconShapes()
+	if len(shapes) != len(iconCells) {
+		t.Fatalf("iconShapes drew %d rectangles for %d cells",
+			len(shapes), len(iconCells))
+	}
+
+	// The widest rectangle on the icon's horizontal midline is the eye; the
+	// uprights are the full-height ones at either end.
+	eye := shapes[6]
+	left, right := shapes[0], shapes[3]
+
+	if got, want := eye.X+eye.Width/2, width/2; got != want {
+		t.Errorf("eye's center is at x=%g, want the icon's own center %g", got, want)
+	}
+	if got, want := eye.Y+eye.Height/2, (left.Y+left.Height)/2; got != want {
+		t.Errorf("eye's center is at y=%g, want the brackets' center %g", got, want)
+	}
+	if gap := eye.X - (left.X + left.Width); gap <= 0 {
+		t.Errorf("eye overlaps the left bracket by %g; the brackets hold it, "+
+			"they do not touch it", -gap)
+	}
+	if gap := right.X - (eye.X + eye.Width); gap <= 0 {
+		t.Errorf("eye overlaps the right bracket by %g", -gap)
+	}
+
+	for i, foot := range []Rect{shapes[7], shapes[8]} {
+		if foot.Y != left.Y+left.Height {
+			t.Errorf("foot %d starts at y=%g, want the brackets' bottom %g",
+				i, foot.Y, left.Y+left.Height)
+		}
+		if bottom := foot.Y + foot.Height; bottom != height {
+			t.Errorf("foot %d ends at y=%g, want the icon's bottom %g", i, bottom, height)
 		}
 	}
 }

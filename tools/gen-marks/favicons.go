@@ -7,10 +7,11 @@ package main
 // showed before, a stock theme logo on a kx page. The names are Hextra's
 // because its head partial is what links them.
 //
-// The mark is drawn without its shadow (mark.FaviconShapes, or
-// mark.TabIconShapes where the icon sits beside a title) and colored from
-// the palette registry rather than a literal, so the icons a browser caches
-// are the same green the site paints itself with. The site repaints the SVG
+// The icon drawn here is kx's logomark, not its lettermark — brackets closing
+// on one block, from mark.FaviconShapes, or mark.TabIconShapes where the icon
+// sits beside a title. It is colored from the palette registry rather than a
+// literal, so the icons a browser caches are the same green the site paints
+// itself with. The site repaints the SVG
 // from the reader's chosen palette at runtime; these files are what shows
 // before that script runs, and in the raster sizes it can't reach.
 
@@ -111,16 +112,13 @@ func write(path string, content []byte) error {
 
 // draw rasterizes the favicon tile at size pixels square.
 //
-// Block edges are snapped to whole pixels rather than antialiased, which is
-// the raster equivalent of the shape-rendering="crispEdges" the SVGs carry:
-// the mark is a grid of blocks, and a soft edge on a block is a smear, not a
-// smoother curve. It matters most at the size it is hardest to read — a
-// 288-unit tile at 16 pixels puts one pixel on each cell, and the half-cell
-// margin would otherwise land the whole mark on half-pixels and blur every
-// edge of it.
+// Edges are snapped to whole pixels rather than antialiased, which is the
+// raster equivalent of the shape-rendering="crispEdges" the SVGs carry: the
+// icon is drawn from rectangles, and a soft edge on a rectangle is a smear,
+// not a smoother curve.
 //
-// Rounding both edges of a block the same way keeps neighbors touching, so
-// the letterforms stay solid rather than growing seams.
+// Rounding both edges of a rectangle the same way keeps neighbors touching, so
+// the brackets stay solid rather than growing seams.
 func draw(size int, fg, bg color.RGBA, standalone bool) *image.RGBA {
 	shapes, side := mark.TabIconShapes()
 	if standalone {
@@ -140,9 +138,10 @@ func draw(size int, fg, bg color.RGBA, standalone bool) *image.RGBA {
 		top := int(math.Round(shape.Y * scale))
 		right := int(math.Round((shape.X + shape.Width) * scale))
 		bottom := int(math.Round((shape.Y + shape.Height) * scale))
-		// A block that rounds away entirely would drop a cell out of the
-		// letterform. No configured size is small enough for that — 16 pixels
-		// is exactly one per cell — but a block is never nothing.
+		// A rectangle that rounds away entirely would drop a bracket arm or a
+		// foot out of the icon. No configured size is small enough for that —
+		// the icon's thinnest part is a third wider than a pixel at 16 — but a
+		// drawn rectangle is never nothing.
 		if right <= left {
 			right = left + 1
 		}
