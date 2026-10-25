@@ -17,6 +17,8 @@ on:
       - "tools/gen-site-theme/**"
       - "tools/gen-site-docs/**"
       - "tools/gen-docs-context/**"
+      # The corpus kx embeds is written by the same generator.
+      - "internal/docs/**"
       - "tools/internal/cmddoc/**"
       - "internal/theme/**"
       # The command reference is generated from the command tree, so a flag
@@ -31,6 +33,8 @@ on:
       - "tools/gen-site-theme/**"
       - "tools/gen-site-docs/**"
       - "tools/gen-docs-context/**"
+      # The corpus kx embeds is written by the same generator.
+      - "internal/docs/**"
       - "tools/internal/cmddoc/**"
       - "internal/theme/**"
       # The command reference is generated from the command tree, so a flag
@@ -115,9 +119,10 @@ jobs:
       - name: Check the generated agent docs are current
         run: |
           go run ./tools/gen-docs-context
-          if ! git diff --quiet -- site/static/llms.txt site/static/llms-full.txt; then
+          generated="site/static/llms.txt site/static/llms-full.txt internal/docs/corpus.json"
+          if ! git diff --quiet -- $generated; then
             echo "::error::the agent docs are stale — run 'go run ./tools/gen-docs-context' and commit the result"
-            git diff --stat -- site/static/llms.txt site/static/llms-full.txt
+            git diff --stat -- $generated
             exit 1
           fi
 

@@ -27,6 +27,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -46,6 +47,11 @@ const (
 	configPath = "site/hugo.toml"
 	indexPath  = "site/static/llms.txt"
 	fullPath   = "site/static/llms-full.txt"
+	// corpusPath is the same prose again, as data the binary embeds. It lives
+	// under internal/docs because go:embed cannot reach outside its own
+	// package's directory, and it is JSON rather than the Markdown file above
+	// so a reader does not have to parse page boundaries back out of prose.
+	corpusPath = "internal/docs/corpus.json"
 
 	// indexName is the filename Hugo treats as a section's own page: it
 	// publishes at the section's URL rather than one below it.
@@ -73,12 +79,18 @@ func run() error {
 		return fmt.Errorf("no pages under %s", contentDir)
 	}
 
+	corpus, err := Corpus(pages, base)
+	if err != nil {
+		return err
+	}
+
 	for _, out := range []struct {
 		path    string
 		content string
 	}{
 		{indexPath, Index(pages, base)},
 		{fullPath, Full(pages, base)},
+		{corpusPath, corpus},
 	} {
 		if err := os.WriteFile(out.path, []byte(out.content), 0o644); err != nil {
 			return err
@@ -503,6 +515,80 @@ func Index(pages []Page, base string) string {
 	return out.String()
 }
 
+// Entry is one page of the embedded corpus, in the shape internal/docs reads.
+// Deliberately not Page: what the binary carries is the rendered prose and
+// where it came from, never the source path or the weights that ordered it.
+type Entry struct {
+	Title       string `json:"title"`
+	Section     string `json:"section"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+	Body        string `json:"body"`
+}
+
+// Corpus renders the documentation as the JSON internal/docs embeds, in the
+// same order as llms-full.txt, so the file kx carries and the file the site
+// publishes are the same documentation read two ways.
+func Corpus(pages []Page, base string) (string, error) {
+	sectionOf := map[string]string{}
+	for _, section := range sections(pages) {
+		for _, page := range section.Pages {
+			sectionOf[page.Rel] = section.Title
+		}
+	}
+	// A section's own page belongs to the section it heads, not to the one
+	// above it — otherwise the four introductions file under nothing.
+	for _, page := range pages {
+		if page.Index {
+			sectionOf[page.Rel] = page.Title
+		}
+	}
+
+	entries := []Entry{}
+	for _, page := range ordered(pages) {
+		entries = append(entries, Entry{
+			Title:       page.Title,
+			Section:     sectionOf[page.Rel],
+			URL:         page.URL(base),
+			Description: page.Description,
+			Body:        page.Body,
+		})
+	}
+
+	// Indented, and a trailing newline, because it is a committed file a
+	// reviewer reads a diff of.
+	encoded, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(encoded) + "\n", nil
+}
+
+// ordered is the pages in the order the site navigation shows them: the
+// documentation's own front page, then each section's index ahead of the pages
+// under it. Both Full and Corpus walk it, so the two never disagree about
+// what comes after what.
+func ordered(pages []Page) []Page {
+	indexes := map[string]Page{}
+	var out []Page
+	for _, page := range pages {
+		if !page.Index {
+			continue
+		}
+		indexes[page.Dir] = page
+		if page.Dir == "" {
+			out = append(out, page)
+		}
+	}
+	for _, section := range sections(pages) {
+		if index, ok := indexes[section.Pages[0].Dir]; ok {
+			out = append(out, index)
+		}
+		out = append(out, section.Pages...)
+	}
+	return out
+}
+
 // Full renders llms-full.txt: every page's prose, in the site's own order,
 // each under its title and with the URL it came from.
 //
@@ -524,26 +610,8 @@ func Full(pages []Page, base string) string {
 		out.WriteString(page.Body)
 	}
 
-	// The documentation's own front page first, then each section's index
-	// ahead of the pages under it.
-	for _, page := range pages {
-		if page.Index && page.Dir == "" {
-			write(page)
-		}
-	}
-	indexes := map[string]Page{}
-	for _, page := range pages {
-		if page.Index {
-			indexes[page.Dir] = page
-		}
-	}
-	for _, section := range sections(pages) {
-		if index, ok := indexes[section.Pages[0].Dir]; ok {
-			write(index)
-		}
-		for _, page := range section.Pages {
-			write(page)
-		}
+	for _, page := range ordered(pages) {
+		write(page)
 	}
 	return out.String()
 }

@@ -1,5 +1,5 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
   "tools": [
     {
       "name": "diagnose",
@@ -178,6 +178,74 @@
         "required": [
           "context",
           "diagnosis"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "docs",
+      "description": "Look up kx's own documentation — commands, flags, concepts, guides — built into this binary, so it describes the kx that is running rather than the current website. Use it before guessing a flag or telling the user kx cannot do something. A query returns the pages that match, each trimmed to the part that answers it; no query lists every page with its description.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "kx documentation"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "description": "What to look up, in the user's own words — 'sort top by memory', 'what a mark is', '--show-healthy'. Omit to list every page instead.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "pages": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "section": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "section",
+                "url",
+                "description"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "query": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "pages"
         ],
         "type": "object"
       }
