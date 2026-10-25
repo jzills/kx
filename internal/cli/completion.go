@@ -44,6 +44,7 @@ var argCompleters = map[string]completer{
 	"theme.name":      completeTheme,
 	"engine.name":     completeEngine,
 	"unmark.name":     completeMarkNames,
+	"topic":           completeDocsTopic,
 	"replicas":        nil, // A number kx cannot guess.
 	"image":           nil, // A registry reference kx has no list of.
 	"port":            nil, // Likewise, and it is a mapping, not a port.

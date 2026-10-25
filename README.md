@@ -328,6 +328,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx mcp` | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
+| `kx docs [<topic>]` | Read kx's documentation in the terminal: a topic, or the list of them. |
 | `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 <!-- commands-table-end -->
 

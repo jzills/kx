@@ -64,6 +64,12 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 |---|---|
 | [`kx mcp [--write-listings]`](mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 
+## Documentation
+
+| Command | Description |
+|---|---|
+| [`kx docs [<topic>]`](docs/) | Read kx's documentation in the terminal: a topic, or the list of them. |
+
 ## Shell
 
 | Command | Description |

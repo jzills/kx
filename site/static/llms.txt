@@ -74,4 +74,5 @@ Every page below is also published as Markdown in one file at https://jzills.git
 - [engine](https://jzills.github.io/kx/docs/reference/commands/engine/): List available scan engines or persist a default choice by name or index.
 - [theme](https://jzills.github.io/kx/docs/reference/commands/theme/): List available color themes or persist a choice by name or index.
 - [mcp](https://jzills.github.io/kx/docs/reference/commands/mcp/): Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio).
+- [docs](https://jzills.github.io/kx/docs/reference/commands/docs/): Read kx's documentation in the terminal: a topic, or the list of them.
 - [completion](https://jzills.github.io/kx/docs/reference/commands/completion/): Generate a shell completion script for kx (bash, zsh, fish, powershell).
