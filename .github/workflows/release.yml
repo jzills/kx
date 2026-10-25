@@ -349,6 +349,63 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref "v${{ needs.build.outputs.version }}"
 
+  # Runs after the release is published, because the formula points at assets
+  # that have to be downloadable and names the sha256s the release itself
+  # listed. A failure here leaves the release intact — Homebrew is one channel
+  # among four — and the tap's own CI audits, installs and tests what it
+  # receives, on an Ubuntu and a macOS runner.
+  homebrew:
+    name: Bump the Homebrew Tap
+    runs-on: ubuntu-latest
+    needs: [build, publish, tag, github-release]
+    steps:
+      - uses: actions/checkout@v7
+
+      # The release's own SHA256SUMS, not a fresh sum of the build artifacts:
+      # the hashes a formula pins have to be the ones a user's brew will
+      # download, and this is the file that says so.
+      - name: Download the release's checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "v${{ needs.build.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS \
+            --dir "$RUNNER_TEMP"
+
+      - name: Render the formula
+        run: |
+          scripts/homebrew_formula.sh \
+            "${{ needs.build.outputs.version }}" \
+            "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/kx.rb"
+          cat "$RUNNER_TEMP/kx.rb"
+
+      # A token of its own, scoped to the tap: the default GITHUB_TOKEN reaches
+      # only this repository, and RELEASE_PAT is for pushing here. Checked
+      # before the clone, since a missing secret otherwise reads as a 404 on a
+      # repository that plainly exists.
+      - name: Push the formula to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set — add a fine-grained PAT with Contents: write on jzills/homebrew-tap"
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:$TAP_TOKEN@github.com/jzills/homebrew-tap.git" \
+            "$RUNNER_TEMP/tap"
+          cp "$RUNNER_TEMP/kx.rb" "$RUNNER_TEMP/tap/Formula/kx.rb"
+          cd "$RUNNER_TEMP/tap"
+          if git diff --quiet; then
+            echo "the tap already carries this formula"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "kx ${{ needs.build.outputs.version }}"
+          git push
+
   merge:
     name: Open PR to Main
     runs-on: ubuntu-latest
