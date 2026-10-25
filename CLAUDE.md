@@ -81,9 +81,11 @@ The command reference table in `README.md` is generated from the command tree by
 
 ## Docs for agents
 
-`site/static/llms.txt` and `site/static/llms-full.txt` are generated from `site/content/docs` by `tools/gen-docs-context` — a map of the documentation and the whole of it as one Markdown file, for an agent that has text rather than a browser. Neither is a standard: llms.txt is an informal community proposal, and llms-full.txt is a convention the proposal doesn't mention.
+`site/static/llms.txt`, `site/static/llms-full.txt` and `internal/docs/corpus.json` are generated from `site/content/docs` by `tools/gen-docs-context` — a map of the documentation, the whole of it as one Markdown file, and the same prose as data the binary embeds. All three are for an agent that has text rather than a browser. Neither is a standard: llms.txt is an informal community proposal, and llms-full.txt is a convention the proposal doesn't mention.
 
 The generator's one input is `site/content/docs`, which already holds the command reference `tools/gen-site-docs` writes from the command tree — so the commands in it are in step with the binary without this reading `internal/cli` a second time. It runs after `gen-site-docs` in both the pre-commit hook and `pages.yml`, and a shortcode it doesn't recognize fails the run rather than publishing template braces as prose.
+
+`internal/docs` embeds that corpus and searches it, which is what the `docs` tool on `kx mcp` answers from — kx ships no model, so the agent calling the tool is the one that reads the pages. Embedded rather than fetched, because `kx mcp` has to work offline and because documentation pinned to the binary describes the flags that binary accepts.
 
 ## Release
 

@@ -70,6 +70,9 @@ func TestMCPToolSurface(t *testing.T) {
 	want := map[string]bool{ // name → read-only
 		"list_marks": true, "mark": false, "list_resources": true, "diagnose": true, "tree": true,
 		"events": true, "logs": true, "top": true, "get_yaml": true, "scan": true,
+		// Reads documentation embedded in the binary; the only tool that
+		// touches neither the cluster nor kx's state.
+		"docs": true,
 	}
 	if len(result.Tools) != len(want) {
 		t.Errorf("%d tools, want %d", len(result.Tools), len(want))

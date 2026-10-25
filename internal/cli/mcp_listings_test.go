@@ -847,8 +847,8 @@ func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 		return byName
 	}
 	off, on := annotations(false), annotations(true)
-	if len(off) != 10 || len(on) != 10 {
-		t.Fatalf("%d and %d tools, want 10 each", len(off), len(on))
+	if len(off) != 11 || len(on) != 11 {
+		t.Fatalf("%d and %d tools, want 11 each", len(off), len(on))
 	}
 	listing := map[string]bool{"list_resources": true, "diagnose": true, "tree": true, "top": true}
 	for name, before := range off {
