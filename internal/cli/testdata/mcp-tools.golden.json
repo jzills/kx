@@ -542,6 +542,10 @@
             "description": "Resource type as kubectl spells it: pods, deploy, svc, nodes, a CRD's name. One type.",
             "type": "string"
           },
+          "lastRun": {
+            "description": "With kind jobs, list only the newest Job of each CronJob, as kx get jobs --last-run does; each row names its CronJob.",
+            "type": "boolean"
+          },
           "limit": {
             "description": "Most rows to return; default 200, at most 1000. total always counts every row.",
             "type": "integer"
@@ -572,6 +576,9 @@
           "kind": {
             "type": "string"
           },
+          "lastRun": {
+            "type": "boolean"
+          },
           "match": {
             "type": "string"
           },
@@ -582,6 +589,9 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "cronJob": {
+                  "type": "string"
+                },
                 "index": {
                   "description": "This row's number in the user's kx history, present only when kx mcp runs with --write-listings; the user can spend it in kx.",
                   "type": "integer"

@@ -36,7 +36,7 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 | --- | --- |
 | `list_marks` | Every mark you've pinned, in any cluster. |
 | `mark` | Pins a name to a resource — the one write the server makes. |
-| `list_resources` | Names and namespaces of one kind. |
+| `list_resources` | Names and namespaces of one kind; with `lastRun`, the newest Job of each CronJob. |
 | `diagnose` | Health: one resource's findings, or a namespace sweep. |
 | `tree` | Ownership: what a resource owns and is owned by. |
 | `events` | Warning and normal events recorded against one resource. |
