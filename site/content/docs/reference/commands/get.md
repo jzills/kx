@@ -18,6 +18,8 @@ A `--sort` sorts the table kx draws by its own columns, before numbering it, so 
 
 A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
 
+With `jobs`, `--last-run` lists only the newest Job each CronJob has created, under a CRONJOB column naming it, so `kx logs 2` reads that run. A Job no CronJob created is no CronJob's last run and is left out, and a CronJob that has never run has no row. `-l` chooses which Jobs are weighed, and the newest is picked among them.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -40,6 +42,7 @@ kx get [OPTIONS] <resource> [index]... [kubectl flags]
 | `-A, --all-namespaces` | List across every namespace; each row is indexed and carries its own namespace |
 | `--decode` | Show Secret data in plaintext; every Secret in the namespace when no index is given |
 | `-k, --key string` | With --decode, print only this key's value |
+| `--last-run` | List only the newest Job of each CronJob, under a CRONJOB column naming it |
 | `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
@@ -93,5 +96,7 @@ kx get pods --watch
 kx get pods --sort status,-restarts
 kx get pods -A --sort namespace,-age
 kx get pods --sort age --limit 5
+kx get jobs --last-run
+kx get jobs -A --last-run --sort -age
 kx get pods --sort-by=.metadata.creationTimestamp
 ```
