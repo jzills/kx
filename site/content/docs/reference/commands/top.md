@@ -10,6 +10,8 @@ Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and sh
 
 A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. CPU and MEMORY sort as quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod with no limit sorts last either way. Another cluster's listing — `--context`, `--kubeconfig` — prints kubectl's own table, which kx never adds its percentage columns to: name 'cpu' or 'memory' there for Pods, and kubectl's own 'cpu%' or 'memory%' for Nodes. kubectl's own `--sort-by` still takes 'cpu' or 'memory', and applies first.
 
+A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -31,6 +33,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `-A, --all-namespaces` | List Pods across every namespace; each row is indexed and carries its own namespace. Not for Nodes, which are not in a namespace |
 | `--html` | Render the listing as HTML and serve it in a browser |
 | `--json` | Print the listing as JSON instead of a table |
+| `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list Pods from; defaults to the current namespace. Not for Nodes, which are not in a namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
@@ -72,6 +75,7 @@ kx top --html
 kx top --json
 kx top --out top.html
 kx top --sort -mem%,-cpu%
+kx top --sort -mem% --limit 10
 kx top nodes --sort -cpu%
 kx top --sort-by=memory
 ```

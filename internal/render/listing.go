@@ -157,6 +157,15 @@ func itemLabel(count int) string {
 	return strconv.Itoa(count) + " items"
 }
 
+// shownLabel is a listing's count as its caption gives it: "5 of 42 items"
+// when a --limit cut it, so the rows shown are not taken for all there were.
+func shownLabel(table index.Table) string {
+	if table.Of > len(table.Rows) {
+		return fmt.Sprintf("%d of %d items", len(table.Rows), table.Of)
+	}
+	return itemLabel(len(table.Rows))
+}
+
 // IndexedTable renders an indexed listing with its caption.
 //
 // Takes the parsed table rather than the text it would render as. The index
@@ -209,7 +218,7 @@ func (r *Renderer) indexedTable(
 	// --name` prints the whole name when something else needs it.
 	enableNameFlex(table.Headers, columns)
 
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, shownLabel(table))
 	r.table(columns, cells, available)
 }
 
@@ -220,7 +229,7 @@ func (r *Renderer) indexedTable(
 func (r *Renderer) sectionedTable(
 	table index.Table, resourceType, namespace string, available int,
 ) {
-	r.Caption(kinds.PluralDisplay(resourceType), namespace, itemLabel(len(table.Rows)))
+	r.Caption(kinds.PluralDisplay(resourceType), namespace, shownLabel(table))
 	for i, section := range table.Sections {
 		if i > 0 {
 			r.line("")

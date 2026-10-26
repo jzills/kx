@@ -318,8 +318,8 @@ func newSecretCommand(services Services, use string, aliases []string) *cobra.Co
 		Short:   "List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets.",
 		Aliases: aliases,
 		Long: "Lists Secrets exactly as kx get does. With `--decode`, prints an indexed Secret's data in plaintext, " +
-			"or every Secret in the namespace when no index is given.\n\n" + secretSortLong,
-		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3\n  kx secret 3..\n  kx secret -l app=web\n  kx secret --sort type,-age",
+			"or every Secret in the namespace when no index is given.\n\n" + secretSortLong + "\n\n" + limitLong,
+		Example: "  kx secret\n  kx secret 1 --decode\n  kx secret 1 --decode -k tls.crt\n  kx secret 1..3\n  kx secret 3..\n  kx secret -l app=web\n  kx secret --sort type,-age\n  kx secret --sort -age --limit 3",
 	}
 	// kubectl get's flags, as kx get takes them: kx secret is kubectl get
 	// secret.

@@ -136,9 +136,9 @@ func newTopCommand(services Services) *cobra.Command {
 		Use:        "top [resource] [kubectl flags]",
 		SuggestFor: []string{"usage", "metrics", "stats"},
 		Short:      "List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits.",
-		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.\n\n" + topSortLong,
+		Long:       "Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and shows CPU%/MEM% — computed against each Pod's limits for Pods, native to kubectl for Nodes.\n\n" + topSortLong + "\n\n" + limitLong,
 		Example: "  kx top\n  kx top nodes\n  kx top -m web\n  kx top --no-limits\n" +
-			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort -mem%,-cpu%\n  kx top nodes --sort -cpu%\n  kx top --sort-by=memory",
+			"  kx top --html\n  kx top --json\n  kx top --out top.html\n  kx top --sort -mem%,-cpu%\n  kx top --sort -mem% --limit 10\n  kx top nodes --sort -cpu%\n  kx top --sort-by=memory",
 		// `resource` means something narrower here than it does to kx get.
 		Annotations: map[string]string{"arg.resource": "'pods' (the default) or 'nodes'"},
 	}
@@ -215,6 +215,14 @@ func newTopCommand(services Services) *cobra.Command {
 				return err
 			}
 		}
+		limitValue, _ := flags.GetInt("limit")
+		limit, err := limitOf(flags.Changed("limit"), limitValue)
+		if err != nil {
+			return err
+		}
+		if err := limitRefusal(limit, rest); err != nil {
+			return err
+		}
 
 		// kubectl rejects -A on `top node` with its own error, naming its
 		// own command; -n it accepts and ignores. Both are refused here
@@ -256,7 +264,7 @@ func newTopCommand(services Services) *cobra.Command {
 		}
 
 		output, resourceLabel, namespace, scopedAllNamespaces, err :=
-			topListing(services, nodes, match, rest, noLimits, "", sortSpec)
+			topListing(services, nodes, match, rest, noLimits, "", sortSpec, limit)
 		if err != nil {
 			return err
 		}
@@ -314,7 +322,7 @@ func newTopCommand(services Services) *cobra.Command {
 		label := kinds.PluralDisplay(resourceLabel)
 		meta, err := pageMeta(services.Config.Theme, "top · "+label,
 			invocation("top", topArg, scopeArgs(namespace, scopedAllNamespaces), matchFlag(match),
-				sortFlag(sortSpec), portFlag(port)))
+				sortFlag(sortSpec), limitFlag(limit), portFlag(port)))
 		if err != nil {
 			return err
 		}
@@ -329,6 +337,7 @@ func newTopCommand(services Services) *cobra.Command {
 	}
 	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().String("sort", "", topSortUsage)
+	cmd.Flags().Int("limit", 0, limitUsage)
 	cmd.Flags().Bool("no-limits", false,
 		"Skip the CPU%/MEM% columns (one fewer kubectl call)")
 	cmd.Flags().Bool("json", false, "Print the listing as JSON instead of a table")

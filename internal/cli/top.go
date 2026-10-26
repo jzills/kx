@@ -29,6 +29,8 @@ type TopCommand struct {
 	Scope string
 	// Sort is the listing's --sort, empty for none; see GetCommand.Sort.
 	Sort string
+	// Limit is the listing's --limit, zero for none; see GetCommand.Limit.
+	Limit int
 }
 
 // EnsureAvailable checks that the cluster's metrics API is registered
@@ -74,7 +76,7 @@ func (c TopCommand) Execute(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys, c.Limit)
 		return table, extractNamespace(extraArgs), err
 	}
 	allNamespaces := allNamespaces(extraArgs)
@@ -117,6 +119,9 @@ func (c TopCommand) Execute(
 		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
 			return index.Table{}, "", err
 		}
+		if err := unlimitableError(output, c.Limit); err != nil {
+			return index.Table{}, "", err
+		}
 		raw := c.Index.Add(output)
 		raw.Unnumbered = true
 		return raw, namespace, nil
@@ -135,8 +140,10 @@ func (c TopCommand) Execute(
 	if rows, err = index.SortRows(headers, rows, keys); err != nil {
 		return index.Table{}, "", sortError(err)
 	}
+	rows, of := limitedRows(rows, c.Limit)
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Of = of
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed: an empty listing that saved no entry
 	// left the previous one resolving indexes. See GetCommand.Execute.
@@ -166,7 +173,7 @@ func (c TopCommand) Execute(
 		// It is also what a refresh runs again — kx top, not kx get pods.
 		Query: &state.Query{
 			Resource: "pods", Args: recorded, Match: matchOf(filterTerm), Command: state.CommandTop,
-			Sort: c.Sort,
+			Sort: c.Sort, Limit: c.Limit,
 		},
 	}); err != nil {
 		return index.Table{}, "", err
@@ -181,9 +188,11 @@ func (c TopCommand) Execute(
 // it was taken in, which a refresh passes as scope (TopCommand.Scope).
 func topListing(
 	services Services, nodes bool, match string, rest []string, noLimits bool, scope, sort string,
+	limit int,
 ) (table index.Table, label, namespace string, spanning bool, err error) {
 	command := TopCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: sort,
+		Limit: limit,
 	}
 	if nodes {
 		table, namespace, err = command.ExecuteNodes(match, rest)
@@ -226,7 +235,7 @@ func (c TopCommand) ExecuteNodes(
 		return index.Table{}, "", err
 	}
 	if crossCluster {
-		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys)
+		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys, c.Limit)
 		return table, "", err
 	}
 	// No namespace, and not the caller's current one: a Node is cluster-scoped.
@@ -252,6 +261,9 @@ func (c TopCommand) ExecuteNodes(
 		if _, err := narrowText(output, filterTerm, extraArgs); err != nil {
 			return index.Table{}, "", err
 		}
+		if err := unlimitableError(output, c.Limit); err != nil {
+			return index.Table{}, "", err
+		}
 		raw := c.Index.Add(output)
 		raw.Unnumbered = true
 		return raw, namespace, nil
@@ -267,8 +279,10 @@ func (c TopCommand) ExecuteNodes(
 	if rows, err = index.SortRows(headers, rows, keys); err != nil {
 		return index.Table{}, "", sortError(err)
 	}
+	rows, of := limitedRows(rows, c.Limit)
 
 	indexed := c.Index.AddRows(headers, rows)
+	indexed.Of = of
 	indexed.Match = filterTerm
 	// Saved even when nothing was listed; see Execute above.
 	if extraArgs == nil {
@@ -281,7 +295,7 @@ func (c TopCommand) ExecuteNodes(
 		// Execute's entry does.
 		Query: &state.Query{
 			Resource: "nodes", Args: extraArgs, Match: matchOf(filterTerm), Command: state.CommandTop,
-			Sort: c.Sort,
+			Sort: c.Sort, Limit: c.Limit,
 		},
 	}); err != nil {
 		return index.Table{}, "", err

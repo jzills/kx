@@ -17,7 +17,9 @@ import (
 type getOptions struct {
 	Match string
 	// Sort is a --sort value, empty for none.
-	Sort   string
+	Sort string
+	// Limit is a --limit, zero for none.
+	Limit  int
 	Decode bool
 	Key    string
 	HasKey bool
@@ -150,6 +152,9 @@ func runGet(services Services, resource string, args []string, options getOption
 		if options.Sort != "" {
 			return errors.New("kx get contexts does not support '--sort' — only a resource listing can be sorted.")
 		}
+		if options.Limit != 0 {
+			return errors.New("kx get contexts does not support '--limit' — only a resource listing can be cut.")
+		}
 		if len(refs) == 0 {
 			return listContexts(services, options.Match)
 		}
@@ -244,6 +249,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	if err := sortRefusal(options.Sort, extra); err != nil {
 		return err
 	}
+	// Nor a --limit, which cuts one.
+	if options.Limit != 0 && (options.Decode || options.HasKey) {
+		flag := "--decode"
+		if !options.Decode {
+			flag = "--key"
+		}
+		return fmt.Errorf("'--limit' cannot be combined with '%s' — it cuts a listing, "+
+			"and '%s' prints a Secret's data.", flag, flag)
+	}
+	if err := limitRefusal(options.Limit, extra); err != nil {
+		return err
+	}
 	if options.Decode || options.HasKey {
 		// Resolved only when the command already names a Secret-shaped
 		// resource and carries indexes: otherwise decodeSecrets's own guards
@@ -317,6 +334,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		if len(groups) > 1 {
 			get := GetCommand{
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index, Sort: options.Sort,
+				Limit: options.Limit,
 			}
 			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
@@ -364,6 +382,7 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: options.Sort,
+		Limit: options.Limit,
 	}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)

@@ -394,6 +394,10 @@ type Table struct {
 	// output is empty: an empty listing kx saved replaced that one and says
 	// how to get back to it, while one it only printed replaced nothing.
 	Unnumbered bool
+	// Of is how many rows the listing had before a --limit cut it, zero when
+	// nothing was cut, so the caption can say the rows shown are not all of
+	// them: five Pods from a namespace of forty read as a namespace of five.
+	Of int
 }
 
 // Section is one table of a listing kubectl printed as several.
@@ -579,6 +583,42 @@ func (l Listing) Names() []string {
 		}
 	}
 	return names
+}
+
+// Len is how many rows the listing holds, across every table.
+func (l Listing) Len() int {
+	count := 0
+	for _, section := range l.sections {
+		count += len(section.rows)
+	}
+	return count
+}
+
+// Limit keeps the listing's first n rows, counted across its tables in the
+// order they are numbered, so what it keeps is rows 1 to n. A table left with
+// no rows is dropped when the listing is drawn, as one a term emptied is. An
+// n of zero keeps every row.
+func (l Listing) Limit(n int) Listing {
+	if n <= 0 || l.Len() <= n {
+		return l
+	}
+	limited := make([]section, len(l.sections))
+	room := n
+	for i, section := range l.sections {
+		limited[i] = section
+		limited[i].rows = section.rows[:min(len(section.rows), room)]
+		room -= len(limited[i].rows)
+	}
+	return Listing{sections: limited}
+}
+
+// LimitRows is Limit for one table already parsed into rows, as kx top holds
+// it.
+func LimitRows(rows [][]string, n int) [][]string {
+	if n <= 0 || len(rows) <= n {
+		return rows
+	}
+	return rows[:n]
 }
 
 // Empty reports whether no table holds a row.

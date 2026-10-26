@@ -1801,7 +1801,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx edit <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>... [--since str]`](https://jzills.github.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
-| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
+| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](https://jzills.github.io/kx/docs/reference/commands/labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | [`kx logs <index>... [--since str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
@@ -1812,9 +1812,9 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx rollout <action> <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | [`kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
 | [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
-| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
-| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
+| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
 | [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
 | [`kx unmark [<name>...] [--all]`](https://jzills.github.io/kx/docs/reference/commands/unmark/) | Remove marks by name; --all removes every mark. |
@@ -2645,6 +2645,8 @@ A `--match` term narrows the table, a watch's live table, `-o name` or a `-o jso
 
 A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. Each column sorts as what it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
 
+A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -2667,6 +2669,7 @@ kx get [OPTIONS] <resource> [index]... [kubectl flags]
 | `-A, --all-namespaces` | List across every namespace; each row is indexed and carries its own namespace |
 | `--decode` | Show Secret data in plaintext; every Secret in the namespace when no index is given |
 | `-k, --key string` | With --decode, print only this key's value |
+| `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
@@ -2718,6 +2721,7 @@ kx get pods 3..
 kx get pods --watch
 kx get pods --sort status,-restarts
 kx get pods -A --sort namespace,-age
+kx get pods --sort age --limit 5
 kx get pods --sort-by=.metadata.creationTimestamp
 ```
 
@@ -3301,6 +3305,8 @@ Lists Secrets exactly as kx get does. With `--decode`, prints an indexed Secret'
 
 A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. A Secret listing's columns are NAME, TYPE, DATA and AGE, which sort as what they hold — DATA as a count, AGE as a duration — and ties keep kubectl's order. With `--decode` there is no listing to sort, only one Secret's data, so the two cannot be combined. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
 
+A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -3326,6 +3332,7 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 | `-A, --all-namespaces` | List across every namespace; each row is indexed and carries its own namespace |
 | `--decode` | Show Secret data in plaintext; every Secret in the namespace when no index is given |
 | `-k, --key string` | With --decode, print only this key's value |
+| `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
@@ -3376,6 +3383,7 @@ kx secret 1..3
 kx secret 3..
 kx secret -l app=web
 kx secret --sort type,-age
+kx secret --sort -age --limit 3
 ```
 
 ---
@@ -3429,6 +3437,8 @@ Lists Pod or Node CPU and memory usage with kubectl top, assigns indexes, and sh
 
 A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. CPU and MEMORY sort as quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod with no limit sorts last either way. Another cluster's listing — `--context`, `--kubeconfig` — prints kubectl's own table, which kx never adds its percentage columns to: name 'cpu' or 'memory' there for Pods, and kubectl's own 'cpu%' or 'memory%' for Nodes. kubectl's own `--sort-by` still takes 'cpu' or 'memory', and applies first.
 
+A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -3450,6 +3460,7 @@ kx top [OPTIONS] [resource] [kubectl flags]
 | `-A, --all-namespaces` | List Pods across every namespace; each row is indexed and carries its own namespace. Not for Nodes, which are not in a namespace |
 | `--html` | Render the listing as HTML and serve it in a browser |
 | `--json` | Print the listing as JSON instead of a table |
+| `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list Pods from; defaults to the current namespace. Not for Nodes, which are not in a namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
@@ -3491,6 +3502,7 @@ kx top --html
 kx top --json
 kx top --out top.html
 kx top --sort -mem%,-cpu%
+kx top --sort -mem% --limit 10
 kx top nodes --sort -cpu%
 kx top --sort-by=memory
 ```
