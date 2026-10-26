@@ -2076,13 +2076,19 @@ func TestSaveKeepsListingsWithDifferentQueriesApart(t *testing.T) {
 	// Sorted, the same rows are numbered differently.
 	save(t, service, State{Resources: pods("api"), Namespace: "staging",
 		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}, Sort: "age"}})
+	// Cut at another row, the same sorted query holds other resources.
+	save(t, service, State{Resources: pods("api"), Namespace: "staging",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}, Sort: "age", Limit: 5}})
+	// The newest Job of each CronJob is not every Job.
+	save(t, service, State{Resources: pods("api"), Namespace: "staging",
+		Query: &Query{Resource: "pods", Args: []string{"-n", "staging"}, Sort: "age", Limit: 5, LastRun: true}})
 
 	history, err := service.LoadHistory()
 	if err != nil {
 		t.Fatalf("LoadHistory: %v", err)
 	}
-	if len(history.States) != 4 {
-		t.Errorf("len(States) = %d, want 4 — four different queries", len(history.States))
+	if len(history.States) != 6 {
+		t.Errorf("len(States) = %d, want 6 — six different queries", len(history.States))
 	}
 }
 

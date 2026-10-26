@@ -30,7 +30,13 @@ Run `kx get <resource>` once, then reference any result by number instead of typ
 Requires `kubectl` on your PATH.
 Every install method delivers the same prebuilt binary.
 
-On Linux or macOS, the install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```bash
+brew install jzills/tap/kx
+```
+
+Or the install script, which fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
 
 ```bash
 curl -fsSL https://jzills.github.io/kx/install.sh | sh
@@ -41,6 +47,7 @@ Or as a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is publis
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
+ln -s ~/.krew/bin/kubectl-idx ~/.krew/bin/kubectl_complete-idx
 ```
 
 Or from PyPI with [uv](https://docs.astral.sh/uv/) — no Python runtime or dependencies required:
@@ -322,6 +329,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx engine [<name>]` | List available scan engines or persist a default choice by name or index. |
 | `kx theme [<name>]` | List available color themes or persist a choice by name or index. |
 | `kx mcp` | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
+| `kx docs [<topic>]` | Read kx's documentation in the terminal: a topic, or the list of them. |
 | `kx completion` | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 <!-- commands-table-end -->
 

@@ -50,6 +50,9 @@ type mcpDeps struct {
 	// live context. Nil leaves whatever source is installed alone — tests
 	// leave it nil so they never read the ambient kubeconfig's cache.
 	Discovery *mcpDiscovery
+	// Version is the kx this server is, which the docs tool reports so an
+	// agent can say which kx the documentation it just read describes.
+	Version string
 	// WriteListings is kx mcp --write-listings: the listing tools save what
 	// they list to the user's history, tagged as the agent's, and return the
 	// indexes. Off, the server writes nothing but marks. See listingSave.
@@ -215,9 +218,12 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"row's number in the user's kx history, and the user can spend it in kx: that listing is now " +
 	"the user's current one, so an index given to you after it refers to your listing, not an " +
 	"earlier one of theirs. Every tool is " +
-	"read-only against the cluster; anything written goes only to kx's local state."
+	"read-only against the cluster; anything written goes only to kx's local state. " +
+	"docs answers questions about kx itself — commands, flags, concepts — from the " +
+	"documentation built into this binary, so look there rather than guessing a flag."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
+	deps.Version = version
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "kx", Title: "kx", Version: version},
 		&mcp.ServerOptions{Instructions: mcpInstructions},
@@ -232,10 +238,10 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 		Short: "Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio).",
 		Long: "Runs a Model Context Protocol server on stdin/stdout, for an MCP client — " +
 			"Claude Code, an IDE, an agent framework — to start as a subprocess.\n\n" +
-			"Ten tools: list_marks and mark for kx's marks; list_resources to list a kind; " +
+			"Eleven tools: list_marks and mark for kx's marks; list_resources to list a kind; " +
 			"diagnose and tree for a resource's health and ownership; events and logs for what " +
 			"happened; top for current usage; get_yaml for its manifest (Secrets redacted); and " +
-			"scan for image CVEs.\n\n" +
+			"scan for image CVEs; and docs for kx's own documentation, built into the binary.\n\n" +
 			"Every tool is read-only against the cluster. Resources are named by kind and name, " +
 			"by a mark, or by an index — a row number from your terminal's current listing, read " +
 			"live. By default the one thing it writes is a new mark, and " +

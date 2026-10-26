@@ -20,6 +20,18 @@ import (
 // public surface can be read in one place — and every handler but scan's goes
 // through serialized, so no two calls ever run at once (see mcpDeps.mu).
 func registerMCPTools(server *mcp.Server, deps mcpDeps) {
+	// Not wrapped in serialized, alone among the tools: it reads documentation
+	// embedded at build time, so there is no cluster call, no state file and
+	// nothing for a concurrent call to race. See mcp_docs.go.
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "docs",
+		Description: "Look up kx's own documentation — commands, flags, concepts, guides — built into " +
+			"this binary, so it describes the kx that is running rather than the current website. " +
+			"Use it before guessing a flag or telling the user kx cannot do something. A query " +
+			"returns the pages that match, each trimmed to the part that answers it; no query lists " +
+			"every page with its description.",
+		Annotations: readOnlyTool("kx documentation"),
+	}, deps.docs)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_marks",
 		Description: "List the kx marks: names the user pinned to resources, usable as a target's mark.",

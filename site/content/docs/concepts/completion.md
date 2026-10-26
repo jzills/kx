@@ -75,6 +75,7 @@ kx completion powershell | Out-String | Invoke-Expression
 Append that to your profile to keep it.
 
 {{% kx-note %}}
-Installed as a krew plugin, the command is `kubectl idx`.
-Completion scripts are generated for a command called `kx`, so they work against the `alias kx="kubectl idx"` from the [install page](../../getting-started/install/) rather than against `kubectl idx` typed out.
+Installed as a krew plugin, the command is `kubectl idx`, and kubectl completes it by running `kubectl_complete-idx` — the link the [install page](../../getting-started/install/) adds beside the plugin.
+That covers `kubectl idx <TAB>` in every shell, and the `alias kx="kubectl idx"` in zsh, which completes an alias as what it stands for and so never consults a `_kx` script.
+In bash, the script above completes the alias as well.
 {{% /kx-note %}}

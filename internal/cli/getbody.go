@@ -17,11 +17,15 @@ import (
 type getOptions struct {
 	Match string
 	// Sort is a --sort value, empty for none.
-	Sort   string
-	Decode bool
-	Key    string
-	HasKey bool
-	Yes    bool
+	Sort string
+	// Limit is a --limit, zero for none.
+	Limit int
+	// LastRun is kx get's --last-run.
+	LastRun bool
+	Decode  bool
+	Key     string
+	HasKey  bool
+	Yes     bool
 	// AfterDash is what followed `--`: kubectl's, forwarded after its other
 	// flags, and never an index, however much it looks like one.
 	AfterDash []string
@@ -140,6 +144,14 @@ func runGet(services Services, resource string, args []string, options getOption
 		}
 	}
 
+	// Refused before anything else is read: it names one kind, and no
+	// index, whatever else the command says.
+	if options.LastRun {
+		if err := lastRunRefusal(resource, len(refs) > 0, extra); err != nil {
+			return err
+		}
+	}
+
 	// Contexts live in kubeconfig, not on the server, so kubectl rejects
 	// `get contexts`. Routing the spelling here keeps `kx get <thing>` the one
 	// way to relist anything — including the hint a kind mismatch prints.
@@ -149,6 +161,9 @@ func runGet(services Services, resource string, args []string, options getOption
 		// table, and in the order kubeconfig holds them.
 		if options.Sort != "" {
 			return errors.New("kx get contexts does not support '--sort' — only a resource listing can be sorted.")
+		}
+		if options.Limit != 0 {
+			return errors.New("kx get contexts does not support '--limit' — only a resource listing can be cut.")
 		}
 		if len(refs) == 0 {
 			return listContexts(services, options.Match)
@@ -244,6 +259,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	if err := sortRefusal(options.Sort, extra); err != nil {
 		return err
 	}
+	// Nor a --limit, which cuts one.
+	if options.Limit != 0 && (options.Decode || options.HasKey) {
+		flag := "--decode"
+		if !options.Decode {
+			flag = "--key"
+		}
+		return fmt.Errorf("'--limit' cannot be combined with '%s' — it cuts a listing, "+
+			"and '%s' prints a Secret's data.", flag, flag)
+	}
+	if err := limitRefusal(options.Limit, extra); err != nil {
+		return err
+	}
 	if options.Decode || options.HasKey {
 		// Resolved only when the command already names a Secret-shaped
 		// resource and carries indexes: otherwise decodeSecrets's own guards
@@ -317,6 +344,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		if len(groups) > 1 {
 			get := GetCommand{
 				Kubectl: services.Kubectl, State: services.State, Index: services.Index, Sort: options.Sort,
+				Limit: options.Limit,
 			}
 			stop := render.Status("fetching " + resource)
 			output, err := get.ExecuteGroups(resource, options.Match, groups, extra)
@@ -364,6 +392,7 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: options.Sort,
+		Limit: options.Limit, LastRun: options.LastRun,
 	}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)

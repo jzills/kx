@@ -134,6 +134,12 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// resolves one, so it stays without the wrapper.
 	root.AddCommand(withRefresh(services, newMarkCommand(services)))
 	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
+	// withoutRefresh: it resolves no index at all. kx docs reads documentation
+	// built into the binary, and never the cluster or the saved listing, so
+	// there is no vanished resource for the wrapper to re-list.
+	docsCmd := newDocsCommand(services)
+	docsCmd.Annotations = documentAnnotations
+	root.AddCommand(withoutRefresh(docsCmd))
 	// withoutRefresh: the server resolves nothing from the listing, so there
 	// is no stale index for the wrapper to recover from.
 	root.AddCommand(withoutRefresh(newMCPCommand(services, info.Version)))
@@ -238,10 +244,12 @@ func newGetCommand(services Services) *cobra.Command {
 			"A `--match` term narrows the table, a watch's live table, `-o name` or a " +
 			"`-o json`/`-o yaml` collection by each row's name. A template is a shape " +
 			"you chose, which kx cannot assume has names in it, so it refuses the term " +
-			"there rather than printing everything.\n\n" + sortLong,
-		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort status,-restarts\n  kx get pods -A --sort namespace,-age\n  kx get pods --sort-by=.metadata.creationTimestamp",
+			"there rather than printing everything.\n\n" + sortLong + "\n\n" + limitLong + "\n\n" + lastRunLong,
+		Example: "  kx get pods\n  kx get pods -n prod -l app=web\n  kx get deploy -m api\n  kx get pods 1..3\n  kx get pods 3..\n  kx get pods --watch\n  kx get pods --sort status,-restarts\n  kx get pods -A --sort namespace,-age\n  kx get pods --sort age --limit 5\n  kx get jobs --last-run\n  kx get jobs -A --last-run --sort -age\n  kx get pods --sort-by=.metadata.creationTimestamp",
 		Args:    minArgs(1),
 	}
+	// kx get's alone: kx secret lists no Jobs.
+	cmd.Flags().Bool("last-run", false, lastRunUsage)
 	kubectlFlags := registerGetFlags(cmd, sortUsage)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -278,6 +286,7 @@ func newGetCommand(services Services) *cobra.Command {
 func registerGetFlags(cmd *cobra.Command, sortUsage string) *kubectlArgs {
 	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().String("sort", "", sortUsage)
+	cmd.Flags().Int("limit", 0, limitUsage)
 	cmd.Flags().Bool("decode", false,
 		"Show Secret data in plaintext; every Secret in the namespace when no index is given")
 	cmd.Flags().StringP("key", "k", "", "With --decode, print only this key's value")
@@ -324,6 +333,12 @@ func getOptionsFrom(cmd *cobra.Command) (getOptions, error) {
 			return options, sortSpecError("")
 		}
 	}
+	limit, _ := flags.GetInt("limit")
+	if options.Limit, err = limitOf(flags.Changed("limit"), limit); err != nil {
+		return options, err
+	}
+	// kx get's flag alone, so absent from kx secret, where it reads false.
+	options.LastRun, _ = flags.GetBool("last-run")
 	return options, nil
 }
 

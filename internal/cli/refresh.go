@@ -290,8 +290,10 @@ func replayGet(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
-		Sort:   query.Sort,
-		Replay: true,
+		Sort:    query.Sort,
+		Limit:   query.Limit,
+		LastRun: query.LastRun,
+		Replay:  true,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
@@ -310,7 +312,7 @@ func replayTop(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	noLimits, rest := extractBool(query.Args, "--no-limits")
 	table, label, namespace, _, err := topListing(
-		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope, query.Sort)
+		services, query.Resource == "nodes", queryMatch(query), rest, noLimits, scope, query.Sort, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +473,12 @@ func relistCommand(entry state.State, elsewhere bool) string {
 	// fetched rows, not the -A listing named.
 	if query.Sort != "" {
 		words = append(words, sortArg(query.Sort))
+	}
+	if query.Limit != 0 {
+		words = append(words, limitArg(query.Limit))
+	}
+	if query.LastRun {
+		words = append(words, "--last-run")
 	}
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)
