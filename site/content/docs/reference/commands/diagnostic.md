@@ -22,6 +22,8 @@ A schedule longer than the window wants a wider one: a weekly CronJob whose last
 
 A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.
 
+--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.
+
 ## Usage
 
 ```text
@@ -46,6 +48,7 @@ kx diagnostic [OPTIONS] [index]
 | `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
+| `--limit int` | Keep the first N rows the sweep shows, after its ranking and --sort |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
@@ -71,6 +74,7 @@ kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy
 kx diagnostic -A --sort namespace,kind
+kx diagnostic -A --limit 5
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json

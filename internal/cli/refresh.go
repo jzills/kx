@@ -345,7 +345,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 		return nil, err
 	}
 	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
-		false, window, since, queryMatch(query), query.Sort)
+		false, window, since, queryMatch(query), query.Sort, query.Limit)
 	if err != nil {
 		return nil, err
 	}

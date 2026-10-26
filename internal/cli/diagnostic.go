@@ -81,6 +81,11 @@ type TriageCommand struct {
 	// the order of what it ties on; recorded in the query, so a refresh
 	// sweeps into the same order.
 	Sort string
+	// Limit is a --limit, zero for none: the first rows the table shows,
+	// once ranked and sorted, are kept and the rest of the sweep is not —
+	// not printed, saved, or reported — so the rows numbered are the rows
+	// on screen. Healthy rows the table hides are not among them.
+	Limit int
 	// NamedNamespace is whether the namespace swept was named — -n, or an
 	// agent's namespace — rather than the context's own. Only a named one is
 	// recorded in the query; the entry records where the sweep was taken
@@ -134,6 +139,17 @@ func (c TriageCommand) Execute(
 	if reports, err = sortReports(reports, c.Sort); err != nil {
 		return render.TriageResult{}, err
 	}
+	// Counted over the whole sweep, before a --limit cuts it: the footer's
+	// healthy count and the --fail-on gate are claims about what was swept,
+	// and a critical resource past the limit still fails the gate.
+	checked, healthy, worst := len(reports), 0, diagnostics.OK
+	for _, report := range reports {
+		if report.Verdict == diagnostics.OK {
+			healthy++
+		}
+		worst = max(worst, report.Verdict)
+	}
+	reports, of := limitedSweep(reports, c.Limit, showHealthy)
 
 	// Every swept resource is indexed, not just the unhealthy ones printed by
 	// default, so an index resolves whatever row the HTML grid's full
@@ -143,11 +159,7 @@ func (c TriageCommand) Execute(
 	// sweep, so the two numberings part company.
 	var entries []state.Resource
 	var terminalRows []render.TriageRow
-	healthy := 0
 	for position, report := range reports {
-		if report.Verdict == diagnostics.OK {
-			healthy++
-		}
 		if showHealthy || report.Verdict != diagnostics.OK {
 			terminalRows = append(terminalRows, render.TriageRow{
 				Index: position + 1, Report: report,
@@ -161,9 +173,11 @@ func (c TriageCommand) Execute(
 	result := render.TriageResult{
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces,
-		Checked:       len(reports),
+		Checked:       checked,
 		Reports:       terminalRows,
 		All:           reports,
+		Of:            of,
+		Worst:         worst,
 		Healthy:       healthy,
 		ShowHealthy:   showHealthy,
 		Window:        c.Window,
@@ -208,7 +222,32 @@ func (c TriageCommand) query(namespace string, allNamespaces bool) *state.Query 
 	if c.Since != "" {
 		args = append(args, "--since", c.Since)
 	}
-	return &state.Query{Command: state.CommandDiag, Args: args, Match: matchOf(c.Match), Sort: c.Sort}
+	return &state.Query{
+		Command: state.CommandDiag, Args: args, Match: matchOf(c.Match), Sort: c.Sort, Limit: c.Limit,
+	}
+}
+
+// limitedSweep keeps the first limit rows the table shows — unhealthy ones,
+// or every one with --show-healthy — returning how many it could have shown
+// when it cut, and zero when it did not. A limit of zero keeps the sweep
+// whole, healthy rows the table hides included, as the HTML report's grid
+// needs them.
+func limitedSweep(
+	reports []diagnostics.Report, limit int, showHealthy bool,
+) ([]diagnostics.Report, int) {
+	if limit == 0 {
+		return reports, 0
+	}
+	shown := make([]diagnostics.Report, 0, len(reports))
+	for _, report := range reports {
+		if showHealthy || report.Verdict != diagnostics.OK {
+			shown = append(shown, report)
+		}
+	}
+	if len(shown) <= limit {
+		return shown, 0
+	}
+	return shown[:limit], len(shown)
 }
 
 // sweepSortError refuses a sweep's --sort before anything is swept: one that
@@ -276,7 +315,7 @@ type sweepScope struct {
 
 func runSweep(
 	ctx context.Context, services Services, scope sweepScope, showHealthy bool,
-	window time.Duration, since, match, sortSpec string,
+	window time.Duration, since, match, sortSpec string, limit int,
 ) (render.TriageResult, error) {
 	client, err := services.Kubernetes()
 	if err != nil {
@@ -291,7 +330,7 @@ func runSweep(
 	stop := render.Status(sweeping)
 	result, err := TriageCommand{
 		Diagnostics: service, Save: services.State.Save, Window: window,
-		Match: match, Since: since, Sort: sortSpec, NamedNamespace: scope.Named,
+		Match: match, Since: since, Sort: sortSpec, Limit: limit, NamedNamespace: scope.Named,
 	}.Execute(ctx, scope.Namespace, scope.All, showHealthy)
 	stop()
 	return result, err
@@ -386,11 +425,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending Pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
 			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.\n\n" +
-			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.",
+			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.\n\n" +
+			"--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.",
 		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -m api\n" +
 			"  kx " + use + " --show-healthy\n" +
 			"  kx " + use + " -A --sort namespace,kind\n" +
+			"  kx " + use + " -A --limit 5\n" +
 			"  kx " + use + " -A\n  kx " + use + " --html\n  kx " + use + " -A --json\n" +
 			"  kx " + use + " --since 7d\n" +
 			"  kx " + use + " -A --fail-on critical --out report.html",
@@ -408,6 +449,11 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			since, _ := cmd.Flags().GetString("since")
 			match, _ := cmd.Flags().GetString("match")
 			sortSpec, _ := cmd.Flags().GetString("sort")
+			limitValue, _ := cmd.Flags().GetInt("limit")
+			limit, err := limitOf(cmd.Flags().Changed("limit"), limitValue)
+			if err != nil {
+				return err
+			}
 			wantsHTML := impliedHTML(html, out)
 			htmlOpts := htmlOptions{Enabled: wantsHTML, Port: port, NoOpen: noOpen, Out: out}
 			if err := htmlOpts.validate(
@@ -486,6 +532,13 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 						"sweep. Drop the flag, or drop the index to sweep the namespace " +
 						"instead.")
 			}
+			// A --limit cuts a sweep's rows, as --sort orders them.
+			if len(args) > 0 && limit != 0 {
+				return errors.New(
+					"'--limit' cannot be combined with an index — it cuts a namespace " +
+						"sweep. Drop the flag, or drop the index to sweep the namespace " +
+						"instead.")
+			}
 			// Checked before anything is swept, as --fail-on is: a sweep's
 			// columns are fixed, so a column it lacks costs nothing to refuse.
 			// After the index, which --sort does not apply to at all: checked
@@ -505,7 +558,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				}
 				result, err := runSweep(ctx, services,
 					sweepScope{Namespace: namespace, All: allNamespaces, Named: named},
-					showHealthy, window, since, match, sortSpec)
+					showHealthy, window, since, match, sortSpec, limit)
 				if err != nil {
 					return err
 				}
@@ -529,7 +582,8 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 					}
 					meta, err := pageMeta(services.Config.Theme, "diag · "+scope,
 						invocation(use, scopeArgs(namespace, allNamespaces),
-							matchFlag(match), sinceFlag(window), sortFlag(sortSpec), portFlag(port)))
+							matchFlag(match), sinceFlag(window), sortFlag(sortSpec), limitFlag(limit),
+							portFlag(port)))
 					if err != nil {
 						return err
 					}
@@ -600,6 +654,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	cmd.Flags().StringP("match", "m", "", matchUsage)
 	cmd.Flags().String("sort", "",
 		"Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each")
+	cmd.Flags().Int("limit", 0, "Keep the first N rows the sweep shows, after its ranking and --sort")
 	cmd.Flags().Bool("show-healthy", false,
 		"Include healthy resources in the terminal table; the HTML report always includes them")
 	cmd.Flags().Bool("json", false,
@@ -642,7 +697,7 @@ func sweepGate(result render.TriageResult, failOn string, threshold diagnostics.
 	if failOn == "" {
 		return nil
 	}
-	worst := diagnostics.OK
+	worst := result.Worst
 	for _, report := range result.All {
 		if report.Verdict > worst {
 			worst = report.Verdict

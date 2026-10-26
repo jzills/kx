@@ -30,7 +30,14 @@ type TriageResult struct {
 	// HTML report shows the full inventory unconditionally, since its grid can
 	// filter healthy rows away client-side rather than needing them dropped
 	// before they ever reach the page.
-	All     []diagnostics.Report
+	All []diagnostics.Report
+	// Of is how many rows the table could have shown before a --limit cut
+	// it, zero when nothing was cut. All and Reports then hold only the rows
+	// kept.
+	Of int
+	// Worst is the worst verdict of the whole sweep, a --limit's cut
+	// included: what kx diag --fail-on gates on.
+	Worst   diagnostics.Severity
 	Healthy int
 	// ShowHealthy mirrors kx diag --show-healthy: Reports already includes the
 	// healthy resources, so the footer must not also claim some were left out.
@@ -98,7 +105,8 @@ func (r *Renderer) Triage(result TriageResult) {
 	// No blank line between the caption and the table: every other indexed
 	// listing puts its header row directly under the caption, and the Python
 	// renderer's extra line here was alone in doing otherwise.
-	r.Caption("Mixed", scope, strconv.Itoa(result.Checked)+" checked", WindowLabel(result.Window))
+	r.Caption("Mixed", scope, strconv.Itoa(result.Checked)+" checked", sweepShownLabel(result),
+		WindowLabel(result.Window))
 
 	// Headed "X" like every other indexed listing. The Python renderer left it
 	// blank, alone among the indexed tables; these numbers are indexes passed
@@ -157,6 +165,15 @@ func (r *Renderer) Triage(result TriageResult) {
 		footer = strconv.Itoa(result.Healthy) + " healthy " + label + " not shown · " + hint
 	}
 	r.line(r.style(theme.Muted, footer))
+}
+
+// sweepShownLabel is the caption's word on a --limit: "5 of 9 shown" when it cut
+// the rows the table would have shown, and nothing when it did not.
+func sweepShownLabel(result TriageResult) string {
+	if result.Of <= len(result.Reports) {
+		return ""
+	}
+	return strconv.Itoa(len(result.Reports)) + " of " + strconv.Itoa(result.Of) + " shown"
 }
 
 // What the NAME column can never have: two-space padding on both sides of all
