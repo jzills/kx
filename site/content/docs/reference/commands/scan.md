@@ -17,6 +17,8 @@ Run 'kx engine' to see or change the default.
 
 A --sort orders the summary by its columns, IMAGE, CRIT, HIGH, MED, LOW and UNSPEC, with a leading - for largest first: --sort -crit,-high puts the most critical images first. The order carries into --json and the --html page, and an image that failed to scan sorts last.
 
+A --limit keeps the first N images of the summary, after --sort orders it: kx scan -A --sort -crit,-high --limit 5 is the five most critical. Every image is still scanned, and --fail-on still reads them all.
+
 Unrecognized flags are passed through to the scanner.
 
 ## Usage
@@ -41,6 +43,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 | `--full` | Stream the scanner's full output instead of the summary table |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the severity counts and every finding as JSON instead of a table |
+| `--limit int` | Keep the first N images of the summary, after --sort |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
@@ -63,6 +66,7 @@ kx scan 1
 kx scan -n prod
 kx scan -m api
 kx scan --sort -crit,-high
+kx scan -A --sort -crit,-high --limit 5
 kx scan 1 --full
 kx scan --html
 kx scan -A --json
