@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
 )
 
@@ -218,5 +222,152 @@ func TestTopLimitKeepsTheFirstSortedRows(t *testing.T) {
 	err := executeArgv(newTopCommand(topServices(t, &scriptedKubectl{})), []string{"--limit", "0"})
 	if want := "Invalid value for '--limit': '0' keeps no rows — give a count of 1 or more."; err == nil || err.Error() != want {
 		t.Errorf("kx top --limit 0: err = %v, want %q", err, want)
+	}
+}
+
+// A sweep's limit keeps the first rows its table shows, and only those are
+// numbered, saved and reported: the healthy rows the table hides are not
+// among the five, and not saved behind them either. The caption says how many
+// it could have shown, while the checked and healthy counts stay the whole
+// sweep's. The control is the same sweep without a limit, which saves every
+// resource, healthy ones included.
+func TestDiagLimitKeepsTheFirstRowsShown(t *testing.T) {
+	sweep := []diagnostics.Data{
+		healthy(kinds.Deployment, "a-ok", "prod"),
+		unhealthy(kinds.StatefulSet, "db", "prod"),
+		unhealthy(kinds.Deployment, "z-bad", "prod"),
+		healthy(kinds.StatefulSet, "cache", "prod"),
+		unhealthy(kinds.Deployment, "m-bad", "prod"),
+	}
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.Limit = 2
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var shown []string
+	for i, row := range result.Reports {
+		shown = append(shown, row.Name)
+		if row.Index != i+1 {
+			t.Errorf("row %s carries index %d, want %d", row.Name, row.Index, i+1)
+		}
+	}
+	if want := []string{"db", "z-bad"}; !slices.Equal(shown, want) {
+		t.Errorf("rows = %v, want %v", shown, want)
+	}
+	last := saved[len(saved)-1]
+	if last.Resources.Len() != 2 || len(result.All) != 2 {
+		t.Errorf("saved %d and reported %d, want the 2 shown", last.Resources.Len(), len(result.All))
+	}
+	if result.Checked != 5 || result.Healthy != 2 || result.Of != 3 || last.Query.Limit != 2 {
+		t.Errorf("checked %d, healthy %d, of %d, query %+v; want 5, 2, 3 and limit 2",
+			result.Checked, result.Healthy, result.Of, last.Query)
+	}
+	out := captureRender(t)
+	render.Triage(result)
+	for _, want := range []string{"Mixed · prod · 5 checked · 2 of 3 shown", "2 healthy resources not shown"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	saved = nil
+	command = triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	result, err = command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if saved[len(saved)-1].Resources.Len() != 5 || result.Of != 0 {
+		t.Errorf("control: saved %d, of %d; want all 5 and no cut", saved[len(saved)-1].Resources.Len(), result.Of)
+	}
+}
+
+// --fail-on gates on the whole sweep: a critical resource the limit cut is
+// still a critical resource. Sorted by name, the warning leads and the limit
+// keeps only it. The control is a sweep with nothing critical in it, which
+// passes the same gate.
+func TestDiagLimitGatesOnTheWholeSweep(t *testing.T) {
+	degraded := unhealthy(kinds.Deployment, "a-degraded", "prod")
+	degraded.Replicas = &diagnostics.ReplicaHealth{Desired: 2, Ready: 1, Available: 1, Updated: 2}
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: []diagnostics.Data{
+		degraded, unhealthy(kinds.Deployment, "z-down", "prod"),
+	}}, &saved)
+	command.Sort, command.Limit = "name", 1
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(result.All) != 1 || result.All[0].Verdict >= diagnostics.Critical {
+		t.Fatalf("kept %+v, want only the degraded Deployment, short of critical", result.All)
+	}
+	if err := sweepGate(result, "critical", diagnostics.Critical); err == nil {
+		t.Error("the gate passed a sweep whose critical resource the limit cut")
+	}
+
+	command = triageOf(&fakeGatherer{sweep: []diagnostics.Data{degraded}}, &saved)
+	command.Limit = 1
+	if result, err = command.Execute(context.Background(), "prod", false, false); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if err := sweepGate(result, "critical", diagnostics.Critical); err != nil {
+		t.Errorf("control: gate = %v, want a pass", err)
+	}
+}
+
+// A sweep's limit is refused beside an index, as its --sort is, and a count
+// that keeps nothing is refused before anything is swept.
+func TestDiagLimitRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"1", "--limit", "3"},
+			"'--limit' cannot be combined with an index — it cuts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."},
+		{[]string{"--limit", "0"},
+			"Invalid value for '--limit': '0' keeps no rows — give a count of 1 or more."},
+	} {
+		services := switchServices(t, &fakeKubectl{namespace: "prod"})
+		err := executeArgv(newDiagnosticCommand(services, "diagnostic", nil), tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("kx diag %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+	}
+}
+
+// A stale index from a limited sweep is refreshed by sweeping again, cut the
+// same way, and the command to relist it names the limit.
+func TestStaleRefreshSweepsAgainWithItsLimit(t *testing.T) {
+	query := &state.Query{Command: state.CommandDiag, Args: []string{"-n", "prod"}, Limit: 1}
+	services := staleClusterServices(t, &fakeKubectl{namespace: "prod"}, query,
+		brokenDeployment("api", "prod"), brokenDeployment("db", "prod"))
+	out := runStale(t, services)
+	if !strings.Contains(out, "Mixed · prod · 2 checked · 1 of 2 shown") {
+		t.Errorf("output = %q, want the sweep cut to 1 again", out)
+	}
+	if got := currentQuery(t, services); got == nil || got.Limit != 1 {
+		t.Errorf("current query = %+v, want limit 1", got)
+	}
+	if got, want := relistCommand(state.State{Namespace: "prod", Query: query}, false), "kx diag -n prod --limit=1"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+}
+
+// A stale index from a limited kx top listing is refreshed by running kx top
+// again, cut the same way.
+func TestStaleRefreshRunsKxTopAgainWithItsLimit(t *testing.T) {
+	kube := &fakeKubectl{
+		output:    "NAME      CPU(cores)   MEMORY(bytes)\napi-new   1m           2Mi\nweb-new   3m           5Mi\n",
+		namespace: "prod",
+	}
+	services := staleServices(t, kube,
+		&state.Query{Command: state.CommandTop, Resource: "pods", Args: []string{"--no-limits"}, Limit: 1})
+	out := runStale(t, services)
+	if !strings.Contains(out, "1 of 2 items") || strings.Contains(out, "web-new") {
+		t.Errorf("output = %q, want kx top cut to api-new again", out)
+	}
+	if got := currentQuery(t, services); got == nil || got.Limit != 1 {
+		t.Errorf("current query = %+v, want limit 1", got)
 	}
 }
