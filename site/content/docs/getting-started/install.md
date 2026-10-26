@@ -47,9 +47,12 @@ On [krew](https://krew.sigs.k8s.io/), kx is published under the name `idx`.
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
+ln -s ~/.krew/bin/kubectl-idx ~/.krew/bin/kubectl_complete-idx
 ```
 
 The alias is worth setting: every example in these docs is written as `kx`, and `kubectl idx describe 2` is a long way to say `kx describe 2`.
+The link is what tab completion goes through.
+kubectl completes a plugin by running an executable named `kubectl_complete-<plugin>`, and zsh completes the alias as the `kubectl idx` it stands for, so without the link `kx get pods <TAB>` offers files.
 
 ## With uv
 
