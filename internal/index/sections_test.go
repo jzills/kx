@@ -257,3 +257,27 @@ func TestListingOfStitchedTables(t *testing.T) {
 		t.Error("ListingOf accepted no tables")
 	}
 }
+
+// A limit counts rows as they are numbered, on from one table into the next,
+// so what it keeps is rows 1 to n: the Deployments' two and none of the
+// Service table, which is dropped as one a term emptied is. Cut table by
+// table, each would have kept n of its own and the listing more than n.
+func TestListingLimitKeepsTheFirstRowsAcrossTables(t *testing.T) {
+	listing, ok := ParseListing(multiKindOutput)
+	if !ok {
+		t.Fatal("ParseListing refused a listing of several kinds")
+	}
+	table := listing.Limit(2).Number()
+	if got, want := entryNames(table.Entries), []string{"deployment.apps/api", "deployment.apps/web"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("entries = %q, want %q", got, want)
+	}
+	if len(table.Sections) > 1 {
+		t.Errorf("kept %d sections, want the emptied Service table dropped", len(table.Sections))
+	}
+	if got := listing.Limit(3).Len(); got != 3 {
+		t.Errorf("Limit(3) kept %d rows, want all 3", got)
+	}
+	if got := listing.Limit(0).Len(); got != 3 {
+		t.Errorf("Limit(0) kept %d rows, want all 3 — zero is no limit", got)
+	}
+}

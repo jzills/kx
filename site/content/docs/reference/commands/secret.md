@@ -10,6 +10,8 @@ Lists Secrets exactly as kx get does. With `--decode`, prints an indexed Secret'
 
 A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. A Secret listing's columns are NAME, TYPE, DATA and AGE, which sort as what they hold — DATA as a count, AGE as a duration — and ties keep kubectl's order. With `--decode` there is no listing to sort, only one Secret's data, so the two cannot be combined. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
 
+A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
+
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
 ## Usage
@@ -35,6 +37,7 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 | `-A, --all-namespaces` | List across every namespace; each row is indexed and carries its own namespace |
 | `--decode` | Show Secret data in plaintext; every Secret in the namespace when no index is given |
 | `-k, --key string` | With --decode, print only this key's value |
+| `--limit int` | Keep the first N rows, after --match and --sort and before indexing |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to list from; defaults to the current namespace |
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
@@ -85,4 +88,5 @@ kx secret 1..3
 kx secret 3..
 kx secret -l app=web
 kx secret --sort type,-age
+kx secret --sort -age --limit 3
 ```
