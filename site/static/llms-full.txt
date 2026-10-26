@@ -85,9 +85,12 @@ On [krew](https://krew.sigs.k8s.io/), kx is published under the name `idx`.
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
+ln -s ~/.krew/bin/kubectl-idx ~/.krew/bin/kubectl_complete-idx
 ```
 
 The alias is worth setting: every example in these docs is written as `kx`, and `kubectl idx describe 2` is a long way to say `kx describe 2`.
+The link is what tab completion goes through.
+kubectl completes a plugin by running an executable named `kubectl_complete-<plugin>`, and zsh completes the alias as the `kubectl idx` it stands for, so without the link `kx get pods <TAB>` offers files.
 
 ## With uv
 
@@ -856,8 +859,9 @@ Append that to your profile to keep it.
 
 > **Note**
 >
-> Installed as a krew plugin, the command is `kubectl idx`.
-> Completion scripts are generated for a command called `kx`, so they work against the `alias kx="kubectl idx"` from the [install page](https://jzills.github.io/kx/docs/getting-started/install/) rather than against `kubectl idx` typed out.
+> Installed as a krew plugin, the command is `kubectl idx`, and kubectl completes it by running `kubectl_complete-idx` — the link the [install page](https://jzills.github.io/kx/docs/getting-started/install/) adds beside the plugin.
+> That covers `kubectl idx <TAB>` in every shell, and the `alias kx="kubectl idx"` in zsh, which completes an alias as what it stands for and so never consults a `_kx` script.
+> In bash, the script above completes the alias as well.
 
 ---
 

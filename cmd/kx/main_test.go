@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jzills/kx/internal/config"
@@ -41,6 +42,26 @@ func TestOnlyTheFixingCommandRunsPastAnUnknownName(t *testing.T) {
 		}
 		if tc.err == unknownEngine && cfg.Engine != config.DefaultEngine {
 			t.Errorf("%q: Engine = %q, want the default %q", tc.args, cfg.Engine, config.DefaultEngine)
+		}
+	}
+}
+
+// Run as kubectl_complete-idx, kx completes the arguments kubectl hands it,
+// which is how kubectl idx <TAB> — and the krew alias in zsh, which expands to
+// it — reaches kx's completion. The control is the same arguments under kx's
+// own name, which run them.
+func TestCompletionHelperNameCompletesItsArguments(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want []string
+	}{
+		{[]string{"/home/u/.krew/bin/kubectl_complete-idx", "get", "pods", ""}, []string{"__complete", "get", "pods", ""}},
+		{[]string{"C:/krew/bin/kubectl_complete-idx.exe", "describe", ""}, []string{"__complete", "describe", ""}},
+		{[]string{"/usr/local/bin/kx", "get", "pods"}, []string{"get", "pods"}},
+		{[]string{"/home/u/.krew/bin/kubectl-idx", "get", "pods"}, []string{"get", "pods"}},
+	} {
+		if got := argsOf(tc.argv); !slices.Equal(got, tc.want) {
+			t.Errorf("argsOf(%q) = %q, want %q", tc.argv, got, tc.want)
 		}
 	}
 }

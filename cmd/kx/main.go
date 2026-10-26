@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jzills/kx/internal/cli"
@@ -63,16 +64,38 @@ func firstPositional(args []string) string {
 	return ""
 }
 
+// completionHelper is the name kubectl runs to complete a plugin's
+// arguments: `kubectl idx get pods <TAB>` asks kubectl_complete-idx, on the
+// PATH, with the arguments after idx.
+//
+// That is also where the krew alias's completion goes. zsh expands an alias
+// before completing it, so `kx` there is `kubectl idx` and kx's own zsh
+// script is never consulted; with no helper, kubectl answered with the
+// shell's file completion, and `kx get pods <TAB>` listed the directory. A
+// link to kx under this name answers as `kx __complete` does.
+const completionHelper = "kubectl_complete-idx"
+
+// argsOf is the command line kx runs: its arguments, or under the
+// completionHelper name, a completion of them.
+func argsOf(argv []string) []string {
+	name := strings.TrimSuffix(filepath.Base(argv[0]), ".exe")
+	if name == completionHelper {
+		return append([]string{"__complete"}, argv[1:]...)
+	}
+	return argv[1:]
+}
+
 // run renders expected failures as a styled error and returns the exit code,
 // so no path calls os.Exit while defers are pending.
 //
 // Config errors go through the renderer like any other failure, styled with
 // the default theme: the configured one is what failed to load.
 func run() int {
+	args := argsOf(os.Args)
 	loader := config.Loader{ThemeKnown: theme.Exists, EngineKnown: scanner.Exists}
 	cfg, err := loader.Load()
-	if err != nil && !fixesUnknownName(err, &cfg, os.Args[1:]) {
-		render.Configure(theme.Default, hasNoColorFlag(os.Args[1:]))
+	if err != nil && !fixesUnknownName(err, &cfg, args) {
+		render.Configure(theme.Default, hasNoColorFlag(args))
 		render.Error(err.Error())
 		return 1
 	}
@@ -80,7 +103,7 @@ func run() int {
 	// --no-color is resolved from the raw arguments rather than from cobra,
 	// because the pass-through commands disable flag parsing and would
 	// otherwise not surface it until after their first output.
-	render.Configure(cfg.Theme, cfg.ThemeDisable || hasNoColorFlag(os.Args[1:]))
+	render.Configure(cfg.Theme, cfg.ThemeDisable || hasNoColorFlag(args))
 
 	// Installed here rather than in cli.NewRoot so it only ever runs for the
 	// real binary: internal/cli's own tests call NewRoot directly, many
@@ -89,7 +112,7 @@ func run() int {
 	// plugin during `go test ./internal/cli/...`.
 	kinds.SetShorthandSource(discovery.NewSource())
 	root := cli.NewRoot(cli.NewServices(cfg), version)
-	if err := cli.Execute(root, os.Args[1:]); err != nil {
+	if err := cli.Execute(root, args); err != nil {
 		var silent cli.SilentError
 		if errors.As(err, &silent) {
 			return silent.Code

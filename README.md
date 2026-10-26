@@ -47,6 +47,7 @@ Or as a kubectl plugin via [krew](https://krew.sigs.k8s.io/), where kx is publis
 ```bash
 kubectl krew install idx
 alias kx="kubectl idx"
+ln -s ~/.krew/bin/kubectl-idx ~/.krew/bin/kubectl_complete-idx
 ```
 
 Or from PyPI with [uv](https://docs.astral.sh/uv/) — no Python runtime or dependencies required:
