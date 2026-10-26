@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 
@@ -147,16 +148,33 @@ func renderDocsPage(page docs.Page) {
 	}
 	render.Blank()
 
+	lines := strings.Split(strings.TrimRight(page.Body, "\n"), "\n")
 	fenced := false
-	for _, line := range strings.Split(strings.TrimRight(page.Body, "\n"), "\n") {
+	for at := 0; at < len(lines); at++ {
+		line := lines[at]
 		if strings.HasPrefix(line, "```") {
 			fenced = !fenced
 			continue
 		}
-		if !fenced && strings.HasPrefix(line, "#") {
+		if fenced {
+			render.Raw(line)
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
 			render.Blank()
 			render.Section(strings.TrimSpace(strings.TrimLeft(line, "#")))
 			continue
+		}
+		// A pipe table, drawn as the table it is. Markdown's own shape — a
+		// row per line, a column per pipe — is unreadable in a terminal: the
+		// reference pages run to 600 characters a row, so every one of them
+		// wraps.
+		if block := tableBlock(lines[at:]); len(block) > 0 {
+			if columns, rows, ok := parseDocsTable(block); ok {
+				render.Table(columns, rows)
+				at += len(block) - 1
+				continue
+			}
 		}
 		render.Raw(line)
 	}
@@ -198,4 +216,110 @@ func lastSegment(slug string) string {
 		return slug[at+1:]
 	}
 	return slug
+}
+
+// tableBlock returns the run of table lines starting at lines[0], or nothing
+// if it does not start one.
+func tableBlock(lines []string) []string {
+	end := 0
+	for end < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[end]), "|") {
+		end++
+	}
+	// A header, a delimiter and at least one row. Fewer is something else
+	// that happens to begin with a pipe, and is left as the text it is.
+	if end < 3 {
+		return nil
+	}
+	return lines[:end]
+}
+
+// parseDocsTable turns a Markdown pipe table into the columns and rows kx
+// draws every other table with, so a documentation page's table fits the
+// terminal and ellipsizes instead of wrapping.
+//
+// Reports whether it parsed one: a block that is not a table is printed as
+// the text it is rather than half-rendered.
+func parseDocsTable(block []string) ([]render.Column, [][]render.Cell, bool) {
+	header := splitDocsRow(block[0])
+	if len(header) == 0 || !isTableDelimiter(block[1], len(header)) {
+		return nil, nil, false
+	}
+
+	columns := make([]render.Column, len(header))
+	for i, name := range header {
+		columns[i] = render.Column{Header: strings.ToUpper(docsCellText(name))}
+	}
+	// The last column absorbs the width: in every table the documentation
+	// carries it is the description, and it is the one that can lose its tail
+	// and still read.
+	columns[len(columns)-1].Flex = true
+
+	rows := make([][]render.Cell, 0, len(block)-2)
+	for _, line := range block[2:] {
+		cells := make([]render.Cell, len(columns))
+		split := splitDocsRow(line)
+		for i := range cells {
+			text := ""
+			if i < len(split) {
+				text = docsCellText(split[i])
+			}
+			cells[i] = render.Plain(text)
+		}
+		rows = append(rows, cells)
+	}
+	return columns, rows, true
+}
+
+// isTableDelimiter reports whether a line is the |---|---| under a header,
+// with one cell per column.
+func isTableDelimiter(line string, columns int) bool {
+	cells := splitDocsRow(line)
+	if len(cells) != columns {
+		return false
+	}
+	for _, cell := range cells {
+		if strings.Trim(cell, "-: ") != "" || !strings.Contains(cell, "-") {
+			return false
+		}
+	}
+	return true
+}
+
+// splitDocsRow cuts a table row at its unescaped pipes. The generator writes a
+// pipe inside a cell as \|, which a plain Split would read as a column break.
+func splitDocsRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
+
+	var (
+		cells   []string
+		current strings.Builder
+		escaped bool
+	)
+	for _, r := range line {
+		switch {
+		case escaped:
+			current.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == '|':
+			cells = append(cells, strings.TrimSpace(current.String()))
+			current.Reset()
+		default:
+			current.WriteRune(r)
+		}
+	}
+	return append(cells, strings.TrimSpace(current.String()))
+}
+
+// docsCellText is one cell as a terminal should show it: the entities the site
+// generator escaped for Hugo turned back into the characters they stand for,
+// and the backticks around code dropped, since a kx table styles a cell rather
+// than marking it up.
+//
+// Without the unescaping, `kx docs cp` described a source path as
+// "&lt;index&gt;:&lt;path&gt;".
+func docsCellText(cell string) string {
+	return strings.ReplaceAll(html.UnescapeString(cell), "`", "")
 }

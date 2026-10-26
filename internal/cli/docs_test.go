@@ -127,3 +127,79 @@ func TestDocsKeepsAFencedExampleIntact(t *testing.T) {
 		t.Errorf("a fence marker reached the terminal:\n%s", out)
 	}
 }
+
+// A documentation page's tables are drawn as kx tables. Markdown's own shape
+// is unreadable in a terminal — the reference pages run to 600 characters a
+// row, so every one of them wraps — and kx has a table renderer that fits the
+// width and ellipsizes instead.
+func TestDocsDrawsAMarkdownTableAsAKxTable(t *testing.T) {
+	out := docsPrinted(t, "docs", "cp")
+
+	if strings.Contains(out, "|---|") {
+		t.Errorf("the table's delimiter row reached the terminal:\n%s", out)
+	}
+	if strings.Contains(out, "| Argument | Description |") {
+		t.Errorf("the table printed as raw Markdown:\n%s", out)
+	}
+	// The control for both: the table's content is still there, so neither
+	// check is passing because the block was dropped.
+	for _, want := range []string{"ARGUMENT", "DESCRIPTION", "<src>", "<dest>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q is missing from the drawn table:\n%s", want, out)
+		}
+	}
+}
+
+// The site generator escapes '<' and '>' for Hugo. Nothing unescaped them for
+// a terminal, so kx docs cp described a source path as
+// "&lt;index&gt;:&lt;path&gt;".
+func TestDocsUnescapesWhatTheSiteGeneratorEscaped(t *testing.T) {
+	out := docsPrinted(t, "docs", "cp")
+
+	if strings.Contains(out, "&lt;") || strings.Contains(out, "&gt;") {
+		t.Errorf("an HTML entity reached the terminal:\n%s", out)
+	}
+	if !strings.Contains(out, "<index>:<path>") {
+		t.Errorf("the unescaped text is not in the output:\n%s", out)
+	}
+}
+
+// A cell may hold a pipe, which the site generator writes as \|. Split on
+// every pipe and that cell becomes two columns, silently shifting every cell
+// after it.
+func TestSplitDocsRowKeepsAnEscapedPipe(t *testing.T) {
+	cells := splitDocsRow(`| ` + "`-o`" + ` | json\|yaml\|name | the output shape |`)
+	want := []string{"`-o`", "json|yaml|name", "the output shape"}
+	if len(cells) != len(want) {
+		t.Fatalf("split into %d cells %q, want %d", len(cells), cells, len(want))
+	}
+	for i := range want {
+		if cells[i] != want[i] {
+			t.Errorf("cell %d = %q, want %q", i, cells[i], want[i])
+		}
+	}
+}
+
+// A line that begins with a pipe is not always a table. Half-rendering one is
+// worse than leaving it as the text it is.
+func TestATableNeedsAHeaderADelimiterAndARow(t *testing.T) {
+	full := []string{"| A | B |", "|---|---|", "| 1 | 2 |", "after"}
+	if block := tableBlock(full); len(block) != 3 {
+		t.Errorf("tableBlock took %d lines, want the 3 of the table", len(block))
+	}
+	if _, _, ok := parseDocsTable(full[:3]); !ok {
+		t.Error("a well-formed table did not parse")
+	}
+
+	for _, lines := range [][]string{
+		{"| A | B |", "| 1 | 2 |", "| 3 | 4 |"}, // no delimiter row
+		{"| A | B |", "|---|---|"},              // no rows
+		{"not a table", "| A |"},                // does not start one
+	} {
+		if block := tableBlock(lines); len(block) >= 3 {
+			if _, _, ok := parseDocsTable(block); ok {
+				t.Errorf("parsed %q as a table", lines)
+			}
+		}
+	}
+}
