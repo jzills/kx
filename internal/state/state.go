@@ -143,6 +143,9 @@ type Query struct {
 	// Limit is the listing's --limit, zero for none: how many of its rows,
 	// sorted, were kept. kx's too, so kept apart from Args as Sort is.
 	Limit int `json:"limit,omitempty"`
+	// LastRun is kx get jobs --last-run: the newest Job of each CronJob
+	// rather than every Job, so a refresh lists the same runs again.
+	LastRun bool `json:"lastRun,omitempty"`
 }
 
 // The commands a listing can come from, as Query.Command records them. kx get
@@ -812,6 +815,10 @@ func sameQuery(current, next Query) bool {
 	}
 	// Cut at a different row, the same query holds different resources.
 	if current.Limit != next.Limit {
+		return false
+	}
+	// The newest runs are not every Job.
+	if current.LastRun != next.LastRun {
 		return false
 	}
 	for i := range current.Args {

@@ -290,9 +290,10 @@ func replayGet(services Services, entry state.State, elsewhere bool) (func(), er
 	scope, _ := listingScope(entry, elsewhere)
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope,
-		Sort:   query.Sort,
-		Limit:  query.Limit,
-		Replay: true,
+		Sort:    query.Sort,
+		Limit:   query.Limit,
+		LastRun: query.LastRun,
+		Replay:  true,
 	}
 	table, namespace, err := get.Execute(query.Resource, queryMatch(query), query.Args)
 	if err != nil {
@@ -475,6 +476,9 @@ func relistCommand(entry state.State, elsewhere bool) string {
 	}
 	if query.Limit != 0 {
 		words = append(words, limitArg(query.Limit))
+	}
+	if query.LastRun {
+		words = append(words, "--last-run")
 	}
 	if term := queryMatch(*query); term != "" {
 		words = append(words, "-m", term)

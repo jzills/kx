@@ -25,7 +25,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>... [--since str]`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
-| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
+| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--last-run] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](label/) | Set or remove labels on an indexed resource. |
 | [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |

@@ -85,6 +85,9 @@ type GetCommand struct {
 	// Limit is the listing's --limit, zero for none: the rows kept once they
 	// are narrowed and sorted, before they are numbered.
 	Limit int
+	// LastRun narrows a Job listing to each CronJob's newest (lastRuns),
+	// before anything else does.
+	LastRun bool
 }
 
 // replayScope is the -n a listing is taken under when its arguments name no
@@ -238,6 +241,17 @@ func (c GetCommand) Execute(
 	// namespace is only the one named, if any: the current one is this
 	// cluster's, not that one's.
 	if clusterFlagIn(extraArgs) != "" {
+		if c.LastRun {
+			listing, ok, err := c.lastRuns(resource, output, kubectlArgs, scope)
+			if err != nil {
+				return index.Table{}, "", err
+			}
+			if !ok {
+				return index.Table{}, "", unreadableLastRunError(output, true)
+			}
+			table, err := unnumbered(listing, listing.Unnumbered(), filterTerm, keys, c.Limit)
+			return table, extractNamespace(extraArgs), err
+		}
 		table, err := unnumberedListing(output, filterTerm, extraArgs, headerless, keys, c.Limit)
 		return table, extractNamespace(extraArgs), err
 	}
@@ -266,6 +280,13 @@ func (c GetCommand) Execute(
 	}
 
 	listing, tabular := c.Index.Parse(output)
+	if c.LastRun && tabular {
+		var ok bool
+		if listing, ok, err = c.lastRuns(resource, output, kubectlArgs, scope); err != nil {
+			return index.Table{}, "", err
+		}
+		tabular = ok
+	}
 	if c.Replay {
 		keys = listing.Present(keys)
 	}
@@ -302,6 +323,9 @@ func (c GetCommand) Execute(
 		if err := unlimitableError(output, c.Limit); err != nil {
 			return index.Table{}, "", err
 		}
+		if err := unreadableLastRunError(output, c.LastRun); err != nil {
+			return index.Table{}, "", err
+		}
 		text, err := narrowText(output, filterTerm, extraArgs)
 		if err != nil {
 			return index.Table{}, "", err
@@ -331,6 +355,7 @@ func (c GetCommand) Execute(
 	listed := getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)
 	listed.Query.Sort = c.Sort
 	listed.Query.Limit = c.Limit
+	listed.Query.LastRun = c.LastRun
 	if err := c.State.Save(listed); err != nil {
 		return index.Table{}, "", err
 	}

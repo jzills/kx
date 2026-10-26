@@ -19,11 +19,13 @@ type getOptions struct {
 	// Sort is a --sort value, empty for none.
 	Sort string
 	// Limit is a --limit, zero for none.
-	Limit  int
-	Decode bool
-	Key    string
-	HasKey bool
-	Yes    bool
+	Limit int
+	// LastRun is kx get's --last-run.
+	LastRun bool
+	Decode  bool
+	Key     string
+	HasKey  bool
+	Yes     bool
 	// AfterDash is what followed `--`: kubectl's, forwarded after its other
 	// flags, and never an index, however much it looks like one.
 	AfterDash []string
@@ -138,6 +140,14 @@ func runGet(services Services, resource string, args []string, options getOption
 		var err error
 		refs, err = parseRefs(services.State, "indexes", indexArgs)
 		if err != nil {
+			return err
+		}
+	}
+
+	// Refused before anything else is read: it names one kind, and no
+	// index, whatever else the command says.
+	if options.LastRun {
+		if err := lastRunRefusal(resource, len(refs) > 0, extra); err != nil {
 			return err
 		}
 	}
@@ -382,7 +392,7 @@ func runGet(services Services, resource string, args []string, options getOption
 
 	get := GetCommand{
 		Kubectl: services.Kubectl, State: services.State, Index: services.Index, Scope: scope, Sort: options.Sort,
-		Limit: options.Limit,
+		Limit: options.Limit, LastRun: options.LastRun,
 	}
 	stop := render.Status("fetching " + resource)
 	output, namespace, err := get.Execute(resource, options.Match, extra)
