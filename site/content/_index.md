@@ -16,7 +16,7 @@ toc: false
   <span class="kx-hero__logo">{{< kx-mark >}}</span>
   <h1 class="kx-hero__title">kubectl, indexed.</h1>
   <p class="kx-hero__lede">
-    Run <code>kx get pods</code> once and every row gets a number.
+    Run <code>kx get &lt;resource&gt;</code> once and every row gets a number.
     From then on you name resources by that number instead of typing them out:
     <code>kx logs 2</code>, <code>kx delete 2 5</code>, <code>kx exec 1</code>.
   </p>
