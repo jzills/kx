@@ -553,11 +553,27 @@ func imagesNoun(count int) string {
 	}
 }
 
+// imagesShownNoun is the banner's count under a --limit: "5 of 40 images"
+// when the limit cuts the summary, and the plain count when it does not.
+//
+// Said in the banner above the table, which is where kx get and kx top
+// caption a cut listing ("5 of 42 items"). Said in a caption underneath
+// instead, it contradicted the count the banner had already given, in a third
+// wording, until the reader reached the last line.
+func imagesShownNoun(count, limit int) string {
+	if limit == 0 || count <= limit {
+		return imagesNoun(count)
+	}
+	return strconv.Itoa(limit) + " of " + strconv.Itoa(count) + " images"
+}
+
 // scanPage builds the HTML page from the same rows the terminal summary
 // renders, so the two views cannot drift apart. match is the sweep's --match
-// term, empty for none, so a sweep it emptied says so as the terminal does.
-func scanPage(scope, match string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
-	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Images: rows}
+// term, empty for none, so a sweep it emptied says so as the terminal does;
+// of is how many images a --limit cut the summary down from, zero for none,
+// so the page's caption says it was cut as the terminal's banner does.
+func scanPage(scope, match string, rows []scanner.ImageScan, of int, meta web.Meta) web.ScanPage {
+	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Of: of, Images: rows}
 }
 
 // scanSortKeys reads kx scan's --sort against the summary's own columns,
@@ -607,6 +623,31 @@ func sortScans(rows []scanner.ImageScan, keys []index.SortKey) []scanner.ImageSc
 	return ordered
 }
 
+// scanLimit takes kx scan's --limit off its hand-parsed arguments: zero
+// when absent, and refused when it is not a count of 1 or more.
+func scanLimit(args []string) (int, []string, error) {
+	present := hasFlag(args, "--limit", "")
+	text, rest, err := extractString(args, "--limit", "")
+	if err != nil || !present {
+		return 0, rest, err
+	}
+	limit, err := strconv.Atoi(text)
+	if err != nil {
+		return 0, nil, fmt.Errorf("Invalid value for '--limit': '%s' is not a valid int.", text)
+	}
+	limit, err = limitOf(true, limit)
+	return limit, rest, err
+}
+
+// limitedScans keeps the summary's first limit images, returning how many it
+// had when it cut and zero when it did not.
+func limitedScans(rows []scanner.ImageScan, limit int) ([]scanner.ImageScan, int) {
+	if limit == 0 || len(rows) <= limit {
+		return rows, 0
+	}
+	return rows[:limit], len(rows)
+}
+
 // sweepPageScope captions a namespace sweep's page with the same "Mixed · "
 // cross-kind label render.ScopeBanner already printed to the terminal above
 // it. scan.gohtml renders Scope verbatim rather than assuming every scan is a
@@ -636,8 +677,12 @@ func newScanCommand(services Services) *cobra.Command {
 			"A --sort orders the summary by its columns, IMAGE, CRIT, HIGH, MED, LOW and UNSPEC, " +
 			"with a leading - for largest first: --sort -crit,-high puts the most critical images " +
 			"first. The order carries into --json and the --html page, and an image that failed " +
-			"to scan sorts last.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n  kx scan 1 --full\n" +
+			"to scan sorts last.\n\n" +
+			"A --limit keeps the first N images of the summary, after --sort orders it: " +
+			"kx scan -A --sort -crit,-high --limit 5 is the five most critical. Every image is " +
+			"still scanned, and --fail-on still reads them all.",
+		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n" +
+			"  kx scan -A --sort -crit,-high --limit 5\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
 		DisableFlagParsing: true,
@@ -663,6 +708,10 @@ func newScanCommand(services Services) *cobra.Command {
 			}
 			if sorted && sortSpec == "" {
 				return sortSpecError("")
+			}
+			limit, rest, err := scanLimit(rest)
+			if err != nil {
+				return err
 			}
 			html, rest := extractBool(rest, "--html")
 			asJSON, rest := extractBool(rest, "--json")
@@ -720,6 +769,12 @@ func newScanCommand(services Services) *cobra.Command {
 					"'--sort' cannot be combined with '--full' — '--full' streams " +
 						"the scanner's own report, which kx does not parse, so there is " +
 						"no table to sort.")
+			}
+			if limit != 0 && full {
+				return errors.New(
+					"'--limit' cannot be combined with '--full' — '--full' streams " +
+						"the scanner's own report, which kx does not parse, so there is " +
+						"no table to cut.")
 			}
 			// Validated up front, as --fail-on is, so a typo fails before any
 			// image is scanned. A column the summary lacks is known now too.
@@ -831,7 +886,8 @@ func newScanCommand(services Services) *cobra.Command {
 					if match != "" && len(images) == 0 {
 						render.EmptyMatch("Mixed", scope.label(), "0 images", match)
 					} else {
-						render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+						render.ScopeBanner("Mixed", scope.label(),
+							imagesShownNoun(len(images), limit))
 					}
 				}
 				pageScope = sweepPageScope(scope.label())
@@ -854,7 +910,8 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				if !asJSON {
-					render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+					render.Banner(string(kind), name, resourceNamespace,
+						imagesShownNoun(len(images), limit))
 				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
@@ -889,13 +946,17 @@ func newScanCommand(services Services) *cobra.Command {
 			// Sorted once, before any of the three views is built from it, so
 			// the table, the document and the page agree.
 			rows = sortScans(rows, sortKeys)
+			// Cut after the sort, so the images kept are its first; the gate
+			// reads every image scanned, a critical one past the cut included.
+			scanned := rows
+			rows, of := limitedScans(rows, limit)
 			if asJSON {
-				document, err := scanJSON(subject, rows)
+				document, err := scanJSON(subject, rows, of)
 				if err != nil {
 					return err
 				}
 				render.Raw(document)
-				return scanGate(rows, failOn)
+				return scanGate(scanned, failOn)
 			}
 			// Nothing to summarize: the banner above already said so
 			// ("no images found"), matching kx diag's own empty sweep, which
@@ -914,11 +975,11 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
 					invocation("scan", indexArg, scopeArgs(namespace, all),
-						matchFlag(match), sortFlag(sortSpec), portFlag(port)))
+						matchFlag(match), sortFlag(sortSpec), limitFlag(limit), portFlag(port)))
 				if err != nil {
 					return err
 				}
-				page := scanPage(pageScope, match, rows, meta)
+				page := scanPage(pageScope, match, rows, of, meta)
 				page.Sorted = len(sortKeys) > 0
 				rendered, err := web.RenderScan(page)
 				if err != nil {
@@ -930,7 +991,7 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 			}
-			return scanGate(rows, failOn)
+			return scanGate(scanned, failOn)
 		},
 	}
 	// Registered so they appear in the command's help; parsing is by hand.
@@ -940,6 +1001,7 @@ func newScanCommand(services Services) *cobra.Command {
 		"Stream the scanner's full output instead of the summary table")
 	cmd.Flags().String("sort", "",
 		"Sort the summary by its columns: '-crit,-high' puts the most critical images first")
+	cmd.Flags().Int("limit", 0, "Keep the first N images of the summary, after --sort")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
 	cmd.Flags().BoolP("all-namespaces", "A", false,

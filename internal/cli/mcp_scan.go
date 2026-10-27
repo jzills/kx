@@ -194,7 +194,9 @@ func (d mcpDeps) scan(ctx context.Context, req *mcp.CallToolRequest, in scanInpu
 	if err != nil {
 		return nil, scanOutput{}, err
 	}
-	out.Scan = scanDocumentOf(subject, rows)
+	// No cut to record: the tool scans every image it collected. Its own
+	// limit is over each image's findings, below, not over the images.
+	out.Scan = scanDocumentOf(subject, rows, 0)
 	limit := clampLimit(in.Limit, defaultScanFindingsLimit, maxScanFindingsLimit)
 	for i := range out.Scan.Images {
 		listFindings(&out.Scan.Images[i], minRank, limit)

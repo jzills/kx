@@ -8,7 +8,7 @@ weight: 9
 
 Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
 
-With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) always includes them.
+With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
@@ -21,6 +21,8 @@ Every finding says which it is. '· for 24d' is how long something has been true
 A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.
 
 A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.
+
+--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.
 
 ## Usage
 
@@ -46,12 +48,13 @@ kx diagnostic [OPTIONS] [index]
 | `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
+| `--limit int` | Keep the first N rows the sweep shows, after its ranking and --sort |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
-| `--show-healthy` | Include healthy resources in the terminal table; the HTML report always includes them |
+| `--show-healthy` | Include healthy resources in the terminal table; the HTML report includes them either way |
 | `--since string` | Ignore anything that happened longer ago than this — events, past restarts, failed runs; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to diag_max_age, which is unset: everything is reported |
 | `--sort string` | Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each |
 
@@ -71,6 +74,7 @@ kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy
 kx diagnostic -A --sort namespace,kind
+kx diagnostic -A --limit 5
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json

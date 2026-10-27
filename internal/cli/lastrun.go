@@ -150,6 +150,27 @@ func newestRuns(jobs []batchv1.Job) map[string]string {
 	return newest
 }
 
+// cronJobsOf reads a numbered last-run table's CRONJOB column back out, keyed
+// by the entry each row resolves to, for a caller that returns the rows as
+// data rather than drawing them.
+func cronJobsOf(table index.Table) map[index.Entry]string {
+	nameIdx := index.ColumnIndex(table.Headers, "NAME")
+	namespaceIdx := index.ColumnIndex(table.Headers, "NAMESPACE")
+	cronJobIdx := index.ColumnIndex(table.Headers, lastRunColumn)
+	owners := make(map[index.Entry]string, len(table.Rows))
+	if nameIdx < 0 || cronJobIdx < 0 {
+		return owners
+	}
+	for _, row := range table.Rows {
+		entry := index.Entry{Name: row[nameIdx]}
+		if namespaceIdx >= 0 {
+			entry.Namespace = row[namespaceIdx]
+		}
+		owners[entry] = row[cronJobIdx]
+	}
+	return owners
+}
+
 // withColumn is row with value inserted at position, leaving row itself
 // untouched.
 func withColumn(row []string, position int, value string) []string {

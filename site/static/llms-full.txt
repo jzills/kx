@@ -1269,7 +1269,7 @@ See [using kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
 Detail the terminal has no room for:
 
 - **diag** — findings sortable and filterable by any column, with a group-by for larger sweeps; each row expands into that resource's full report.
-  Unlike the terminal table, the page always includes healthy resources.
+  Unlike the terminal table, the page includes healthy resources too, as far back as a `--limit` kept the sweep.
 - **scan** — per-image severity counts up top; the CVE table below groups by image and expands each row into the vulnerabilities behind its counts.
 - **tree** — the ownership graph as a collapsible tree.
 - **top** — usage as a percentage of limits, for Pods or Nodes.
@@ -1419,7 +1419,8 @@ kx scan -n prod --fail-on high --json
 
 ## `--json`
 
-The same analysis as a machine-readable document — every resource swept, healthy ones included, and every CVE behind the severity counts.
+The same analysis as a machine-readable document — every resource the run covers, healthy ones included, and every CVE behind the severity counts.
+A `--limit` cuts the document to the rows it kept and records in `of` how many there were, so the five worst resources are never read as the only five.
 
 ```bash
 kx diag --json | jq '.resources[] | select(.verdict == "critical") | .name'
@@ -1598,7 +1599,7 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 | --- | --- |
 | `list_marks` | Every mark you've pinned, in any cluster. |
 | `mark` | Pins a name to a resource — the one write the server makes. |
-| `list_resources` | Names and namespaces of one kind. |
+| `list_resources` | Names and namespaces of one kind; with `lastRun`, the newest Job of each CronJob. |
 | `diagnose` | Health: one resource's findings, or a namespace sweep. |
 | `tree` | Ownership: what a resource owns and is owned by. |
 | `events` | Warning and normal events recorded against one resource. |
@@ -1800,7 +1801,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host). |
 | [`kx delete <index>... [--dry-run[=str]] [--output/-o str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/drain/) | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/edit/) | Open an indexed resource in your editor via kubectl edit. |
 | [`kx events <index>... [--since str]`](https://jzills.github.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
@@ -1815,7 +1816,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx ref <index>... [--kind] [--name] [--namespace]`](https://jzills.github.io/kx/docs/reference/commands/ref/) | Print what an index refers to, for commands kx doesn't wrap. |
 | [`kx rollout <action> <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | [`kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
@@ -2336,7 +2337,7 @@ Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, P
 
 Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
 
-With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) always includes them.
+With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
@@ -2349,6 +2350,8 @@ Every finding says which it is. '· for 24d' is how long something has been true
 A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.
 
 A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.
+
+--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.
 
 ## Usage
 
@@ -2374,12 +2377,13 @@ kx diagnostic [OPTIONS] [index]
 | `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
+| `--limit int` | Keep the first N rows the sweep shows, after its ranking and --sort |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
-| `--show-healthy` | Include healthy resources in the terminal table; the HTML report always includes them |
+| `--show-healthy` | Include healthy resources in the terminal table; the HTML report includes them either way |
 | `--since string` | Ignore anything that happened longer ago than this — events, past restarts, failed runs; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to diag_max_age, which is unset: everything is reported |
 | `--sort string` | Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each |
 
@@ -2399,6 +2403,7 @@ kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy
 kx diagnostic -A --sort namespace,kind
+kx diagnostic -A --limit 5
 kx diagnostic -A
 kx diagnostic --html
 kx diagnostic -A --json
@@ -3250,6 +3255,8 @@ Run 'kx engine' to see or change the default.
 
 A --sort orders the summary by its columns, IMAGE, CRIT, HIGH, MED, LOW and UNSPEC, with a leading - for largest first: --sort -crit,-high puts the most critical images first. The order carries into --json and the --html page, and an image that failed to scan sorts last.
 
+A --limit keeps the first N images of the summary, after --sort orders it: kx scan -A --sort -crit,-high --limit 5 is the five most critical. Every image is still scanned, and --fail-on still reads them all.
+
 Unrecognized flags are passed through to the scanner.
 
 ## Usage
@@ -3274,6 +3281,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 | `--full` | Stream the scanner's full output instead of the summary table |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the severity counts and every finding as JSON instead of a table |
+| `--limit int` | Keep the first N images of the summary, after --sort |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
 | `-n, --namespace string` | Namespace to sweep; defaults to the current namespace |
 | `--no-open` | Serve the HTML report without opening a browser |
@@ -3296,6 +3304,7 @@ kx scan 1
 kx scan -n prod
 kx scan -m api
 kx scan --sort -crit,-high
+kx scan -A --sort -crit,-high --limit 5
 kx scan 1 --full
 kx scan --html
 kx scan -A --json

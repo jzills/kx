@@ -68,8 +68,14 @@ type DiagPage struct {
 	// Only a sweep it emptied shows it: there, "0 checked" would read as an
 	// empty namespace, which it may well not be.
 	Match string
-	// Reports are every swept resource, most severe first, healthy included —
-	// or exactly one resource when Single is set, healthy or not.
+	// Limited is whether a --limit cut the sweep: the grid holds the rows
+	// ahead of the cut rather than every resource Checked counts, so the
+	// caption says how many it has. Without it the page gave "12 checked"
+	// over five rows and nothing said the sweep had been cut.
+	Limited bool
+	// Reports are every swept resource ahead of a --limit's cut, most severe
+	// first, healthy included — or exactly one resource when Single is set,
+	// healthy or not.
 	Reports []diagnostics.Report
 }
 
@@ -79,7 +85,11 @@ type ScanPage struct {
 	Scope string
 	// Match is the --match term the sweep was narrowed by, empty for none —
 	// named on the page when it left no images, as DiagPage's is.
-	Match  string
+	Match string
+	// Of is how many images the summary could have shown had a --limit not
+	// cut it, zero when none did: the caption reads "5 of 40 images", the
+	// count the terminal banner gives.
+	Of     int
 	Images []scanner.ImageScan
 	// Sorted is a --sort: the images arrive in its order, which the grid
 	// keeps rather than sorting by Crit on load. A header click still sorts.

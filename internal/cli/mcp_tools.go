@@ -266,6 +266,7 @@ type listInput struct {
 	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"List across every namespace."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
 	Match         string `json:"match,omitempty" jsonschema:"List only the resources whose name contains this, case-insensitively, as kx get -m does."`
+	LastRun       bool   `json:"lastRun,omitempty" jsonschema:"With kind jobs, list only the newest Job of each CronJob, as kx get jobs --last-run does; each row names its CronJob."`
 }
 
 type listedResource struct {
@@ -275,6 +276,8 @@ type listedResource struct {
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
+	// CronJob is the CronJob a lastRun row is the newest run of.
+	CronJob string `json:"cronJob,omitempty"`
 }
 
 type listOutput struct {
@@ -283,6 +286,7 @@ type listOutput struct {
 	Namespace     string           `json:"namespace,omitempty"`
 	AllNamespaces bool             `json:"allNamespaces,omitempty"`
 	Match         string           `json:"match,omitempty"`
+	LastRun       bool             `json:"lastRun,omitempty"`
 	Total         int              `json:"total"`
 	Resources     []listedResource `json:"resources"`
 }
@@ -299,6 +303,10 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	}
 	if err := validMatch(in.Match); err != nil {
 		return nil, listOutput{}, err
+	}
+	if in.LastRun && kinds.Normalize(in.Kind) != kinds.Job {
+		return nil, listOutput{}, fmt.Errorf("'lastRun' lists the newest Job of each CronJob, "+
+			"not %s — set kind to jobs.", kinds.PluralDisplay(in.Kind))
 	}
 	kind := kinds.Normalize(in.Kind)
 	// Context is kx's own pseudo-kind for kubeconfig contexts, not something
@@ -338,6 +346,13 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, err
 	}
 	listing, tabular := index.ParseListing(output)
+	if tabular && in.LastRun {
+		// kx get jobs --last-run's own narrowing, asked of the same scope.
+		get := GetCommand{Kubectl: d.Kubectl, Index: index.Service{}}
+		if listing, tabular, err = get.lastRuns(in.Kind, output, args[2:], nil); err != nil {
+			return nil, listOutput{}, err
+		}
+	}
 	if !tabular && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
@@ -357,15 +372,21 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		recorded = []string{}
 	}
 	if indexed {
-		if err := d.listingSave(current)(getListing(in.Kind, in.Match, recorded, namespace, table.Entries)); err != nil {
+		listed := getListing(in.Kind, in.Match, recorded, namespace, table.Entries)
+		listed.Query.LastRun = in.LastRun
+		if err := d.listingSave(current)(listed); err != nil {
 			return nil, listOutput{}, err
 		}
 	}
 
+	var cronJobs map[index.Entry]string
+	if in.LastRun {
+		cronJobs = cronJobsOf(table)
+	}
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: current, Kind: string(kind), Namespace: namespace,
-		AllNamespaces: in.AllNamespaces, Match: in.Match, Total: len(table.Entries),
+		AllNamespaces: in.AllNamespaces, Match: in.Match, LastRun: in.LastRun, Total: len(table.Entries),
 		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
 	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {
@@ -373,7 +394,8 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		if entry.Namespace != "" {
 			rowNamespace = entry.Namespace
 		}
-		row := listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace}
+		row := listedResource{Kind: string(kind), Name: entry.Name, Namespace: rowNamespace,
+			CronJob: cronJobs[entry]}
 		if indexed {
 			row.Index = position + 1
 		}
