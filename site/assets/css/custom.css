@@ -241,6 +241,18 @@ body {
   margin: 5rem auto 0;
 }
 
+/* A column, so each card's link sits at its foot and the links of one row
+   line up however long the words above them run. */
+.kx-feature {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.kx-feature a {
+  margin-top: auto;
+}
+
 .kx-feature__title {
   font-size: 1.1rem;
   font-weight: 600;

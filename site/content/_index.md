@@ -43,7 +43,7 @@ toc: false
 <section class="kx-features" id="features" aria-label="What kx does">
   <div class="kx-feature">
     <h2 class="kx-feature__title">Triage a namespace</h2>
-    <p>Bare <code>kx diag</code> sweeps every workload and ranks what is unhealthy: CrashLoopBackOff, image pull failures, OOMKill risk read from live usage, stalled rollouts and Services with no endpoints.</p>
+    <p>Bare <code>kx diag</code> sweeps every workload and ranks what is unhealthy: CrashLoopBackOff, image pull failures, OOMKill risk, stalled rollouts and Services with no endpoints.</p>
     <a href="docs/guides/triage-a-namespace/">Triage a namespace</a>
   </div>
   <div class="kx-feature">
