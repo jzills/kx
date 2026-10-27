@@ -7,13 +7,13 @@
  */
 
 html {
-  /* Most of the navbar is fragments on the landing page — Install, Commands,
-     Features, Reports, and the mark itself, which goes to the top — and the
-     docs pages have a table of contents that is nothing but fragments.
-     Without this the browser teleports, and a reader who clicks "Reports"
-     arrives with no idea whether the page moved a screen or ten; the
-     animation is what says how far. .kx-section's scroll-margin-top is the
-     other half, keeping the landing point clear of the sticky navbar.
+  /* The landing page links to its own sections by fragment (Install in the
+     navbar, the hero's "Other ways to install", the mark itself, which goes
+     to the top), and the docs pages have a table of contents that is nothing
+     but fragments. Without this the browser teleports, and a reader arrives
+     with no idea whether the page moved a screen or ten; the animation is
+     what says how far. The scroll-margin-top on .kx-home [id] is the other
+     half, keeping the landing point clear of the sticky navbar.
 
      No reduced-motion guard here: Hextra's reset already forces
      scroll-behavior: auto on everything under that query, so a reader who
@@ -26,115 +26,384 @@ body {
   color: var(--kx-body);
 }
 
-/* Hero
- * ------------------------------------------------------------------ */
+/* Landing page
+ * ------------------------------------------------------------------
+ * content/_index.md, rendered by layouts/home.html. Laid out like the pages
+ * of other command-line tools: a centered hero with one call to action and
+ * one command, the product shown in a window, then a few sections that each
+ * link into the docs. The accent is kept for the mark, links, the primary
+ * button and the terminal's own highlights; everything else is body, muted
+ * and border. */
+
+.kx-home {
+  padding: 0 1.5rem 3rem;
+  color: var(--kx-body);
+}
+
+.kx-home h1,
+.kx-home h2 {
+  color: var(--kx-body);
+  letter-spacing: -0.02em;
+}
+
+.kx-home p {
+  color: var(--kx-muted);
+  line-height: 1.65;
+}
+
+.kx-home a:not(.kx-button) {
+  color: var(--kx-accent);
+  font-weight: 500;
+}
+
+.kx-home a:not(.kx-button):hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.kx-home p code,
+.kx-closing__try code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  color: var(--kx-body);
+  background-color: var(--kx-surface);
+  border: 1px solid var(--kx-border);
+  border-radius: 0.3rem;
+  padding: 0.1em 0.35em;
+  /* A chip breaking mid-command (kx / exec 1) splits its own background
+     across two lines; kept whole, it wraps as a unit. */
+  white-space: nowrap;
+}
+
+/* Every section the navbar or another page links to by fragment clears the
+   sticky navbar when jumped to. */
+.kx-home [id] {
+  scroll-margin-top: 5rem;
+}
+
+/* Hero */
 
 .kx-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.25rem;
-  padding: 3.5rem 1rem 2.5rem;
   text-align: center;
-}
-
-.kx-hero__tagline {
-  font-size: clamp(1.6rem, 4vw, 2.6rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--kx-accent);
-  margin: 0;
-}
-
-.kx-hero__blurb {
-  max-width: 46rem;
-  margin: 0;
-  font-size: clamp(1rem, 2vw, 1.15rem);
-  line-height: 1.6;
-  color: var(--kx-muted);
-}
-
-.kx-hero__blurb code,
-.kx-section__lede code {
-  /* A code chip breaking mid-command (kx / exec 1) splits its own pill
-     background across two lines. Keeping each chip whole is what a
-     container-width fix can't guarantee at every viewport. */
-  white-space: nowrap;
+  padding: clamp(3rem, 8vw, 5.5rem) 0 2.5rem;
 }
 
 .kx-hero__logo {
   display: block;
   color: var(--kx-accent);
+  margin-bottom: 1.5rem;
 }
 
 .kx-hero__logo svg {
-  height: clamp(4.5rem, 13vw, 7.5rem);
+  height: clamp(3.25rem, 8vw, 4.5rem);
   width: auto;
   display: block;
+}
+
+.kx-hero__title {
+  font-size: clamp(2.4rem, 6.5vw, 4rem);
+  font-weight: 750;
+  line-height: 1.05;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.kx-hero__lede {
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  max-width: 40rem;
+  margin: 1.25rem 0 0;
+  text-wrap: pretty;
+}
+
+.kx-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.kx-hero__alt {
+  font-size: 0.9rem;
+  margin: 0.85rem 0 0;
+}
+
+.kx-hero__alt a::after {
+  content: " →";
+}
+
+.kx-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 1.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--kx-border);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--kx-body);
+  background-color: transparent;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.kx-button:hover {
+  background-color: var(--kx-surface);
+}
+
+/* The palette's background is the text color on its accent: every palette
+   pairs the two for contrast already, light ones included, where a fixed
+   white would vanish on a pale accent. */
+.kx-button--primary {
+  border-color: var(--kx-accent);
+  background-color: var(--kx-accent);
+  color: var(--kx-background);
+}
+
+.kx-button--primary:hover {
+  background-color: var(--kx-accent);
+  opacity: 0.88;
+}
+
+/* The install command under the buttons, with its copy button. */
+
+.kx-command {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 1.75rem;
+  padding: 0.6rem 0.6rem 0.6rem 1rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.5rem;
+  background-color: var(--kx-surface);
+}
+
+.kx-command .kx-install__command {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 0.9rem;
+  /* On a phone the command wraps rather than scrolling inside its box,
+     which hid the half that matters. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Windows: a terminal capture in a frame, so it reads as the product rather
+ * than as a code sample. */
+
+.kx-window {
+  max-width: 60rem;
   margin: 0 auto;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.75rem;
+  background-color: var(--kx-surface);
+  overflow: hidden;
+}
+
+.kx-window--hero {
+  margin-top: 1rem;
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.45);
+}
+
+.kx-window__bar {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--kx-border);
+}
+
+.kx-window__bar span {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  background-color: var(--kx-border);
+}
+
+/* The capture inside a window drops its own frame: the window is the frame. */
+.kx-window .kx-terminal {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* What kx does: six, three to a row at desktop width. */
+
+.kx-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 2.5rem 3rem;
+  max-width: 66rem;
+  margin: 5rem auto 0;
+}
+
+.kx-feature__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.kx-feature p {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.kx-feature a::after,
+.kx-showcase__text a::after,
+.kx-split__text a::after {
+  content: " →";
+}
+
+/* A section's words above what it shows. */
+
+.kx-showcase {
+  max-width: 66rem;
+  margin: 7rem auto 0;
+}
+
+.kx-showcase__text {
+  max-width: 42rem;
+  margin: 0 auto 2rem;
+  text-align: center;
+}
+
+.kx-showcase h2,
+.kx-split h2,
+.kx-closing h2 {
+  font-size: clamp(1.6rem, 3.2vw, 2.1rem);
+  font-weight: 700;
+  margin: 0;
+}
+
+.kx-showcase__text p,
+.kx-split__text p {
+  margin: 0.75rem 0 1rem;
+}
+
+/* Report screenshots, one large and two beside each other below it. */
+
+.kx-shot {
+  margin: 0;
+}
+
+.kx-shot figcaption {
+  margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  text-align: center;
+  color: var(--kx-muted);
+}
+
+.kx-shot--wide .kx-media {
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.35);
+}
+
+.kx-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 2rem;
+  margin-top: 2.5rem;
 }
 
 /* The report screenshots (kx-shot.html): several hundred KB each, so
  * below-the-fold ones stay unfetched until they are scrolled to. */
 .kx-media {
   width: 100%;
-  /* The shots are captured wider than this, so they only ever scale down —
-     PNG screenshots tolerate that far better than the monospace recording
-     that used to live in this section did. */
-  max-width: 64rem;
+  height: auto;
+  max-width: 66rem;
   margin: 0 auto;
   display: block;
   border: 1px solid var(--kx-border);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   background-color: var(--kx-surface);
 }
 
-/* Install
- * ------------------------------------------------------------------ */
+/* Words beside what they describe; stacked on narrow screens. */
+
+.kx-split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  align-items: center;
+  gap: 3rem;
+  max-width: 66rem;
+  margin: 7rem auto 0;
+}
+
+.kx-split .kx-themes {
+  justify-content: flex-start;
+  margin: 0;
+}
+
+@media (max-width: 48rem) {
+  .kx-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    margin-top: 5rem;
+  }
+}
+
+/* Install, closing the page. */
+
+.kx-closing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 7rem auto 0;
+  padding: 3rem clamp(1rem, 4vw, 3rem);
+  max-width: 66rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.75rem;
+  background-color: var(--kx-surface);
+}
+
+.kx-closing > p {
+  max-width: 40rem;
+  margin: 0.6rem 0 0;
+}
+
+.kx-closing .kx-hero__actions {
+  margin-top: 1.75rem;
+}
+
+.kx-closing__try {
+  font-size: 0.9rem;
+}
 
 .kx-install {
   display: grid;
   gap: 0.75rem;
-  /* Wide enough for the longest command on a card, "uvx --from kx-cli kx get
-     pods", which was clipped mid-word at 16rem. A command a reader cannot see
-     all of is worse than a grid that wraps to fewer columns. */
-  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
-  max-width: 56rem;
-  margin: 0 auto;
+  /* Two to a row: four across clipped "brew install jzills/tap/kx" mid-word,
+     and a command a reader cannot see all of is worse than a taller grid. */
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  width: 100%;
+  max-width: 46rem;
+  margin-top: 2rem;
+  text-align: left;
 }
 
 .kx-install__card {
   border: 1px solid var(--kx-border);
   border-radius: 0.5rem;
-  background-color: var(--kx-surface);
-  padding: 0.9rem 1rem;
-}
-
-/* The install script leads: one command for every Linux and macOS machine, so
-   it takes the first row on its own, above the per-tool cards. */
-.kx-install__card--lead {
-  grid-column: 1 / -1;
-}
-
-/* On a phone the command would otherwise scroll inside its card, hiding the
-   half that matters. It wraps at its spaces instead, and the <wbr> after each
-   slash in the URL is a last resort; neither adds text to the copy. */
-.kx-install__card--lead .kx-install__command {
-  white-space: normal;
-  overflow-wrap: break-word;
+  background-color: var(--kx-background);
+  padding: 0.8rem 1rem;
 }
 
 .kx-install__label {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--kx-muted);
-  margin-bottom: 0.35rem;
 }
 
 .kx-install__command {
+  display: block;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.92rem;
+  font-size: 0.85rem;
   color: var(--kx-body);
   overflow-x: auto;
   white-space: nowrap;
@@ -144,6 +413,7 @@ body {
   margin-top: 0.3rem;
 }
 
+/* The prompt is drawn here, so it never lands in the clipboard. */
 .kx-install__command::before {
   content: "$ ";
   color: var(--kx-accent);
@@ -162,13 +432,10 @@ body {
   margin-bottom: 0.35rem;
 }
 
-.kx-install__head .kx-install__label {
-  margin-bottom: 0;
-}
-
 .kx-install__copy {
   display: inline-flex;
-  padding: 0.25rem;
+  flex: none;
+  padding: 0.3rem;
   border: 1px solid transparent;
   border-radius: 0.35rem;
   background: none;
@@ -215,50 +482,11 @@ body {
   white-space: nowrap;
 }
 
-/* Feature cards
- * ------------------------------------------------------------------ */
-
-.kx-features {
-  display: grid;
-  gap: 1rem;
-  /* 20rem, not 17: there are six cards, and a minimum narrow enough to fit
-     four across leaves the second row half empty. This holds them to three
-     and three at desktop width. */
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-  max-width: 72rem;
-  margin: 0 auto;
-}
-
-.kx-feature {
-  border: 1px solid var(--kx-border);
-  border-radius: 0.6rem;
-  background-color: var(--kx-surface);
-  padding: 1.1rem 1.2rem;
-}
-
-.kx-feature__title {
-  font-weight: 600;
-  color: var(--kx-accent);
-  margin: 0 0 0.4rem;
-}
-
-/* Each card's heading links to that feature's guide. The whole card is not the
-   link target: the body text mentions commands, and a card-wide anchor would
-   swallow any link put in one later. */
-.kx-feature__title a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.kx-feature__title a:hover {
-  text-decoration: underline;
-}
-
-.kx-feature__body {
-  margin: 0;
-  color: var(--kx-muted);
-  line-height: 1.55;
-  font-size: 0.95rem;
+.kx-fineprint {
+  max-width: 44rem;
+  margin: 3rem auto 0;
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 /* Terminal sample
@@ -279,11 +507,12 @@ body {
 
 .kx-terminal pre {
   margin: 0;
-  /* Hextra styles .content pre with vertical padding only, so the capture's
-     first line sat flush against the left edge. Inline padding only: the
-     vertical is the theme's and is fine. */
+  /* Hextra styles pre with vertical padding only, so the capture's first
+     line sat flush against the left edge. Inline padding only: the vertical
+     is the theme's and is fine. */
   padding-inline: 0.85rem;
   color: var(--kx-body);
+  background: none;
 }
 
 .kx-terminal .c-accent { color: var(--kx-accent); }
@@ -298,7 +527,7 @@ body {
 .kx-themes {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.5rem;
   justify-content: center;
   max-width: 44rem;
   margin: 0 auto;
@@ -307,13 +536,13 @@ body {
 .kx-themes__swatch {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  border: 0.1em solid var(--kx-border);
+  gap: 0.45rem;
+  border: 1px solid var(--kx-border);
   border-radius: 999px;
   background-color: var(--kx-surface);
   color: var(--kx-muted);
-  padding: 0.3rem 0.7rem 0.3rem 0.4rem;
-  font-size: 0.82rem;
+  padding: 0.4rem 0.85rem 0.4rem 0.5rem;
+  font-size: 0.85rem;
   cursor: pointer;
   transition: color 0.12s ease, border-color 0.12s ease;
 }
@@ -328,38 +557,13 @@ body {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 999px;
-  /* em, like the swatch's own border above: the ring is the palette's accent,
-     and at 1px it read as a hairline rather than as the color it is naming. */
+  /* em: the ring is the palette's accent, and at 1px it read as a hairline
+     rather than as the color it is naming. */
   border: 0.15em solid var(--kx-border);
 }
 
-/* Sections
- * ------------------------------------------------------------------ */
-
-.kx-section {
-  padding: 2.5rem 1rem;
-  /* The navbar is sticky, so a section jumped to from the menu would otherwise
-     start underneath it with its heading hidden. */
-  scroll-margin-top: 5rem;
-}
-
-.kx-section__title {
-  text-align: center;
-  font-size: 1.5rem;
-  font-weight: 650;
-  color: var(--kx-body);
-  margin: 0 0 0.5rem;
-}
-
-.kx-section__lede {
-  text-align: center;
-  color: var(--kx-muted);
-  max-width: 44rem;
-  margin: 0 auto 1.75rem;
-  line-height: 1.6;
-}
-
 @media (prefers-reduced-motion: reduce) {
+  .kx-button,
   .kx-themes__swatch {
     transition: none;
   }
