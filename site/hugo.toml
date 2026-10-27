@@ -93,10 +93,12 @@ title = "kubectl, indexed."
     default = "dark"
     displayToggle = true
 
-# Docs leads, then the landing page's own sections. "Themes" used to sit among
-# them and no longer does: the palette menu at the end of this bar is that
-# section's control, on every page rather than one, and two entries offering
-# the same choice a scroll apart is one too many.
+# Docs leads, then Install, the one landing-page section a reader comes back
+# for. The page's other sections are a scroll away and no longer each take a
+# slot in the bar: a menu of five fragments read as a table of contents,
+# where the tools this site is laid out like name a handful of destinations.
+# "Themes" left earlier: the palette menu at the end of this bar is that
+# section's control, on every page rather than one.
 [menu]
   [[menu.main]]
     name = "Docs"
@@ -107,32 +109,20 @@ title = "kubectl, indexed."
     pageRef = "/#install"
     weight = 2
   [[menu.main]]
-    name = "Commands"
-    pageRef = "/#commands"
-    weight = 3
-  [[menu.main]]
-    name = "Features"
-    pageRef = "/#features"
-    weight = 4
-  [[menu.main]]
-    name = "Reports"
-    pageRef = "/#reports"
-    weight = 5
-  [[menu.main]]
     name = "Search"
-    weight = 6
+    weight = 3
     [menu.main.params]
       type = "search"
   [[menu.main]]
     identifier = "github"
     name = "GitHub"
     url = "https://github.com/jzills/kx"
-    weight = 7
+    weight = 4
     [menu.main.params]
       icon = "github"
   # The kx palette menu; see params.theme above.
   [[menu.main]]
     name = "Theme"
-    weight = 8
+    weight = 5
     [menu.main.params]
       type = "theme-toggle"
