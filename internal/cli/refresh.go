@@ -332,10 +332,17 @@ func sweptScope(services Services, entry state.State, elsewhere bool) (namespace
 	return namespace, all, named
 }
 
+// replaySweep sweeps again, cut and ordered as the stale listing was.
+//
+// --show-healthy is taken from the query, which records it only where it
+// decided what the listing held — beside a --limit, whose cut counts the rows
+// the table shows (TriageCommand.query). A refresh of any other sweep prints
+// the default table.
 func replaySweep(ctx context.Context, services Services, entry state.State, elsewhere bool) (func(), error) {
 	query := *entry.Query
 	namespace, all, named := sweptScope(services, entry, elsewhere)
 	_, _, rest := recordedScope(query.Args)
+	showHealthy, rest := extractBool(rest, "--show-healthy")
 	since, _, err := extractString(rest, "--since", "")
 	if err != nil {
 		return nil, err
@@ -345,7 +352,7 @@ func replaySweep(ctx context.Context, services Services, entry state.State, else
 		return nil, err
 	}
 	result, err := runSweep(ctx, services, sweepScope{Namespace: namespace, All: all, Named: named},
-		false, window, since, queryMatch(query), query.Sort, query.Limit)
+		showHealthy, window, since, queryMatch(query), query.Sort, query.Limit)
 	if err != nil {
 		return nil, err
 	}

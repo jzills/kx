@@ -235,7 +235,7 @@ func TestScanJSONCarriesCountsAndFindings(t *testing.T) {
 		Findings: []scanner.Finding{
 			{ID: "CVE-1", Severity: "CRITICAL", Package: "openssl", Installed: "3.0", FixedIn: "3.1"},
 		},
-	}, {Image: "broken:v1", Error: "pull failed"}})
+	}, {Image: "broken:v1", Error: "pull failed"}}, 0)
 	if err != nil {
 		t.Fatalf("scanJSON: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestDiagnosticThresholdAcceptsTheVerdictSpelling(t *testing.T) {
 func TestScanJSONNamesTheWorkloadItScanned(t *testing.T) {
 	out, err := scanJSON(scanSubject{
 		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
-	}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	}, []scanner.ImageScan{{Image: "nginx:1.27"}}, 0)
 	if err != nil {
 		t.Fatalf("scanJSON: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestScanJSONNamesTheWorkloadItScanned(t *testing.T) {
 // A sweep of one namespace names the namespace and nothing else — there is no
 // single workload it was about.
 func TestScanJSONNamesTheNamespaceItSwept(t *testing.T) {
-	out, err := scanJSON(scanSubject{Namespace: "prod"}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	out, err := scanJSON(scanSubject{Namespace: "prod"}, []scanner.ImageScan{{Image: "nginx:1.27"}}, 0)
 	if err != nil {
 		t.Fatalf("scanJSON: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestScanJSONNamesTheNamespaceItSwept(t *testing.T) {
 // -A is a flag, not a namespace called "all namespaces". kx diag already says
 // so with a boolean; kx scan says it the same way.
 func TestScanJSONMarksAClusterWideSweep(t *testing.T) {
-	out, err := scanJSON(scanSubject{AllNamespaces: true}, []scanner.ImageScan{{Image: "nginx:1.27"}})
+	out, err := scanJSON(scanSubject{AllNamespaces: true}, []scanner.ImageScan{{Image: "nginx:1.27"}}, 0)
 	if err != nil {
 		t.Fatalf("scanJSON: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
 	t.Run("one resource", func(t *testing.T) {
 		scanned, err := scanJSON(scanSubject{
 			Kind: kinds.Deployment, Name: "api", Namespace: "prod",
-		}, nil)
+		}, nil, 0)
 		if err != nil {
 			t.Fatalf("scanJSON: %v", err)
 		}
@@ -449,7 +449,7 @@ func TestScanAndDiagnosticNameTheirSubjectTheSameWay(t *testing.T) {
 	})
 
 	t.Run("a cluster-wide sweep", func(t *testing.T) {
-		scanned, err := scanJSON(scanSubject{AllNamespaces: true}, nil)
+		scanned, err := scanJSON(scanSubject{AllNamespaces: true}, nil, 0)
 		if err != nil {
 			t.Fatalf("scanJSON: %v", err)
 		}
@@ -520,7 +520,7 @@ func TestScanJSONUsesLowercaseSeverities(t *testing.T) {
 		Image:    "nginx:1.27",
 		Counts:   map[string]int{"CRITICAL": 1, "HIGH": 2, "MEDIUM": 0},
 		Findings: []scanner.Finding{{ID: "CVE-1", Severity: "CRITICAL"}},
-	}})
+	}}, 0)
 	if err != nil {
 		t.Fatalf("scanJSON: %v", err)
 	}

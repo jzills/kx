@@ -10,6 +10,7 @@ import (
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/state"
+	"github.com/jzills/kx/internal/web"
 )
 
 // A limit keeps the first rows of the sorted order and numbers only them, so
@@ -317,13 +318,17 @@ func TestDiagLimitGatesOnTheWholeSweep(t *testing.T) {
 }
 
 // A sweep's limit is refused beside an index, as its --sort is, and a count
-// that keeps nothing is refused before anything is swept.
+// that keeps nothing is refused before anything is swept. The index comes
+// first: 'kx diag 1 --limit 0' is a flag the index cannot take at all, and
+// reading the count first answered it with the count's refusal instead.
 func TestDiagLimitRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"1", "--limit", "3"},
+			"'--limit' cannot be combined with an index — it cuts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."},
+		{[]string{"1", "--limit", "0"},
 			"'--limit' cannot be combined with an index — it cuts a namespace sweep. Drop the flag, or drop the index to sweep the namespace instead."},
 		{[]string{"--limit", "0"},
 			"Invalid value for '--limit': '0' keeps no rows — give a count of 1 or more."},
@@ -369,5 +374,171 @@ func TestStaleRefreshRunsKxTopAgainWithItsLimit(t *testing.T) {
 	}
 	if got := currentQuery(t, services); got == nil || got.Limit != 1 {
 		t.Errorf("current query = %+v, want limit 1", got)
+	}
+}
+
+// A sweep's limit cuts it to a prefix of itself, so the resources ahead of
+// the cut are kept whole — the healthy ones the table hides included, since
+// the document and the HTML grid are inventories and an index has to resolve
+// whatever the grid can show. Cutting the table's rows instead dropped every
+// healthy resource from both, and dropped them even where the limit was wide
+// enough to cut nothing at all. Sorted by name so a healthy resource sits
+// ahead of the cut rather than behind it.
+func TestDiagLimitKeepsTheHealthyResourcesAheadOfTheCut(t *testing.T) {
+	sweep := []diagnostics.Data{
+		healthy(kinds.Deployment, "a-ok", "prod"),
+		unhealthy(kinds.StatefulSet, "db", "prod"),
+		healthy(kinds.StatefulSet, "cache", "prod"),
+		unhealthy(kinds.Deployment, "m-bad", "prod"),
+		unhealthy(kinds.Deployment, "z-bad", "prod"),
+	}
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.Sort, command.Limit = "name", 2
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var covered []string
+	for _, report := range result.All {
+		covered = append(covered, report.Name)
+	}
+	if want := []string{"a-ok", "cache", "db", "m-bad"}; !slices.Equal(covered, want) {
+		t.Errorf("covered = %v, want %v", covered, want)
+	}
+	// The rows printed are the two the limit kept, numbered where they sit in
+	// the inventory saved beside them.
+	var shown []string
+	for _, row := range result.Reports {
+		shown = append(shown, row.Name)
+		if want := covered[row.Index-1]; want != row.Name {
+			t.Errorf("row %s carries index %d, which names %s", row.Name, row.Index, want)
+		}
+	}
+	if want := []string{"db", "m-bad"}; !slices.Equal(shown, want) {
+		t.Errorf("rows = %v, want %v", shown, want)
+	}
+	last := saved[len(saved)-1]
+	if last.Resources.Len() != 4 || result.Of != 3 {
+		t.Errorf("saved %d and cut from %d, want 4 and 3", last.Resources.Len(), result.Of)
+	}
+	if page := sweepPage(result, web.Meta{}); !page.Limited || len(page.Reports) != 4 {
+		t.Errorf("page is %d rows, limited %v; want the 4 covered, marked cut",
+			len(page.Reports), page.Limited)
+	}
+
+	// A limit wider than the rows the table could show cuts nothing, so the
+	// sweep is saved and reported whole.
+	saved = nil
+	command = triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.Limit = 9
+	if result, err = command.Execute(context.Background(), "prod", false, false); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if len(result.All) != 5 || result.Of != 0 || saved[len(saved)-1].Resources.Len() != 5 {
+		t.Errorf("control: covered %d, cut from %d, saved %d; want all 5 and no cut",
+			len(result.All), result.Of, saved[len(saved)-1].Resources.Len())
+	}
+	if page := sweepPage(result, web.Meta{}); page.Limited {
+		t.Error("control: the page says it was cut")
+	}
+}
+
+// --show-healthy decides what a limited sweep saves — the limit counts the
+// rows the table shows, and with the flag the healthy ones are among them —
+// so the query records it and the relist line names it. Left out, a refresh
+// swept without it, the limit cut nothing, and the entry it saved numbered
+// rows the user had never been shown.
+func TestDiagLimitRecordsShowHealthy(t *testing.T) {
+	sweep := []diagnostics.Data{
+		unhealthy(kinds.Deployment, "api", "prod"),
+		unhealthy(kinds.Deployment, "db", "prod"),
+		healthy(kinds.Deployment, "cache", "prod"),
+		healthy(kinds.Deployment, "web", "prod"),
+		healthy(kinds.Deployment, "jobs", "prod"),
+	}
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.Limit, command.NamedNamespace = 3, true
+	result, err := command.Execute(context.Background(), "prod", false, true)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	entry := saved[len(saved)-1]
+	if entry.Resources.Len() != 3 || result.Of != 5 {
+		t.Errorf("saved %d and cut from %d, want 3 and 5", entry.Resources.Len(), result.Of)
+	}
+	if got, want := relistCommand(entry, false), "kx diag -n prod --show-healthy --limit=3"; got != want {
+		t.Errorf("relist = %q, want %q", got, want)
+	}
+
+	// Without a limit the flag changes nothing the sweep saves, so the query
+	// records it no more than it records --json.
+	saved = nil
+	command = triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.NamedNamespace = true
+	if _, err = command.Execute(context.Background(), "prod", false, true); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if got, want := relistCommand(saved[len(saved)-1], false), "kx diag -n prod"; got != want {
+		t.Errorf("control: relist = %q, want %q", got, want)
+	}
+}
+
+// A refresh of that sweep sweeps it again with the flag the query recorded,
+// so the rows it numbers are the rows that were numbered before. Swept
+// without it, the limit cut nothing: the refresh printed two rows and saved
+// five.
+func TestStaleRefreshSweepsAgainWithItsShowHealthy(t *testing.T) {
+	query := &state.Query{
+		Command: state.CommandDiag, Args: []string{"-n", "prod", "--show-healthy"}, Limit: 3,
+	}
+	services := staleClusterServices(t, &fakeKubectl{namespace: "prod"}, query,
+		brokenDeployment("api", "prod"), brokenDeployment("db", "prod"),
+		healthyDeployment("cache", "prod"), healthyDeployment("web", "prod"),
+		healthyDeployment("jobs", "prod"))
+	out := runStale(t, services)
+	if !strings.Contains(out, "5 checked · 3 of 5 shown") {
+		t.Errorf("output = %q, want the sweep cut to 3 of 5 again", out)
+	}
+	if got := currentEntry(t, services); got.Resources.Len() != 3 {
+		t.Errorf("saved %d resources, want the 3 the refresh showed", got.Resources.Len())
+	}
+}
+
+// A sweep's document says what a --limit cut it down from: the three worst
+// resources and the only three there were are otherwise the same shape, and
+// the --fail-on code beside them was earned by the whole sweep either way.
+func TestDiagLimitSaysWhatTheDocumentWasCutFrom(t *testing.T) {
+	sweep := []diagnostics.Data{
+		unhealthy(kinds.Deployment, "api", "prod"),
+		unhealthy(kinds.Deployment, "db", "prod"),
+		unhealthy(kinds.Deployment, "web", "prod"),
+	}
+	var saved []state.State
+	command := triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	command.Limit = 2
+	result, err := command.Execute(context.Background(), "prod", false, false)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	document, err := triageJSON(result)
+	if err != nil {
+		t.Fatalf("triageJSON: %v", err)
+	}
+	if got := decodeJSON(t, document)["of"]; got != float64(3) {
+		t.Errorf("of = %v, want the 3 rows the limit cut it down from:\n%s", got, document)
+	}
+
+	// The same sweep uncut records no count: there is no cut to say.
+	command = triageOf(&fakeGatherer{sweep: sweep}, &saved)
+	if result, err = command.Execute(context.Background(), "prod", false, false); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if document, err = triageJSON(result); err != nil {
+		t.Fatalf("control: triageJSON: %v", err)
+	}
+	if _, present := decodeJSON(t, document)["of"]; present {
+		t.Errorf("control: of is set for an uncut document:\n%s", document)
 	}
 }

@@ -693,7 +693,7 @@ func TestScanPageMapsScopeAndImagesFromTheSummary(t *testing.T) {
 	rows := []scanner.ImageScan{
 		{Image: "api:v1", Counts: map[string]int{"critical": 1}},
 	}
-	page := scanPage("prod", "", rows, web.Meta{Title: "t"})
+	page := scanPage("prod", "", rows, 0, web.Meta{Title: "t"})
 
 	if page.Scope != "prod" {
 		t.Errorf("Scope = %q, want prod", page.Scope)
