@@ -130,7 +130,7 @@
     {{if eq .Checked 0}}
       <p class="caption">Mixed · {{.Scope}} · {{if .Match}}{{nothingMatches .Match}}{{else}}{{.Checked}} checked{{end}}{{with .Window}} · {{.}}{{end}}</p>
     {{else}}
-      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{with .Window}} · {{.}}{{end}}</p>
+      <p class="caption">Mixed · {{.Scope}} · {{.Checked}} checked{{if .Limited}} · {{len .Reports}} shown{{end}}{{with .Window}} · {{.}}{{end}}</p>
       <div class="grid-mount" data-kx-grid="diag" data-all-namespaces="{{.AllNamespaces}}" data-sorted="{{.Sorted}}"></div>
       <script type="application/json" id="kx-diag-data">{{diagRowsJSON .Reports}}</script>
       {{range $i, $r := .Reports}}<template id="diag-detail-{{$i}}">{{template "report" $r}}</template>{{end}}

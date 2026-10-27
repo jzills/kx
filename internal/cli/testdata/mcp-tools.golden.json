@@ -95,6 +95,9 @@
               "namespace": {
                 "type": "string"
               },
+              "of": {
+                "type": "integer"
+              },
               "resources": {
                 "items": {
                   "additionalProperties": false,
@@ -987,6 +990,9 @@
               },
               "namespace": {
                 "type": "string"
+              },
+              "of": {
+                "type": "integer"
               },
               "schemaVersion": {
                 "type": "integer"

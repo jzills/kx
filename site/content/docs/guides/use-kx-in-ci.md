@@ -16,7 +16,8 @@ kx scan -n prod --fail-on high --json
 
 ## `--json`
 
-The same analysis as a machine-readable document — every resource swept, healthy ones included, and every CVE behind the severity counts.
+The same analysis as a machine-readable document — every resource the run covers, healthy ones included, and every CVE behind the severity counts.
+A `--limit` cuts the document to the rows it kept and records in `of` how many there were, so the five worst resources are never read as the only five.
 
 ```bash
 kx diag --json | jq '.resources[] | select(.verdict == "critical") | .name'

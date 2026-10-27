@@ -30,9 +30,11 @@ func limitScanServices(t *testing.T) Services {
 }
 
 // A limit keeps the summary's first images once --sort has ordered it, and
-// says how many there were; the gate still reads every image scanned, so the
-// critical one the limit cut fails it. The control is the same sweep sorted
-// the other way, where the critical image is the one kept.
+// says how many there were — in the banner above the table, where kx get and
+// kx top say it, rather than in a caption below that contradicted the count
+// the banner had already given; the gate still reads every image scanned, so
+// the critical one the limit cut fails it. The control is the same sweep
+// sorted the other way, where the critical image is the one kept.
 func TestScanLimitKeepsTheFirstImagesAndGatesOnEvery(t *testing.T) {
 	cmd := newScanCommand(limitScanServices(t))
 	out := captureRender(t)
@@ -46,8 +48,11 @@ func TestScanLimitKeepsTheFirstImagesAndGatesOnEvery(t *testing.T) {
 	if !strings.Contains(out.String(), "a:v1") || strings.Contains(out.String(), "z:v1") {
 		t.Errorf("want a:v1 alone in the summary:\n%s", out)
 	}
-	if !strings.Contains(out.String(), "1 of 2 images shown") {
-		t.Errorf("output missing '1 of 2 images shown':\n%s", out)
+	banner := strings.Index(out.String(), "Mixed · prod · 1 of 2 images")
+	if banner < 0 {
+		t.Errorf("banner missing '1 of 2 images':\n%s", out)
+	} else if table := strings.Index(out.String(), "IMAGE"); banner > table {
+		t.Errorf("the cut is named below the table, not in the banner above it:\n%s", out)
 	}
 
 	cmd = newScanCommand(limitScanServices(t))
@@ -60,7 +65,9 @@ func TestScanLimitKeepsTheFirstImagesAndGatesOnEvery(t *testing.T) {
 	}
 }
 
-// --json carries the images kept, as the table does.
+// --json carries the images kept, as the table does, and says how many it
+// was cut down from: the top image of two and the only image scanned are
+// otherwise one document, and the --fail-on code beside them read both.
 func TestScanLimitCutsTheDocument(t *testing.T) {
 	cmd := newScanCommand(limitScanServices(t))
 	out := captureRender(t)
@@ -69,6 +76,20 @@ func TestScanLimitCutsTheDocument(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"a:v1"`) || strings.Contains(out.String(), `"z:v1"`) {
 		t.Errorf("want a:v1 alone in the document:\n%s", out)
+	}
+	if got := decodeJSON(t, out.String())["of"]; got != float64(2) {
+		t.Errorf("of = %v, want the 2 images the limit cut it down from:\n%s", got, out)
+	}
+
+	// The same sweep uncut says nothing: a document with no cut to record
+	// carries no count beside the images it holds.
+	cmd = newScanCommand(limitScanServices(t))
+	out = captureRender(t)
+	if err := cmd.RunE(cmd, []string{"--engine", "trivy", "-n", "prod", "--json"}); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if _, present := decodeJSON(t, out.String())["of"]; present {
+		t.Errorf("control: of is set for an uncut document:\n%s", out)
 	}
 }
 

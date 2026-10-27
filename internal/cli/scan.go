@@ -553,11 +553,27 @@ func imagesNoun(count int) string {
 	}
 }
 
+// imagesShownNoun is the banner's count under a --limit: "5 of 40 images"
+// when the limit cuts the summary, and the plain count when it does not.
+//
+// Said in the banner above the table, which is where kx get and kx top
+// caption a cut listing ("5 of 42 items"). Said in a caption underneath
+// instead, it contradicted the count the banner had already given, in a third
+// wording, until the reader reached the last line.
+func imagesShownNoun(count, limit int) string {
+	if limit == 0 || count <= limit {
+		return imagesNoun(count)
+	}
+	return strconv.Itoa(limit) + " of " + strconv.Itoa(count) + " images"
+}
+
 // scanPage builds the HTML page from the same rows the terminal summary
 // renders, so the two views cannot drift apart. match is the sweep's --match
-// term, empty for none, so a sweep it emptied says so as the terminal does.
-func scanPage(scope, match string, rows []scanner.ImageScan, meta web.Meta) web.ScanPage {
-	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Images: rows}
+// term, empty for none, so a sweep it emptied says so as the terminal does;
+// of is how many images a --limit cut the summary down from, zero for none,
+// so the page's caption says it was cut as the terminal's banner does.
+func scanPage(scope, match string, rows []scanner.ImageScan, of int, meta web.Meta) web.ScanPage {
+	return web.ScanPage{Meta: meta, Scope: scope, Match: match, Of: of, Images: rows}
 }
 
 // scanSortKeys reads kx scan's --sort against the summary's own columns,
@@ -870,7 +886,8 @@ func newScanCommand(services Services) *cobra.Command {
 					if match != "" && len(images) == 0 {
 						render.EmptyMatch("Mixed", scope.label(), "0 images", match)
 					} else {
-						render.ScopeBanner("Mixed", scope.label(), imagesNoun(len(images)))
+						render.ScopeBanner("Mixed", scope.label(),
+							imagesShownNoun(len(images), limit))
 					}
 				}
 				pageScope = sweepPageScope(scope.label())
@@ -893,7 +910,8 @@ func newScanCommand(services Services) *cobra.Command {
 					return err
 				}
 				if !asJSON {
-					render.Banner(string(kind), name, resourceNamespace, imagesNoun(len(images)))
+					render.Banner(string(kind), name, resourceNamespace,
+						imagesShownNoun(len(images), limit))
 				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
@@ -933,7 +951,7 @@ func newScanCommand(services Services) *cobra.Command {
 			scanned := rows
 			rows, of := limitedScans(rows, limit)
 			if asJSON {
-				document, err := scanJSON(subject, rows)
+				document, err := scanJSON(subject, rows, of)
 				if err != nil {
 					return err
 				}
@@ -946,9 +964,6 @@ func newScanCommand(services Services) *cobra.Command {
 			// nothing.
 			if len(rows) > 0 {
 				render.ScanSummary(rows)
-			}
-			if of != 0 {
-				render.Caption(fmt.Sprintf("%d of %d images shown", len(rows), of))
 			}
 			// The gate is the tail of every path, not the alternative to one.
 			// Publishing a report and failing the build are not in conflict:
@@ -964,7 +979,7 @@ func newScanCommand(services Services) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				page := scanPage(pageScope, match, rows, meta)
+				page := scanPage(pageScope, match, rows, of, meta)
 				page.Sorted = len(sortKeys) > 0
 				rendered, err := web.RenderScan(page)
 				if err != nil {

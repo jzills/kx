@@ -8,7 +8,7 @@ weight: 9
 
 Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.
 
-With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) always includes them.
+With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.
 
 A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
@@ -54,7 +54,7 @@ kx diagnostic [OPTIONS] [index]
 | `--no-open` | Serve the HTML report without opening a browser |
 | `--out string` | Write the HTML report to this file instead of serving it in a browser |
 | `--port int` | Port to serve the HTML report on; 0 picks a free one |
-| `--show-healthy` | Include healthy resources in the terminal table; the HTML report always includes them |
+| `--show-healthy` | Include healthy resources in the terminal table; the HTML report includes them either way |
 | `--since string` | Ignore anything that happened longer ago than this — events, past restarts, failed runs; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to diag_max_age, which is unset: everything is reported |
 | `--sort string` | Sort the sweep by its columns, on top of the severity ranking: 'kind' groups it by kind, the worst first in each |
 

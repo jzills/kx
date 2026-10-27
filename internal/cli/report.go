@@ -170,9 +170,16 @@ type diagnosticDocument struct {
 	// Match is the --match term the sweep was narrowed by, absent for none —
 	// for the same reason Window is here: without it, a narrowed sweep and a
 	// quiet namespace are two documents a consumer cannot tell apart.
-	Match     string       `json:"match,omitempty"`
-	Checked   int          `json:"checked"`
-	Healthy   int          `json:"healthy"`
+	Match   string `json:"match,omitempty"`
+	Checked int    `json:"checked"`
+	Healthy int    `json:"healthy"`
+	// Of is how many rows the sweep could have shown had a --limit not cut
+	// it — the figure the terminal caption gives as "2 of 3 shown" — absent
+	// when none did. Without it, a document holding the five worst resources
+	// and one holding the only five there were read alike, while the
+	// --fail-on exit code beside them was earned by the whole sweep either
+	// way.
+	Of        int          `json:"of,omitempty"`
 	Resources []jsonReport `json:"resources"`
 }
 
@@ -212,6 +219,7 @@ func triageDocument(result render.TriageResult, indexed bool) diagnosticDocument
 		Match:         result.Match,
 		Checked:       result.Checked,
 		Healthy:       result.Healthy,
+		Of:            result.Of,
 		Resources:     resources,
 	}
 }
@@ -256,18 +264,24 @@ type scanSubject struct {
 // scanDocument is the one shape kx scan --json emits, and what the MCP
 // server's scan tool returns as structured content.
 type scanDocument struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	Kind          kinds.Kind  `json:"kind,omitempty"`
-	Name          string      `json:"name,omitempty"`
-	Namespace     string      `json:"namespace,omitempty"`
-	AllNamespaces bool        `json:"allNamespaces,omitempty"`
-	Match         string      `json:"match,omitempty"`
-	Images        []jsonImage `json:"images"`
+	SchemaVersion int        `json:"schemaVersion"`
+	Kind          kinds.Kind `json:"kind,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	Namespace     string     `json:"namespace,omitempty"`
+	AllNamespaces bool       `json:"allNamespaces,omitempty"`
+	Match         string     `json:"match,omitempty"`
+	// Of is how many images the summary could have shown had a --limit not
+	// cut it, absent when none did, as the sweep document's own Of is: the
+	// top five images of forty and the only five scanned are otherwise one
+	// shape, and the --fail-on gate read all forty.
+	Of     int         `json:"of,omitempty"`
+	Images []jsonImage `json:"images"`
 }
 
 // scanDocumentOf converts a scan's rows into scanJSON's document, unencoded,
-// for the MCP server to return as structured content.
-func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument {
+// for the MCP server to return as structured content. of is how many images
+// a --limit cut the summary down from, zero when it cut nothing.
+func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan, of int) scanDocument {
 	images := make([]jsonImage, 0, len(rows))
 	for _, row := range rows {
 		findings := make([]jsonVulnerability, 0, len(row.Findings))
@@ -289,14 +303,14 @@ func scanDocumentOf(subject scanSubject, rows []scanner.ImageScan) scanDocument 
 	return scanDocument{
 		SchemaVersion: reportSchemaVersion, Kind: subject.Kind, Name: subject.Name,
 		Namespace: subject.Namespace, AllNamespaces: subject.AllNamespaces,
-		Match: subject.Match, Images: images,
+		Match: subject.Match, Of: of, Images: images,
 	}
 }
 
 // scanJSON serializes a scan's rows, the same ones the summary table and the
 // HTML report are built from.
-func scanJSON(subject scanSubject, rows []scanner.ImageScan) (string, error) {
-	return encode(scanDocumentOf(subject, rows))
+func scanJSON(subject scanSubject, rows []scanner.ImageScan, of int) (string, error) {
+	return encode(scanDocumentOf(subject, rows, of))
 }
 
 // severityToken is the document spelling of a scanner's severity label.

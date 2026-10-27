@@ -61,7 +61,7 @@ See [using kx in CI](../use-kx-in-ci/).
 Detail the terminal has no room for:
 
 - **diag** — findings sortable and filterable by any column, with a group-by for larger sweeps; each row expands into that resource's full report.
-  Unlike the terminal table, the page always includes healthy resources.
+  Unlike the terminal table, the page includes healthy resources too, as far back as a `--limit` kept the sweep.
 - **scan** — per-image severity counts up top; the CVE table below groups by image and expands each row into the vulnerabilities behind its counts.
 - **tree** — the ownership graph as a collapsible tree.
 - **top** — usage as a percentage of limits, for Pods or Nodes.

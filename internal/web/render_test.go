@@ -799,6 +799,29 @@ func TestRenderScanCaptionRendersScopeVerbatim(t *testing.T) {
 	}
 }
 
+// A --limit's cut is in the caption, where the count it cut is: a page
+// holding two of forty images otherwise read as a namespace running two, and
+// only the masthead's invocation line said a limit had been given at all.
+func TestRenderScanCaptionCountsACut(t *testing.T) {
+	page := scanPage(t)
+	page.Of = 40
+	out, err := RenderScan(page)
+	if err != nil {
+		t.Fatalf("RenderScan returned %v", err)
+	}
+	if !strings.Contains(string(out), "· 2 of 40 images</p>") {
+		t.Error("the page caption did not say what the limit cut the summary down from")
+	}
+
+	page.Of = 0
+	if out, err = RenderScan(page); err != nil {
+		t.Fatalf("control: RenderScan returned %v", err)
+	}
+	if html := string(out); !strings.Contains(html, "· 2 images</p>") || strings.Contains(html, "of 40") {
+		t.Error("control: an uncut summary counted itself against something")
+	}
+}
+
 // A --match term is named only when it left nothing to scan. A sweep it
 // narrowed to some images counts them like any other, since there is no empty
 // namespace for the count to be mistaken for.
@@ -1475,6 +1498,32 @@ func TestRenderDiagSweepCaptionCarriesTheWindow(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Mixed · diagnostics · 12 checked · last 24h") {
 		t.Error("the sweep caption did not carry the window")
+	}
+}
+
+// A sweep the limit cut says so beside the count of what it swept: "12
+// checked" over five rows, with the cut named nowhere but the masthead's
+// invocation line, read as a cluster with seven resources missing from its
+// own report.
+func TestRenderDiagSweepCaptionCountsACut(t *testing.T) {
+	page := DiagPage{
+		Meta: testMeta(t), Scope: "diagnostics", Checked: 12, Limited: true,
+		Reports: []diagnostics.Report{criticalReport(t)},
+	}
+	out, err := RenderDiag(page)
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), "Mixed · diagnostics · 12 checked · 1 shown") {
+		t.Error("the sweep caption did not say the grid holds fewer rows than were checked")
+	}
+
+	page.Limited = false
+	if out, err = RenderDiag(page); err != nil {
+		t.Fatalf("control: RenderDiag returned %v", err)
+	}
+	if strings.Contains(string(out), "1 shown") {
+		t.Error("control: an uncut sweep counted the rows it kept")
 	}
 }
 
