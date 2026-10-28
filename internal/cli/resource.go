@@ -326,10 +326,11 @@ type CopyCommand struct {
 	State   IndexResolver
 }
 
-// resolvedPod is what resolve found, if the argument named an indexed pod —
-// nil when it didn't, which is the common case for the local-path side of
-// a copy.
+// resolvedPod is what resolve found, if the argument named a pod by index or
+// mark — nil when it didn't, which is the common case for the local-path side
+// of a copy.
 type resolvedPod struct {
+	Ref       state.Ref
 	Name      string
 	Namespace string
 }
@@ -372,44 +373,42 @@ func (c CopyCommand) Execute(src, dest string, extraArgs []string) error {
 	if pod == nil {
 		return SilentError{Code: code}
 	}
-	// cp resolves its pod out of an "<index>:<path>" argument via strconv.Atoi,
-	// so there is no Ref in hand here the way the other commands have one — the
-	// zero Ref keeps today's refreshable behavior, which is right for an index
-	// path. cp does not support marks: resolve (above) refuses one with a clear
-	// message rather than reaching here at all, so this path is only ever an
-	// index's.
-	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, state.Ref{})
+	// The pod's own Ref, so a vanished mark is reported as one to retake
+	// rather than relisting a listing it was never read from (isStale).
+	return forwardExit(c.Kubectl, kinds.Pod, pod.Name, pod.Namespace, code, pod.Ref)
 }
 
-// resolve rewrites an "<index>:<path>" argument into kubectl cp's own
-// "<namespace>/<pod>:<path>" pod-reference syntax. Anything that doesn't
-// parse as "<int>:..." passes through completely unchanged — a local path,
-// or an already-qualified ns/pod:path for bypassing the index entirely.
+// resolve rewrites an "<index>:<path>" or "@<mark>:<path>" argument into
+// kubectl cp's own "<namespace>/<pod>:<path>" pod-reference syntax. Anything
+// else passes through completely unchanged — a local path, or an
+// already-qualified ns/pod:path for bypassing the index entirely.
 func (c CopyCommand) resolve(arg string) (rewritten string, pod *resolvedPod, err error) {
 	before, path, found := strings.Cut(arg, ":")
 	if !found {
 		return arg, nil, nil
 	}
-	// Marks on cp are deliberately out of scope — there is no Ref here for one
-	// to ride along on, unlike every other command — but silently mishandling
-	// one is not: without this, strconv.Atoi below simply failed to parse
-	// "@api" and the whole argument fell through unchanged, handing kubectl
-	// the literal string "@api:/f" and a confusing message about a path.
-	if mark, ok := strings.CutPrefix(before, "@"); ok {
-		return "", nil, markRefusedForCp(mark)
+	var ref state.Ref
+	if strings.HasPrefix(before, "@") {
+		// Through parseRef, so a malformed mark is refused as every other
+		// command refuses one, rather than handed to kubectl as a path.
+		if ref, err = parseRef("index", before); err != nil {
+			return "", nil, err
+		}
+	} else {
+		index, err := strconv.Atoi(before)
+		if err != nil {
+			return arg, nil, nil
+		}
+		ref = state.Ref{Index: index}
 	}
-	index, err := strconv.Atoi(before)
-	if err != nil {
-		return arg, nil, nil
-	}
-	name, namespace, kind, err := c.State.Fields(index)
+	name, namespace, kind, err := c.State.Resolve(ref)
 	if err != nil {
 		return "", nil, err
 	}
 	if kind != kinds.Pod {
 		return "", nil, unsupportedKindError("cp", kind, kinds.Set{kinds.Pod})
 	}
-	return namespace + "/" + name + ":" + path, &resolvedPod{Name: name, Namespace: namespace}, nil
+	return namespace + "/" + name + ":" + path, &resolvedPod{Ref: ref, Name: name, Namespace: namespace}, nil
 }
 
 // Kinds whose logs are aggregated across the pods they own, rather than read

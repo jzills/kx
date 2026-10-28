@@ -713,9 +713,10 @@ func newCopyCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"copy"},
 		Short:      "Copy files to or from an indexed Pod via kubectl cp.",
 		Long: "Copies files to or from an indexed Pod via kubectl cp. Either side of the copy " +
-			"can name a path inside the Pod as index:path.",
+			"can name a path inside the Pod as index:path, or as @mark:path for a marked Pod.",
 		Example: "  kx cp 1:/var/log/app.log ./app.log\n" +
-			"  kx cp ./patch.conf 1:/etc/app/patch.conf",
+			"  kx cp ./patch.conf 1:/etc/app/patch.conf\n" +
+			"  kx cp @api:/var/log/app.log ./app.log",
 		Args:        minArgs(2),
 		Annotations: mutatingAnnotations,
 	}
