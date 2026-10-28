@@ -324,6 +324,18 @@ var commands = map[string][]Flag{
 		{Name: "show-managed-fields", Type: "bool", NoOptDefVal: "true", Usage: "If true, keep the managedFields when printing objects in JSON or YAML format."},
 		{Name: "template", Type: "string", Usage: "Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview].", Filename: true},
 	},
+	"taint": {
+		{Name: "all", Type: "bool", NoOptDefVal: "true", Usage: "Select all nodes in the cluster"},
+		{Name: "allow-missing-template-keys", Type: "bool", NoOptDefVal: "true", Usage: "If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats."},
+		{Name: "dry-run", Type: "string", NoOptDefVal: "unchanged", Usage: "Must be \"none\", \"server\", or \"client\". If client strategy, only print the object that would be sent, without sending it. If server strategy, submit server-side request without persisting the resource."},
+		{Name: "field-manager", Type: "string", Usage: "Name of the manager used to track field ownership."},
+		{Name: "output", Shorthand: "o", Type: "string", Usage: "Output format. One of: (json, yaml, kyaml, name, go-template, go-template-file, template, templatefile, jsonpath, jsonpath-as-json, jsonpath-file)."},
+		{Name: "overwrite", Type: "bool", NoOptDefVal: "true", Usage: "If true, allow taints to be overwritten, otherwise reject taint updates that overwrite existing taints."},
+		{Name: "selector", Shorthand: "l", Type: "string", Usage: "Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints."},
+		{Name: "show-managed-fields", Type: "bool", NoOptDefVal: "true", Usage: "If true, keep the managedFields when printing objects in JSON or YAML format."},
+		{Name: "template", Type: "string", Usage: "Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview].", Filename: true},
+		{Name: "validate", Type: "string", NoOptDefVal: "strict", Usage: "Must be one of: strict (or true), warn, ignore (or false). \"true\" or \"strict\" will use a schema to validate the input and fail the request if invalid. It will perform server side validation if ServerSideFieldValidation is enabled on the api-server, but will fall back to less reliable client-side validation if not. \"warn\" will warn about unknown or duplicate fields without blocking the request if server-side field validation is enabled on the API server, and behave as \"ignore\" otherwise. \"false\" or \"ignore\" will not perform any schema validation, silently dropping any unknown or duplicate fields."},
+	},
 	"top node": {
 		{Name: "no-headers", Type: "bool", NoOptDefVal: "true", Usage: "If present, print output without headers"},
 		{Name: "selector", Shorthand: "l", Type: "string", Usage: "Selector (label query) to filter on, supports '=', '==', '!=', 'in', 'notin'.(e.g. -l key1=value1,key2=value2,key3 in (value3)). Matching objects must satisfy all of the specified label constraints."},

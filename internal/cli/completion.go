@@ -52,6 +52,7 @@ var argCompleters = map[string]completer{
 	"image":           nil, // A registry reference kx has no list of.
 	"port":            nil, // Likewise, and it is a mapping, not a port.
 	"key=value":       nil,
+	"taint":           nil, // A key and value kx has no list of.
 	"command":         nil, // Runs in the pod; local paths would be wrong.
 	"src":             completePath,
 	"dest":            completePath,

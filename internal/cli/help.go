@@ -30,7 +30,7 @@ var helpSections = []struct {
 		"annotate", "annotations", "context", "cordon", "cp", "debug", "delete",
 		"describe", "diagnostic", "drain", "edit", "events", "exec", "get",
 		"label", "labels", "logs", "mark", "namespace", "port-forward", "ref", "rollout",
-		"scale", "scan", "secret", "set", "top", "tree", "uncordon", "unmark", "wait", "yaml",
+		"scale", "scan", "secret", "set", "taint", "top", "tree", "uncordon", "unmark", "wait", "yaml",
 	}},
 	{"History", []string{"state"}},
 	{"Configuration", []string{"engine", "theme"}},
@@ -189,6 +189,7 @@ var argDocs = map[string]string{
 	"src":       "Source path, or <index>:<path> or @<mark>:<path> inside the Pod",
 	"dest":      "Destination path, or <index>:<path> or @<mark>:<path> inside the Pod",
 	"key=value": "Key and value to set; repeatable",
+	"taint":     "A taint to set, key=value:Effect or key:Effect; repeatable",
 	"command":   "Command to run in the Pod instead of a shell",
 	"topic":     "Documentation page: its path, or its last part — kx docs lists them",
 }
