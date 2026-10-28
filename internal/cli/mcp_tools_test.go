@@ -446,6 +446,7 @@ type diagnoseResult struct {
 	Diagnosis struct {
 		Checked   int `json:"checked"`
 		Healthy   int `json:"healthy"`
+		Of        int `json:"of"`
 		Resources []struct {
 			Kind    string `json:"kind"`
 			Name    string `json:"name"`
@@ -542,6 +543,65 @@ func TestDiagnoseSweepIsUnhealthyOnlyUnindexedAndSavesNothing(t *testing.T) {
 	name, _, _, err := deps.State.Fields(1)
 	if err != nil || name != "user-pod" {
 		t.Errorf("index 1 = %q, %v; the sweep replaced the user's listing", name, err)
+	}
+}
+
+// A sweep's limit keeps the first rows of the answer it would give, so it
+// counts the rows returned — the unhealthy ones, or every one with
+// showHealthy — and of says how many there were. The sweep itself is not cut:
+// checked and healthy still count every resource swept.
+func TestDiagnoseSweepLimitKeepsTheFirstRowsReturned(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{namespace: "prod"},
+		brokenDeployment("api", "prod"), brokenDeployment("db", "prod"),
+		brokenDeployment("cache", "prod"), healthyDeployment("web", "prod"))
+	session := connectMCP(t, deps)
+	names := func(out diagnoseResult) []string {
+		var names []string
+		for _, resource := range out.Diagnosis.Resources {
+			names = append(names, resource.Name)
+		}
+		return names
+	}
+
+	var whole diagnoseResult
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"showHealthy": true}), &whole)
+	if len(whole.Diagnosis.Resources) != 4 || whole.Diagnosis.Of != 0 {
+		t.Fatalf("unlimited sweep = %v of %d, want all four and no of", names(whole), whole.Diagnosis.Of)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want []string
+		of   int
+	}{
+		{"unhealthy rows", map[string]any{"limit": 2}, names(whole)[:2], 3},
+		{"every row", map[string]any{"limit": 3, "showHealthy": true}, names(whole)[:3], 4},
+		{"wide enough to cut nothing", map[string]any{"limit": 3}, names(whole)[:3], 0},
+	} {
+		var out diagnoseResult
+		decodeStructured(t, callTool(t, session, "diagnose", tc.args), &out)
+		if got := names(out); strings.Join(got, ",") != strings.Join(tc.want, ",") || out.Diagnosis.Of != tc.of {
+			t.Errorf("%s: resources %v of %d, want %v of %d", tc.name, got, out.Diagnosis.Of, tc.want, tc.of)
+		}
+		if out.Diagnosis.Checked != 4 || out.Diagnosis.Healthy != 1 {
+			t.Errorf("%s: checked %d healthy %d, want 4 and 1 — a limit cuts the answer, not the sweep",
+				tc.name, out.Diagnosis.Checked, out.Diagnosis.Healthy)
+		}
+	}
+}
+
+// A limit bounds a sweep, and a target is one resource, so the two are
+// refused together rather than the limit ignored.
+func TestDiagnoseRefusesALimitBesideATarget(t *testing.T) {
+	session := connectMCP(t, mcpDiagDeps(t, &recordingKubectl{}, brokenDeployment("api", "prod")))
+	result := callTool(t, session, "diagnose", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}, "limit": 1,
+	})
+	want := "'limit' applies without a target — a target already names one resource. " +
+		"Drop it, or drop the target to sweep."
+	if !result.IsError || toolText(result) != want {
+		t.Errorf("result = %q (error %v), want the refusal %q", toolText(result), result.IsError, want)
 	}
 }
 
