@@ -482,3 +482,62 @@ func (d mcpDeps) getYAML(_ context.Context, _ *mcp.CallToolRequest, in getYamlIn
 	out.YAML = encoded
 	return nil, out, nil
 }
+
+// maxDescribeBytes bounds kubectl describe's text kept in a tool result — 256
+// KiB, as logs and get_yaml are bounded.
+const maxDescribeBytes = 256 * 1024
+
+// boundDescribeBytes keeps the first maxDescribeBytes of a description, cut
+// at a line boundary. The head rather than the tail, as logs keeps: a
+// description opens with what the resource is and ends with its events,
+// which the events tool returns in full.
+func boundDescribeBytes(output string) (string, bool) {
+	if len(output) <= maxDescribeBytes {
+		return output, false
+	}
+	cut := output[:maxDescribeBytes]
+	if idx := strings.LastIndexByte(cut, '\n'); idx >= 0 {
+		return cut[:idx+1], true
+	}
+	// One line longer than the cap: cut before the rune the cap lands in.
+	for len(cut) > 0 && !utf8.RuneStart(output[len(cut)]) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut, true
+}
+
+type describeInput struct {
+	Target mcpTarget `json:"target" jsonschema:"The resource to describe."`
+}
+
+type describeOutput struct {
+	Context   string `json:"context"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Mark      string `json:"mark,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Describe  string `json:"describe"`
+}
+
+func (d mcpDeps) describe(_ context.Context, _ *mcp.CallToolRequest, in describeInput) (*mcp.CallToolResult, describeOutput, error) {
+	out := describeOutput{Context: d.Kubectl.CurrentContext()}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, describeOutput{}, err
+	}
+	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
+
+	// Through Run, not the RunInteractive kx describe streams with: the text
+	// is the result, and the server's stdout is the protocol.
+	args := []string{"describe", string(target.Kind), target.Name}
+	if target.Namespace != "" {
+		args = append(args, "-n", target.Namespace)
+	}
+	output, err := d.Kubectl.Run(args)
+	if err != nil {
+		return nil, describeOutput{}, err
+	}
+	out.Describe, out.Truncated = boundDescribeBytes(output)
+	return nil, out, nil
+}
