@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/graph"
@@ -150,6 +151,34 @@ func clampLimit(requested, def, max int) int {
 	return min(requested, max)
 }
 
+// mcpSortKeys reads a tool's sort as kx get reads --sort, refusing it in the
+// tools' words. A control character is refused as validMatch refuses one in
+// a match term: under --write-listings the spec is saved with the listing,
+// and kx prints a saved sort back to the terminal in a relist hint.
+func mcpSortKeys(spec string) ([]index.SortKey, error) {
+	if spec == "" {
+		return nil, nil
+	}
+	if strings.IndexFunc(spec, unicode.IsControl) >= 0 {
+		return nil, errors.New("'sort' cannot hold a control character — no column name does.")
+	}
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return nil, sortSpecErrorAs("sort", spec)
+	}
+	return keys, nil
+}
+
+// mcpSortError is a sort's column refusal as a tool gives it, naming the
+// argument 'sort' rather than the flag the command it reuses would name.
+func mcpSortError(err error) error {
+	var column sortColumnError
+	if errors.As(sortError(err), &column) {
+		return errors.New(column.as("sort"))
+	}
+	return err
+}
+
 // mcpMark is one mark as a tool reports it. Resource, not Name, holds the
 // resource's name: Name is the mark's own.
 type mcpMark struct {
@@ -267,6 +296,7 @@ type listInput struct {
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
 	Match         string `json:"match,omitempty" jsonschema:"List only the resources whose name contains this, case-insensitively, as kx get -m does."`
 	LastRun       bool   `json:"lastRun,omitempty" jsonschema:"With kind jobs, list only the newest Job of each CronJob, as kx get jobs --last-run does; each row names its CronJob."`
+	Sort          string `json:"sort,omitempty" jsonschema:"Order the rows by the columns kubectl's table for this kind prints, as kx get --sort does: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest. Applied before limit, so limit keeps the first rows of that order."`
 }
 
 type listedResource struct {
@@ -287,6 +317,7 @@ type listOutput struct {
 	AllNamespaces bool             `json:"allNamespaces,omitempty"`
 	Match         string           `json:"match,omitempty"`
 	LastRun       bool             `json:"lastRun,omitempty"`
+	Sort          string           `json:"sort,omitempty"`
 	Total         int              `json:"total"`
 	Resources     []listedResource `json:"resources"`
 }
@@ -302,6 +333,10 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, err
 	}
 	if err := validMatch(in.Match); err != nil {
+		return nil, listOutput{}, err
+	}
+	keys, err := mcpSortKeys(in.Sort)
+	if err != nil {
 		return nil, listOutput{}, err
 	}
 	if in.LastRun && kinds.Normalize(in.Kind) != kinds.Job {
@@ -356,7 +391,13 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if !tabular && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
-	table := listing.Narrow(in.Match).Number()
+	// Sorted before it is numbered, as kx get sorts, so a saved row's index
+	// is its place in the order returned.
+	sorted, err := listing.Narrow(in.Match).Sort(keys)
+	if err != nil {
+		return nil, listOutput{}, mcpSortError(err)
+	}
+	table := sorted.Number()
 
 	// Saved as `kx get <kind>` saves it, and under the same rules (numberable,
 	// read off the whole reply): an empty listing is saved, since it is the
@@ -374,6 +415,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if indexed {
 		listed := getListing(in.Kind, in.Match, recorded, namespace, table.Entries)
 		listed.Query.LastRun = in.LastRun
+		listed.Query.Sort = in.Sort
 		if err := d.listingSave(current)(listed); err != nil {
 			return nil, listOutput{}, err
 		}
@@ -386,8 +428,8 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: current, Kind: string(kind), Namespace: namespace,
-		AllNamespaces: in.AllNamespaces, Match: in.Match, LastRun: in.LastRun, Total: len(table.Entries),
-		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
+		AllNamespaces: in.AllNamespaces, Match: in.Match, LastRun: in.LastRun, Sort: in.Sort,
+		Total: len(table.Entries), Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
 	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {
 		rowNamespace := namespace
@@ -412,6 +454,7 @@ type diagnoseInput struct {
 	ShowHealthy   bool       `json:"showHealthy,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
 	Match         string     `json:"match,omitempty" jsonschema:"Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target."`
 	Limit         int        `json:"limit,omitempty" jsonschema:"Most resources a sweep returns, worst first; every one when absent, at most 1000. of counts what the sweep would have returned without it."`
+	Sort          string     `json:"sort,omitempty" jsonschema:"Order a sweep by its columns — kind, name, namespace, verdict, top-finding — on top of the severity ranking, as kx diag --sort does: 'kind' groups it by kind, the worst first in each. Only without a target."`
 }
 
 type diagnoseOutput struct {
@@ -442,8 +485,22 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 			"'limit' applies without a target — a target already names one resource. " +
 				"Drop it, or drop the target to sweep.")
 	}
+	if in.Target != nil && in.Sort != "" {
+		return nil, diagnoseOutput{}, errors.New(
+			"'sort' applies without a target — a target already names one resource. " +
+				"Drop it, or drop the target to sweep.")
+	}
 	if err := validMatch(in.Match); err != nil {
 		return nil, diagnoseOutput{}, err
+	}
+	// Checked against the sweep's columns before anything is swept, as kx
+	// diag checks its --sort, so a misspelled column costs no sweep.
+	keys, err := mcpSortKeys(in.Sort)
+	if err != nil {
+		return nil, diagnoseOutput{}, err
+	}
+	if _, err := index.SortRows(sweepHeaders, nil, keys); err != nil {
+		return nil, diagnoseOutput{}, mcpSortError(err)
 	}
 	window, err := resolveWindowAs("since", in.Since, d.Config.DiagMaxAge)
 	if err != nil {
@@ -483,7 +540,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// the row's position in the saved sweep.
 	result, err := TriageCommand{
 		Diagnostics: service, Save: d.listingSave(out.Context), Window: window,
-		Match: in.Match, Since: in.Since, NamedNamespace: in.Namespace != "",
+		Match: in.Match, Since: in.Since, Sort: in.Sort, NamedNamespace: in.Namespace != "",
 	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
