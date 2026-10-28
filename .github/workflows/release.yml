@@ -466,7 +466,7 @@ jobs:
           echo "::error::$PR_URL did not merge within ten minutes; the site still shows the previous release"
           exit 1
 
-      # The site's footer and release notes page read the version from
+      # The site's release notes page reads the latest version from
       # develop, and the merge above, made with GITHUB_TOKEN, starts no
       # workflow of its own. A dispatch is one of the two events that token
       # is allowed to start.

@@ -24,7 +24,7 @@ on:
       # The command reference is generated from the command tree, so a flag
       # added to a command changes the site even when nothing under site/ moved.
       - "internal/cli/**"
-      # Read by the release notes page and the footer's version line.
+      # Read by the release notes page.
       - "release-notes/**"
       - "pyproject.toml"
       - ".github/workflows/pages.yml"
@@ -43,12 +43,12 @@ on:
       # The command reference is generated from the command tree, so a flag
       # added to a command changes the site even when nothing under site/ moved.
       - "internal/cli/**"
-      # Read by the release notes page and the footer's version line.
+      # Read by the release notes page.
       - "release-notes/**"
       - "pyproject.toml"
       - ".github/workflows/pages.yml"
-  # Also how a release reaches the site. The footer names the latest version
-  # and the notes page lists it, but release.yml merges the version bump back
+  # Also how a release reaches the site. The notes page lists each released
+  # version, but release.yml merges the version bump back
   # into develop with GITHUB_TOKEN, and a push made with that token starts no
   # workflow, so the paths above never see it land. release.yml dispatches
   # this once the merge has landed instead.

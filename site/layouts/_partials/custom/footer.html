@@ -3,16 +3,15 @@
   empty: copyright and "Powered by" are both off in hugo.toml, so without this
   the footer was a blank band under every page.
 
-  Three short link columns, a wordmark, the author's profiles and the
-  latest released version. The
-  wordmark is set in text rather than shipped as an image so it takes the
-  active palette's muted color, as the navbar mark does.
+  Three short link columns, then a wordmark over the copyright line with the
+  author's profiles across from it. The wordmark is set in text rather than
+  shipped as an image so it takes the active palette's muted color, as the
+  navbar mark does.
 
   Site links go through relURL, which adds the /kx/ the site is served under;
   a bare "/docs/" would point at the root of jzills.github.io.
 */ -}}
 {{- $repo := "https://github.com/jzills/kx" -}}
-{{- $releases := partialCached "kx/releases.html" . -}}
 {{- /*
   The bug link opens GitHub's new-issue form with the label set and the body
   laid out. A query string rather than an issue template under .github/,
@@ -53,21 +52,17 @@
     </div>
   </nav>
 
-  <div class="kx-footer__brand">
-    <div class="kx-footer__wordmark" aria-hidden="true">ZILLS</div>
+  <div class="kx-footer__wordmark" aria-hidden="true">ZILLS</div>
+  <div class="kx-footer__bottom">
     <p class="kx-footer__copyright">© {{ now.Year }} Joshua Zillwood</p>
-  </div>
-
-  <div class="kx-footer__connect">
-    <span>Let's connect</span>
-    <a href="https://github.com/jzills" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-      {{- partial "utils/icon.html" (dict "name" "github" "attributes" `height=22 aria-hidden="true"`) -}}
-    </a>
-    <a href="https://www.linkedin.com/in/jzillss/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
-      {{- partial "utils/icon.html" (dict "name" "linkedin" "attributes" `height=20 aria-hidden="true"`) -}}
-    </a>
-    {{- with $releases.latest }}
-    <a class="kx-footer__version" href="{{ "releases/" | relURL }}">kx v{{ . }}</a>
-    {{- end }}
+    <div class="kx-footer__connect">
+      <span>Let's connect</span>
+      <a href="https://github.com/jzills" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        {{- partial "utils/icon.html" (dict "name" "github" "attributes" `height=22 aria-hidden="true"`) -}}
+      </a>
+      <a href="https://www.linkedin.com/in/jzillss/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+        {{- partial "utils/icon.html" (dict "name" "linkedin" "attributes" `height=20 aria-hidden="true"`) -}}
+      </a>
+    </div>
   </div>
 </div>

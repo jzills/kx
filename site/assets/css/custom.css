@@ -568,13 +568,8 @@ body {
   margin-top: 0.5rem;
 }
 
-.kx-footer__brand {
-  margin-top: 3.5rem;
-  padding-bottom: 2rem;
-  border-bottom: 1px solid var(--kx-border);
-}
-
 .kx-footer__wordmark {
+  margin-top: 3.5rem;
   font-size: 2rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -582,7 +577,14 @@ body {
   user-select: none;
 }
 
-.kx-footer__copyright {
+/* The copyright line and the profiles share a row, pushed to opposite ends,
+   and stack on a phone, where the two don't fit side by side. */
+.kx-footer__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
   margin-top: 0.85rem;
 }
 
@@ -590,17 +592,17 @@ body {
   display: flex;
   align-items: center;
   gap: 1.25rem;
-  margin-top: 1.5rem;
+}
+
+.kx-footer__connect span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .kx-footer__connect a {
   display: inline-flex;
-}
-
-.kx-footer__version {
-  margin-inline-start: auto;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.85rem;
 }
 
 /* Theme picker

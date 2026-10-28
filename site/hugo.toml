@@ -37,10 +37,9 @@ title = "kubectl, indexed."
     target = "assets"
 
   # Read, not published: the release notes page renders each paragraph from
-  # release-notes/, and pyproject.toml names the latest version, which the
-  # footer prints and the notes page stops at. release.yml stamps that file
-  # only when a release publishes, so a paragraph written ahead of its release
-  # stays off the site until then. Both are mounted under assets/ rather than
+  # release-notes/, and stops at the latest version, which pyproject.toml
+  # names. release.yml stamps that file only when a release publishes, so a
+  # paragraph written ahead of its release stays off the site until then. Both are mounted under assets/ rather than
   # copied into site/, because a copy goes stale with every release.
   [[module.mounts]]
     source = "../release-notes"
