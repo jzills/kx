@@ -597,6 +597,12 @@ body {
   display: inline-flex;
 }
 
+.kx-footer__version {
+  margin-inline-start: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
 /* Theme picker
  * ------------------------------------------------------------------ */
 

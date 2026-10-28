@@ -1,0 +1,18 @@
+{{- /*
+  Every released version's paragraph from release-notes/, newest first.
+
+      {{% kx-release-notes %}}
+
+  Percent delimiters, so the headings this writes are markdown and reach the
+  page's table of contents as one entry per version. The paragraph is the
+  first of a release's three tiers; the list of changes and the commit log
+  stay on GitHub, which each version links to.
+*/ -}}
+{{- $releases := partialCached "kx/releases.html" . -}}
+{{- range $releases.notes }}
+## v{{ .version }}
+
+{{ .body }}
+
+[v{{ .version }} on GitHub](https://github.com/jzills/kx/releases/tag/v{{ .version }})
+{{ end -}}

@@ -3,7 +3,8 @@
   empty: copyright and "Powered by" are both off in hugo.toml, so without this
   the footer was a blank band under every page.
 
-  Three short link columns, a wordmark, and the author's profiles. The
+  Three short link columns, a wordmark, the author's profiles and the
+  latest released version. The
   wordmark is set in text rather than shipped as an image so it takes the
   active palette's muted color, as the navbar mark does.
 
@@ -11,6 +12,16 @@
   a bare "/docs/" would point at the root of jzills.github.io.
 */ -}}
 {{- $repo := "https://github.com/jzills/kx" -}}
+{{- $releases := partialCached "kx/releases.html" . -}}
+{{- /*
+  The bug link opens GitHub's new-issue form with the label set and the body
+  laid out. A query string rather than an issue template under .github/,
+  since this link is the only place that asks for a bug report. The body asks
+  for kx --version's output, because the site can't know which binary the
+  reader runs; the footer's own version is only the latest release.
+*/ -}}
+{{- $bugBody := "**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n```\nkx ...\n```\n\n**Version**\n\nPaste the output of `kx --version`.\n" -}}
+{{- $bugURL := printf "%s/issues/new?%s" $repo (querify "labels" "bug" "body" $bugBody) -}}
 <div class="kx-footer">
   <nav class="kx-footer__cols" aria-label="Footer">
     <div class="kx-footer__col">
@@ -34,8 +45,8 @@
       <h2 class="kx-footer__heading">Project</h2>
       <ul>
         <li><a href="{{ $repo }}">GitHub</a></li>
-        <li><a href="{{ $repo }}/releases">Releases</a></li>
-        <li><a href="{{ $repo }}/issues">Issues</a></li>
+        <li><a href="{{ "releases/" | relURL }}">Release notes</a></li>
+        <li><a href="{{ $bugURL }}">Report a bug</a></li>
         <li><a href="{{ $repo }}/blob/main/CONTRIBUTING.md">Contributing</a></li>
         <li><a href="{{ $repo }}/blob/main/LICENSE">MIT license</a></li>
       </ul>
@@ -55,5 +66,8 @@
     <a href="https://www.linkedin.com/in/jzillss/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
       {{- partial "utils/icon.html" (dict "name" "linkedin" "attributes" `height=20 aria-hidden="true"`) -}}
     </a>
+    {{- with $releases.latest }}
+    <a class="kx-footer__version" href="{{ "releases/" | relURL }}">kx v{{ . }}</a>
+    {{- end }}
   </div>
 </div>

@@ -435,6 +435,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # To dispatch pages.yml below.
+      actions: write
     steps:
       - name: Create PR to merge release branch back into develop
         env:
@@ -454,3 +456,21 @@ jobs:
           # --auto errors when the PR is already in clean status (nothing
           # pending to wait on); merge directly in that case.
           gh pr merge "$PR_URL" --merge --auto || gh pr merge "$PR_URL" --merge
+          # --auto can return before the merge lands; for v0.10.1 it landed
+          # after this workflow had finished. Wait for it, so the site rebuild
+          # below reads the bumped pyproject.toml rather than the old one.
+          for _ in $(seq 60); do
+            [ "$(gh pr view "$PR_URL" --json state --jq .state)" = MERGED ] && exit 0
+            sleep 10
+          done
+          echo "::error::$PR_URL did not merge within ten minutes; the site still shows the previous release"
+          exit 1
+
+      # The site's footer and release notes page read the version from
+      # develop, and the merge above, made with GITHUB_TOKEN, starts no
+      # workflow of its own. A dispatch is one of the two events that token
+      # is allowed to start.
+      - name: Rebuild the site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref develop
