@@ -73,8 +73,14 @@ func sortFlag(spec string) string {
 }
 
 func sortSpecError(spec string) error {
-	return fmt.Errorf("Invalid value for '--sort': '%s' names no column — name each column, "+
-		"separated by commas: 'status,-restarts'.", spec)
+	return sortSpecErrorAs("--sort", spec)
+}
+
+// sortSpecErrorAs is sortSpecError for the argument named name: the MCP
+// tools' is 'sort', with no dashes.
+func sortSpecErrorAs(name, spec string) error {
+	return fmt.Errorf("Invalid value for '%s': '%s' names no column — name each column, "+
+		"separated by commas: 'status,-restarts'.", name, spec)
 }
 
 // sortError puts a sort's refusal in kx's words: an unknown column is a value
@@ -82,10 +88,21 @@ func sortSpecError(spec string) error {
 func sortError(err error) error {
 	var unknown index.UnknownColumnError
 	if errors.As(err, &unknown) {
-		return fmt.Errorf("Invalid value for '--sort': '%s'. Accepted values: %s.",
-			unknown.Column, strings.Join(unknown.Accepted, ", "))
+		return sortColumnError{unknown}
 	}
 	return err
+}
+
+// sortColumnError is a sort naming a column its listing has none of. A type
+// rather than a sentence, because the commands that refuse one are shared
+// with the MCP tools, which name the argument 'sort' (mcpSortError).
+type sortColumnError struct{ index.UnknownColumnError }
+
+func (e sortColumnError) Error() string { return e.as("--sort") }
+
+func (e sortColumnError) as(name string) string {
+	return fmt.Sprintf("Invalid value for '%s': '%s'. Accepted values: %s.",
+		name, e.Column, strings.Join(e.Accepted, ", "))
 }
 
 // unsortableError is a --sort over a reply kx could not read as a table, or

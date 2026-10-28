@@ -36,6 +36,10 @@
             "description": "Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting.",
             "type": "string"
           },
+          "sort": {
+            "description": "Order a sweep by its columns — kind, name, namespace, verdict, top-finding — on top of the severity ranking, as kx diag --sort does: 'kind' groups it by kind, the worst first in each. Only without a target.",
+            "type": "string"
+          },
           "target": {
             "additionalProperties": false,
             "description": "One resource to diagnose. Omit to sweep a namespace.",
@@ -564,6 +568,10 @@
           "namespace": {
             "description": "Namespace to list; defaults to the current namespace.",
             "type": "string"
+          },
+          "sort": {
+            "description": "Order the rows by the columns kubectl's table for this kind prints, as kx get --sort does: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest. Applied before limit, so limit keeps the first rows of that order.",
+            "type": "string"
           }
         },
         "required": [
@@ -623,6 +631,9 @@
               "null",
               "array"
             ]
+          },
+          "sort": {
+            "type": "string"
           },
           "total": {
             "type": "integer"
@@ -1045,6 +1056,10 @@
           "nodes": {
             "description": "Report Node usage against capacity instead of Pod usage against limits.",
             "type": "boolean"
+          },
+          "sort": {
+            "description": "Order the rows by their columns, as kx top --sort does: '-mem%,-cpu%' puts the largest share of its memory limit first, then of its CPU limit. Pods have name, cpu, memory, cpu% and mem%, and namespace across namespaces; Nodes the same, against capacity. Applied before limit, so limit keeps the first rows of that order.",
+            "type": "string"
           }
         },
         "type": "object"

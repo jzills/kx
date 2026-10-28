@@ -267,6 +267,7 @@ type topInput struct {
 	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"Read across every namespace. Not valid with Nodes."`
 	Nodes         bool   `json:"nodes,omitempty" jsonschema:"Report Node usage against capacity instead of Pod usage against limits."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000."`
+	Sort          string `json:"sort,omitempty" jsonschema:"Order the rows by their columns, as kx top --sort does: '-mem%,-cpu%' puts the largest share of its memory limit first, then of its CPU limit. Pods have name, cpu, memory, cpu% and mem%, and namespace across namespaces; Nodes the same, against capacity. Applied before limit, so limit keeps the first rows of that order."`
 }
 
 type topOutput struct {
@@ -290,7 +291,10 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 	// Read once, before kubectl runs: it labels the output and stamps the
 	// saved listing (see listingSave).
 	out := topOutput{Context: d.Kubectl.CurrentContext()}
-	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(out.Context), Index: index.Service{}}
+	if _, err := mcpSortKeys(in.Sort); err != nil {
+		return nil, topOutput{}, err
+	}
+	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(out.Context), Index: index.Service{}, Sort: in.Sort}
 
 	var indexed index.Table
 	var err error
@@ -315,7 +319,7 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 		subject.Namespace = command.Scope
 	}
 	if err != nil {
-		return nil, topOutput{}, err
+		return nil, topOutput{}, mcpSortError(err)
 	}
 
 	rows := topPageRows(indexed)
