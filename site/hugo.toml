@@ -97,10 +97,11 @@ title = "kubectl, indexed."
       js = "vendor/flexsearch/flexsearch.bundle.min.js"
 
   # displayToggle is on, but the control it shows is layouts/_partials/
-  # theme-toggle.html — the kx palette menu, not Hextra's light/dark switch.
-  # See that file for why the two can't coexist: ours knows all ten palettes,
-  # two of which are light, and a second control that only knew "light" and
-  # "dark" would disagree with the one that knows the rest.
+  # theme-toggle.html: a light/dark button that switches between kx palettes,
+  # not Hextra's own switch, which knows nothing of them. The full palette
+  # list is on the landing page. With nothing stored, the reader's system
+  # setting picks light or dark; "default" is only Hextra's first guess, which
+  # assets/js/kx-theme.js corrects before the page paints.
   [params.theme]
     default = "dark"
     displayToggle = true
@@ -109,8 +110,8 @@ title = "kubectl, indexed."
 # for. The page's other sections are a scroll away and no longer each take a
 # slot in the bar: a menu of five fragments read as a table of contents,
 # where the tools this site is laid out like name a handful of destinations.
-# "Themes" left earlier: the palette menu at the end of this bar is that
-# section's control, on every page rather than one.
+# "Themes" left earlier too; its palettes are a scroll away on the landing
+# page, and the bar keeps only a light/dark button.
 [menu]
   [[menu.main]]
     name = "Docs"
@@ -132,7 +133,7 @@ title = "kubectl, indexed."
     weight = 4
     [menu.main.params]
       icon = "github"
-  # The kx palette menu; see params.theme above.
+  # The light/dark button; see params.theme above.
   [[menu.main]]
     name = "Theme"
     weight = 5

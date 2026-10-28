@@ -8,8 +8,8 @@ toc: false
   numbers, and what it does beyond that, each linking into the docs. The words
   that need saying at length live in docs/; this page is the pitch.
 
-  Every color is a --kx-* property from the active palette, so the palette
-  menu restyles this page as it does the docs.
+  Every color is a --kx-* property from the active palette, so a palette
+  picked under "In your colors" restyles this page as it does the docs.
 -->
 
 <section class="kx-hero">

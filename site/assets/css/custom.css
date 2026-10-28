@@ -544,6 +544,54 @@ body {
   color: var(--kx-body);
 }
 
+/* The brand column and the links stack on a phone and sit side by side from
+   a tablet up, the links pushed to the right edge. */
+.kx-footer__top {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+@media (min-width: 900px) {
+  .kx-footer__top {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 4rem;
+  }
+}
+
+.kx-footer__about {
+  max-width: 31rem;
+}
+
+/* Two classes, to outrank the muted ".kx-footer a" the links take. */
+.kx-footer .kx-footer__mark {
+  display: inline-block;
+  color: var(--kx-accent);
+}
+
+.kx-footer__mark svg {
+  height: 2rem;
+  width: auto;
+}
+
+.kx-footer__tagline {
+  margin-top: 1rem;
+  line-height: 1.6;
+}
+
+.kx-footer__command {
+  margin-top: 1.25rem;
+}
+
+/* One line, scrolling if it must, where the hero's copy wraps: in a column
+   this narrow, wrapping broke the URL mid-word. */
+.kx-footer__command .kx-install__command {
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
 .kx-footer__cols {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -552,7 +600,7 @@ body {
 
 @media (min-width: 640px) {
   .kx-footer__cols {
-    grid-template-columns: repeat(3, minmax(0, 12rem));
+    grid-template-columns: repeat(3, minmax(0, auto));
     gap: 2rem 4rem;
   }
 }
@@ -665,121 +713,36 @@ body {
   display: block;
 }
 
-/* Palette menu
+/* Light/dark toggle
  * ------------------------------------------------------------------
  * The navbar and sidebar control; see layouts/_partials/theme-toggle.html.
- * The landing page's swatch row above is the same choice laid out flat. */
+ * It shows what a click switches to: the sun on a dark page, the moon on a
+ * light one. */
 
-.kx-palette {
-  position: relative;
-  display: flex;
-}
-
-.kx-palette__button {
+.kx-mode {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
   color: var(--kx-muted);
   cursor: pointer;
-  font: inherit;
-  font-size: 0.82rem;
-  padding: 0.3rem 0.5rem;
+  transition: color 0.15s;
 }
 
-.kx-palette__button:hover {
+.kx-mode:hover {
   color: var(--kx-accent);
 }
 
-.kx-palette__name {
-  /* The palette names are long enough to shove the navbar around as they
-     change — "solarized-dark" against "nord". The sidebar copy shows the
-     name; the navbar copy is passed hideLabel and shows the dot alone. */
-  white-space: nowrap;
+.kx-mode__icon--moon,
+html.dark .kx-mode__icon--sun {
+  display: block;
 }
 
-.kx-palette__chevron {
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-.kx-palette__dot {
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 999px;
-  /* Matches the landing page's swatch dot; see .kx-themes__dot. */
-  border: 0.15em solid var(--kx-border);
-  flex-shrink: 0;
-}
-
-.kx-palette__menu {
-  position: absolute;
-  z-index: 30;
-  margin: 0.35rem 0 0;
-  padding: 0.25rem;
-  list-style: none;
-  min-width: 11rem;
-  max-height: 60vh;
-  overflow-y: auto;
-  border: 1px solid var(--kx-border);
-  border-radius: 0.5rem;
-  background-color: var(--kx-surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
-}
-
-/* location="top" is the navbar, which opens downward; the sidebar's footer
-   sits at the bottom of the viewport and has to open upward or the menu
-   would be drawn off-screen. */
-.kx-palette--top .kx-palette__menu {
-  top: 100%;
-  inset-inline-end: 0;
-}
-
-.kx-palette--bottom .kx-palette__menu {
-  bottom: 100%;
-  inset-inline-start: 0;
-  margin: 0 0 0.35rem;
-}
-
-.kx-palette__option {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  border: 0;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--kx-body);
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.82rem;
-  padding: 0.35rem 0.55rem;
-  text-align: start;
-}
-
-.kx-palette__option:hover,
-.kx-palette__option:focus-visible {
-  background-color: var(--kx-background);
-  color: var(--kx-accent);
-}
-
-.kx-palette__option[aria-checked="true"] {
-  color: var(--kx-accent);
-}
-
-.kx-palette__label {
-  flex-grow: 1;
-}
-
-.kx-palette__check {
-  flex-shrink: 0;
-  visibility: hidden;
-}
-
-.kx-palette__option[aria-checked="true"] .kx-palette__check {
-  visibility: visible;
+.kx-mode__icon--sun,
+html.dark .kx-mode__icon--moon {
+  display: none;
 }
 
 /* Hextra chrome
@@ -817,11 +780,21 @@ body {
   border-color: var(--kx-border);
 }
 
-/* The footer band is bg-gray-100 / neutral-900 in the theme, the same fixed
-   surfaces as above, so it gets the palette's background and a rule instead. */
+/* The footer band takes the palette's background, and its top edge is a line
+   of the accent fading out at both ends, which marks the footer as a section
+   of its own rather than more of the page. */
 .hextra-footer {
+  position: relative;
   background-color: var(--kx-background);
-  border-top: 1px solid var(--kx-border);
+}
+
+.hextra-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--kx-accent), transparent);
+  opacity: 0.6;
 }
 
 .hextra-search-results {

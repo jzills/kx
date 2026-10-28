@@ -36,14 +36,12 @@
 {{- end }}
 
 {{- /*
-  The install cards' copy buttons and platform chips, on the landing page
-  only — nothing else has them. Deferred: unlike the palette runtime above,
+  The copy buttons on install commands: the landing page's cards, and the
+  footer's command on every page. Deferred: unlike the palette runtime above,
   nothing here has to beat the first paint, because the controls it reveals
-  ship hidden and the cards read correctly without them.
+  ship hidden and the commands read correctly without them.
 */ -}}
-{{- if .IsHome }}
-  {{- with resources.Get "js/kx-install.js" }}
-    {{- $install := . | minify | fingerprint }}
-    <script defer src="{{ $install.RelPermalink }}" integrity="{{ $install.Data.Integrity }}"></script>
-  {{- end }}
+{{- with resources.Get "js/kx-install.js" }}
+  {{- $install := . | minify | fingerprint }}
+  <script defer src="{{ $install.RelPermalink }}" integrity="{{ $install.Data.Integrity }}"></script>
 {{- end }}
