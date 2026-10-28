@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jzills/kx/internal/index"
@@ -352,7 +353,7 @@ func (c GetCommand) Execute(
 	// `kx delete 1` deleted a pod in a — a namespace and two commands away
 	// from anything the screen had shown. The entry carries its query, so the
 	// refusal it produces can name what found nothing.
-	listed := getListing(resource, filterTerm, extraArgs, namespace, indexed.Entries)
+	listed := getListing(resource, filterTerm, extraArgs, namespace, indexed)
 	listed.Query.Sort = c.Sort
 	listed.Query.Limit = c.Limit
 	listed.Query.LastRun = c.LastRun
@@ -486,13 +487,14 @@ func listingKind(resource string) kinds.Kind {
 // user's. When they do match (`kx get pods -n default`), the agent's entry
 // replaces the user's, Source and all.
 func getListing(
-	resource, filterTerm string, extraArgs []string, namespace string, entries []index.Entry,
+	resource, filterTerm string, extraArgs []string, namespace string, table index.Table,
 ) state.State {
 	if extraArgs == nil {
 		extraArgs = []string{}
 	}
 	return state.State{
-		Resources:     resourcesFrom(entries, listingKind(resource)),
+		Resources:     resourcesFrom(table.Entries, listingKind(resource)),
+		Columns:       listingColumns(table),
 		Namespace:     namespace,
 		AllNamespaces: allNamespaces(extraArgs),
 		Query: &state.Query{
@@ -634,6 +636,7 @@ func (c GetCommand) ExecuteGroups(
 		// Groups are fetched one namespace at a time and stitched back
 		// together, so the merged listing spans them by construction.
 		Resources:     resourcesFrom(indexed.Entries, listingKind(resource)),
+		Columns:       listingColumns(indexed),
 		AllNamespaces: true,
 		Query: &state.Query{
 			Command: state.CommandFetch, Resource: resource, Args: []string{}, Match: matchOf(filterTerm),
@@ -642,6 +645,31 @@ func (c GetCommand) ExecuteGroups(
 		return index.Table{}, err
 	}
 	return indexed, nil
+}
+
+// listingColumns are a numbered table's column keys, as a saved listing
+// records them (state.State.Columns): every table's for a listing kubectl
+// printed as several, and never the X column kx numbers the rows in.
+func listingColumns(table index.Table) []string {
+	headers := [][]string{table.Headers}
+	if len(table.Sections) > 0 {
+		headers = headers[:0]
+		for _, section := range table.Sections {
+			headers = append(headers, section.Headers)
+		}
+	}
+	var columns []string
+	for _, header := range headers {
+		if len(header) > 0 && header[0] == "X" {
+			header = header[1:]
+		}
+		for _, key := range index.ColumnKeys(header) {
+			if !slices.Contains(columns, key) {
+				columns = append(columns, key)
+			}
+		}
+	}
+	return columns
 }
 
 // resourcesFrom turns indexed entries into saved resources, carrying each
