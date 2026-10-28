@@ -590,8 +590,8 @@ kx mark api 3
 ```
 
 pins whatever index 3 currently resolves to under the name `api`.
-From then on, `@api` spends it exactly the way an index does, anywhere `<index>` is accepted — with three exceptions: `kx ns` and `kx context` switch a namespace/context slot, not a Kubernetes resource, so there is nothing for a mark to have pinned there; and `kx cp` parses its own `<index>:<path>` argument rather than taking a bare index, so a mark has nowhere to go.
-All three refuse a mark explicitly, naming the reason, rather than silently falling back to some other behavior.
+From then on, `@api` spends it exactly the way an index does, anywhere `<index>` is accepted, `kx cp`'s `@api:<path>` included — with two exceptions: `kx ns` and `kx context` switch a namespace/context slot, not a Kubernetes resource, so there is nothing for a mark to have pinned there.
+Both refuse a mark explicitly, naming the reason, rather than silently falling back to some other behavior.
 
 ```bash
 kx logs @api -f
@@ -2074,7 +2074,7 @@ Source: https://jzills.github.io/kx/docs/reference/commands/cp/
 
 Copy files to or from an indexed Pod via kubectl cp.
 
-Copies files to or from an indexed Pod via kubectl cp. Either side of the copy can name a path inside the Pod as index:path.
+Copies files to or from an indexed Pod via kubectl cp. Either side of the copy can name a path inside the Pod as index:path, or as @mark:path for a marked Pod.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
@@ -2088,8 +2088,8 @@ kx cp [OPTIONS] <src> <dest> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<src>` | Source path, or &lt;index&gt;:&lt;path&gt; inside the Pod |
-| `<dest>` | Destination path, or &lt;index&gt;:&lt;path&gt; inside the Pod |
+| `<src>` | Source path, or &lt;index&gt;:&lt;path&gt; or @&lt;mark&gt;:&lt;path&gt; inside the Pod |
+| `<dest>` | Destination path, or &lt;index&gt;:&lt;path&gt; or @&lt;mark&gt;:&lt;path&gt; inside the Pod |
 
 ## Options
 
@@ -2117,6 +2117,7 @@ kx cp [OPTIONS] <src> <dest> [kubectl flags]
 ```bash
 kx cp 1:/var/log/app.log ./app.log
 kx cp ./patch.conf 1:/etc/app/patch.conf
+kx cp @api:/var/log/app.log ./app.log
 ```
 
 ---
