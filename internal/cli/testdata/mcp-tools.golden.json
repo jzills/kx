@@ -1,5 +1,5 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, describe, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, describe, get_yaml, rollout_history or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
   "tools": [
     {
       "name": "describe",
@@ -915,6 +915,91 @@
         "required": [
           "context",
           "mark"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rollout_history",
+      "description": "A Deployment's, StatefulSet's or DaemonSet's revisions, as kubectl rollout history lists them with each one's change cause — or, given revision, that revision's Pod template, so two can be compared to see what a rollout changed. Rolling back is the user's to do, with kx rollout undo.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Rollout history"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "description": "One revision to show in full — its Pod template — rather than the list of them.",
+            "type": "integer"
+          },
+          "target": {
+            "additionalProperties": false,
+            "description": "The Deployment, StatefulSet or DaemonSet whose revisions to show.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "history": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "name",
+          "history"
         ],
         "type": "object"
       }

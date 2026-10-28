@@ -541,3 +541,52 @@ func (d mcpDeps) describe(_ context.Context, _ *mcp.CallToolRequest, in describe
 	out.Describe, out.Truncated = boundDescribeBytes(output)
 	return nil, out, nil
 }
+
+type rolloutHistoryInput struct {
+	Target   mcpTarget `json:"target" jsonschema:"The Deployment, StatefulSet or DaemonSet whose revisions to show."`
+	Revision int       `json:"revision,omitempty" jsonschema:"One revision to show in full — its Pod template — rather than the list of them."`
+}
+
+type rolloutHistoryOutput struct {
+	Context   string `json:"context"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Mark      string `json:"mark,omitempty"`
+	Revision  int    `json:"revision,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	History   string `json:"history"`
+}
+
+func (d mcpDeps) rolloutHistory(_ context.Context, _ *mcp.CallToolRequest, in rolloutHistoryInput) (*mcp.CallToolResult, rolloutHistoryOutput, error) {
+	// kubectl reads --revision=0 as every revision, which is what leaving it
+	// out already says; a negative one is no revision at all.
+	if in.Revision < 0 {
+		return nil, rolloutHistoryOutput{}, fmt.Errorf(
+			"Invalid value for 'revision': '%d'. It is a revision number from the history — 1 or more.", in.Revision)
+	}
+	out := rolloutHistoryOutput{Context: d.Kubectl.CurrentContext(), Revision: in.Revision}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, rolloutHistoryOutput{}, err
+	}
+	if !rolloutKinds.Has(target.Kind) {
+		return nil, rolloutHistoryOutput{}, unsupportedKindError("rollout history", target.Kind, rolloutKinds)
+	}
+	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
+
+	// history alone of kubectl rollout's subcommands: it reads the revisions
+	// the controller kept, and status blocks while the rest change the
+	// workload.
+	args := []string{"rollout", "history", string(target.Kind) + "/" + target.Name, "-n", target.Namespace}
+	if in.Revision > 0 {
+		args = append(args, fmt.Sprintf("--revision=%d", in.Revision))
+	}
+	output, err := d.Kubectl.Run(args)
+	if err != nil {
+		return nil, rolloutHistoryOutput{}, err
+	}
+	// Bounded as describe's text is: a revision's Pod template can be long.
+	out.History, out.Truncated = boundDescribeBytes(output)
+	return nil, out, nil
+}

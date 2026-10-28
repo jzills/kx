@@ -945,3 +945,80 @@ func TestBoundDescribeBytesKeepsTheHeadAtALineBoundary(t *testing.T) {
 		t.Errorf("a short description = %q (truncated %v), want it whole", got, truncated)
 	}
 }
+
+// rollout_history lists the resolved workload's revisions, or with revision
+// shows one of them, through kubectl rollout history and nothing else.
+func TestRolloutHistoryToolReadsTheResolvedWorkloadsRevisions(t *testing.T) {
+	const history = "deployment.apps/api\nREVISION  CHANGE-CAUSE\n1         <none>\n2         image bump\n"
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{}, "rollout history Deployment/api -n prod"},
+		{map[string]any{"revision": 2}, "rollout history Deployment/api -n prod --revision=2"},
+	} {
+		kube := &recordingKubectl{output: history}
+		args := map[string]any{"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}}
+		for key, value := range tc.args {
+			args[key] = value
+		}
+		var out rolloutHistoryOutput
+		decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "rollout_history", args), &out)
+		if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != tc.want {
+			t.Errorf("%v: kubectl runs = %v, want one %q", tc.args, kube.runs, tc.want)
+		}
+		if out.History != history || out.Kind != "Deployment" || out.Name != "api" || out.Namespace != "prod" {
+			t.Errorf("%v: out = %+v", tc.args, out)
+		}
+	}
+}
+
+// A kind kubectl keeps no rollout history for, and a revision no history
+// holds, are refused in full sentences before kubectl runs.
+func TestRolloutHistoryToolRefusesBeforeKubectlRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			"a Pod", map[string]any{"target": map[string]any{"kind": "pods", "name": "api", "namespace": "prod"}},
+			"kx rollout history does not support 'Pod' — only Deployments, StatefulSets and DaemonSets.",
+		},
+		{
+			"a negative revision", map[string]any{
+				"target":   map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+				"revision": -1,
+			},
+			"Invalid value for 'revision': '-1'. It is a revision number from the history — 1 or more.",
+		},
+	} {
+		kube := &recordingKubectl{}
+		result := callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "rollout_history", tc.args)
+		if !result.IsError || toolText(result) != tc.want {
+			t.Errorf("%s: result = %q (error %v), want %q", tc.name, toolText(result), result.IsError, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: kubectl ran %v before the refusal", tc.name, kube.runs)
+		}
+	}
+}
+
+// The read-only guard admits rollout history and none of rollout's other
+// subcommands, which change the workload: a tool that ran rollout restart
+// must fail TestMCPToolsOnlyRead rather than pass as a "rollout".
+func TestReadsOnlyAdmitsRolloutHistoryAlone(t *testing.T) {
+	for args, want := range map[string]bool{
+		"rollout history Deployment/api": true,
+		"rollout restart Deployment/api": false,
+		"rollout undo Deployment/api":    false,
+		"rollout":                        false,
+		"get pods":                       true,
+		"delete pod api":                 false,
+		"":                               false,
+	} {
+		if got := readsOnly(strings.Fields(args)); got != want {
+			t.Errorf("readsOnly(%q) = %v, want %v", args, got, want)
+		}
+	}
+}

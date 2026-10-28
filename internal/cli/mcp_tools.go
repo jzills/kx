@@ -100,6 +100,14 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"at 256 KiB; truncated says the end was cut.",
 		Annotations: readOnlyTool("Describe"),
 	}, serialized(deps, deps.describe))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "rollout_history",
+		Description: "A Deployment's, StatefulSet's or DaemonSet's revisions, as kubectl rollout history " +
+			"lists them with each one's change cause — or, given revision, that revision's Pod template, " +
+			"so two can be compared to see what a rollout changed. Rolling back is the user's to do, " +
+			"with kx rollout undo.",
+		Annotations: readOnlyTool("Rollout history"),
+	}, serialized(deps, deps.rolloutHistory))
 	// Not through serialized: a sweep can take minutes, so scan holds the
 	// lock only while it resolves images — see registerScanTool.
 	registerScanTool(server, deps)
