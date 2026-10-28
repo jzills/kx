@@ -202,7 +202,7 @@ func seedUserListing(t *testing.T, deps mcpDeps) {
 	t.Helper()
 	const configMaps = "NAME       DATA   AGE\nsettings   1      1d\n"
 	if err := deps.State.Save(getListing("configmaps", "", []string{"-n", "other"}, "other",
-		index.Service{}.Add(configMaps).Entries)); err != nil {
+		index.Service{}.Add(configMaps))); err != nil {
 		t.Fatal(err)
 	}
 }

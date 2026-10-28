@@ -165,6 +165,7 @@ func (c TopCommand) Execute(
 	}
 	if err := c.State.Save(state.State{
 		Resources:     resourcesFrom(indexed.Entries, kinds.Pod),
+		Columns:       listingColumns(indexed),
 		Namespace:     entryNamespace,
 		AllNamespaces: allNamespaces,
 		// Command keeps it from being a `kx get pods` listing, which it is
@@ -290,6 +291,7 @@ func (c TopCommand) ExecuteNodes(
 	}
 	if err := c.State.Save(state.State{
 		Resources: resourcesFrom(indexed.Entries, kinds.Node),
+		Columns:   listingColumns(indexed),
 		Namespace: namespace,
 		// Carrying the command that produced it, for the same reasons
 		// Execute's entry does.

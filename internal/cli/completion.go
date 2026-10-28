@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
@@ -172,6 +175,114 @@ var flagValues = map[string]completer{
 	"scan.fail-on":       completeScanThreshold,
 }
 
+// sortColumns are the columns a command's --sort completes, given the line so
+// far: the fixed columns a sweep and a scan summary print, and, for a listing
+// whose columns kubectl decides, the ones kx recorded the last time it saved
+// a listing of that kind (recordedColumns). nil for a command with no --sort,
+// and for a kind kx has not listed yet.
+func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
+	allNamespaces := false
+	if flag := cmd.Flags().Lookup("all-namespaces"); flag != nil {
+		allNamespaces = flag.Value.String() == "true"
+	}
+	switch cmd.Name() {
+	case "diagnostic":
+		return index.ColumnKeys(sweepHeaders)
+	case "scan":
+		return index.ColumnKeys(render.ScanHeaders())
+	case "top":
+		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 &&
+			kinds.Normalize(positionals[0]) == kinds.Node {
+			return recordedColumns(services, state.CommandTop, "nodes", false)
+		}
+		return recordedColumns(services, state.CommandTop, "pods", allNamespaces)
+	case "secret":
+		return recordedColumns(services, "", "secrets", allNamespaces)
+	case "get":
+		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 {
+			return recordedColumns(services, "", positionals[0], allNamespaces)
+		}
+	}
+	return nil
+}
+
+// recordedColumns are the columns of the newest saved listing a command made
+// of a kind — kx get's (and its stitched fetch's) for command "", kx top's
+// for state.CommandTop — read from the history and the per-kind slots, so
+// they cost no API call, as -n's completion costs none.
+//
+// A listing in the other scope is used when none in this one is, with the
+// NAMESPACE column an -A listing adds put in or taken out: the rest of a
+// kind's columns are the same either way.
+func recordedColumns(services Services, command, resource string, allNamespaces bool) []string {
+	if services.State == nil {
+		return nil
+	}
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		return nil
+	}
+	entries := make([]state.State, 0, len(history.States)+len(history.Named))
+	for i := len(history.States) - 1; i >= 0; i-- {
+		entries = append(entries, history.States[i])
+	}
+	for _, entry := range history.Named {
+		entries = append(entries, entry)
+	}
+	kind := kinds.Normalize(resource)
+	var otherScope []string
+	for _, entry := range entries {
+		query := entry.Query
+		if query == nil || len(entry.Columns) == 0 || kinds.Normalize(query.Resource) != kind {
+			continue
+		}
+		if query.Command != command && !(command == "" && query.Command == state.CommandFetch) {
+			continue
+		}
+		if entry.AllNamespaces == allNamespaces {
+			return entry.Columns
+		}
+		if otherScope == nil {
+			otherScope = rescoped(entry.Columns, allNamespaces)
+		}
+	}
+	return otherScope
+}
+
+// rescoped is a listing's columns in the other scope: with NAMESPACE first
+// for -A, as kubectl puts it, or without it.
+func rescoped(columns []string, allNamespaces bool) []string {
+	without := slices.DeleteFunc(slices.Clone(columns), func(column string) bool { return column == "namespace" })
+	if allNamespaces {
+		return append([]string{"namespace"}, without...)
+	}
+	return without
+}
+
+// sortCandidates completes the last key of a --sort spec against columns,
+// keeping what is typed ahead of it: "status,-re" offers "status,-restarts".
+// A column the spec already names is not offered twice.
+func sortCandidates(columns []string, toComplete string) []string {
+	head, last := "", toComplete
+	if comma := strings.LastIndex(toComplete, ","); comma >= 0 {
+		head, last = toComplete[:comma+1], toComplete[comma+1:]
+	}
+	if rest, descending := strings.CutPrefix(last, "-"); descending {
+		head, last = head+"-", rest
+	}
+	named := map[string]bool{}
+	for _, key := range strings.Split(head, ",") {
+		named[strings.TrimPrefix(strings.TrimSpace(key), "-")] = true
+	}
+	var candidates []string
+	for _, column := range columns {
+		if !named[column] && strings.HasPrefix(column, strings.ToLower(last)) {
+			candidates = append(candidates, head+column)
+		}
+	}
+	return candidates
+}
+
 // lookupFlagValue prefers a command's own completer for a flag, the way
 // lookupCompleter does for an argument.
 //
@@ -194,7 +305,7 @@ func flagValueCompletion(
 	cmd *cobra.Command, services Services, args []string, toComplete string,
 ) ([]string, bool) {
 	if name, prefix, found := strings.Cut(toComplete, "="); found && strings.HasPrefix(name, "--") {
-		complete, ok := lookupFlagValue(cmd, strings.TrimPrefix(name, "--"))
+		complete, ok := lineFlagValue(cmd, args, strings.TrimPrefix(name, "--"))
 		if !ok {
 			return nil, false
 		}
@@ -214,13 +325,24 @@ func flagValueCompletion(
 	if flag == "" {
 		return nil, false
 	}
-	complete, ok := lookupFlagValue(cmd, flag)
+	complete, ok := lineFlagValue(cmd, args, flag)
 	if !ok {
 		// A flag that takes a value, but not one kx can suggest values for —
 		// a label selector, say. Still not a filename.
 		return nil, true
 	}
 	return complete(services, toComplete), true
+}
+
+// lineFlagValue is lookupFlagValue with the line so far, which a --sort's
+// columns depend on (sortColumns).
+func lineFlagValue(cmd *cobra.Command, args []string, name string) (completer, bool) {
+	if name == "sort" {
+		return func(services Services, toComplete string) []string {
+			return sortCandidates(sortColumns(cmd, services, args), toComplete)
+		}, true
+	}
+	return lookupFlagValue(cmd, name)
 }
 
 // valueFlag returns the registered name of a flag token that takes a value, or
@@ -559,6 +681,17 @@ func registerFlagCompletions(root *cobra.Command, services Services) {
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
 		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+			if flag.Name == "sort" {
+				// Without a trailing space, so a comma and the next key can
+				// follow the one just completed.
+				_ = cmd.RegisterFlagCompletionFunc(flag.Name, func(
+					cmd *cobra.Command, args []string, toComplete string,
+				) ([]string, cobra.ShellCompDirective) {
+					return sortCandidates(sortColumns(cmd, services, args), toComplete),
+						cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+				})
+				return
+			}
 			complete, ok := lookupFlagValue(cmd, flag.Name)
 			if !ok && takesPlainValue(cmd, flag) {
 				// Cobra completes a parsed command's flag values itself, and

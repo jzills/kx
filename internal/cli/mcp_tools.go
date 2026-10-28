@@ -372,7 +372,7 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		recorded = []string{}
 	}
 	if indexed {
-		listed := getListing(in.Kind, in.Match, recorded, namespace, table.Entries)
+		listed := getListing(in.Kind, in.Match, recorded, namespace, table)
 		listed.Query.LastRun = in.LastRun
 		if err := d.listingSave(current)(listed); err != nil {
 			return nil, listOutput{}, err
