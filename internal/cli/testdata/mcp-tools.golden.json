@@ -1,6 +1,84 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, describe, get_yaml or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
   "tools": [
+    {
+      "name": "describe",
+      "description": "kubectl describe's account of one resource: its settings and status in prose, conditions, the endpoints of a Service, the resources allocated on a Node, and recent events. Secret values are never shown — kubectl describe gives their sizes only. Capped at 256 KiB; truncated says the end was cut.",
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true,
+        "title": "Describe"
+      },
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "additionalProperties": false,
+            "description": "The resource to describe.",
+            "properties": {
+              "index": {
+                "description": "A row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'; confirm the resolved name back to the user before acting on it.",
+                "type": "integer"
+              },
+              "kind": {
+                "description": "Resource type as kubectl spells it: pods, deploy, Deployment, a CRD's name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "mark": {
+                "description": "A kx mark (with or without the leading @) in place of kind, name and namespace. list_marks shows them.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Resource name. Required unless mark or index is given.",
+                "type": "string"
+              },
+              "namespace": {
+                "description": "Namespace; defaults to the kubeconfig's current namespace. Omit for cluster-scoped kinds such as Nodes.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "describe": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "mark": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context",
+          "kind",
+          "name",
+          "describe"
+        ],
+        "type": "object"
+      }
+    },
     {
       "name": "diagnose",
       "description": "Diagnose Kubernetes health. With a target, analyzes that resource — replica counts, container states, restarts, warning events — and returns findings ranked most specific first. With no target, sweeps a namespace (or every namespace) and returns the unhealthy resources. Supports Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod and Node. When kx mcp runs with --write-listings, a sweep is saved to the user's kx history, every swept resource in the order returned, and each carries its index there — so without showHealthy, the numbers skip the healthy rows left out.",

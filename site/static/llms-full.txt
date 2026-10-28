@@ -1606,6 +1606,7 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 | `events` | Warning and normal events recorded against one resource. |
 | `logs` | Recent container logs, one Pod or a workload's Pods aggregated. |
 | `top` | Current CPU and memory, against limits or Node capacity. |
+| `describe` | `kubectl describe`'s account of one resource, which shows a Secret's sizes, never its values. |
 | `get_yaml` | A resource's manifest, narrowable to a few fields, Secrets redacted. |
 | `scan` | Image CVEs from the configured scanner, at most 50 images a call by default. |
 
@@ -1613,7 +1614,7 @@ Your MCP client lists each tool's arguments itself, from the server's `tools/lis
 
 ## What it will never do
 
-Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `logs` and `top`; client-go only ever `get`s, `list`s and `watch`es.
+Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs` and `top`; client-go only ever `get`s, `list`s and `watch`es.
 Nothing an agent calls here deletes, patches, scales, execs, port-forwards or edits anything.
 
 The `mark` tool is the one write, and it writes kx's own state, not the cluster — the same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit` resolves the same resource whether you or the agent set it.
@@ -3985,7 +3986,7 @@ Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MC
 
 Runs a Model Context Protocol server on stdin/stdout, for an MCP client — Claude Code, an IDE, an agent framework — to start as a subprocess.
 
-Eleven tools: list_marks and mark for kx's marks; list_resources to list a kind; diagnose and tree for a resource's health and ownership; events and logs for what happened; top for current usage; get_yaml for its manifest (Secrets redacted); and scan for image CVEs; and docs for kx's own documentation, built into the binary.
+Twelve tools: list_marks and mark for kx's marks; list_resources to list a kind; diagnose and tree for a resource's health and ownership; events and logs for what happened; top for current usage; describe for kubectl describe's account of it; get_yaml for its manifest (Secrets redacted); scan for image CVEs; and docs for kx's own documentation, built into the binary.
 
 Every tool is read-only against the cluster. Resources are named by kind and name, by a mark, or by an index — a row number from your terminal's current listing, read live. By default the one thing it writes is a new mark, and it refuses to move one you already set.
 

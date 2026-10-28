@@ -92,6 +92,14 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"nested keys (fields). Secret values and the last-applied annotation are redacted.",
 		Annotations: readOnlyTool("Get YAML"),
 	}, serialized(deps, deps.getYAML))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "describe",
+		Description: "kubectl describe's account of one resource: its settings and status in prose, " +
+			"conditions, the endpoints of a Service, the resources allocated on a Node, and recent " +
+			"events. Secret values are never shown — kubectl describe gives their sizes only. Capped " +
+			"at 256 KiB; truncated says the end was cut.",
+		Annotations: readOnlyTool("Describe"),
+	}, serialized(deps, deps.describe))
 	// Not through serialized: a sweep can take minutes, so scan holds the
 	// lock only while it resolves images — see registerScanTool.
 	registerScanTool(server, deps)

@@ -8,7 +8,7 @@ weight: 36
 
 Runs a Model Context Protocol server on stdin/stdout, for an MCP client — Claude Code, an IDE, an agent framework — to start as a subprocess.
 
-Eleven tools: list_marks and mark for kx's marks; list_resources to list a kind; diagnose and tree for a resource's health and ownership; events and logs for what happened; top for current usage; get_yaml for its manifest (Secrets redacted); and scan for image CVEs; and docs for kx's own documentation, built into the binary.
+Twelve tools: list_marks and mark for kx's marks; list_resources to list a kind; diagnose and tree for a resource's health and ownership; events and logs for what happened; top for current usage; describe for kubectl describe's account of it; get_yaml for its manifest (Secrets redacted); scan for image CVEs; and docs for kx's own documentation, built into the binary.
 
 Every tool is read-only against the cluster. Resources are named by kind and name, by a mark, or by an index — a row number from your terminal's current listing, read live. By default the one thing it writes is a new mark, and it refuses to move one you already set.
 
