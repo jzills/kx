@@ -1381,6 +1381,21 @@ kx drain 1 --ignore-daemonsets --delete-emptydir-data
 
 It prompts before doing anything unless you pass `--yes`, and streams kubectl's own progress, which can run for minutes. kubectl's drain flags pass through: `--force`, `--grace-period`, `--ignore-daemonsets`, `--delete-emptydir-data`, `--timeout`.
 
+## Keeping Pods off a Node
+
+A taint keeps Pods off a Node unless they tolerate it, which is how a Node is set aside for one kind of workload rather than taken out of service.
+
+```bash
+kx taint 1 dedicated=gpu:NoSchedule    # only Pods that tolerate it land here
+kx taint 1 --remove dedicated          # drop the key, whatever its effect
+kx taint 1 dedicated=infra:NoSchedule --overwrite
+```
+
+The effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute`.
+The first two only steer the scheduler.
+A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does.
+It also refuses kubectl's `--all` and `--selector`: beside a Node's name, kubectl taint applies them to every Node they select rather than refusing the pair, so `--all` would taint the whole cluster.
+
 ## Nodes are not in a namespace
 
 A Node is cluster-scoped, so its listing records no namespace and its captions do not name one — `Nodes · 1 item`, not `Nodes · prod · 1 item`.
@@ -1664,7 +1679,7 @@ That cuts both ways: agent listings count toward `max_history` (10 by default), 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes your *current* listing the moment it saves, so `kx delete 3` right after can mean the agent's row 3, not the one you last ran `kx get` for.
 Every mutating command now says so when the index it resolves came from an agent's listing.
 The `kx delete` and `kx drain` commands fold that into their confirm prompt, so you see it before you answer; skip the prompt with `--yes`/`-y` and they print the stderr notice below in its place.
-The `kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.`
+The `kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate`, `kx taint` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.`
 It is a notice, not a prompt — nothing pauses, stdout is unchanged, and the exit code doesn't change either.
 Commands that only read — `kx describe`, `kx logs`, `kx yaml`, `kx port-forward`, `kx events`, `kx tree`, `kx diag`, and `kx rollout status` and `history` — print nothing.
 The `kx state` command shows which listing is current; `kx state back` is the way out if it isn't the one you meant.
@@ -1822,6 +1837,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
+| [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
 | [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
@@ -3449,6 +3465,71 @@ kx set [OPTIONS]
 kx set image 1 nginx:1.27.3
 kx set image 1 api=api:v2 envoy=envoyproxy/envoy:v1.31
 kx set image @api api:v2 --dry-run=server
+```
+
+---
+
+# kx taint
+
+Source: https://jzills.github.io/kx/docs/reference/commands/taint/
+
+Set or remove taints on an indexed Node.
+
+Sets or removes taints on one indexed Node — key=value:Effect or key:Effect to set, --remove to drop one. The effect is NoSchedule, PreferNoSchedule or NoExecute.
+
+One index only, as for kx drain: a NoExecute taint evicts every Pod that does not tolerate it, so tainting a range of Nodes in one command drains each of them.
+
+kubectl's own taint flags pass through, --overwrite and --dry-run among them. --all and --selector are refused, since beside a Node's name kubectl taint applies them to every Node they select.
+
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
+## Usage
+
+```text
+kx taint [OPTIONS] <index> [taint...] [kubectl flags]
+```
+
+## Arguments
+
+| Argument | Description |
+|---|---|
+| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[taint]...` | A taint to set, key=value:Effect or key:Effect; repeatable |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
+| `--remove strings` | Taint to remove, as key or key:Effect (repeatable) |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--field-manager string` | Name of the manager used to track field ownership. |
+| `--overwrite` | If true, allow taints to be overwritten, otherwise reject taint updates that overwrite existing taints. |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--validate[=string]` | Must be one of: strict (or true), warn, ignore (or false). "true" or "strict" will use a schema to validate the input and fail the request if invalid. It will perform server side validation if ServerSideFieldValidation is enabled on the api-server, but will fall back to less reliable client-side validation if not. "warn" will warn about unknown or duplicate fields without blocking the request if server-side field validation is enabled on the API server, and behave as "ignore" otherwise. "false" or "ignore" will not perform any schema validation, silently dropping any unknown or duplicate fields. |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
+## Global options
+
+| Option | Description |
+|---|---|
+| `--no-color` | Disable styled output |
+| `-h, --help` | Show this message and exit |
+
+## Examples
+
+```bash
+kx taint 1 dedicated=gpu:NoSchedule
+kx taint 1 --remove dedicated
+kx taint 1 dedicated=infra:NoSchedule --overwrite
+kx taint 1 maintenance:NoExecute --dry-run=server
 ```
 
 ---

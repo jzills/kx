@@ -319,6 +319,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx scan [<index>]` | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | `kx secret [<index>...]` | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | `kx set` | Change an indexed workload's container images with kx set image, printing each one before and after. |
+| `kx taint <index> [<taint>...]` | Set or remove taints on an indexed Node. |
 | `kx top [<resource>]` | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
 | `kx tree [<index>]` | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | `kx uncordon <index>...` | Mark one or more indexed Nodes schedulable again. |

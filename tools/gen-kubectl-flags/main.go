@@ -59,6 +59,7 @@ var subcommands = []string{
 	"rollout undo",
 	"scale",
 	"set image",
+	"taint",
 	"top node",
 	"top pod",
 	"uncordon",

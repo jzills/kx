@@ -82,6 +82,7 @@ func mutatingCommandCases() []mutatingCase {
 			return newMetadataWriteCommand(s, "annotate", "annotations", "", "")
 		}, []string{"1", "note=hi"}, `{"metadata":{"annotations":{}}}`},
 		{"cp", kinds.Pod, newCopyCommand, []string{"1:/var/log/app.log", "./app.log"}, ""},
+		{"taint", kinds.Node, newTaintCommand, []string{"1", "dedicated=gpu:NoSchedule"}, ""},
 	}
 }
 
@@ -320,7 +321,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"scale": true, "rollout": true, "cordon": true, "uncordon": true,
 		"debug": true, "edit": true, "exec": true, "label": true,
 		"annotate": true, "cp": true, "delete": true, "drain": true,
-		"set": true,
+		"set": true, "taint": true,
 	}
 	nonMutating := map[string]bool{
 		// docs resolves no index and reads no cluster — it prints

@@ -3,7 +3,7 @@
 title: "kx completion"
 linkTitle: "completion"
 description: "Generate a shell completion script for kx (bash, zsh, fish, powershell)."
-weight: 38
+weight: 39
 ---
 
 Generates a shell completion script for kx. See each subcommand's own --help for how to install it.
