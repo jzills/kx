@@ -133,7 +133,14 @@ const watchNote = "watches can't be indexed — showing a live view; press Ctrl-
 // wantsLiveTable). -A watches are included — watchRows keys rows by
 // NAMESPACE/NAME in that case, so same-named pods in different namespaces
 // don't collide.
-func runWatch(services Services, resource string, extra []string, match string) error {
+//
+// A --sort orders the live table, sorted afresh from the rows as they stand
+// on every redraw, so a row that changes moves to where its new cells sort.
+func runWatch(services Services, resource string, extra []string, match, sortSpec string) error {
+	keys, err := sortKeysOf(sortSpec)
+	if err != nil {
+		return err
+	}
 	namespace := watchNamespace(extra, services.Kubectl)
 
 	args := append([]string{"get", resource}, extra...)
@@ -164,12 +171,17 @@ func runWatch(services Services, resource string, extra []string, match string) 
 	// throttle that skips a redraw can leave the screen stuck on a stale
 	// frame indefinitely once the cluster goes quiet — exactly what "the
 	// initial ADDED burst only shows one row" turned out to be.
-	redraw := func() {
-		lines = render.RedrawTable(displayHeaders, rows.Snapshot(), lines,
+	redraw := func() error {
+		snapshot, err := index.SortRows(displayHeaders, rows.Snapshot(), keys)
+		if err != nil {
+			return sortError(err)
+		}
+		lines = render.RedrawTable(displayHeaders, snapshot, lines,
 			watchNote, kinds.PluralDisplay(resource), namespace, "watching")
+		return nil
 	}
 
-	err := services.Kubectl.Watch(args, func(line string) error {
+	return services.Kubectl.Watch(args, func(line string) error {
 		if displayHeaders == nil {
 			parsed, ok := index.ParseHeader(line)
 			if !ok || parsed.EventIdx < 0 {
@@ -177,14 +189,17 @@ func runWatch(services Services, resource string, extra []string, match string) 
 			}
 			shape = parsed
 			displayHeaders = dropIndex(shape.Headers, shape.EventIdx)
+			// Refused on the header, before a row is drawn, when a key names
+			// a column the watch has none of.
+			if _, err := index.SortRows(displayHeaders, nil, keys); err != nil {
+				return sortError(err)
+			}
 			return nil
 		}
 		if strings.TrimSpace(line) == "" {
 			return nil
 		}
 		rows.Apply(shape, shape.Row(line))
-		redraw()
-		return nil
+		return redraw()
 	})
-	return err
 }
