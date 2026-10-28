@@ -171,7 +171,3 @@ toc: false
   </div>
 </section>
 
-<p class="kx-fineprint">
-  This project is released under the <a href="https://github.com/jzills/kx/blob/main/LICENSE">MIT license</a>.
-  Kubernetes is a registered trademark of the Linux Foundation, which does not endorse this project.
-</p>

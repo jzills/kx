@@ -494,13 +494,6 @@ body {
   white-space: nowrap;
 }
 
-.kx-fineprint {
-  max-width: 44rem;
-  margin: 3rem auto 0;
-  font-size: 0.85rem;
-  text-align: center;
-}
-
 /* Terminal sample
  * ------------------------------------------------------------------ */
 
@@ -532,6 +525,77 @@ body {
 .kx-terminal .c-ok     { color: var(--kx-status-ok); }
 .kx-terminal .c-warn   { color: var(--kx-status-warn); }
 .kx-terminal .c-bad    { color: var(--kx-status-bad); }
+
+/* Footer
+ * ------------------------------------------------------------------ */
+
+.kx-footer {
+  padding: 3rem 0 2.5rem;
+  color: var(--kx-muted);
+  font-size: 0.9rem;
+}
+
+.kx-footer a {
+  color: var(--kx-muted);
+  transition: color 0.15s;
+}
+
+.kx-footer a:hover {
+  color: var(--kx-body);
+}
+
+.kx-footer__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .kx-footer__cols {
+    grid-template-columns: repeat(3, minmax(0, 12rem));
+    gap: 2rem 4rem;
+  }
+}
+
+.kx-footer__heading {
+  margin-bottom: 0.75rem;
+  color: var(--kx-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.kx-footer__col li + li {
+  margin-top: 0.5rem;
+}
+
+.kx-footer__brand {
+  margin-top: 3.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--kx-border);
+}
+
+.kx-footer__wordmark {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  user-select: none;
+}
+
+.kx-footer__copyright {
+  margin-top: 0.85rem;
+}
+
+.kx-footer__connect {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.kx-footer__connect a {
+  display: inline-flex;
+}
 
 /* Theme picker
  * ------------------------------------------------------------------ */
@@ -746,6 +810,13 @@ body {
   background-color: var(--kx-background);
   box-shadow: 0 -12px 16px var(--kx-background);
   border-color: var(--kx-border);
+}
+
+/* The footer band is bg-gray-100 / neutral-900 in the theme, the same fixed
+   surfaces as above, so it gets the palette's background and a rule instead. */
+.hextra-footer {
+  background-color: var(--kx-background);
+  border-top: 1px solid var(--kx-border);
 }
 
 .hextra-search-results {
