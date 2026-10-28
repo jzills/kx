@@ -129,7 +129,7 @@ toc: false
 <section class="kx-closing" id="install">
   <h2>Install kx</h2>
   <p>Every method installs the same prebuilt binary, from PyPI too, with no Python runtime. It needs only <code>kubectl</code> on your PATH.</p>
-  <div class="kx-install">
+  <div class="kx-install" data-kx-tabs aria-label="Install with">
     <div class="kx-install__card" data-kx-copy>
       <div class="kx-install__head">
         <div class="kx-install__label">Homebrew</div>

@@ -188,6 +188,17 @@ body {
 
 /* The install command under the buttons, with its copy button. */
 
+/* A command a reader is meant to copy: the hero's, the install panel's and
+   the footer's. An edge tinted with the accent and a soft glow of it set
+   them apart from the inline code around them, which shares their surface
+   and border and so, untinted, read as more of the same. color-mix keeps it
+   per palette, light ones included. */
+:root {
+  --kx-command-edge: color-mix(in srgb, var(--kx-accent) 35%, var(--kx-border));
+  --kx-command-glow: 0 0 0 1px color-mix(in srgb, var(--kx-accent) 8%, transparent),
+    0 18px 48px -20px color-mix(in srgb, var(--kx-accent) 45%, transparent);
+}
+
 .kx-command {
   display: flex;
   align-items: center;
@@ -195,17 +206,18 @@ body {
   width: fit-content;
   max-width: 100%;
   margin-top: 1.75rem;
-  padding: 0.6rem 0.6rem 0.6rem 1rem;
-  border: 1px solid var(--kx-border);
-  border-radius: 0.5rem;
+  padding: 0.7rem 0.7rem 0.7rem 1.1rem;
+  border: 1px solid var(--kx-command-edge);
+  border-radius: 0.6rem;
   background-color: var(--kx-surface);
+  box-shadow: var(--kx-command-glow);
 }
 
 .kx-command .kx-install__command {
   flex: 1;
   min-width: 0;
   text-align: left;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   /* On a phone the command wraps rather than scrolling inside its box,
      which hid the half that matters. */
   white-space: normal;
@@ -226,7 +238,9 @@ body {
 
 .kx-window--hero {
   margin-top: 1rem;
-  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.45);
+  border-color: var(--kx-command-edge);
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.45),
+    0 30px 90px -40px color-mix(in srgb, var(--kx-accent) 40%, transparent);
 }
 
 .kx-window__bar {
@@ -379,17 +393,21 @@ body {
 
 /* Install, closing the page. */
 
+/* A wash of the accent from the top edge, so the section a reader came to
+   install from reads as the page's destination rather than one more box. */
 .kx-closing {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   margin: 7rem auto 0;
-  padding: 3rem clamp(1rem, 4vw, 3rem);
+  padding: 3.5rem clamp(1rem, 4vw, 3rem);
   max-width: 66rem;
   border: 1px solid var(--kx-border);
-  border-radius: 0.75rem;
-  background-color: var(--kx-surface);
+  border-radius: 1rem;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--kx-accent) 14%, transparent), transparent),
+    var(--kx-surface);
 }
 
 .kx-closing > p {
@@ -448,6 +466,85 @@ body {
 .kx-install__command::before {
   content: "$ ";
   color: var(--kx-accent);
+}
+
+/* Tabbed, once assets/js/kx-install.js has run: one panel framed like the
+   hero's command, a row of tabs across its top, and one card showing at a
+   time. The card's own label is the tab now, so it is hidden inside it. */
+.kx-install.is-tabbed {
+  display: block;
+  max-width: 36rem;
+  border: 1px solid var(--kx-command-edge);
+  border-radius: 0.75rem;
+  background-color: var(--kx-background);
+  box-shadow: var(--kx-command-glow);
+  overflow: hidden;
+}
+
+.kx-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem 0;
+  border-bottom: 1px solid var(--kx-border);
+  overflow-x: auto;
+}
+
+.kx-tabs__tab {
+  flex: none;
+  padding: 0.55rem 0.8rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--kx-muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.kx-tabs__tab:hover {
+  color: var(--kx-body);
+}
+
+.kx-tabs__tab[aria-selected="true"] {
+  color: var(--kx-body);
+  border-bottom-color: var(--kx-accent);
+}
+
+/* The copy button sits in a gutter at the panel's right edge, level with
+   the first command, so a long command scrolls beneath nothing. */
+.kx-install.is-tabbed .kx-install__card {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  padding: 1.1rem 3.5rem 1.1rem 1.25rem;
+}
+
+.kx-install.is-tabbed .kx-install__head {
+  margin: 0;
+}
+
+.kx-install.is-tabbed .kx-install__label {
+  display: none;
+}
+
+.kx-install.is-tabbed .kx-install__copy {
+  position: absolute;
+  top: 1.15rem;
+  right: 1rem;
+}
+
+.kx-install.is-tabbed .kx-install__command {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+@media (max-width: 30rem) {
+  .kx-install.is-tabbed .kx-install__command {
+    font-size: 0.85rem;
+  }
 }
 
 /* The label and its copy button share a row. The button ships with the hidden
