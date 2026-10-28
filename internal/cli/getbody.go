@@ -378,7 +378,7 @@ func runGet(services Services, resource string, args []string, options getOption
 		// straight through instead, the same way `logs -f` does — re-theming
 		// non-tabular output doesn't make sense.
 		if wantsLiveTable(extra) {
-			return runWatch(services, resource, extra, options.Match)
+			return runWatch(services, resource, extra, options.Match, options.Sort)
 		}
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
 		// opened with a line that is not a name, and a headerless watch's rows

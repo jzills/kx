@@ -24,7 +24,8 @@ const (
 	sortLong = sortHow + "Each column sorts as what " +
 		"it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as " +
 		"quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's " +
-		"own `--sort-by` still takes a JSONPath, and applies first."
+		"own `--sort-by` still takes a JSONPath, and applies first. A `--watch` table stays " +
+		"sorted as it redraws, a row moving when its cells change."
 	topSortLong = sortHow + "CPU and MEMORY sort as " +
 		"quantities and CPU% and MEM% as percentages, ties keep kubectl's order, and a Pod " +
 		"with no limit sorts last either way. Another cluster's listing — `--context`, " +
@@ -106,8 +107,9 @@ func unsortableError(output string, keys []index.SortKey, args []string) error {
 }
 
 // sortRefusal is --sort beside a flag that leaves no table of kx's to sort,
-// or "" for none: a watch, which streams rows as they change, and output for
-// a program, which is kubectl's to order (--sort-by).
+// or "" for none: a watch kx streams rather than draws, and output for a
+// program, which is kubectl's to order (--sort-by). A watch kx draws is
+// sorted afresh on every redraw (runWatch).
 func sortRefusal(spec string, args []string) error {
 	if spec == "" {
 		return nil
@@ -115,9 +117,9 @@ func sortRefusal(spec string, args []string) error {
 	if _, err := index.ParseSortKeys(spec); err != nil {
 		return sortSpecError(spec)
 	}
-	if isWatch(args) {
-		return errors.New("'--sort' cannot be combined with '--watch' — a watch streams rows " +
-			"as they change, so there is no finished table to sort.")
+	if isWatch(args) && !wantsLiveTable(args) && printsTable(args) {
+		return errors.New("'--sort' cannot be combined with '--watch' here — a watch in this " +
+			"shape streams kubectl's rows as they change, so there is no table of kx's to sort.")
 	}
 	if !programReadsStdout(args) {
 		return nil
