@@ -264,40 +264,68 @@ body {
   border-radius: 0;
 }
 
-/* What kx does: six, three to a row at desktop width. */
+/* What kx does: six cards, three to a row at desktop width. Each card is
+   the link to its guide, so the whole card is the target and needs no
+   separate "read more" line. */
 
 .kx-features {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: 2.5rem 3rem;
+  gap: 1rem;
   max-width: 66rem;
   margin: 5rem auto 0;
 }
 
-/* A column, so each card's link sits at its foot and the links of one row
-   line up however long the words above them run. */
-.kx-feature {
+.kx-home a.kx-feature {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  padding: 1.4rem 1.5rem 1.5rem;
+  border: 1px solid var(--kx-border);
+  border-radius: 0.75rem;
+  background-color: var(--kx-surface);
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 
-.kx-feature a {
-  margin-top: auto;
+.kx-home a.kx-feature:hover {
+  text-decoration: none;
+  border-color: var(--kx-command-edge);
+  transform: translateY(-2px);
+  box-shadow: var(--kx-command-glow);
+}
+
+.kx-feature__icon {
+  display: inline-flex;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  color: var(--kx-accent);
+  background-color: color-mix(in srgb, var(--kx-accent) 12%, transparent);
 }
 
 .kx-feature__title {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  margin: 0;
+  margin: 1rem 0 0;
 }
 
 .kx-feature p {
-  margin: 0.5rem 0 0.75rem;
-  font-size: 0.95rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.93rem;
 }
 
-.kx-feature a::after,
+@media (prefers-reduced-motion: reduce) {
+  .kx-home a.kx-feature {
+    transition: none;
+  }
+
+  .kx-home a.kx-feature:hover {
+    transform: none;
+  }
+}
+
 .kx-showcase__text a::after,
 .kx-split__text a::after {
   content: " →";
