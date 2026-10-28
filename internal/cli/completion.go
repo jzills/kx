@@ -176,9 +176,9 @@ var flagValues = map[string]completer{
 }
 
 // sortColumns are the columns a command's --sort completes, given the line so
-// far: the fixed columns a sweep and a scan summary print, and, for a listing
-// whose columns kubectl decides, the ones kx recorded the last time it saved
-// a listing of that kind (recordedColumns). nil for a command with no --sort,
+// far: the fixed columns a sweep, a scan summary and kx events print, and,
+// for a listing whose columns kubectl decides, the ones kx recorded the last
+// time it saved a listing of that kind (recordedColumns). nil for a command with no --sort,
 // and for a kind kx has not listed yet.
 func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
 	allNamespaces := false
@@ -190,6 +190,8 @@ func sortColumns(cmd *cobra.Command, services Services, args []string) []string 
 		return index.ColumnKeys(sweepHeaders)
 	case "scan":
 		return index.ColumnKeys(render.ScanHeaders())
+	case "events":
+		return index.ColumnKeys(render.EventsHeaders)
 	case "top":
 		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 &&
 			kinds.Normalize(positionals[0]) == kinds.Node {

@@ -188,6 +188,7 @@ func TestSortCompletesFixedAndTopColumns(t *testing.T) {
 	}{
 		{[]string{"diagnostic", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
 		{[]string{"scan", "--sort", "cr"}, "crit"},
+		{[]string{"events", "1", "--sort", ""}, "type,reason,kind,age,message"},
 		{[]string{"top", "nodes", "--sort", "c"}, "cpu,cpu%"},
 		{[]string{"top", "--sort", ""}, ""},
 	} {
