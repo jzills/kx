@@ -61,6 +61,10 @@ func elapsed(now, timestamp time.Time) string {
 	return config.FormatSpan(now.Sub(timestamp))
 }
 
+// EventsHeaders are the columns EventsTable prints, which kx events --sort
+// names.
+var EventsHeaders = []string{"TYPE", "REASON", "KIND", "AGE", "MESSAGE"}
+
 // EventsTable renders the events for one resource.
 func (r *Renderer) EventsTable(rows []events.Row, window time.Duration) {
 	if len(rows) == 0 {
@@ -76,9 +80,9 @@ func (r *Renderer) EventsTable(rows []events.Row, window time.Duration) {
 		return
 	}
 
-	columns := []Column{
-		{Header: "TYPE"}, {Header: "REASON"}, {Header: "KIND"},
-		{Header: "AGE"}, {Header: "MESSAGE"},
+	columns := make([]Column, 0, len(EventsHeaders))
+	for _, header := range EventsHeaders {
+		columns = append(columns, Column{Header: header})
 	}
 	cells := make([][]Cell, 0, len(rows))
 	for _, row := range rows {
