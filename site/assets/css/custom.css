@@ -595,10 +595,7 @@ body {
 }
 
 .kx-footer__connect span {
-  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .kx-footer__connect a {
