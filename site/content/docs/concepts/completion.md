@@ -31,7 +31,7 @@ Which is the difference between remembering a number and reading one.
 | `<action>` for `kx rollout` | `status`, `restart`, `pause`, `resume`, `history`, `undo` |
 | `<name>` for `kx theme` / `kx engine` | The palettes and scan engines |
 | `-n` | Namespace names |
-| `--sort` | Column names: kx's own for `kx diag` and `kx scan`, and for a listing the columns kx last printed for that kind, so `kx get pods` once and `kx get pods --sort re<TAB>` offers `ready` and `restarts` |
+| `--sort` | Column names: kx's own for `kx diag`, `kx scan` and `kx events`, and for a listing the columns kx last printed for that kind, so `kx get pods` once and `kx get pods --sort re<TAB>` offers `ready` and `restarts` |
 | `<src>` / `<dest>` for `kx cp` | Local paths, from the shell's own file completion |
 
 All of it is answered from `~/.kx/state.json` and registries compiled into the binary.
