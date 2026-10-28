@@ -222,7 +222,7 @@ func recordedColumns(services Services, command, resource string, allNamespaces 
 	if err != nil {
 		return nil
 	}
-	entries := make([]state.State, 0, len(history.States)+len(history.Named))
+	var entries []state.State
 	for i := len(history.States) - 1; i >= 0; i-- {
 		entries = append(entries, history.States[i])
 	}
