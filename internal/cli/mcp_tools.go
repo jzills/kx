@@ -411,6 +411,7 @@ type diagnoseInput struct {
 	Since         string     `json:"since,omitempty" jsonschema:"Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting."`
 	ShowHealthy   bool       `json:"showHealthy,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
 	Match         string     `json:"match,omitempty" jsonschema:"Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target."`
+	Limit         int        `json:"limit,omitempty" jsonschema:"Most resources a sweep returns, worst first; every one when absent, at most 1000. of counts what the sweep would have returned without it."`
 }
 
 type diagnoseOutput struct {
@@ -435,6 +436,11 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	}
 	if in.Target != nil && in.Match != "" {
 		return nil, diagnoseOutput{}, errMCPMatchBesideTarget
+	}
+	if in.Target != nil && in.Limit != 0 {
+		return nil, diagnoseOutput{}, errors.New(
+			"'limit' applies without a target — a target already names one resource. " +
+				"Drop it, or drop the target to sweep.")
 	}
 	if err := validMatch(in.Match); err != nil {
 		return nil, diagnoseOutput{}, err
@@ -494,6 +500,15 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 			}
 		}
 		out.Diagnosis.Resources = kept
+	}
+	// Cut here, after the healthy rows are filtered, so a limit counts the
+	// rows it returns — kx diag --limit's "first N of what's shown". Unlike
+	// that flag it cuts only the answer: the sweep was saved whole above, as
+	// list_resources and tree save theirs, so a row past the cut keeps its
+	// index. Of says a cut happened, as it does in kx diag --json.
+	if limit := min(in.Limit, maxListLimit); limit > 0 && len(out.Diagnosis.Resources) > limit {
+		out.Diagnosis.Of = len(out.Diagnosis.Resources)
+		out.Diagnosis.Resources = out.Diagnosis.Resources[:limit]
 	}
 	return nil, out, nil
 }

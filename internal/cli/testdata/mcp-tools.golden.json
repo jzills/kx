@@ -16,6 +16,10 @@
             "description": "Sweep every namespace when there is no target.",
             "type": "boolean"
           },
+          "limit": {
+            "description": "Most resources a sweep returns, worst first; every one when absent, at most 1000. of counts what the sweep would have returned without it.",
+            "type": "integer"
+          },
           "match": {
             "description": "Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target.",
             "type": "string"
