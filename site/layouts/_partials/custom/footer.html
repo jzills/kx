@@ -1,0 +1,68 @@
+{{- /*
+  Fills Hextra's footer, which the theme renders on every page but leaves
+  empty: copyright and "Powered by" are both off in hugo.toml, so without this
+  the footer was a blank band under every page.
+
+  Three short link columns, then a wordmark over the copyright line with the
+  author's profiles across from it. The wordmark is set in text rather than
+  shipped as an image so it takes the active palette's muted color, as the
+  navbar mark does.
+
+  Site links go through relURL, which adds the /kx/ the site is served under;
+  a bare "/docs/" would point at the root of jzills.github.io.
+*/ -}}
+{{- $repo := "https://github.com/jzills/kx" -}}
+{{- /*
+  The bug link opens GitHub's new-issue form with the label set and the body
+  laid out. A query string rather than an issue template under .github/,
+  since this link is the only place that asks for a bug report. The body asks
+  for kx --version's output, because the site can't know which binary the
+  reader runs; the footer's own version is only the latest release.
+*/ -}}
+{{- $bugBody := "**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n```\nkx ...\n```\n\n**Version**\n\nPaste the output of `kx --version`.\n" -}}
+{{- $bugURL := printf "%s/issues/new?%s" $repo (querify "labels" "bug" "body" $bugBody) -}}
+<div class="kx-footer">
+  <nav class="kx-footer__cols" aria-label="Footer">
+    <div class="kx-footer__col">
+      <h2 class="kx-footer__heading">Get started</h2>
+      <ul>
+        <li><a href="{{ "docs/getting-started/install/" | relURL }}">Install</a></li>
+        <li><a href="{{ "docs/getting-started/quickstart/" | relURL }}">Quickstart</a></li>
+        <li><a href="{{ "docs/reference/commands/" | relURL }}">Command reference</a></li>
+      </ul>
+    </div>
+    <div class="kx-footer__col">
+      <h2 class="kx-footer__heading">Learn</h2>
+      <ul>
+        <li><a href="{{ "docs/concepts/" | relURL }}">Concepts</a></li>
+        <li><a href="{{ "docs/guides/" | relURL }}">Guides</a></li>
+        <li><a href="{{ "docs/guides/use-kx-from-an-agent/" | relURL }}">Use kx from an agent</a></li>
+        <li><a href="{{ "llms.txt" | relURL }}">llms.txt</a></li>
+      </ul>
+    </div>
+    <div class="kx-footer__col">
+      <h2 class="kx-footer__heading">Project</h2>
+      <ul>
+        <li><a href="{{ $repo }}">GitHub</a></li>
+        <li><a href="{{ "releases/" | relURL }}">Release notes</a></li>
+        <li><a href="{{ $bugURL }}">Report a bug</a></li>
+        <li><a href="{{ $repo }}/blob/main/CONTRIBUTING.md">Contributing</a></li>
+        <li><a href="{{ $repo }}/blob/main/LICENSE">MIT license</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="kx-footer__wordmark" aria-hidden="true">ZILLS</div>
+  <div class="kx-footer__bottom">
+    <p class="kx-footer__copyright">© {{ now.Year }} Joshua Zillwood</p>
+    <div class="kx-footer__connect">
+      <span>Let's connect</span>
+      <a href="https://github.com/jzills" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        {{- partial "utils/icon.html" (dict "name" "github" "attributes" `height=22 aria-hidden="true"`) -}}
+      </a>
+      <a href="https://www.linkedin.com/in/jzillss/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+        {{- partial "utils/icon.html" (dict "name" "linkedin" "attributes" `height=20 aria-hidden="true"`) -}}
+      </a>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,7 @@
+{{- /* A "major.minor.patch" string as one comparable integer; see releases.html. */ -}}
+{{- $parts := split . "." -}}
+{{- $key := 0 -}}
+{{- if eq (len $parts) 3 -}}
+  {{- $key = add (mul (int (index $parts 0)) 1000000) (mul (int (index $parts 1)) 1000) (int (index $parts 2)) -}}
+{{- end -}}
+{{- return $key -}}
