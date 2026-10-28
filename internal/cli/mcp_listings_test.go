@@ -853,7 +853,7 @@ func TestWriteListingsUsersRefreshOverATaggedEntryIsUntagged(t *testing.T) {
 // Annotations tell a client what a tool can change. With --write-listings the
 // four listing tools save to kx's local state, so they stop claiming to be
 // read-only — non-destructive and idempotent, said explicitly — while the
-// other eight are exactly as they are without the flag.
+// other nine are exactly as they are without the flag.
 func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 	annotations := func(writeListings bool) map[string]*mcp.ToolAnnotations {
 		deps := mcpTestDeps(t, &recordingKubectl{})
@@ -869,8 +869,8 @@ func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 		return byName
 	}
 	off, on := annotations(false), annotations(true)
-	if len(off) != 12 || len(on) != 12 {
-		t.Fatalf("%d and %d tools, want 12 each", len(off), len(on))
+	if len(off) != 13 || len(on) != 13 {
+		t.Fatalf("%d and %d tools, want 13 each", len(off), len(on))
 	}
 	listing := map[string]bool{"list_resources": true, "diagnose": true, "tree": true, "top": true}
 	for name, before := range off {

@@ -69,7 +69,7 @@ func TestMCPToolSurface(t *testing.T) {
 	}
 	want := map[string]bool{ // name → read-only
 		"list_marks": true, "mark": false, "list_resources": true, "diagnose": true, "tree": true,
-		"events": true, "logs": true, "top": true, "describe": true, "get_yaml": true, "scan": true,
+		"events": true, "logs": true, "top": true, "describe": true, "get_yaml": true, "rollout_history": true, "scan": true,
 		// Reads documentation embedded in the binary; the only tool that
 		// touches neither the cluster nor kx's state.
 		"docs": true,
@@ -100,6 +100,16 @@ const podsAllNamespacesOutput = "NAMESPACE   NAME      READY   STATUS    RESTART
 // readOnlyKubectlVerbs are the kubectl subcommands a tool may run: each reads
 // the cluster and changes nothing in it.
 var readOnlyKubectlVerbs = []string{"get", "describe", "logs", "top"}
+
+// readsOnly reports whether a kubectl argv only reads: one of those verbs, or
+// rollout history — never rollout's other subcommands, which restart, pause,
+// resume and undo.
+func readsOnly(args []string) bool {
+	if len(args) >= 2 && args[0] == "rollout" {
+		return args[1] == "history"
+	}
+	return len(args) > 0 && slices.Contains(readOnlyKubectlVerbs, args[0])
+}
 
 // readOnlyCall is one call the read-only guards drive through the protocol.
 type readOnlyCall struct {
@@ -141,6 +151,7 @@ func readOnlyFixture(t *testing.T) (mcpDeps, *recordingKubectl, *fake.Clientset,
 			"apiVersion: v1\nkind: Deployment\nmetadata:\n  name: api\n", // get_yaml
 			secretManifest, // get_yaml on a Secret
 			"Name:         api\nNamespace:    prod\n",              // describe
+			"REVISION  CHANGE-CAUSE\n1         <none>\n",           // rollout_history
 			workloadJSON("api:v1", "db:v1"),                        // scan's image read of the Deployment
 			`{"items":[` + workloadJSON("api:v1", "web:v1") + `]}`, // scan's namespace sweep
 		},
@@ -193,6 +204,7 @@ func readOnlyFixture(t *testing.T) (mcpDeps, *recordingKubectl, *fake.Clientset,
 		{"get_yaml", map[string]any{"target": target}, 1, 0, 0, false},
 		{"get_yaml", map[string]any{"target": secretTarget}, 1, 0, 0, false},
 		{"describe", map[string]any{"target": target}, 1, 0, 0, false},
+		{"rollout_history", map[string]any{"target": target}, 1, 0, 0, false},
 		{"scan", map[string]any{"target": target}, 1, 0, 3, false},
 		{"scan", map[string]any{"namespace": "prod", "engine": "trivy"}, 1, 0, 3, false},
 	}
@@ -214,14 +226,14 @@ func seedUserListing(t *testing.T, deps mcpDeps) {
 }
 
 // Every tool, driven through the protocol with every argument shape it takes,
-// may ask kubectl only to get, describe, log or top, may ask client-go only to
-// read (get/list/watch, never a write verb), and every one of those calls
+// may ask kubectl only to get, describe, log, top or read a rollout's history,
+// may ask client-go only to read (get/list/watch, never a write verb), and every one of those calls
 // must actually succeed — so a tool that started erroring out before it ever
 // reached kubectl or client-go couldn't quietly pass this by making the
 // recorded calls list look short and clean. This is the read-only promise as
 // a test, covering every path that reads a cluster: kubectl (list_resources,
-// mark, events, logs, top, describe, get_yaml, scan) and client-go (diagnose,
-// tree) —
+// mark, events, logs, top, describe, get_yaml, rollout_history, scan) and
+// client-go (diagnose, tree) —
 // and scan's scanner, which may only preflight and summarize.
 //
 // With --write-listings off, which is the default, it is the local-state
@@ -285,16 +297,16 @@ func TestMCPToolsOnlyRead(t *testing.T) {
 		t.Errorf("kubectl ran %d times, want %d: %v", len(kube.runs), wantKubectlRuns, kube.runs)
 	}
 	for _, args := range kube.runs {
-		if len(args) == 0 || !slices.Contains(readOnlyKubectlVerbs, args[0]) {
-			t.Errorf("kubectl %v — only get, describe, logs and top are allowed", args)
+		if !readsOnly(args) {
+			t.Errorf("kubectl %v — only get, describe, logs, top and rollout history are allowed", args)
 		}
 	}
 	if len(kube.probes) != wantKubectlProbes {
 		t.Errorf("kubectl probed %d times, want %d: %v", len(kube.probes), wantKubectlProbes, kube.probes)
 	}
 	for _, args := range kube.probes {
-		if len(args) == 0 || !slices.Contains(readOnlyKubectlVerbs, args[0]) {
-			t.Errorf("kubectl probe %v — only get, describe, logs and top are allowed", args)
+		if !readsOnly(args) {
+			t.Errorf("kubectl probe %v — only get, describe, logs, top and rollout history are allowed", args)
 		}
 	}
 	// A scanner is a subprocess too, and pulls from registries: it may only

@@ -44,13 +44,14 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 | `top` | Current CPU and memory, against limits or Node capacity. |
 | `describe` | `kubectl describe`'s account of one resource, which shows a Secret's sizes, never its values. |
 | `get_yaml` | A resource's manifest, narrowable to a few fields, Secrets redacted. |
+| `rollout_history` | A workload's revisions, or one revision's Pod template. |
 | `scan` | Image CVEs from the configured scanner, at most 50 images a call by default. |
 
 Your MCP client lists each tool's arguments itself, from the server's `tools/list` reply, with a description of every one.
 
 ## What it will never do
 
-Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs` and `top`; client-go only ever `get`s, `list`s and `watch`es.
+Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs`, `top` and `rollout history`; client-go only ever `get`s, `list`s and `watch`es.
 Nothing an agent calls here deletes, patches, scales, execs, port-forwards or edits anything.
 
 The `mark` tool is the one write, and it writes kx's own state, not the cluster — the same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit` resolves the same resource whether you or the agent set it.
