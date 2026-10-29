@@ -172,9 +172,11 @@ func TestSortCompletionPrefersTheListingsOwnScope(t *testing.T) {
 
 // The commands whose columns are kx's own complete them with no listing
 // saved at all; kx top's come from its own listings, never kx get's of the
-// same kind. Each leaves no trailing space, kx scan too, whose flags kx
-// parses by hand: its completion ended in a space, so a comma typed after
-// "critical" began a new word.
+// same kind. A key already typed is not offered again in any spelling the
+// sort accepts for it: "Kind,top_finding," offered kind and top-finding.
+// Each leaves no trailing space, kx scan too, whose flags kx parses by hand:
+// its completion ended in a space, so a comma typed after "critical" began a
+// new word.
 func TestSortCompletesFixedAndTopColumns(t *testing.T) {
 	services := sortSeeded(t)
 	if err := services.State.Save(state.State{
@@ -189,6 +191,8 @@ func TestSortCompletesFixedAndTopColumns(t *testing.T) {
 		want string
 	}{
 		{[]string{"diagnostic", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		{[]string{"diagnostic", "--sort", "Kind,top_finding,"},
+			"Kind,top_finding,name,Kind,top_finding,namespace,Kind,top_finding,verdict"},
 		{[]string{"scan", "--sort", "cr"}, "crit"},
 		{[]string{"scan", "--sort=cr"}, "--sort=crit"},
 		{[]string{"events", "1", "--sort", ""}, "type,reason,kind,age,message"},
