@@ -106,7 +106,7 @@ title = "kubectl, indexed."
     default = "dark"
     displayToggle = true
 
-# Docs leads, then Install, the one landing-page section a reader comes back
+# Documentation leads, then Install, the one landing-page section a reader comes back
 # for. The page's other sections are a scroll away and no longer each take a
 # slot in the bar: a menu of five fragments read as a table of contents,
 # where the tools this site is laid out like name a handful of destinations.
@@ -114,7 +114,7 @@ title = "kubectl, indexed."
 # page, and the bar keeps only a light/dark button.
 [menu]
   [[menu.main]]
-    name = "Docs"
+    name = "Documentation"
     pageRef = "/docs"
     weight = 1
   [[menu.main]]
