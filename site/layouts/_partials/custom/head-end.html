@@ -46,6 +46,14 @@
   <script defer src="{{ $install.RelPermalink }}" integrity="{{ $install.Data.Integrity }}"></script>
 {{- end }}
 
+{{- /* The landing page's scroll reveal; see the file. */ -}}
+{{- if .IsHome }}
+  {{- with resources.Get "js/kx-reveal.js" }}
+    {{- $reveal := . | minify | fingerprint }}
+    <script defer src="{{ $reveal.RelPermalink }}" integrity="{{ $reveal.Data.Integrity }}"></script>
+  {{- end }}
+{{- end }}
+
 {{- /*
   The site's two typefaces, Inter and JetBrains Mono, vendored under
   assets/vendor/ (see THIRD_PARTY_NOTICES.md) rather than fetched from Google

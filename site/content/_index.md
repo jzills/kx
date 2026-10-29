@@ -40,7 +40,7 @@ toc: false
 {{< kx-hero-terminal >}}
 </figure>
 
-<section class="kx-features" id="features" aria-label="What kx does">
+<section class="kx-features" id="features" aria-label="What kx does" data-kx-reveal>
   <a class="kx-feature" href="docs/guides/triage-a-namespace/">
     <div class="kx-feature__head">
       <h2 class="kx-feature__title">Triage a namespace</h2>
@@ -85,7 +85,7 @@ toc: false
   </a>
 </section>
 
-<section class="kx-showcase" id="commands">
+<section class="kx-showcase kx-band" id="commands" data-kx-reveal>
   <div class="kx-showcase__text">
     <h2>Every listing, numbered</h2>
     <p>
@@ -100,7 +100,7 @@ toc: false
   </figure>
 </section>
 
-<section class="kx-showcase" id="reports">
+<section class="kx-showcase" id="reports" data-kx-reveal>
   <div class="kx-showcase__text">
     <h2>Reports in the browser</h2>
     <p>
@@ -126,7 +126,7 @@ toc: false
   </div>
 </section>
 
-<section class="kx-split" id="themes">
+<section class="kx-split kx-band" id="themes" data-kx-reveal>
   <div class="kx-split__text">
     <h2>In your colors</h2>
     <p>
@@ -138,7 +138,7 @@ toc: false
   {{< kx-themes >}}
 </section>
 
-<section class="kx-closing" id="install">
+<section class="kx-closing" id="install" data-kx-reveal>
   <h2>Install kx</h2>
   <p>Every method installs the same prebuilt binary, from PyPI too, with no Python runtime. It needs only <code>kubectl</code> on your PATH.</p>
   <div class="kx-install" data-kx-tabs aria-label="Install with">

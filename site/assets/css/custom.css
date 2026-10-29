@@ -59,6 +59,76 @@ body {
   color: var(--kx-body);
 }
 
+/* The hero's backdrop and the section bands below reach past the content
+   column to the viewport's edges. clip rather than hidden: it trims that
+   overhang without making the body a scroll container, which would break
+   the sticky navbar. */
+body {
+  overflow-x: clip;
+}
+
+/* Depth
+ * ------------------------------------------------------------------
+ * One background color from the navbar to the footer left the page flat:
+ * nothing marked where one section ended and the next began. Three quiet
+ * layers, all drawn from the palette:
+ *
+ *   - behind the hero, a dot grid in the border color and a wash of the
+ *     accent, both fading out before the terminal;
+ *   - every other section on a full-width band a shade off the background;
+ *   - sections easing up into place as they scroll into view
+ *     (assets/js/kx-reveal.js). */
+
+.kx-hero {
+  position: relative;
+  isolation: isolate;
+}
+
+.kx-hero::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -6rem;
+  bottom: -14rem;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(ellipse 50% 45% at 50% 0%, color-mix(in srgb, var(--kx-accent) 9%, transparent), transparent),
+    radial-gradient(circle, var(--kx-border) 1px, transparent 1.5px) 0 0 / 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 30%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 60% 70% at 50% 30%, #000 30%, transparent 75%);
+  pointer-events: none;
+}
+
+/* A band is the section's own background, extended to both edges of the
+   viewport by a shadow of the same color and trimmed by clip-path to the
+   section's height. Halfway between the page and the surface color, so a
+   card or window on it still reads as raised. */
+.kx-band {
+  --kx-band: color-mix(in srgb, var(--kx-surface) 55%, var(--kx-background));
+  background-color: var(--kx-band);
+  box-shadow: 0 0 0 100vmax var(--kx-band);
+  clip-path: inset(0 -100vmax);
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+}
+
+.kx-band + * {
+  margin-top: 5rem;
+}
+
+html.kx-motion [data-kx-reveal] {
+  opacity: 0;
+  transform: translateY(1.25rem);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+html.kx-motion [data-kx-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
 .kx-home h1,
 .kx-home h2 {
   color: var(--kx-body);
