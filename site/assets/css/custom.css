@@ -473,7 +473,15 @@ html.kx-motion [data-kx-reveal].is-revealed {
   display: block;
   border: 1px solid var(--kx-border);
   border-radius: 0.75rem;
-  background-color: var(--kx-surface);
+  /* The shots are cropped to the report's edge, and a report's page is the
+     palette's background color, so padding in that color widens the margin
+     without a seam where the image meets it. */
+  padding: 1.25rem;
+  background-color: var(--kx-background);
+}
+
+.kx-shots .kx-media {
+  padding: 0.75rem;
 }
 
 /* Words beside what they describe; stacked on narrow screens. */
