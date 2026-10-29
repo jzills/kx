@@ -194,9 +194,8 @@ body {
    and border and so, untinted, read as more of the same. color-mix keeps it
    per palette, light ones included. */
 :root {
-  --kx-command-edge: color-mix(in srgb, var(--kx-accent) 35%, var(--kx-border));
-  --kx-command-glow: 0 0 0 1px color-mix(in srgb, var(--kx-accent) 8%, transparent),
-    0 18px 48px -20px color-mix(in srgb, var(--kx-accent) 45%, transparent);
+  --kx-command-edge: color-mix(in srgb, var(--kx-accent) 22%, var(--kx-border));
+  --kx-command-glow: 0 12px 32px -18px color-mix(in srgb, var(--kx-accent) 22%, transparent);
 }
 
 .kx-command {
@@ -240,7 +239,7 @@ body {
   margin-top: 1rem;
   border-color: var(--kx-command-edge);
   box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.45),
-    0 30px 90px -40px color-mix(in srgb, var(--kx-accent) 40%, transparent);
+    0 30px 80px -44px color-mix(in srgb, var(--kx-accent) 16%, transparent);
 }
 
 .kx-window__bar {
@@ -434,7 +433,7 @@ body {
   border: 1px solid var(--kx-border);
   border-radius: 1rem;
   background:
-    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--kx-accent) 14%, transparent), transparent),
+    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--kx-accent) 6%, transparent), transparent),
     var(--kx-surface);
 }
 
@@ -938,7 +937,7 @@ html.dark .kx-mode__icon--moon {
   inset: 0 0 auto;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--kx-accent), transparent);
-  opacity: 0.6;
+  opacity: 0.35;
 }
 
 .hextra-search-results {
