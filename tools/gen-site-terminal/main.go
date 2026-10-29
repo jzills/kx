@@ -18,7 +18,7 @@
 // like demo/render.sh, and its output is committed.
 //
 // Two outputs share the same capture/convert machinery: the single listing
-// under "One listing, every command", and the hero's short sequence, which
+// under "Every listing, numbered", and the hero's short sequence, which
 // replaced an animated recording (see git history) that was never shown at
 // its native resolution and read as blurry because of it. A static capture
 // has no such failure mode — it is exactly the pixels the page ships.
@@ -38,10 +38,12 @@ import (
 
 const outputPath = "site/layouts/_partials/kx-terminal.html"
 
-// command is what the "every command" sample shows. Kept short: the listing
-// is the point, and a taller block pushes the rest of the page below the
-// fold.
-var command = []string{"get", "pods", "-n", "diagnostics"}
+// command is what the "every listing" sample shows: a health sweep, ranked
+// and numbered. Not another `kx get pods`, which the hero already opens
+// with; the point of this section is that every listing kx prints is
+// numbered, a sweep's findings included. Kept short: a taller block pushes
+// the rest of the page below the fold.
+var command = []string{"diag", "-n", "diagnostics"}
 
 // maxRows caps the captured listing so a seeded cluster that grew does not
 // silently lengthen the page.
@@ -53,7 +55,7 @@ const heroOutputPath = "site/layouts/_partials/kx-hero-terminal.html"
 // row from it by number, chained in a single kx session so the indexes
 // resolve the way they would for a reader trying this themselves. Kept to
 // three steps and short caps — this is a first impression, not the proof;
-// "One listing, every command" further down is the proof.
+// "Every listing, numbered" further down is the proof.
 var heroSteps = []struct {
 	command []string
 	maxRows int

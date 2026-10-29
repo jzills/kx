@@ -3,8 +3,10 @@
   empty: copyright and "Powered by" are both off in hugo.toml, so without this
   the footer was a blank band under every page.
 
-  Three short link columns, then a wordmark over the copyright line with the
-  author's profiles across from it. The wordmark is set in text rather than
+  The kx mark, tagline and install command beside three short link columns,
+  then a wordmark over the copyright line with the author's profiles across
+  from it. The brand column is what fills the footer's width; without it the
+  links sat in the left half and the right half was empty. The wordmark is set in text rather than
   shipped as an image so it takes the active palette's muted color, as the
   navbar mark does.
 
@@ -17,40 +19,53 @@
   laid out. A query string rather than an issue template under .github/,
   since this link is the only place that asks for a bug report. The body asks
   for kx --version's output, because the site can't know which binary the
-  reader runs; the footer's own version is only the latest release.
+  reader runs.
 */ -}}
 {{- $bugBody := "**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n```\nkx ...\n```\n\n**Version**\n\nPaste the output of `kx --version`.\n" -}}
 {{- $bugURL := printf "%s/issues/new?%s" $repo (querify "labels" "bug" "body" $bugBody) -}}
 <div class="kx-footer">
-  <nav class="kx-footer__cols" aria-label="Footer">
-    <div class="kx-footer__col">
-      <h2 class="kx-footer__heading">Get started</h2>
-      <ul>
-        <li><a href="{{ "docs/getting-started/install/" | relURL }}">Install</a></li>
-        <li><a href="{{ "docs/getting-started/quickstart/" | relURL }}">Quickstart</a></li>
-        <li><a href="{{ "docs/reference/commands/" | relURL }}">Command reference</a></li>
-      </ul>
+  <div class="kx-footer__top">
+    <div class="kx-footer__about">
+      <a class="kx-footer__mark" href="{{ site.Home.RelPermalink }}" aria-label="kx">
+        {{- with resources.Get "kx-mark.svg" }}{{ .Content | safeHTML }}{{ end -}}
+      </a>
+      <p class="kx-footer__tagline">kubectl, indexed. Every row of a listing gets a number, and every other command takes it.</p>
+      <div class="kx-command kx-footer__command" data-kx-copy>
+        <code class="kx-install__command">curl -fsSL https://jzills.github.io/kx/install.sh | sh</code>
+        <button type="button" class="kx-install__copy" aria-label="Copy the install script command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+        <span class="kx-install__status" role="status"></span>
+      </div>
     </div>
-    <div class="kx-footer__col">
-      <h2 class="kx-footer__heading">Learn</h2>
-      <ul>
-        <li><a href="{{ "docs/concepts/" | relURL }}">Concepts</a></li>
-        <li><a href="{{ "docs/guides/" | relURL }}">Guides</a></li>
-        <li><a href="{{ "docs/guides/use-kx-from-an-agent/" | relURL }}">Use kx from an agent</a></li>
-        <li><a href="{{ "llms.txt" | relURL }}">llms.txt</a></li>
-      </ul>
-    </div>
-    <div class="kx-footer__col">
-      <h2 class="kx-footer__heading">Project</h2>
-      <ul>
-        <li><a href="{{ $repo }}">GitHub</a></li>
-        <li><a href="{{ "releases/" | relURL }}">Release notes</a></li>
-        <li><a href="{{ $bugURL }}">Report a bug</a></li>
-        <li><a href="{{ $repo }}/blob/main/CONTRIBUTING.md">Contributing</a></li>
-        <li><a href="{{ $repo }}/blob/main/LICENSE">MIT license</a></li>
-      </ul>
-    </div>
-  </nav>
+    <nav class="kx-footer__cols" aria-label="Footer">
+      <div class="kx-footer__col">
+        <h2 class="kx-footer__heading">Get started</h2>
+        <ul>
+          <li><a href="{{ "docs/getting-started/install/" | relURL }}">Install</a></li>
+          <li><a href="{{ "docs/getting-started/quickstart/" | relURL }}">Quickstart</a></li>
+          <li><a href="{{ "docs/reference/commands/" | relURL }}">Command reference</a></li>
+        </ul>
+      </div>
+      <div class="kx-footer__col">
+        <h2 class="kx-footer__heading">Learn</h2>
+        <ul>
+          <li><a href="{{ "docs/concepts/" | relURL }}">Concepts</a></li>
+          <li><a href="{{ "docs/guides/" | relURL }}">Guides</a></li>
+          <li><a href="{{ "docs/guides/use-kx-from-an-agent/" | relURL }}">Use kx from an agent</a></li>
+          <li><a href="{{ "llms.txt" | relURL }}">Docs for agents</a></li>
+        </ul>
+      </div>
+      <div class="kx-footer__col">
+        <h2 class="kx-footer__heading">Project</h2>
+        <ul>
+          <li><a href="{{ $repo }}">GitHub</a></li>
+          <li><a href="{{ "releases/" | relURL }}">Release notes</a></li>
+          <li><a href="{{ $bugURL }}">Report a bug</a></li>
+          <li><a href="{{ $repo }}/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="{{ $repo }}/blob/main/LICENSE">MIT license</a></li>
+        </ul>
+      </div>
+    </nav>
+  </div>
 
   <div class="kx-footer__wordmark" aria-hidden="true">ZILLS</div>
   <div class="kx-footer__bottom">

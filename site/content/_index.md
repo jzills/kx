@@ -8,8 +8,8 @@ toc: false
   numbers, and what it does beyond that, each linking into the docs. The words
   that need saying at length live in docs/; this page is the pitch.
 
-  Every color is a --kx-* property from the active palette, so the palette
-  menu restyles this page as it does the docs.
+  Every color is a --kx-* property from the active palette, so a palette
+  picked under "In your colors" restyles this page as it does the docs.
 -->
 
 <section class="kx-hero">
@@ -40,45 +40,57 @@ toc: false
 {{< kx-hero-terminal >}}
 </figure>
 
-<section class="kx-features" id="features" aria-label="What kx does">
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Triage a namespace</h2>
-    <p>Bare <code>kx diag</code> sweeps every workload and ranks what is unhealthy: CrashLoopBackOff, image pull failures, OOMKill risk, stalled rollouts and Services with no endpoints.</p>
-    <a href="docs/guides/triage-a-namespace/">Triage a namespace</a>
-  </div>
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Scan images for CVEs</h2>
-    <p>The <code>kx scan</code> command resolves a workload's unique images and scans each one with Docker Scout, Trivy or Grype, then prints a severity summary.</p>
-    <a href="docs/guides/scan-images/">Scan images</a>
-  </div>
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Ownership, as a tree</h2>
-    <p>The <code>kx tree</code> command walks ownership references from controllers down to containers, the structure kubectl's table output cannot show, and numbers it like any other listing.</p>
-    <a href="docs/guides/ownership-tree/">Ownership trees</a>
-  </div>
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Read a Secret in plaintext</h2>
-    <p>Running <code>kx secret 1 --decode</code> prints keys and values decoded, with binary payloads shown as a placeholder. With <code>-k</code>, one value prints raw, straight into a shell.</p>
-    <a href="docs/guides/read-a-secret/">Read a Secret</a>
-  </div>
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Completion that knows your listing</h2>
-    <p>Typing <code>kx describe &lt;TAB&gt;</code> offers <code>1&nbsp;&nbsp;api-7d8f (Pod)</code>, not a bare number. It answers from saved state, so it never waits on the cluster.</p>
-    <a href="docs/concepts/completion/">Completion</a>
-  </div>
-  <div class="kx-feature">
-    <h2 class="kx-feature__title">Built for agents and CI</h2>
-    <p>The <code>kx mcp</code> server lets an agent read the cluster without writing to it, and <code>--json</code> with <code>--fail-on</code> turns a sweep or a scan into a pipeline gate.</p>
-    <a href="docs/guides/use-kx-from-an-agent/">Use kx from an agent</a>
-  </div>
+<section class="kx-features" id="features" aria-label="What kx does" data-kx-reveal>
+  <a class="kx-feature" href="docs/guides/triage-a-namespace/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Triage a namespace</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="fire" >}}</span>
+    </div>
+    <p>Bare <code>kx diag</code> sweeps every workload and ranks what is unhealthy, from CrashLoopBackOff to Services with no endpoints.</p>
+  </a>
+  <a class="kx-feature" href="docs/guides/scan-images/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Scan images for CVEs</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="shield-check" >}}</span>
+    </div>
+    <p>The <code>kx scan</code> command scans each unique image with Docker Scout, Trivy or Grype and sums up the severities.</p>
+  </a>
+  <a class="kx-feature" href="docs/guides/ownership-tree/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Ownership, as a tree</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="folder-tree" >}}</span>
+    </div>
+    <p>The <code>kx tree</code> command walks ownership from controllers down to containers and numbers it like any other listing.</p>
+  </a>
+  <a class="kx-feature" href="docs/guides/read-a-secret/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Read a Secret in plaintext</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="key" >}}</span>
+    </div>
+    <p>Running <code>kx secret 1 --decode</code> prints every key decoded, or one value raw with <code>-k</code>, straight into a shell.</p>
+  </a>
+  <a class="kx-feature" href="docs/concepts/completion/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Tab completion, by number</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="terminal" >}}</span>
+    </div>
+    <p>Typing <code>kx describe &lt;TAB&gt;</code> offers <code>1&nbsp;&nbsp;api-7d8f (Pod)</code>, from saved state, so it never waits on the cluster.</p>
+  </a>
+  <a class="kx-feature" href="docs/guides/use-kx-from-an-agent/">
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Built for agents and CI</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="sparkles" >}}</span>
+    </div>
+    <p>The <code>kx mcp</code> server gives an agent read-only access, and <code>--fail-on</code> turns a sweep or scan into a pipeline gate.</p>
+  </a>
 </section>
 
-<section class="kx-showcase" id="commands">
+<section class="kx-showcase kx-band" id="commands" data-kx-reveal>
   <div class="kx-showcase__text">
-    <h2>One listing, every command</h2>
+    <h2>Every listing, numbered</h2>
     <p>
-      Indexes come from the last listing and stay put until you list again.
-      Name several at once, a range, or a range left open, as in <code>kx delete 1 2..4 5..</code>, and <code>--sort</code> and <code>--limit</code> decide which rows get the first numbers.
+      A health sweep numbers what it finds the way <code>kx get</code> numbers rows, worst first, so the next command is <code>kx describe 1</code> or <code>kx logs 3</code>.
+      Indexes stay put until you list again, and one command can take several, a range, or a range left open, as in <code>kx delete 1 2..4 5..</code>.
     </p>
     <a href="docs/concepts/indexes/">How indexes work</a>
   </div>
@@ -88,7 +100,7 @@ toc: false
   </figure>
 </section>
 
-<section class="kx-showcase" id="reports">
+<section class="kx-showcase" id="reports" data-kx-reveal>
   <div class="kx-showcase__text">
     <h2>Reports in the browser</h2>
     <p>
@@ -114,7 +126,7 @@ toc: false
   </div>
 </section>
 
-<section class="kx-split" id="themes">
+<section class="kx-split kx-band" id="themes" data-kx-reveal>
   <div class="kx-split__text">
     <h2>In your colors</h2>
     <p>
@@ -126,14 +138,14 @@ toc: false
   {{< kx-themes >}}
 </section>
 
-<section class="kx-closing" id="install">
+<section class="kx-closing" id="install" data-kx-reveal>
   <h2>Install kx</h2>
   <p>Every method installs the same prebuilt binary, from PyPI too, with no Python runtime. It needs only <code>kubectl</code> on your PATH.</p>
-  <div class="kx-install">
+  <div class="kx-install" data-kx-tabs aria-label="Install with">
     <div class="kx-install__card" data-kx-copy>
       <div class="kx-install__head">
-        <div class="kx-install__label">Homebrew</div>
-        <button type="button" class="kx-install__copy" aria-label="Copy the Homebrew install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+        <div class="kx-install__label">brew</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the brew install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
       </div>
       <div class="kx-install__command">brew install jzills/tap/kx</div>
       <span class="kx-install__status" role="status"></span>

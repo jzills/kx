@@ -127,5 +127,24 @@
     }
   };
 
-  apply(stored());
+  // With nothing stored, the reader's system setting picks between the two
+  // defaults, and a change to it is followed until they choose for
+  // themselves.
+  var systemLight = window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: light)")
+    : null;
+
+  function initial() {
+    return stored() || (systemLight && systemLight.matches ? "light" : DEFAULT);
+  }
+
+  if (systemLight && systemLight.addEventListener) {
+    systemLight.addEventListener("change", function () {
+      if (!stored()) {
+        apply(initial());
+      }
+    });
+  }
+
+  apply(initial());
 })();

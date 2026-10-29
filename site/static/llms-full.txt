@@ -6,7 +6,7 @@ The whole of https://jzills.github.io/kx/docs/, as Markdown. Generated from the 
 
 ---
 
-# Documentation
+# Welcome to kx
 
 Source: https://jzills.github.io/kx/docs/
 
