@@ -88,8 +88,8 @@ func TestTaintReportsAnAbsentTaintAsKubectlsErrorNotAStaleNode(t *testing.T) {
 	absent := kubectl.Error{Stderr: `error: taint "spot" not found`}
 
 	kube := &recordingKubectl{err: absent, probeCode: 0}
-	_, _, err := TaintCommand{Kubectl: kube, State: node("node-a")}.
-		Execute(state.Ref{Index: 1}, nil, []string{"spot"}, nil)
+	_, _, err := TaintCommand{Kubectl: kube}.
+		Execute(Resolved{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
 	var stale StaleResourceError
 	if errors.As(err, &stale) {
 		t.Fatalf("err = %v, want kubectl's own error — the Node is still there", err)
@@ -103,8 +103,8 @@ func TestTaintReportsAnAbsentTaintAsKubectlsErrorNotAStaleNode(t *testing.T) {
 
 	// The control: the same failure on a Node the probe cannot find is stale.
 	gone := &recordingKubectl{err: absent, probeCode: 1}
-	_, _, err = TaintCommand{Kubectl: gone, State: node("node-a")}.
-		Execute(state.Ref{Mark: "worker"}, nil, []string{"spot"}, nil)
+	_, _, err = TaintCommand{Kubectl: gone}.
+		Execute(Resolved{Ref: state.Ref{Mark: "worker"}, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want a StaleResourceError for a Node that is gone", err)
 	}

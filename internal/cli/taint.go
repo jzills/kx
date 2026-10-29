@@ -8,7 +8,6 @@ import (
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
-	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -23,25 +22,22 @@ var taintEffects = []string{"NoSchedule", "PreferNoSchedule", "NoExecute"}
 // Nodes tainted in one command is a drain of each of them.
 type TaintCommand struct {
 	Kubectl kubectl.Service
-	State   IndexResolver
 }
 
 // Execute applies the taints in sets and drops those in removes, returning
 // kx's line for it and kubectl's own output, which reportChange prints in its
 // place when an output format was asked for. Both are already validated
 // (parseTaint, parseTaintRemoval). extraArgs are kubectl's own flags,
-// forwarded after kx's.
-func (c TaintCommand) Execute(ref state.Ref, sets, removes, extraArgs []string) (message, output string, err error) {
+// forwarded after kx's. target is resolved once, by the caller, so the Node
+// its checks read is the Node tainted.
+func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string) (message, output string, err error) {
 	if len(sets) == 0 && len(removes) == 0 {
 		return "", "", errors.New(
 			"kx taint needs key=value:Effect to set, or --remove to name a taint to drop — neither was given.")
 	}
-	name, _, kind, err := c.State.Resolve(ref)
-	if err != nil {
-		return "", "", err
-	}
-	if kind != kinds.Node {
-		return "", "", unsupportedKindError("taint", kind, kinds.Set{kinds.Node})
+	name := target.Name
+	if target.Kind != kinds.Node {
+		return "", "", unsupportedKindError("taint", target.Kind, kinds.Set{kinds.Node})
 	}
 	// No -n: a Node is cluster-scoped.
 	args := append([]string{"taint", "node", name}, sets...)
@@ -54,7 +50,7 @@ func (c TaintCommand) Execute(ref state.Ref, sets, removes, extraArgs []string) 
 		// of a taint the Node does not have with `taint "gpu" not found`,
 		// which IsNotFound would take for the Node itself having gone.
 		if c.Kubectl.Probe([]string{"get", "node", name}) != 0 {
-			return "", "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: ref}
+			return "", "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: target.Ref}
 		}
 		// kubectl's words, but no longer a kubectl.Error: withRefresh asks
 		// IsNotFound again (isStale), and would relist the Nodes over it.
@@ -189,16 +185,16 @@ func newTaintCommand(services Services) *cobra.Command {
 		if err := refuseTaintScopeFlag(extra); err != nil {
 			return err
 		}
-		_, namespace, kind, err := services.State.Resolve(ref)
+		name, namespace, kind, err := services.State.Resolve(ref)
 		if err != nil {
 			return err
 		}
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		target := Resolved{Ref: ref, Name: name, Namespace: namespace, Kind: kind}
+		if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
 			return err
 		}
-		message, output, err := TaintCommand{Kubectl: services.Kubectl, State: services.State}.
-			Execute(ref, sets, removes, extra)
+		message, output, err := TaintCommand{Kubectl: services.Kubectl}.
+			Execute(target, sets, removes, extra)
 		if err != nil {
 			return err
 		}
