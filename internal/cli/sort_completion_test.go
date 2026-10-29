@@ -197,3 +197,47 @@ func TestSortCompletesFixedAndTopColumns(t *testing.T) {
 		}
 	}
 }
+
+// A listing taken with another -o or --last-run is not the table a --sort
+// sorts: after kx get pods -o wide, a plain kx get pods --sort offered node,
+// which the plain table refused. Each line completes the columns of the
+// listing in its own shape, the older plain one under a newer wide one
+// included, and a shape never listed completes nothing.
+func TestSortCompletionReadsAListingOfTheSameShape(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	for _, entry := range []state.State{
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod"}},
+			Columns: []string{"name", "ready", "status", "restarts", "age"},
+		},
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod", "--output=wide"}},
+			Columns: []string{"name", "ready", "status", "restarts", "age", "ip", "node"},
+		},
+		{
+			Resources: state.NewResources([]string{"nightly-1"}, kinds.Job), Namespace: "prod",
+			Query:   &state.Query{Resource: "jobs", Args: []string{"--namespace=prod"}, LastRun: true},
+			Columns: []string{"name", "cronjob", "status", "age"},
+		},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"get", "pods", "--sort", "n"}, "name"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "n"}, "name,node"},
+		{[]string{"get", "pods", "-o", "custom-columns=NAME:.metadata.name", "--sort", ""}, ""},
+		{[]string{"get", "jobs", "--last-run", "--sort", "c"}, "cronjob"},
+		{[]string{"get", "jobs", "--sort", ""}, ""},
+	} {
+		if got, _ := completeSort(t, services, tc.line...); strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}
