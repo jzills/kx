@@ -42,33 +42,45 @@ toc: false
 
 <section class="kx-features" id="features" aria-label="What kx does">
   <a class="kx-feature" href="docs/guides/triage-a-namespace/">
-    <span class="kx-feature__icon">{{< kx-icon name="fire" >}}</span>
-    <h2 class="kx-feature__title">Triage a namespace</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Triage a namespace</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="fire" >}}</span>
+    </div>
     <p>Bare <code>kx diag</code> sweeps every workload and ranks what is unhealthy, from CrashLoopBackOff to Services with no endpoints.</p>
   </a>
   <a class="kx-feature" href="docs/guides/scan-images/">
-    <span class="kx-feature__icon">{{< kx-icon name="shield-check" >}}</span>
-    <h2 class="kx-feature__title">Scan images for CVEs</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Scan images for CVEs</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="shield-check" >}}</span>
+    </div>
     <p>The <code>kx scan</code> command scans each unique image with Docker Scout, Trivy or Grype and sums up the severities.</p>
   </a>
   <a class="kx-feature" href="docs/guides/ownership-tree/">
-    <span class="kx-feature__icon">{{< kx-icon name="folder-tree" >}}</span>
-    <h2 class="kx-feature__title">Ownership, as a tree</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Ownership, as a tree</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="folder-tree" >}}</span>
+    </div>
     <p>The <code>kx tree</code> command walks ownership from controllers down to containers and numbers it like any other listing.</p>
   </a>
   <a class="kx-feature" href="docs/guides/read-a-secret/">
-    <span class="kx-feature__icon">{{< kx-icon name="key" >}}</span>
-    <h2 class="kx-feature__title">Read a Secret in plaintext</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Read a Secret in plaintext</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="key" >}}</span>
+    </div>
     <p>Running <code>kx secret 1 --decode</code> prints every key decoded, or one value raw with <code>-k</code>, straight into a shell.</p>
   </a>
   <a class="kx-feature" href="docs/concepts/completion/">
-    <span class="kx-feature__icon">{{< kx-icon name="terminal" >}}</span>
-    <h2 class="kx-feature__title">Completion that knows your listing</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Completion that knows your listing</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="terminal" >}}</span>
+    </div>
     <p>Typing <code>kx describe &lt;TAB&gt;</code> offers <code>1&nbsp;&nbsp;api-7d8f (Pod)</code>, from saved state, so it never waits on the cluster.</p>
   </a>
   <a class="kx-feature" href="docs/guides/use-kx-from-an-agent/">
-    <span class="kx-feature__icon">{{< kx-icon name="sparkles" >}}</span>
-    <h2 class="kx-feature__title">Built for agents and CI</h2>
+    <div class="kx-feature__head">
+      <h2 class="kx-feature__title">Built for agents and CI</h2>
+      <span class="kx-feature__icon">{{< kx-icon name="sparkles" >}}</span>
+    </div>
     <p>The <code>kx mcp</code> server gives an agent read-only access, and <code>--fail-on</code> turns a sweep or scan into a pipeline gate.</p>
   </a>
 </section>

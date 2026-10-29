@@ -298,20 +298,32 @@ body {
 
 .kx-feature__icon {
   display: inline-flex;
-  padding: 0.5rem;
+  flex: none;
+  padding: 0.45rem;
   border-radius: 0.5rem;
   color: var(--kx-accent);
   background-color: color-mix(in srgb, var(--kx-accent) 12%, transparent);
 }
 
+/* The title and its icon share the card's first row, the icon at the far
+   end, so the icon labels the card rather than sitting above it as a row of
+   its own. */
+.kx-feature__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
 .kx-feature__title {
   font-size: 1.05rem;
   font-weight: 600;
-  margin: 1rem 0 0;
+  margin: 0;
 }
 
 .kx-feature p {
-  margin: 0.4rem 0 0;
+  margin: 0.6rem 0 0;
   font-size: 0.93rem;
 }
 
