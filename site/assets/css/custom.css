@@ -594,8 +594,19 @@ html.kx-motion [data-kx-reveal].is-revealed {
   display: flex;
   gap: 0.25rem;
   padding: 0.4rem 0.5rem 0;
-  border-bottom: 1px solid var(--kx-border);
+  /* The rule is an inset shadow rather than a border so the selected tab's
+     underline can sit on it without overflowing the strip: a tab hanging
+     past the edge of an overflow-x: auto box gave it a vertical scrollbar.
+     The strip still scrolls sideways if the labels outgrow it, without a
+     visible bar. */
+  box-shadow: inset 0 -1px 0 var(--kx-border);
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.kx-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .kx-tabs__tab {
@@ -603,7 +614,6 @@ html.kx-motion [data-kx-reveal].is-revealed {
   padding: 0.55rem 0.8rem;
   border: 0;
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   background: none;
   color: var(--kx-muted);
   font: inherit;

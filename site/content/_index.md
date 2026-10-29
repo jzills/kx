@@ -144,8 +144,8 @@ toc: false
   <div class="kx-install" data-kx-tabs aria-label="Install with">
     <div class="kx-install__card" data-kx-copy>
       <div class="kx-install__head">
-        <div class="kx-install__label">Homebrew</div>
-        <button type="button" class="kx-install__copy" aria-label="Copy the Homebrew install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+        <div class="kx-install__label">brew</div>
+        <button type="button" class="kx-install__copy" aria-label="Copy the brew install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
       </div>
       <div class="kx-install__command">brew install jzills/tap/kx</div>
       <span class="kx-install__status" role="status"></span>
