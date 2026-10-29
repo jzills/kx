@@ -71,7 +71,7 @@ toc: false
   </a>
   <a class="kx-feature" href="docs/concepts/completion/">
     <div class="kx-feature__head">
-      <h2 class="kx-feature__title">Index-aware completion</h2>
+      <h2 class="kx-feature__title">Tab completion, by number</h2>
       <span class="kx-feature__icon">{{< kx-icon name="terminal" >}}</span>
     </div>
     <p>Typing <code>kx describe &lt;TAB&gt;</code> offers <code>1&nbsp;&nbsp;api-7d8f (Pod)</code>, from saved state, so it never waits on the cluster.</p>
