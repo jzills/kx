@@ -127,8 +127,8 @@ func argCompletion(cmd *cobra.Command, services Services) func(
 		// and `kx scan --engine <TAB>` offered the positional's candidates
 		// instead. The flags are hand-parsed here for the same reason they are
 		// hand-parsed at run time.
-		if candidates, ok := flagValueCompletion(cmd, services, args, toComplete); ok {
-			return candidates, cobra.ShellCompDirectiveNoFileComp
+		if candidates, directive, ok := flagValueCompletion(cmd, services, args, toComplete); ok {
+			return candidates, directive
 		}
 
 		arg, ok := argAt(cmd, len(positionalsOnly(cmd, args)))
@@ -306,11 +306,12 @@ func lookupFlagValue(cmd *cobra.Command, name string) (completer, bool) {
 // caller falls through to the positional path.
 func flagValueCompletion(
 	cmd *cobra.Command, services Services, args []string, toComplete string,
-) ([]string, bool) {
+) ([]string, cobra.ShellCompDirective, bool) {
 	if name, prefix, found := strings.Cut(toComplete, "="); found && strings.HasPrefix(name, "--") {
-		complete, ok := lineFlagValue(cmd, args, strings.TrimPrefix(name, "--"))
+		flag := strings.TrimPrefix(name, "--")
+		complete, ok := lineFlagValue(cmd, args, flag)
 		if !ok {
-			return nil, false
+			return nil, 0, false
 		}
 		// The shell replaces the whole word, so each candidate has to carry
 		// the "--flag=" it is completing after.
@@ -318,23 +319,33 @@ func flagValueCompletion(
 		for _, candidate := range complete(services, prefix) {
 			candidates = append(candidates, name+"="+candidate)
 		}
-		return candidates, true
+		return candidates, flagValueDirective(flag), true
 	}
 
 	if len(args) == 0 {
-		return nil, false
+		return nil, 0, false
 	}
 	flag := valueFlag(cmd, args[len(args)-1])
 	if flag == "" {
-		return nil, false
+		return nil, 0, false
 	}
 	complete, ok := lineFlagValue(cmd, args, flag)
 	if !ok {
 		// A flag that takes a value, but not one kx can suggest values for —
 		// a label selector, say. Still not a filename.
-		return nil, true
+		return nil, cobra.ShellCompDirectiveNoFileComp, true
 	}
-	return complete(services, toComplete), true
+	return complete(services, toComplete), flagValueDirective(flag), true
+}
+
+// flagValueDirective is the directive for a completed flag value: never a
+// filename, and for --sort no trailing space, so a comma and the next key can
+// follow the one just completed, as the registered --sort completer leaves it.
+func flagValueDirective(flag string) cobra.ShellCompDirective {
+	if flag == "sort" {
+		return cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+	}
+	return cobra.ShellCompDirectiveNoFileComp
 }
 
 // lineFlagValue is lookupFlagValue with the line so far, which a --sort's
