@@ -339,9 +339,10 @@ func rescoped(columns []string, allNamespaces bool) []string {
 
 // sortCandidates completes the last key of a --sort spec against columns,
 // keeping what is typed ahead of it: "status,-re" offers "status,-restarts".
-// A column the spec already names is not offered twice, however its key was
-// spelled: keys are read through index.ColumnKey, as the sort itself reads
-// them, so "Kind" and "top_finding" name kind and top-finding.
+// A column the spec already names is not offered twice, and the key being
+// typed matches whatever way it is spelled: both are read through
+// index.ColumnKey, as the sort itself reads them, so "Kind" and "top_finding"
+// name kind and top-finding, and "nominated_n" completes nominated-node.
 func sortCandidates(columns []string, toComplete string) []string {
 	head, last := "", toComplete
 	if comma := strings.LastIndex(toComplete, ","); comma >= 0 {
@@ -356,7 +357,7 @@ func sortCandidates(columns []string, toComplete string) []string {
 	}
 	var candidates []string
 	for _, column := range columns {
-		if !named[column] && strings.HasPrefix(column, strings.ToLower(last)) {
+		if !named[column] && strings.HasPrefix(column, index.ColumnKey(last)) {
 			candidates = append(candidates, head+column)
 		}
 	}

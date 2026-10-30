@@ -226,7 +226,7 @@ func TestSortCompletionReadsAListingOfTheSameShape(t *testing.T) {
 		{
 			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
 			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod", "--output=wide"}},
-			Columns: []string{"name", "ready", "status", "restarts", "age", "ip", "node"},
+			Columns: []string{"name", "ready", "status", "restarts", "age", "ip", "node", "nominated-node"},
 		},
 		{
 			Resources: state.NewResources([]string{"nightly-1"}, kinds.Job), Namespace: "prod",
@@ -243,7 +243,13 @@ func TestSortCompletionReadsAListingOfTheSameShape(t *testing.T) {
 		want string
 	}{
 		{[]string{"get", "pods", "--sort", "n"}, "name"},
-		{[]string{"get", "pods", "-o", "wide", "--sort", "n"}, "name,node"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "n"}, "name,node,nominated-node"},
+		// The sort reads a typed key through ColumnKey, so these spellings
+		// are the ones it accepts; completion matched the prefix literally
+		// and offered nothing for them.
+		{[]string{"get", "pods", "-o", "wide", "--sort", "nominated_n"}, "nominated-node"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "NOMINATED-N"}, "nominated-node"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "nominated-n"}, "nominated-node"},
 		{[]string{"get", "pods", "-o", "custom-columns=NAME:.metadata.name", "--sort", ""}, ""},
 		{[]string{"get", "jobs", "--last-run", "--sort", "c"}, "cronjob"},
 		{[]string{"get", "jobs", "--sort", ""}, ""},
