@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/kinds"
@@ -63,6 +64,13 @@ func TestTaintRefusesBeforeKubectlRuns(t *testing.T) {
 			"Invalid value for the effect in 'dedicated=gpu:NoSched': 'NoSched'. Accepted values: NoSchedule, PreferNoSchedule, NoExecute."},
 		{kinds.Node, []string{"1", "dedicated-"},
 			"'dedicated-' is kubectl's spelling for removing a taint — use '--remove dedicated' instead."},
+		// The suggestion has to be a --remove value kx accepts: a taint is
+		// removed by key and effect, never by value, so the value is
+		// dropped rather than handed back to be refused again.
+		{kinds.Node, []string{"1", "dedicated=gpu:NoSchedule-"},
+			"'dedicated=gpu:NoSchedule-' is kubectl's spelling for removing a taint — use '--remove dedicated:NoSchedule' instead."},
+		{kinds.Node, []string{"1", "dedicated=gpu-"},
+			"'dedicated=gpu-' is kubectl's spelling for removing a taint — use '--remove dedicated' instead."},
 		{kinds.Node, []string{"1", "--remove", "dedicated-"},
 			"Invalid value for '--remove': 'dedicated-' ends in kubectl's removal '-' — '--remove' adds it, so give the key as 'dedicated'."},
 		{kinds.Node, []string{"1", "--remove", "dedicated-:NoSchedule"},
@@ -251,5 +259,35 @@ func TestTaintDeclinedLeavesTheNodeAloneAndNamesAnMCPListing(t *testing.T) {
 	want := "Evict every Pod on Node/node-a that does not tolerate 'maintenance:NoExecute' — from a kx mcp listing?"
 	if prompted != want {
 		t.Errorf("prompt = %q, want %q", prompted, want)
+	}
+}
+
+// The --remove value parseTaint suggests has to be one parseTaintRemoval
+// accepts, or the refusal sends the reader into the next one: setting
+// 'dedicated=gpu:NoSchedule-' suggested '--remove dedicated=gpu:NoSchedule',
+// which --remove answered with "not a valid taint key".
+func TestTaintRemovalSuggestionIsAcceptedByRemove(t *testing.T) {
+	for _, written := range []string{
+		"dedicated-",
+		"dedicated:NoSchedule-",
+		"dedicated=gpu-",
+		"dedicated=gpu:NoSchedule-",
+		"dedicated=gpu:NoExecute-",
+	} {
+		err := parseTaint(written)
+		if err == nil {
+			t.Errorf("parseTaint(%q) = nil, want the removal-spelling refusal", written)
+			continue
+		}
+		_, suggestion, found := strings.Cut(err.Error(), "use '--remove ")
+		if !found {
+			t.Errorf("parseTaint(%q) = %q, want it to suggest --remove", written, err)
+			continue
+		}
+		suggestion, _, _ = strings.Cut(suggestion, "'")
+		if err := parseTaintRemoval(suggestion); err != nil {
+			t.Errorf("setting %q suggested '--remove %s', which --remove then refuses: %v",
+				written, suggestion, err)
+		}
 	}
 }
