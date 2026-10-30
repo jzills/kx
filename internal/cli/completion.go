@@ -182,10 +182,9 @@ var flagValues = map[string]completer{
 // time it saved a listing of that kind (recordedColumns). nil for a command with no --sort,
 // and for a kind kx has not listed yet.
 func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
-	shape := lineShape(cmd)
-	if shape.unknown {
-		return nil
-	}
+	// The commands whose columns are kx's own answer first: the table is
+	// the same whatever flags the line carries, so there is no shape to
+	// match and no listing to match it to.
 	switch cmd.Name() {
 	case "diagnostic":
 		return index.ColumnKeys(sweepHeaders)
@@ -193,6 +192,14 @@ func sortColumns(cmd *cobra.Command, services Services, args []string) []string 
 		return index.ColumnKeys(render.ScanHeaders())
 	case "events":
 		return index.ColumnKeys(render.EventsHeaders)
+	}
+	// The rest print kubectl's columns, read back from a saved listing, so
+	// only a line whose shape kx can match to one has columns to offer.
+	shape := lineShape(cmd)
+	if shape.unknown {
+		return nil
+	}
+	switch cmd.Name() {
 	case "top":
 		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 &&
 			kinds.Normalize(positionals[0]) == kinds.Node {
@@ -218,12 +225,13 @@ type listingShape struct {
 	allNamespaces bool
 	output        string
 	lastRun       bool
+	noLimits      bool
 	unknown       bool
 }
 
 // shapeFlags are the flags listingShape models itself, by long name and by
 // the shorthand a saved listing can carry.
-var shapeFlags = []string{"all-namespaces", "A", "output", "o", "last-run"}
+var shapeFlags = []string{"all-namespaces", "A", "output", "o", "last-run", "no-limits"}
 
 // columnNeutralFlags leave a listing's columns alone: they pick which
 // resources are listed or which cluster they come from, or they are kx's own
@@ -266,6 +274,8 @@ func lineShape(cmd *cobra.Command) listingShape {
 			shape.output = flag.Value.String()
 		case "last-run":
 			shape.lastRun = flag.Value.String() == "true"
+		case "no-limits":
+			shape.noLimits = flag.Value.String() == "true"
 		default:
 			if flagShapesColumns(flag.Name) {
 				shape.unknown = true
@@ -312,6 +322,11 @@ func recordedColumns(services Services, command, resource string, shape listingS
 		}
 		if output, _, _ := extractString(query.Args, "--output", "-o"); output != shape.output ||
 			query.LastRun != shape.lastRun {
+			continue
+		}
+		// kx top records its own --no-limits beside kubectl's flags, as
+		// refresh reads it back: without it the table has no CPU%/MEM%.
+		if noLimits, _ := extractBool(query.Args, "--no-limits"); noLimits != shape.noLimits {
 			continue
 		}
 		if slices.ContainsFunc(query.Args, flagShapesColumns) {

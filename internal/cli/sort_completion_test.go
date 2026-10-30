@@ -191,6 +191,12 @@ func TestSortCompletesFixedAndTopColumns(t *testing.T) {
 		want string
 	}{
 		{[]string{"diagnostic", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		// Their columns are kx's own, so a flag on the line changes nothing
+		// about them: each of these completed nothing once the shape gate
+		// ran for every command.
+		{[]string{"diagnostic", "--show-healthy", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		{[]string{"diagnostic", "--since", "1h", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		{[]string{"events", "1", "--since", "30m", "--sort", ""}, "type,reason,kind,age,message"},
 		{[]string{"diagnostic", "--sort", "Kind,top_finding,"},
 			"Kind,top_finding,name,Kind,top_finding,namespace,Kind,top_finding,verdict"},
 		{[]string{"scan", "--sort", "cr"}, "crit"},
@@ -279,6 +285,13 @@ func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
 			Query:   &state.Query{Resource: "deploy", Args: []string{"--namespace=prod", "--label-columns=app"}},
 			Columns: []string{"name", "ready", "up-to-date", "available", "age", "app"},
 		},
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query: &state.Query{
+				Resource: "pods", Args: []string{"--namespace=prod", "--no-limits"}, Command: state.CommandTop,
+			},
+			Columns: []string{"name", "cpu", "memory"},
+		},
 	} {
 		if err := services.State.Save(entry); err != nil {
 			t.Fatal(err)
@@ -293,7 +306,9 @@ func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
 		{[]string{"top", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
 		{[]string{"top", "--selector", "app=api", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
 		{[]string{"top", "--containers", "--sort", ""}, ""},
-		{[]string{"top", "--no-limits", "--sort", ""}, ""},
+		// --no-limits is kx's own and recorded on the listing it took, so
+		// its shape is one kx can match, each line to its own table.
+		{[]string{"top", "--no-limits", "--sort", ""}, "name,cpu,memory"},
 		// The only Deployment listing was taken with -L, so it is no plain
 		// table, and the plain line gets nothing.
 		{[]string{"get", "deploy", "--sort", ""}, ""},
