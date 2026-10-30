@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,20 @@ func (c DescribeCommand) Execute(ref state.Ref, extraArgs []string) error {
 	if err != nil {
 		return err
 	}
-	args := append([]string{"describe", string(kind), name, "-n", namespace}, extraArgs...)
+	// Kind/name as one argument, so kubectl describes that resource or fails
+	// on it: given the kind and name apart, it answers a name with no exact
+	// match by describing every resource the name prefixes, and exits 0, so
+	// an index whose resource had gone described another one and never
+	// reached the refresh. Beside a name forwarded after the index (kx
+	// describe 1 redis) kubectl refuses Kind/name, so that keeps the two —
+	// kubectl's flags are forwarded as one --long=value word each, so a word
+	// without a leading dash is a name.
+	subject := []string{string(kind) + "/" + name}
+	if slices.ContainsFunc(extraArgs, func(arg string) bool { return !strings.HasPrefix(arg, "-") }) {
+		subject = []string{string(kind), name}
+	}
+	args := append(append([]string{"describe"}, subject...), "-n", namespace)
+	args = append(args, extraArgs...)
 	code, err := c.Kubectl.RunInteractive(args, false)
 	if err != nil {
 		return err

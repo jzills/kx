@@ -184,16 +184,28 @@ func joinArgs(args []string) string { return strings.Join(args, " ") }
 
 func noStatus(string) func() { return func() {} }
 
+// The indexed resource is one Kind/name argument, which kubectl matches
+// exactly: as two, kubectl answered a name that had gone by describing every
+// resource it prefixes, exit 0, so the stale index never refreshed. Beside a
+// name forwarded after the index, which kubectl refuses next to Kind/name,
+// the two stay apart.
 func TestDescribeBuildsKubectlCommand(t *testing.T) {
-	kubectl := &recordingKubectl{}
-	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.
-		Execute(state.Ref{Index: 1}, []string{"--show-events=false"})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	want := "describe Pod nginx -n prod --show-events=false"
-	if got := joinArgs(kubectl.interactive[0]); got != want {
-		t.Errorf("args = %q, want %q", got, want)
+	for _, tc := range []struct {
+		extra []string
+		want  string
+	}{
+		{[]string{"--show-events=false"}, "describe Pod/nginx -n prod --show-events=false"},
+		{nil, "describe Pod/nginx -n prod"},
+		{[]string{"redis", "--show-events=false"}, "describe Pod nginx -n prod redis --show-events=false"},
+	} {
+		kubectl := &recordingKubectl{}
+		err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, tc.extra)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", tc.extra, err)
+		}
+		if got := joinArgs(kubectl.interactive[0]); got != tc.want {
+			t.Errorf("Execute(%v): args = %q, want %q", tc.extra, got, tc.want)
+		}
 	}
 }
 
