@@ -1393,7 +1393,7 @@ kx taint 1 dedicated=infra:NoSchedule --overwrite
 
 The effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute`.
 The first two only steer the scheduler.
-A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does.
+A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does, and asks before setting one unless you pass `--yes`.
 It also refuses kubectl's `--all` and `--selector`: beside a Node's name, kubectl taint applies them to every Node they select rather than refusing the pair, so `--all` would taint the whole cluster.
 
 ## Nodes are not in a namespace
@@ -1837,7 +1837,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
-| [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
+| [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
 | [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
@@ -3477,7 +3477,7 @@ Set or remove taints on an indexed Node.
 
 Sets or removes taints on one indexed Node — key=value:Effect or key:Effect to set, --remove to drop one. The effect is NoSchedule, PreferNoSchedule or NoExecute.
 
-One index only, as for kx drain: a NoExecute taint evicts every Pod that does not tolerate it, so tainting a range of Nodes in one command drains each of them.
+One index only, as for kx drain: a NoExecute taint evicts every Pod that does not tolerate it, so tainting a range of Nodes in one command drains each of them. Setting one asks first, unless you pass --yes.
 
 kubectl's own taint flags pass through, --overwrite and --dry-run among them. --all and --selector are refused, since beside a Node's name kubectl taint applies them to every Node they select.
 
@@ -3503,6 +3503,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 | `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `--remove strings` | Taint to remove, as key or key:Effect (repeatable) |
+| `-y, --yes` | Skip the confirmation prompt a NoExecute taint asks |
 
 ## Passthrough options
 
@@ -3528,6 +3529,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 ```bash
 kx taint 1 dedicated=gpu:NoSchedule
 kx taint 1 --remove dedicated
+kx taint 1 maintenance:NoExecute -y
 kx taint 1 dedicated=infra:NoSchedule --overwrite
 kx taint 1 maintenance:NoExecute --dry-run=server
 ```

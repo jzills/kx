@@ -8,7 +8,7 @@ weight: 27
 
 Sets or removes taints on one indexed Node — key=value:Effect or key:Effect to set, --remove to drop one. The effect is NoSchedule, PreferNoSchedule or NoExecute.
 
-One index only, as for kx drain: a NoExecute taint evicts every Pod that does not tolerate it, so tainting a range of Nodes in one command drains each of them.
+One index only, as for kx drain: a NoExecute taint evicts every Pod that does not tolerate it, so tainting a range of Nodes in one command drains each of them. Setting one asks first, unless you pass --yes.
 
 kubectl's own taint flags pass through, --overwrite and --dry-run among them. --all and --selector are refused, since beside a Node's name kubectl taint applies them to every Node they select.
 
@@ -34,6 +34,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 | `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
 | `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
 | `--remove strings` | Taint to remove, as key or key:Effect (repeatable) |
+| `-y, --yes` | Skip the confirmation prompt a NoExecute taint asks |
 
 ## Passthrough options
 
@@ -59,6 +60,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 ```bash
 kx taint 1 dedicated=gpu:NoSchedule
 kx taint 1 --remove dedicated
+kx taint 1 maintenance:NoExecute -y
 kx taint 1 dedicated=infra:NoSchedule --overwrite
 kx taint 1 maintenance:NoExecute --dry-run=server
 ```
