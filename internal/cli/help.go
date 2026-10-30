@@ -568,10 +568,48 @@ func rewriteArgs(root *cobra.Command, args []string) []string {
 		return rewriteKindAlias(root, args)
 	}
 	line := rewriteKindAlias(root, args[1:len(args)-1])
+	line, toComplete := attachFlagValue(root, line, args[len(args)-1])
 	rewritten := make([]string, 0, len(line)+2)
 	rewritten = append(rewritten, args[0])
 	rewritten = append(rewritten, line...)
-	return append(rewritten, args[len(args)-1])
+	return append(rewritten, toComplete)
+}
+
+// attachFlagValue joins the flag waiting for a value to the value being
+// completed, when that value begins with a dash: `--sort` and `-re` become
+// the single word `--sort=-re`.
+//
+// Cobra decides whether it is completing a flag's value before it parses the
+// line, and reads any word starting with '-' as the opening of a flag name
+// unless it carries an '='. So the flag was left without its value, parsing
+// refused the line — `flag needs an argument: --sort` — and cobra answered
+// with ShellCompDirectiveDefault, which is the shell's *filename* completion.
+// `kx get pods --sort -re<TAB>` offered the working directory, while
+// `--sort=-re` offered the columns. Descending is the spelling kx's own help
+// leads with (`kx top --sort -mem%,-cpu%`), so the form most likely to be
+// typed was the one that completed least.
+//
+// Only a flag that requires a value is joined. One with an optional value
+// (NoOptDefVal) stands on its own, so the next word really is another flag,
+// and a command that parses its own flags (kx scan) already reaches its
+// completer by this path's absence.
+func attachFlagValue(root *cobra.Command, line []string, toComplete string) ([]string, string) {
+	if len(line) == 0 || !strings.HasPrefix(toComplete, "-") || strings.Contains(toComplete, "=") {
+		return line, toComplete
+	}
+	cmd, _, err := root.Find(line)
+	if err != nil || cmd == nil || cmd.DisableFlagParsing {
+		return line, toComplete
+	}
+	token := line[len(line)-1]
+	name := valueFlag(cmd, token)
+	if name == "" {
+		return line, toComplete
+	}
+	if flag := cmd.Flags().Lookup(name); flag == nil || flag.NoOptDefVal != "" {
+		return line, toComplete
+	}
+	return line[:len(line)-1], token + "=" + toComplete
 }
 
 func rewriteKindAlias(root *cobra.Command, args []string) []string {

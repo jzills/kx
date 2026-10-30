@@ -326,3 +326,80 @@ func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
 		}
 	}
 }
+
+// The descending spelling of a key completes, which is the spelling kx's own
+// help leads with (`kx top --sort -mem%,-cpu%`).
+//
+// Cobra decides whether it is completing a flag's value before it parses the
+// line, and reads a word opening with '-' as a flag name unless it carries
+// an '='. So `--sort` was left without its value, parsing refused the line,
+// and cobra answered ShellCompDirectiveDefault — the shell's filename
+// completion, which offered the working directory. The directive is asserted
+// here for that reason: candidates alone would not catch the fallback.
+func TestSortCompletesADescendingKey(t *testing.T) {
+	services := sortSeeded(t)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+		Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod"}, Command: state.CommandTop},
+		Columns: []string{"name", "cpu", "memory", "cpu%", "mem%"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"get", "pods", "--sort", "-re"}, "-ready,-restarts"},
+		{[]string{"top", "--sort", "-c"}, "-cpu,-cpu%"},
+		{[]string{"events", "1", "--sort", "-ty"}, "-type"},
+		// Already worked, and must keep working: the attached spelling
+		// cobra reads as a value itself, and kx scan, which parses its own
+		// flags and so never took this path.
+		{[]string{"get", "pods", "--sort=-re"}, "-ready,-restarts"},
+		{[]string{"scan", "--sort", "-cr"}, "-crit"},
+		// The ascending spelling is untouched.
+		{[]string{"get", "pods", "--sort", "re"}, "ready,restarts"},
+	} {
+		got, directive := completeSort(t, services, tc.line...)
+		if strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+		want := int(cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace)
+		if directive != want {
+			t.Errorf("kx %s<TAB> directive %d, want %d — %d is Default, the shell's filenames",
+				strings.Join(tc.line, " "), directive, want, int(cobra.ShellCompDirectiveDefault))
+		}
+	}
+}
+
+// Only a flag still waiting for a value swallows the next word: a dash that
+// opens a flag name is left alone, or joining the two would complete flag
+// values where the reader is naming a flag.
+func TestADashAfterAFlagsValueStillCompletesFlagNames(t *testing.T) {
+	services := sortSeeded(t)
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		// Nothing is waiting for a value: the previous word is one.
+		{[]string{"get", "pods", "--match", "api", "--so"}, "--sort"},
+		{[]string{"get", "pods", "--so"}, "--sort"},
+		// A boolean takes no value, so the dash after it opens a flag.
+		{[]string{"get", "pods", "--no-headers", "--so"}, "--sort"},
+		// --cascade's value is optional (NoOptDefVal), so it too is
+		// complete on its own and the next word is a flag of its own.
+		{[]string{"delete", "1", "--cascade", "--fo"}, "--force"},
+	} {
+		got, _ := completeSort(t, services, tc.line...)
+		found := false
+		for _, candidate := range got {
+			if name, _, _ := strings.Cut(candidate, "\t"); name == tc.want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("kx %s<TAB> = %v, want the %s flag name among them",
+				strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}
