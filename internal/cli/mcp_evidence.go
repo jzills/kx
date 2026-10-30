@@ -529,8 +529,10 @@ func (d mcpDeps) describe(_ context.Context, _ *mcp.CallToolRequest, in describe
 	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
 
 	// Through Run, not the RunInteractive kx describe streams with: the text
-	// is the result, and the server's stdout is the protocol.
-	args := []string{"describe", string(target.Kind), target.Name}
+	// is the result, and the server's stdout is the protocol. Kind/name as one
+	// argument: given the kind and name apart, kubectl answers a name with no
+	// exact match by describing every resource whose name starts with it.
+	args := []string{"describe", string(target.Kind) + "/" + target.Name}
 	if target.Namespace != "" {
 		args = append(args, "-n", target.Namespace)
 	}

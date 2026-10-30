@@ -863,7 +863,9 @@ func TestEventsToolStaleIndexTargetIsATranslatedError(t *testing.T) {
 }
 
 // describe asks kubectl to describe the resolved target, never a spelling the
-// caller typed, and returns kubectl's text whole.
+// caller typed, and returns kubectl's text whole. The target is one Kind/name
+// argument: as two, kubectl answered a name with no exact match with every
+// resource whose name it prefixes, labeled as the target.
 func TestDescribeToolDescribesTheResolvedTarget(t *testing.T) {
 	const text = "Name:         api\nNamespace:    prod\nReplicas:     2 desired | 0 available\n"
 	kube := &recordingKubectl{output: text}
@@ -872,7 +874,7 @@ func TestDescribeToolDescribesTheResolvedTarget(t *testing.T) {
 		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
 	}), &out)
 
-	want := "describe Deployment api -n prod"
+	want := "describe Deployment/api -n prod"
 	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != want {
 		t.Fatalf("kubectl runs = %v, want one %q", kube.runs, want)
 	}
@@ -898,8 +900,8 @@ func TestDescribeToolLeavesTheNamespaceOffANodeAndNamesTheMark(t *testing.T) {
 	decodeStructured(t, callTool(t, connectMCP(t, deps), "describe",
 		map[string]any{"target": map[string]any{"mark": "@worker"}}), &out)
 
-	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != "describe Node node-a" {
-		t.Fatalf("kubectl runs = %v, want one 'describe Node node-a'", kube.runs)
+	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != "describe Node/node-a" {
+		t.Fatalf("kubectl runs = %v, want one 'describe Node/node-a'", kube.runs)
 	}
 	if out.Mark != "worker" || out.Namespace != "" {
 		t.Errorf("mark %q namespace %q, want worker and none", out.Mark, out.Namespace)
