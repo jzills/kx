@@ -113,7 +113,7 @@ func TestTaintReportsAnAbsentTaintAsKubectlsErrorNotAStaleNode(t *testing.T) {
 	taint := func(kube *recordingKubectl, ref state.Ref) error {
 		t.Helper()
 		_, _, err := TaintCommand{Kubectl: kube}.
-			Execute(Resolved{Ref: ref, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
+			Execute(Resolved{Ref: ref, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil, false, "")
 		return err
 	}
 
@@ -175,5 +175,81 @@ func TestTaintReportsWhatChanged(t *testing.T) {
 		if out.String() != tc.want {
 			t.Errorf("kx taint %s printed %q, want %q", joinArgs(tc.args), out.String(), tc.want)
 		}
+	}
+}
+
+// A NoExecute taint evicts every Pod that does not tolerate it, so it is
+// asked about the way kx drain's eviction is. The other two effects evict
+// nothing and are set without a word, a dry run changes nothing to ask
+// about, and --yes skips the question as it does for drain.
+func TestTaintConfirmsOnlyAnEvictingTaint(t *testing.T) {
+	node := Resolved{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node}
+	for _, tc := range []struct {
+		name   string
+		sets   []string
+		extra  []string
+		yes    bool
+		prompt string
+	}{
+		{"NoExecute asks", []string{"maintenance:NoExecute"}, nil, false,
+			"Evict every Pod on Node/node-a that does not tolerate 'maintenance:NoExecute'?"},
+		{"several are named together", []string{"a=1:NoExecute", "b=2:NoExecute"}, nil, false,
+			"Evict every Pod on Node/node-a that does not tolerate 'a=1:NoExecute', 'b=2:NoExecute'?"},
+		{"NoSchedule does not ask", []string{"dedicated=gpu:NoSchedule"}, nil, false, ""},
+		{"PreferNoSchedule does not ask", []string{"dedicated=gpu:PreferNoSchedule"}, nil, false, ""},
+		{"a removal does not ask", nil, nil, false, ""},
+		{"--yes skips the question", []string{"maintenance:NoExecute"}, nil, true, ""},
+		{"a dry run has nothing to ask about", []string{"maintenance:NoExecute"},
+			[]string{"--dry-run=server"}, false, ""},
+	} {
+		kube := &recordingKubectl{output: "node/node-a tainted"}
+		var prompted string
+		removes := []string{}
+		if len(tc.sets) == 0 {
+			removes = []string{"spot"}
+		}
+		_, _, err := TaintCommand{
+			Kubectl: kube, Confirm: func(m string) error { prompted = m; return nil },
+		}.Execute(node, tc.sets, removes, tc.extra, tc.yes, "")
+		if err != nil {
+			t.Errorf("%s: Execute: %v", tc.name, err)
+			continue
+		}
+		if prompted != tc.prompt {
+			t.Errorf("%s: prompt = %q, want %q", tc.name, prompted, tc.prompt)
+		}
+		if len(kube.runs) != 1 {
+			t.Errorf("%s: kubectl ran %v, want the taint once", tc.name, kube.runs)
+		}
+	}
+}
+
+// Declining the prompt stops the taint, so the Node is left alone, and the
+// prompt names where the index came from as drain's does.
+func TestTaintDeclinedLeavesTheNodeAloneAndNamesAnMCPListing(t *testing.T) {
+	declined := errors.New("aborted")
+	kube := &recordingKubectl{}
+	_, _, err := TaintCommand{
+		Kubectl: kube, Confirm: func(string) error { return declined },
+	}.Execute(Resolved{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node},
+		[]string{"maintenance:NoExecute"}, nil, nil, false, "")
+	if !errors.Is(err, declined) {
+		t.Fatalf("err = %v, want the decline", err)
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %v after the prompt was declined", kube.runs)
+	}
+
+	var prompted string
+	if _, _, err := (TaintCommand{
+		Kubectl: &recordingKubectl{output: "ok"},
+		Confirm: func(m string) error { prompted = m; return nil },
+	}).Execute(Resolved{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node},
+		[]string{"maintenance:NoExecute"}, nil, nil, false, state.SourceMCP); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := "Evict every Pod on Node/node-a that does not tolerate 'maintenance:NoExecute' — from a kx mcp listing?"
+	if prompted != want {
+		t.Errorf("prompt = %q, want %q", prompted, want)
 	}
 }

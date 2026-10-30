@@ -22,6 +22,9 @@ var taintEffects = []string{"NoSchedule", "PreferNoSchedule", "NoExecute"}
 // Nodes tainted in one command is a drain of each of them.
 type TaintCommand struct {
 	Kubectl kubectl.Service
+	// Confirm asks for consent before a NoExecute taint, returning an error
+	// to abort, as kx drain's does.
+	Confirm func(string) error
 }
 
 // Execute applies the taints in sets and drops those in removes, returning
@@ -29,8 +32,11 @@ type TaintCommand struct {
 // place when an output format was asked for. Both are already validated
 // (parseTaint, parseTaintRemoval). extraArgs are kubectl's own flags,
 // forwarded after kx's. target is resolved once, by the caller, so the Node
-// its checks read is the Node tainted.
-func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string) (message, output string, err error) {
+// its checks read is the Node tainted, and source is that same resolve's
+// provenance, named in the prompt.
+func (c TaintCommand) Execute(
+	target Resolved, sets, removes, extraArgs []string, yes bool, source string,
+) (message, output string, err error) {
 	// The kind first: an index that is no Node cannot be tainted whatever
 	// is asked of it, and asking for the taints first sent the user to write
 	// one before learning that.
@@ -42,6 +48,17 @@ func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string
 			"kx taint needs key=value:Effect to set, or --remove to name a taint to drop — neither was given.")
 	}
 	name := target.Name
+	// A NoExecute taint evicts every Pod that does not tolerate it, which is
+	// a drain by another name, so it is asked about the way kx drain asks.
+	// The other two effects evict nothing and are set without a word.
+	evicting := evictingTaints(sets)
+	if taintPrompts(evicting, yes, extraArgs) {
+		if err := c.Confirm(fmt.Sprintf(
+			"Evict every Pod on Node/%s that does not tolerate '%s'%s?",
+			name, strings.Join(evicting, "', '"), listingProvenance(source))); err != nil {
+			return "", "", err
+		}
+	}
 	// No -n: a Node is cluster-scoped.
 	args := append([]string{"taint", "node", name}, sets...)
 	for _, taint := range removes {
@@ -79,6 +96,31 @@ func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string
 		parts = append(parts, "dry run — nothing was changed")
 	}
 	return fmt.Sprintf("Tainted Node/%s (%s)", name, strings.Join(parts, ", ")), output, nil
+}
+
+// taintPrompts reports whether Execute will ask before setting evicting, the
+// NoExecute taints among those given: waved through by --yes, and by a dry
+// run, which changes nothing to ask about.
+//
+// Read by RunE as well, to arm the agent-listing notice only where no prompt
+// will name the provenance itself — the two must agree, or a taint that
+// prompts says where the index came from twice, and one that does not says
+// it never.
+func taintPrompts(evicting []string, yes bool, extraArgs []string) bool {
+	return len(evicting) > 0 && !yes && !isDryRun(extraArgs)
+}
+
+// evictingTaints are the taints among sets whose effect is NoExecute, in the
+// order given. Read off the taints kx has already validated (parseTaint), so
+// the effect is whatever follows the last colon.
+func evictingTaints(sets []string) []string {
+	var evicting []string
+	for _, taint := range sets {
+		if _, effect, found := strings.Cut(taint, ":"); found && effect == "NoExecute" {
+			evicting = append(evicting, taint)
+		}
+	}
+	return evicting
 }
 
 // parseTaint checks one taint to set, key=value:Effect or key:Effect, before
@@ -155,17 +197,20 @@ func newTaintCommand(services Services) *cobra.Command {
 		Long: "Sets or removes taints on one indexed Node — key=value:Effect or key:Effect to set, " +
 			"--remove to drop one. The effect is NoSchedule, PreferNoSchedule or NoExecute.\n\n" +
 			"One index only, as for kx drain: a NoExecute taint evicts every Pod that does not " +
-			"tolerate it, so tainting a range of Nodes in one command drains each of them.\n\n" +
+			"tolerate it, so tainting a range of Nodes in one command drains each of them. " +
+			"Setting one asks first, unless you pass --yes.\n\n" +
 			"kubectl's own taint flags pass through, --overwrite and --dry-run among them. " +
 			"--all and --selector are refused, since beside a Node's name kubectl taint applies " +
 			"them to every Node they select.",
 		Example: "  kx taint 1 dedicated=gpu:NoSchedule\n" +
 			"  kx taint 1 --remove dedicated\n" +
+			"  kx taint 1 maintenance:NoExecute -y\n" +
 			"  kx taint 1 dedicated=infra:NoSchedule --overwrite\n" +
 			"  kx taint 1 maintenance:NoExecute --dry-run=server",
 		Annotations: mutatingAnnotations,
 	}
 	cmd.Flags().StringArray("remove", nil, "Taint to remove, as key or key:Effect (repeatable)")
+	cmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt a NoExecute taint asks")
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "taint")
 	// Still parsed, so refuseTaintScopeFlag can name them, but not offered:
@@ -178,7 +223,7 @@ func newTaintCommand(services Services) *cobra.Command {
 		if len(positional) == 0 {
 			return requiredArgsError(cmd)
 		}
-		installAgentIndexNotice(services)
+		yes, _ := cmd.Flags().GetBool("yes")
 		ref, err := parseRef("index", positional[0])
 		if err != nil {
 			return err
@@ -198,7 +243,16 @@ func newTaintCommand(services Services) *cobra.Command {
 		if err := refuseTaintScopeFlag(extra); err != nil {
 			return err
 		}
-		name, namespace, kind, err := services.State.Resolve(ref)
+		// Armed only where no prompt will name the listing's provenance
+		// itself, as kx drain arms it only with --yes. Unlike drain, kx
+		// taint does not always prompt: a NoSchedule taint evicts nothing
+		// and is set without a question, so the notice is what says the
+		// index came from an agent. Before the resolve below, which is what
+		// it hooks.
+		if !taintPrompts(evictingTaints(sets), yes, extra) {
+			installAgentIndexNotice(services)
+		}
+		name, namespace, kind, source, err := resolveWithProvenance(services.State, ref)
 		if err != nil {
 			return err
 		}
@@ -206,8 +260,8 @@ func newTaintCommand(services Services) *cobra.Command {
 		if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
 			return err
 		}
-		message, output, err := TaintCommand{Kubectl: services.Kubectl}.
-			Execute(target, sets, removes, extra)
+		message, output, err := TaintCommand{Kubectl: services.Kubectl, Confirm: services.confirm()}.
+			Execute(target, sets, removes, extra, yes, source)
 		if err != nil {
 			return err
 		}

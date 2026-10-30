@@ -66,7 +66,7 @@ kx taint 1 dedicated=infra:NoSchedule --overwrite
 
 The effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute`.
 The first two only steer the scheduler.
-A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does.
+A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does, and asks before setting one unless you pass `--yes`.
 It also refuses kubectl's `--all` and `--selector`: beside a Node's name, kubectl taint applies them to every Node they select rather than refusing the pair, so `--all` would taint the whole cluster.
 
 ## Nodes are not in a namespace
