@@ -49,10 +49,17 @@ func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string
 	}
 	output, err = c.Kubectl.Run(append(args, extraArgs...))
 	if err != nil {
-		// Probed rather than read off the error: kubectl answers a --remove
-		// of a taint the Node does not have with `taint "gpu" not found`,
-		// which IsNotFound would take for the Node itself having gone.
-		if c.Kubectl.Probe([]string{"get", "node", name}) != 0 {
+		// Asked again rather than read off the error: kubectl answers a
+		// --remove of a taint the Node does not have with `taint "gpu" not
+		// found`, which IsNotFound would take for the Node itself having
+		// gone.
+		//
+		// Only a NotFound from that second look is a vanished Node, as for
+		// kx drain's preflight. Any nonzero exit counted, so an API server
+		// that could not be reached — which fails the taint and the look
+		// alike — was reported as a Node that no longer exists, and the
+		// refresh then relisted over kubectl's real complaint.
+		if _, missing := c.Kubectl.Run([]string{"get", "node", name}); IsNotFound(missing) {
 			return "", "", StaleResourceError{Kind: kinds.Node, Name: name, Ref: target.Ref}
 		}
 		// kubectl's words, but no longer a kubectl.Error: withRefresh asks
