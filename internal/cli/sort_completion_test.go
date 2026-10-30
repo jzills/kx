@@ -253,3 +253,47 @@ func TestSortCompletionReadsAListingOfTheSameShape(t *testing.T) {
 		}
 	}
 }
+
+// A flag kx cannot assume leaves the columns alone makes the shape one no
+// saved listing stands in for, in either direction: kubectl top --containers
+// prints a POD column kx top does not, so its listing is not the plain
+// table's and the plain listing is not its. Completion offers nothing rather
+// than a column the sort would refuse. A flag that only picks which
+// resources are listed still reuses the listing.
+func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	for _, entry := range []state.State{
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod"}, Command: state.CommandTop},
+			Columns: []string{"name", "cpu", "memory", "cpu%", "mem%"},
+		},
+		{
+			Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+			Query:   &state.Query{Resource: "deploy", Args: []string{"--namespace=prod", "--label-columns=app"}},
+			Columns: []string{"name", "ready", "up-to-date", "available", "age", "app"},
+		},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		// The plain kx top listing is there, so each empty answer below is
+		// the shape being refused, not a listing that was never saved.
+		{[]string{"top", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--selector", "app=api", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--containers", "--sort", ""}, ""},
+		{[]string{"top", "--no-limits", "--sort", ""}, ""},
+		// The only Deployment listing was taken with -L, so it is no plain
+		// table, and the plain line gets nothing.
+		{[]string{"get", "deploy", "--sort", ""}, ""},
+	} {
+		if got, _ := completeSort(t, services, tc.line...); strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %q", strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}
