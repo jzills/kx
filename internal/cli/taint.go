@@ -129,7 +129,7 @@ func parseTaint(taint string) error {
 	if strings.HasSuffix(taint, "-") {
 		return fmt.Errorf(
 			"'%s' is kubectl's spelling for removing a taint — use '--remove %s' instead.",
-			taint, strings.TrimSuffix(taint, "-"))
+			taint, removalSpelling(strings.TrimSuffix(taint, "-")))
 	}
 	spec, effect, found := strings.Cut(taint, ":")
 	key, _, _ := strings.Cut(spec, "=")
@@ -138,6 +138,21 @@ func parseTaint(taint string) error {
 			"'%s' is not a taint — write key=value:Effect or key:Effect, as in 'dedicated=gpu:NoSchedule'.", taint)
 	}
 	return validTaintEffect(taint, effect)
+}
+
+// removalSpelling is the --remove value for a taint written out in full:
+// its key, and its effect where one was given. The value is dropped, because
+// a taint is removed by key and effect and never by value — kubectl's own
+// key=value:Effect- removes whatever value the key holds — and suggesting it
+// sent the reader from one refusal into the next, --remove having answered
+// 'dedicated=gpu:NoSchedule' with "not a valid taint key".
+func removalSpelling(taint string) string {
+	spec, effect, found := strings.Cut(taint, ":")
+	key, _, _ := strings.Cut(spec, "=")
+	if !found {
+		return key
+	}
+	return key + ":" + effect
 }
 
 // parseTaintRemoval checks one --remove value: a key, which drops the key's
