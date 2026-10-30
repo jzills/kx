@@ -182,15 +182,9 @@ var flagValues = map[string]completer{
 // time it saved a listing of that kind (recordedColumns). nil for a command with no --sort,
 // and for a kind kx has not listed yet.
 func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
-	var shape listingShape
-	if flag := cmd.Flags().Lookup("all-namespaces"); flag != nil {
-		shape.allNamespaces = flag.Value.String() == "true"
-	}
-	if flag := cmd.Flags().Lookup("output"); flag != nil {
-		shape.output = flag.Value.String()
-	}
-	if flag := cmd.Flags().Lookup("last-run"); flag != nil {
-		shape.lastRun = flag.Value.String() == "true"
+	shape := lineShape(cmd)
+	if shape.unknown {
+		return nil
 	}
 	switch cmd.Name() {
 	case "diagnostic":
@@ -217,11 +211,68 @@ func sortColumns(cmd *cobra.Command, services Services, args []string) []string 
 
 // listingShape is what the line being completed asks of a listing's columns
 // beyond its kind: -A adds NAMESPACE, -o wide or custom-columns change the
-// set, and kx get jobs --last-run adds CRONJOB.
+// set, and kx get jobs --last-run adds CRONJOB. unknown is a flag that does
+// none of those and is not known to leave the columns alone, which makes the
+// shape one kx cannot match a saved listing to.
 type listingShape struct {
 	allNamespaces bool
 	output        string
 	lastRun       bool
+	unknown       bool
+}
+
+// shapeFlags are the flags listingShape models itself, by long name and by
+// the shorthand a saved listing can carry.
+var shapeFlags = []string{"all-namespaces", "A", "output", "o", "last-run"}
+
+// columnNeutralFlags leave a listing's columns alone: they pick which
+// resources are listed or which cluster they come from, or they are kx's own
+// and never reach kubectl's table. Every other flag is read as changing the
+// columns, because many do — kubectl top --containers prints POD, kx get
+// -L app adds the label — and a wrong column completed is worse than none:
+// the sort refuses it, naming the columns the table really has.
+var columnNeutralFlags = []string{
+	// Which resources are listed.
+	"namespace", "n", "selector", "l", "field-selector", "ignore-not-found", "chunk-size",
+	// Which cluster they are read from.
+	"context", "cluster", "user", "kubeconfig", "server", "token", "request-timeout",
+	"certificate-authority", "client-certificate", "client-key", "insecure-skip-tls-verify",
+	"as", "as-group", "as-uid",
+	// kx's own, which kubectl's table never sees.
+	"sort", "match", "m", "limit", "watch", "w", "yes", "y", "no-color",
+}
+
+// flagShapesColumns reports whether a flag, named as it was written and
+// without its dashes or value, is one kx cannot assume leaves the columns
+// alone.
+func flagShapesColumns(name string) bool {
+	name = strings.TrimLeft(name, "-")
+	name, _, _ = strings.Cut(name, "=")
+	return name != "" && !slices.Contains(shapeFlags, name) && !slices.Contains(columnNeutralFlags, name)
+}
+
+// lineShape reads the shape the line being completed asks for from the flags
+// it set. A flag kx cannot assume leaves the columns alone makes it unknown,
+// so no saved listing stands in for a table kx has not seen: kx top
+// --containers prints a POD column kx top does not, and completing from the
+// plain listing offered cpu%, which --containers refuses.
+func lineShape(cmd *cobra.Command) listingShape {
+	var shape listingShape
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		switch flag.Name {
+		case "all-namespaces":
+			shape.allNamespaces = flag.Value.String() == "true"
+		case "output":
+			shape.output = flag.Value.String()
+		case "last-run":
+			shape.lastRun = flag.Value.String() == "true"
+		default:
+			if flagShapesColumns(flag.Name) {
+				shape.unknown = true
+			}
+		}
+	})
+	return shape
 }
 
 // recordedColumns are the columns of the newest saved listing a command made
@@ -231,10 +282,9 @@ type listingShape struct {
 //
 // A listing in the other scope is used when none in this one is, with the
 // NAMESPACE column an -A listing adds put in or taken out: the rest of a
-// kind's columns are the same either way. One taken with another -o or
-// --last-run is never used: its columns are another table's, and after
-// kx get pods -o wide a plain --sort offered node, which the plain table
-// then refused.
+// kind's columns are the same either way. One taken in another shape is
+// never used: its columns are another table's, and after kx get pods -o wide
+// a plain --sort offered node, which the plain table then refused.
 func recordedColumns(services Services, command, resource string, shape listingShape) []string {
 	if services.State == nil {
 		return nil
@@ -262,6 +312,9 @@ func recordedColumns(services Services, command, resource string, shape listingS
 		}
 		if output, _, _ := extractString(query.Args, "--output", "-o"); output != shape.output ||
 			query.LastRun != shape.lastRun {
+			continue
+		}
+		if slices.ContainsFunc(query.Args, flagShapesColumns) {
 			continue
 		}
 		if entry.AllNamespaces == shape.allNamespaces {
