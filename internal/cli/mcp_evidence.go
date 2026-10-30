@@ -267,6 +267,7 @@ type topInput struct {
 	AllNamespaces bool   `json:"allNamespaces,omitempty" jsonschema:"Read across every namespace. Not valid with Nodes."`
 	Nodes         bool   `json:"nodes,omitempty" jsonschema:"Report Node usage against capacity instead of Pod usage against limits."`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000."`
+	Sort          string `json:"sort,omitempty" jsonschema:"Order the rows by their columns, as kx top --sort does: '-mem%,-cpu%' puts the largest share of its memory limit first, then of its CPU limit. Pods have name, cpu, memory, cpu% and mem%, and namespace across namespaces; Nodes the same, against capacity. Applied before limit, so limit keeps the first rows of that order."`
 }
 
 type topOutput struct {
@@ -290,7 +291,10 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 	// Read once, before kubectl runs: it labels the output and stamps the
 	// saved listing (see listingSave).
 	out := topOutput{Context: d.Kubectl.CurrentContext()}
-	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(out.Context), Index: index.Service{}}
+	if _, err := mcpSortKeys(in.Sort); err != nil {
+		return nil, topOutput{}, err
+	}
+	command := TopCommand{Kubectl: d.Kubectl, State: d.listingWriter(out.Context), Index: index.Service{}, Sort: in.Sort}
 
 	var indexed index.Table
 	var err error
@@ -315,7 +319,7 @@ func (d mcpDeps) top(_ context.Context, _ *mcp.CallToolRequest, in topInput) (*m
 		subject.Namespace = command.Scope
 	}
 	if err != nil {
-		return nil, topOutput{}, err
+		return nil, topOutput{}, mcpSortError(err)
 	}
 
 	rows := topPageRows(indexed)
@@ -476,5 +480,115 @@ func (d mcpDeps) getYAML(_ context.Context, _ *mcp.CallToolRequest, in getYamlIn
 			(len(encoded)+1023)/1024)
 	}
 	out.YAML = encoded
+	return nil, out, nil
+}
+
+// maxDescribeBytes bounds kubectl describe's text kept in a tool result — 256
+// KiB, as logs and get_yaml are bounded.
+const maxDescribeBytes = 256 * 1024
+
+// boundDescribeBytes keeps the first maxDescribeBytes of a description, cut
+// at a line boundary. The head rather than the tail, as logs keeps: a
+// description opens with what the resource is and ends with its events,
+// which the events tool returns in full.
+func boundDescribeBytes(output string) (string, bool) {
+	if len(output) <= maxDescribeBytes {
+		return output, false
+	}
+	cut := output[:maxDescribeBytes]
+	if idx := strings.LastIndexByte(cut, '\n'); idx >= 0 {
+		return cut[:idx+1], true
+	}
+	// One line longer than the cap: cut before the rune the cap lands in.
+	for len(cut) > 0 && !utf8.RuneStart(output[len(cut)]) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut, true
+}
+
+type describeInput struct {
+	Target mcpTarget `json:"target" jsonschema:"The resource to describe."`
+}
+
+type describeOutput struct {
+	Context   string `json:"context"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Mark      string `json:"mark,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Describe  string `json:"describe"`
+}
+
+func (d mcpDeps) describe(_ context.Context, _ *mcp.CallToolRequest, in describeInput) (*mcp.CallToolResult, describeOutput, error) {
+	out := describeOutput{Context: d.Kubectl.CurrentContext()}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, describeOutput{}, err
+	}
+	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
+
+	// Through Run, not the RunInteractive kx describe streams with: the text
+	// is the result, and the server's stdout is the protocol. Kind/name as one
+	// argument: given the kind and name apart, kubectl answers a name with no
+	// exact match by describing every resource whose name starts with it.
+	args := []string{"describe", string(target.Kind) + "/" + target.Name}
+	if target.Namespace != "" {
+		args = append(args, "-n", target.Namespace)
+	}
+	output, err := d.Kubectl.Run(args)
+	if err != nil {
+		return nil, describeOutput{}, err
+	}
+	out.Describe, out.Truncated = boundDescribeBytes(output)
+	return nil, out, nil
+}
+
+type rolloutHistoryInput struct {
+	Target   mcpTarget `json:"target" jsonschema:"The Deployment, StatefulSet or DaemonSet whose revisions to show."`
+	Revision int       `json:"revision,omitempty" jsonschema:"One revision to show in full — its Pod template — rather than the list of them."`
+}
+
+type rolloutHistoryOutput struct {
+	Context   string `json:"context"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	Mark      string `json:"mark,omitempty"`
+	Revision  int    `json:"revision,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	History   string `json:"history"`
+}
+
+func (d mcpDeps) rolloutHistory(_ context.Context, _ *mcp.CallToolRequest, in rolloutHistoryInput) (*mcp.CallToolResult, rolloutHistoryOutput, error) {
+	// kubectl reads --revision=0 as every revision, which is what leaving it
+	// out already says; a negative one is no revision at all.
+	if in.Revision < 0 {
+		return nil, rolloutHistoryOutput{}, fmt.Errorf(
+			"Invalid value for 'revision': '%d'. It is a revision number from the history — 1 or more.", in.Revision)
+	}
+	out := rolloutHistoryOutput{Context: d.Kubectl.CurrentContext(), Revision: in.Revision}
+	target, err := d.resolveTarget(in.Target)
+	if err != nil {
+		return nil, rolloutHistoryOutput{}, err
+	}
+	if !rolloutKinds.Has(target.Kind) {
+		return nil, rolloutHistoryOutput{}, unsupportedKindError("rollout history", target.Kind, rolloutKinds)
+	}
+	out.Kind, out.Name, out.Namespace, out.Mark = string(target.Kind), target.Name, target.Namespace, target.Mark
+
+	// history alone of kubectl rollout's subcommands: it reads the revisions
+	// the controller kept, and status blocks while the rest change the
+	// workload.
+	args := []string{"rollout", "history", string(target.Kind) + "/" + target.Name, "-n", target.Namespace}
+	if in.Revision > 0 {
+		args = append(args, fmt.Sprintf("--revision=%d", in.Revision))
+	}
+	output, err := d.Kubectl.Run(args)
+	if err != nil {
+		return nil, rolloutHistoryOutput{}, err
+	}
+	// Bounded as describe's text is: a revision's Pod template can be long.
+	out.History, out.Truncated = boundDescribeBytes(output)
 	return nil, out, nil
 }

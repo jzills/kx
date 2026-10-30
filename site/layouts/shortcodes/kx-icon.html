@@ -1,0 +1,9 @@
+{{- /*
+  One of Hextra's bundled icons, for markup written in a content file.
+
+      {{< kx-icon name="key" >}}
+
+  Markdown can't call a partial, and the icons are inline SVG drawn in
+  currentColor, so they take the palette's color from whatever holds them.
+*/ -}}
+{{- partial "utils/icon.html" (dict "name" (.Get "name") "attributes" `height=20 aria-hidden="true"`) -}}

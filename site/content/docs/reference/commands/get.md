@@ -14,7 +14,7 @@ A cluster-scoped kind — Nodes, PersistentVolumes, StorageClasses, a cluster-sc
 
 A `--match` term narrows the table, a watch's live table, `-o name` or a `-o json`/`-o yaml` collection by each row's name. A template is a shape you chose, which kx cannot assume has names in it, so it refuses the term there rather than printing everything.
 
-A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. Each column sorts as what it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's own `--sort-by` still takes a JSONPath, and applies first.
+A `--sort` sorts the table kx draws by its own columns, before numbering it, so row 1 is the first sorted row: name the columns separated by commas, as the header reads them, with a leading `-` to sort one from largest down. Each column sorts as what it holds — AGE as a duration, RESTARTS as a count, READY as a ratio, CPU and memory as quantities — ties keep kubectl's order, and a `<none>` sorts last either way. kubectl's own `--sort-by` still takes a JSONPath, and applies first. A `--watch` table stays sorted as it redraws, a row moving when its cells change.
 
 A `--limit` keeps the first N rows, after `--match` narrows them and `--sort` orders them and before they are numbered, so `--sort age --limit 5` is the five newest numbered 1 to 5, and an index past them names nothing. The caption counts the rows kept against the rows there were.
 

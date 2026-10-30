@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/events"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/render"
@@ -66,6 +68,45 @@ func (c EventsCommand) executeResolved(ctx context.Context, kind kinds.Kind, nam
 	return events.Rows(events.Within(matched, c.Since)), nil
 }
 
+// eventsSortUsage describes kx events' --sort, and eventsSortLong is the
+// paragraph its help carries.
+const (
+	eventsSortUsage = "Sort the events by their columns: '-type,age' puts Warnings first, the newest first in each"
+	eventsSortLong  = "--sort orders each table by its columns, named separated by commas as " +
+		"the header reads them, with a leading '-' to sort one from largest down: TYPE, REASON, " +
+		"KIND and MESSAGE as text, AGE as a duration, so 'age' puts the newest first. Ties keep " +
+		"the order the cluster returned them in."
+)
+
+// sortEvents orders one resource's events by a --sort over the columns kx
+// events prints, stably, so whatever the keys tie on keeps the cluster's
+// order. AGE's cell is the event's age in whole seconds at now rather than
+// the "3m ago" the table shows: that text rounds two events a few seconds
+// apart to one age, and the cells are only sorted, never shown.
+func sortEvents(rows []events.Row, keys []index.SortKey, now time.Time) ([]events.Row, error) {
+	if len(keys) == 0 {
+		return rows, nil
+	}
+	cells := make([][]string, len(rows))
+	for i, row := range rows {
+		age := ""
+		if !row.Timestamp.IsZero() {
+			age = strconv.FormatInt(int64(now.Sub(row.Timestamp)/time.Second), 10)
+		}
+		cells[i] = []string{row.Type, row.Reason, row.Kind, age, row.Message, strconv.Itoa(i)}
+	}
+	sorted, err := index.SortRows(render.EventsHeaders, cells, keys)
+	if err != nil {
+		return nil, sortError(err)
+	}
+	ordered := make([]events.Row, len(rows))
+	for i, line := range sorted {
+		at, _ := strconv.Atoi(line[len(line)-1])
+		ordered[i] = rows[at]
+	}
+	return ordered, nil
+}
+
 func newEventsCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "events <index>...",
@@ -76,9 +117,9 @@ func newEventsCommand(services Services) *cobra.Command {
 			config.DurationUnits + ": " + config.DurationExamples + ". " +
 			"Without it every event the cluster still holds is listed — on a default cluster roughly the last " +
 			"hour, since that is how long the API server keeps an event before dropping it. Set events_max_age " +
-			"in config.toml to choose a window once rather than per run.",
+			"in config.toml to choose a window once rather than per run.\n\n" + eventsSortLong,
 		Example: "  kx events 1\n  kx events 1 2\n  kx events 1 --since 30m\n" +
-			"  kx events 1..3\n  kx events 3..",
+			"  kx events 1 --sort -type,age\n  kx events 1..3\n  kx events 3..",
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolved, err := resolveRefs(services.State, "indexes", args)
@@ -91,6 +132,19 @@ func newEventsCommand(services Services) *cobra.Command {
 			window, err := resolveWindow(since, services.Config.EventsMaxAge)
 			if err != nil {
 				return err
+			}
+			// Checked against the columns before the API server is read, as
+			// --since is, and by presence: '--sort ""' names no column.
+			spec, _ := cmd.Flags().GetString("sort")
+			if cmd.Flags().Changed("sort") && spec == "" {
+				return sortSpecError("")
+			}
+			keys, err := sortKeysOf(spec)
+			if err != nil {
+				return err
+			}
+			if _, err := index.SortRows(render.EventsHeaders, nil, keys); err != nil {
+				return sortError(err)
 			}
 			client, err := services.Kubernetes()
 			if err != nil {
@@ -107,6 +161,9 @@ func newEventsCommand(services Services) *cobra.Command {
 				rows, err := command.Execute(cmd.Context(), target.Ref)
 				stop()
 				if err != nil {
+					return err
+				}
+				if rows, err = sortEvents(rows, keys, time.Now()); err != nil {
 					return err
 				}
 				extra := ""
@@ -127,6 +184,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		"Only events newer than this; "+config.DurationUnits+": "+config.DurationExamples+".",
 		"events_max_age", services.Config.EventsMaxAge,
 		"every event the cluster still holds is listed"))
+	cmd.Flags().String("sort", "", eventsSortUsage)
 	return cmd
 }
 

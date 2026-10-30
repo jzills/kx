@@ -1,6 +1,6 @@
 ---
-title: Documentation
-linkTitle: Docs
+title: Welcome to kx
+linkTitle: Documentation
 description: Install kx, learn the index workflow, and look up any command.
 weight: 1
 ---

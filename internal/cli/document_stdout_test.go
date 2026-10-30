@@ -117,7 +117,7 @@ func TestDocumentAnnotationAllowlistIsPinned(t *testing.T) {
 		"engine": true, "events": true, "get": true, "label": true,
 		"labels": true, "mark": true, "mcp": true, "namespace": true,
 		"port-forward": true, "ref": true, "rollout": true, "scale": true,
-		"scan": true, "secret": true, "set": true, "set image": true,
+		"scan": true, "secret": true, "set": true, "set image": true, "taint": true,
 		"state": true, "state back": true, "state drop": true,
 		"state forward": true, "theme": true, "top": true, "tree": true,
 		"uncordon": true, "unmark": true, "wait": true,

@@ -245,6 +245,7 @@ func TestEveryCommandNamesItsMissingArgumentsTheSameWay(t *testing.T) {
 		{"ref", []string{"ref", "--no-color"}},
 		{"cordon", []string{"cordon", "--no-color"}},
 		{"uncordon", []string{"uncordon", "--no-color"}},
+		{"taint", []string{"taint", "--no-color"}},
 		{"set image", []string{"set", "image", "--no-color"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,7 +318,7 @@ func TestMissingRequiredArgsSpeakInKxsVoiceNotCobras(t *testing.T) {
 	for _, name := range []string{
 		"describe", "logs", "edit", "exec", "debug", "delete", "scale",
 		"rollout", "yaml", "labels", "annotations", "label", "annotate",
-		"events", "cordon", "uncordon", "get",
+		"events", "cordon", "uncordon", "get", "taint",
 	} {
 		cmd, _, err := root.Find([]string{name})
 		if err != nil {

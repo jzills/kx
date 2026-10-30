@@ -1,0 +1,328 @@
+package cli
+
+import (
+	"bytes"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
+	"github.com/jzills/kx/internal/state"
+	"github.com/spf13/cobra"
+)
+
+// A listing saves the keys of the columns it printed, the names a --sort
+// takes, so a later --sort over the kind can be completed without asking
+// the cluster: the X kx numbers rows in is not one of them, an -A listing's
+// NAMESPACE is, and a listing of several kinds keeps every table's.
+func TestListingsSaveTheColumnsTheyPrinted(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resource string
+		output   string
+		want     []string
+	}{
+		{"one kind", "pods", sortPods, []string{"name", "ready", "status", "restarts", "age"}},
+		{"every namespace", "pods", podsAllNamespacesOutput,
+			[]string{"namespace", "name", "ready", "status", "restarts", "age"}},
+		{"several kinds", "deploy,svc", deploySvcOutput, []string{"name", "ready", "up-to-date", "available",
+			"age", "type", "cluster-ip", "external-ip", "port"}},
+	} {
+		services := switchServices(t, &fakeKubectl{output: tc.output, namespace: "prod"})
+		var out bytes.Buffer
+		render.SetOutput(&out, &out, "github-dark")
+		if err := runGet(services, tc.resource, nil, getOptions{}); err != nil {
+			t.Fatalf("%s: runGet: %v", tc.name, err)
+		}
+		entry, err := services.State.Load()
+		if err != nil {
+			t.Fatalf("%s: Load: %v", tc.name, err)
+		}
+		if got := strings.Join(entry.Columns, ","); got != strings.Join(tc.want, ",") {
+			t.Errorf("%s: saved columns %s, want %s", tc.name, got, strings.Join(tc.want, ","))
+		}
+	}
+
+	// kx top's percentage columns are kx's own, added after kubectl's.
+	kube := &recordingKubectl{outputs: []string{topPodsFixture, podsJSON}}
+	services := switchServices(t, kube)
+	if _, _, err := (TopCommand{Kubectl: kube, State: services.State, Index: services.Index}).
+		Execute("", nil, false); err != nil {
+		t.Fatalf("top: %v", err)
+	}
+	entry, err := services.State.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(entry.Columns, ","); got != "name,cpu,memory,cpu%,mem%" {
+		t.Errorf("top: saved columns %s, want name,cpu,memory,cpu%%,mem%%", got)
+	}
+	nodes := &recordingKubectl{outputs: []string{nodesOutput}}
+	services = switchServices(t, nodes)
+	if _, _, err := (TopCommand{Kubectl: nodes, State: services.State, Index: services.Index}).
+		ExecuteNodes("", nil); err != nil {
+		t.Fatalf("top nodes: %v", err)
+	}
+	if entry, err = services.State.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(entry.Columns, ","); got != "name,cpu,cpu%,memory,mem%" {
+		t.Errorf("top nodes: saved columns %s, want name,cpu,cpu%%,memory,mem%%", got)
+	}
+}
+
+// completeSort runs kx's completion for a line ending in a --sort value, as
+// the shell asks for it, and returns the candidates and the directive.
+func completeSort(t *testing.T, services Services, line ...string) ([]string, int) {
+	t.Helper()
+	root := NewRoot(services, "test")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	if err := Execute(root, append([]string{cobra.ShellCompRequestCmd}, line...)); err != nil {
+		t.Fatalf("complete %v: %v", line, err)
+	}
+	var candidates []string
+	directive := -1
+	for _, row := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if code, ok := strings.CutPrefix(row, ":"); ok {
+			directive, _ = strconv.Atoi(code)
+			continue
+		}
+		candidates = append(candidates, row)
+	}
+	return candidates, directive
+}
+
+// sortSeeded is a state holding a listing of Pods, then one of Deployments
+// on top of it, each with the columns kubectl printed for it.
+func sortSeeded(t *testing.T) Services {
+	t.Helper()
+	services := switchServices(t, &recordingKubectl{})
+	for _, entry := range []state.State{
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{}},
+			Columns: []string{"name", "ready", "status", "restarts", "age"},
+		},
+		{
+			Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+			Query:   &state.Query{Resource: "deploy", Args: []string{}},
+			Columns: []string{"name", "ready", "up-to-date", "available", "age"},
+		},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return services
+}
+
+// kx get --sort completes the columns of the last listing of the kind named,
+// not of the last listing: the Deployments were listed after the Pods, and a
+// Pod has no up-to-date column. A kind never listed completes nothing.
+func TestSortCompletesTheColumnsOfTheKindsLastListing(t *testing.T) {
+	services := sortSeeded(t)
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"get", "pods", "--sort", ""}, "name,ready,status,restarts,age"},
+		{[]string{"po", "--sort", "re"}, "ready,restarts"},
+		{[]string{"get", "deployments", "--sort", "up"}, "up-to-date"},
+		{[]string{"get", "pods", "--sort", "status,-"}, "status,-name,status,-ready,status,-restarts,status,-age"},
+		{[]string{"get", "pods", "-A", "--sort", "n"}, "namespace,name"},
+		{[]string{"get", "svc", "--sort", ""}, ""},
+	} {
+		got, directive := completeSort(t, services, tc.line...)
+		if strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+		want := int(cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace)
+		if directive != want {
+			t.Errorf("kx %s<TAB> directive %d, want %d — no space, so a comma can follow", strings.Join(tc.line, " "), directive, want)
+		}
+	}
+}
+
+// A listing's own scope is preferred to the other one's, whose NAMESPACE
+// column is put in or taken out: a Pod listing taken with -A completes
+// namespace for an -A --sort and leaves it out of a plain one.
+func TestSortCompletionPrefersTheListingsOwnScope(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), AllNamespaces: true,
+		Query:   &state.Query{Resource: "pods", Args: []string{"-A"}},
+		Columns: []string{"namespace", "name", "age"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"get", "pods", "-A", "--sort", ""}, "namespace,name,age"},
+		{[]string{"get", "pods", "--sort", ""}, "name,age"},
+	} {
+		if got, _ := completeSort(t, services, tc.line...); strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}
+
+// The commands whose columns are kx's own complete them with no listing
+// saved at all; kx top's come from its own listings, never kx get's of the
+// same kind. A key already typed is not offered again in any spelling the
+// sort accepts for it: "Kind,top_finding," offered kind and top-finding.
+// Each leaves no trailing space, kx scan too, whose flags kx parses by hand:
+// its completion ended in a space, so a comma typed after "critical" began a
+// new word.
+func TestSortCompletesFixedAndTopColumns(t *testing.T) {
+	services := sortSeeded(t)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"node-a"}, kinds.Node),
+		Query:     &state.Query{Resource: "nodes", Args: []string{}, Command: state.CommandTop},
+		Columns:   []string{"name", "cpu", "cpu%", "memory", "mem%"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"diagnostic", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		// Their columns are kx's own, so a flag on the line changes nothing
+		// about them: each of these completed nothing once the shape gate
+		// ran for every command.
+		{[]string{"diagnostic", "--show-healthy", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		{[]string{"diagnostic", "--since", "1h", "--sort", ""}, "kind,name,namespace,verdict,top-finding"},
+		{[]string{"events", "1", "--since", "30m", "--sort", ""}, "type,reason,kind,age,message"},
+		{[]string{"diagnostic", "--sort", "Kind,top_finding,"},
+			"Kind,top_finding,name,Kind,top_finding,namespace,Kind,top_finding,verdict"},
+		{[]string{"scan", "--sort", "cr"}, "crit"},
+		{[]string{"scan", "--sort=cr"}, "--sort=crit"},
+		{[]string{"events", "1", "--sort", ""}, "type,reason,kind,age,message"},
+		{[]string{"top", "nodes", "--sort", "c"}, "cpu,cpu%"},
+		{[]string{"top", "--sort", ""}, ""},
+	} {
+		got, directive := completeSort(t, services, tc.line...)
+		if strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+		want := int(cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace)
+		if directive != want {
+			t.Errorf("kx %s<TAB> directive %d, want %d — no space, so a comma can follow", strings.Join(tc.line, " "), directive, want)
+		}
+	}
+}
+
+// A listing taken with another -o or --last-run is not the table a --sort
+// sorts: after kx get pods -o wide, a plain kx get pods --sort offered node,
+// which the plain table refused. Each line completes the columns of the
+// listing in its own shape, the older plain one under a newer wide one
+// included, and a shape never listed completes nothing.
+func TestSortCompletionReadsAListingOfTheSameShape(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	for _, entry := range []state.State{
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod"}},
+			Columns: []string{"name", "ready", "status", "restarts", "age"},
+		},
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod", "--output=wide"}},
+			Columns: []string{"name", "ready", "status", "restarts", "age", "ip", "node", "nominated-node"},
+		},
+		{
+			Resources: state.NewResources([]string{"nightly-1"}, kinds.Job), Namespace: "prod",
+			Query:   &state.Query{Resource: "jobs", Args: []string{"--namespace=prod"}, LastRun: true},
+			Columns: []string{"name", "cronjob", "status", "age"},
+		},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		{[]string{"get", "pods", "--sort", "n"}, "name"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "n"}, "name,node,nominated-node"},
+		// The sort reads a typed key through ColumnKey, so these spellings
+		// are the ones it accepts; completion matched the prefix literally
+		// and offered nothing for them.
+		{[]string{"get", "pods", "-o", "wide", "--sort", "nominated_n"}, "nominated-node"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "NOMINATED-N"}, "nominated-node"},
+		{[]string{"get", "pods", "-o", "wide", "--sort", "nominated-n"}, "nominated-node"},
+		{[]string{"get", "pods", "-o", "custom-columns=NAME:.metadata.name", "--sort", ""}, ""},
+		{[]string{"get", "jobs", "--last-run", "--sort", "c"}, "cronjob"},
+		{[]string{"get", "jobs", "--sort", ""}, ""},
+	} {
+		if got, _ := completeSort(t, services, tc.line...); strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %s", strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}
+
+// A flag kx cannot assume leaves the columns alone makes the shape one no
+// saved listing stands in for, in either direction: kubectl top --containers
+// prints a POD column kx top does not, so its listing is not the plain
+// table's and the plain listing is not its. Completion offers nothing rather
+// than a column the sort would refuse. A flag that only picks which
+// resources are listed still reuses the listing.
+func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
+	services := switchServices(t, &recordingKubectl{})
+	for _, entry := range []state.State{
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query:   &state.Query{Resource: "pods", Args: []string{"--namespace=prod"}, Command: state.CommandTop},
+			Columns: []string{"name", "cpu", "memory", "cpu%", "mem%"},
+		},
+		{
+			Resources: state.NewResources([]string{"web"}, kinds.Deployment), Namespace: "prod",
+			Query:   &state.Query{Resource: "deploy", Args: []string{"--namespace=prod", "--label-columns=app"}},
+			Columns: []string{"name", "ready", "up-to-date", "available", "age", "app"},
+		},
+		{
+			Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+			Query: &state.Query{
+				Resource: "pods", Args: []string{"--namespace=prod", "--no-limits"}, Command: state.CommandTop,
+			},
+			Columns: []string{"name", "cpu", "memory"},
+		},
+	} {
+		if err := services.State.Save(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		line []string
+		want string
+	}{
+		// The plain kx top listing is there, so each empty answer below is
+		// the shape being refused, not a listing that was never saved.
+		{[]string{"top", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--selector", "app=api", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		// kx's own flags shape nothing kubectl prints, so each of these
+		// completes the table's columns. They were listed by name once, and
+		// the report flags were missing from that list.
+		{[]string{"top", "--json", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--html", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--out", "/tmp/report.html", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--limit", "5", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		// kubectl's own, and it does change the columns.
+		{[]string{"top", "--containers", "--sort", ""}, ""},
+		// --no-limits is kx's own and recorded on the listing it took, so
+		// its shape is one kx can match, each line to its own table.
+		{[]string{"top", "--no-limits", "--sort", ""}, "name,cpu,memory"},
+		// The only Deployment listing was taken with -L, so it is no plain
+		// table, and the plain line gets nothing.
+		{[]string{"get", "deploy", "--sort", ""}, ""},
+	} {
+		if got, _ := completeSort(t, services, tc.line...); strings.Join(got, ",") != tc.want {
+			t.Errorf("kx %s<TAB> = %v, want %q", strings.Join(tc.line, " "), got, tc.want)
+		}
+	}
+}

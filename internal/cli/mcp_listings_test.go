@@ -291,6 +291,28 @@ func TestWriteListingsDiagnoseSweepIndexesResolveWithHealthyRowsLeftOut(t *testi
 	assertSavedLikeTheCLI(t, entry, cli)
 }
 
+// A limit cuts what diagnose returns, never what it saves: the sweep is saved
+// whole, as list_resources and tree save theirs, so the rows returned carry
+// the indexes the unlimited answer gives them and a row past the cut still
+// resolves.
+func TestWriteListingsDiagnoseSweepLimitSavesTheWholeSweep(t *testing.T) {
+	deps := mcpDiagDeps(t, &recordingKubectl{namespace: "prod"},
+		brokenDeployment("api", "prod"), brokenDeployment("db", "prod"), healthyDeployment("web", "prod"))
+	deps.WriteListings = true
+	session := connectMCP(t, deps)
+
+	var out diagnoseResult
+	decodeStructured(t, callTool(t, session, "diagnose", map[string]any{"limit": 1}), &out)
+	if len(out.Diagnosis.Resources) != 1 || out.Diagnosis.Resources[0].Index != 1 || out.Diagnosis.Of != 2 {
+		t.Fatalf("resources = %+v of %d, want the first at index 1 of 2", out.Diagnosis.Resources, out.Diagnosis.Of)
+	}
+	entry := onlyTaggedEntry(t, deps.State)
+	if entry.Resources.Len() != 3 {
+		t.Errorf("saved %d resources, want all 3 swept — the limit cut the saved listing", entry.Resources.Len())
+	}
+	assertResolves(t, deps.State, 3, kinds.Deployment, "web", "prod")
+}
+
 // The diagnose sweep across every namespace saves like kx diag -A: no entry
 // namespace, each resource carrying its own.
 func TestWriteListingsDiagnoseSweepAcrossNamespacesSavesLikeKxDiagA(t *testing.T) {
@@ -831,7 +853,7 @@ func TestWriteListingsUsersRefreshOverATaggedEntryIsUntagged(t *testing.T) {
 // Annotations tell a client what a tool can change. With --write-listings the
 // four listing tools save to kx's local state, so they stop claiming to be
 // read-only — non-destructive and idempotent, said explicitly — while the
-// other six are exactly as they are without the flag.
+// other nine are exactly as they are without the flag.
 func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 	annotations := func(writeListings bool) map[string]*mcp.ToolAnnotations {
 		deps := mcpTestDeps(t, &recordingKubectl{})
@@ -847,8 +869,8 @@ func TestWriteListingsListingToolsStopClaimingReadOnly(t *testing.T) {
 		return byName
 	}
 	off, on := annotations(false), annotations(true)
-	if len(off) != 11 || len(on) != 11 {
-		t.Fatalf("%d and %d tools, want 11 each", len(off), len(on))
+	if len(off) != 13 || len(on) != 13 {
+		t.Fatalf("%d and %d tools, want 13 each", len(off), len(on))
 	}
 	listing := map[string]bool{"list_resources": true, "diagnose": true, "tree": true, "top": true}
 	for name, before := range off {

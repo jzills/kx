@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -183,16 +184,28 @@ func joinArgs(args []string) string { return strings.Join(args, " ") }
 
 func noStatus(string) func() { return func() {} }
 
+// The indexed resource is one Kind/name argument, which kubectl matches
+// exactly: as two, kubectl answered a name that had gone by describing every
+// resource it prefixes, exit 0, so the stale index never refreshed. Beside a
+// name forwarded after the index, which kubectl refuses next to Kind/name,
+// the two stay apart.
 func TestDescribeBuildsKubectlCommand(t *testing.T) {
-	kubectl := &recordingKubectl{}
-	err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.
-		Execute(state.Ref{Index: 1}, []string{"--show-events=false"})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	want := "describe Pod nginx -n prod --show-events=false"
-	if got := joinArgs(kubectl.interactive[0]); got != want {
-		t.Errorf("args = %q, want %q", got, want)
+	for _, tc := range []struct {
+		extra []string
+		want  string
+	}{
+		{[]string{"--show-events=false"}, "describe Pod/nginx -n prod --show-events=false"},
+		{nil, "describe Pod/nginx -n prod"},
+		{[]string{"redis", "--show-events=false"}, "describe Pod nginx -n prod redis --show-events=false"},
+	} {
+		kubectl := &recordingKubectl{}
+		err := DescribeCommand{Kubectl: kubectl, State: pod("nginx")}.Execute(state.Ref{Index: 1}, tc.extra)
+		if err != nil {
+			t.Fatalf("Execute(%v): %v", tc.extra, err)
+		}
+		if got := joinArgs(kubectl.interactive[0]); got != tc.want {
+			t.Errorf("Execute(%v): args = %q, want %q", tc.extra, got, tc.want)
+		}
 	}
 }
 
@@ -378,42 +391,85 @@ func TestCopyRejectsAnIndexedNonPod(t *testing.T) {
 	}
 }
 
-// kx cp parses its pod side with strconv.Atoi, which has no sigil branch —
-// marks on cp are deliberately out of scope, but before this, "@api:/f"
-// simply failed to parse as an int and fell through unchanged, so kubectl
-// was handed the literal string "@api:/f" and failed with a confusing
-// message about a path. This must be refused clearly instead, the way kx ns
-// @foo is refused.
-func TestCopyRefusesAMarkOnTheSourceSide(t *testing.T) {
-	kubectl := &recordingKubectl{}
-	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
-		Execute("@api:/var/log/app.log", "./app.log", nil)
-	if err == nil {
-		t.Fatal("copied from a mark, want an error")
+// markedPodStore is a state file whose current listing holds api-old at
+// index 1 and whose mark @api pins a different Pod, api-7d8f, so a test can
+// tell which of the two a reference resolved to.
+func markedPodStore(t *testing.T) *state.Service {
+	t.Helper()
+	store := &state.Service{MaxHistory: 10, Path: filepath.Join(t.TempDir(), "state.json")}
+	if err := store.Save(state.State{
+		Resources: state.NewResources([]string{"api-old"}, kinds.Pod), Namespace: "prod",
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
 	}
-	for _, want := range []string{"@api", "mark"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err = %q\n  missing %q", err.Error(), want)
+	if err := store.SaveMark("api", state.Mark{
+		Resource: state.Resource{Name: "api-7d8f", Kind: kinds.Pod, Namespace: "diagnostics"},
+	}); err != nil {
+		t.Fatalf("SaveMark: %v", err)
+	}
+	return store
+}
+
+// Either side of a copy can name its Pod by mark, as @api:path, the way every
+// other command takes @api for an index. kx cp used to refuse one, the only
+// command that did, because it parsed the index out of the path with
+// strconv.Atoi and had no Ref to carry a mark in.
+func TestCopyResolvesAMarkOnEitherSide(t *testing.T) {
+	for _, tc := range []struct {
+		src, dest, want string
+	}{
+		{"@api:/var/log/app.log", "./app.log", "cp diagnostics/api-7d8f:/var/log/app.log ./app.log"},
+		{"./patch.conf", "@api:/etc/app/patch.conf", "cp ./patch.conf diagnostics/api-7d8f:/etc/app/patch.conf"},
+		// The control: an index on the same store is the listing's Pod, not the
+		// mark's, so the mark rows above are not passing on index 1.
+		{"1:/var/log/app.log", "./app.log", "cp prod/api-old:/var/log/app.log ./app.log"},
+	} {
+		kubectl := &recordingKubectl{}
+		if err := (CopyCommand{Kubectl: kubectl, State: markedPodStore(t)}).
+			Execute(tc.src, tc.dest, nil); err != nil {
+			t.Fatalf("kx cp %s %s: %v", tc.src, tc.dest, err)
 		}
-	}
-	if len(kubectl.interactive) != 0 {
-		t.Error("kubectl was called with an unresolved mark")
+		if got := joinArgs(kubectl.interactive[0]); got != tc.want {
+			t.Errorf("kx cp %s %s ran %q, want %q", tc.src, tc.dest, got, tc.want)
+		}
 	}
 }
 
-// Either side of the copy can name a mark; both must be refused the same way.
-func TestCopyRefusesAMarkOnTheDestinationSide(t *testing.T) {
-	kubectl := &recordingKubectl{}
-	err := CopyCommand{Kubectl: kubectl, State: pod("nginx")}.
-		Execute("./patch.conf", "@api:/etc/app/patch.conf", nil)
-	if err == nil {
-		t.Fatal("copied to a mark, want an error")
+// A mark is refused before kubectl runs when it is malformed or unknown,
+// rather than handed to kubectl as the literal path "@api:/f", which kubectl
+// answers with a message about a path.
+func TestCopyRefusesAMarkThatDoesNotResolve(t *testing.T) {
+	for _, tc := range []struct {
+		src, want string
+	}{
+		{"@3:/f", "'3' is a number, which a mark name cannot be — '@3' would be indistinguishable from index 3."},
+		{"@nope:/f", "No mark named 'nope' — run 'kx mark nope <index>' to create one, or 'kx mark' to list them."},
+	} {
+		kubectl := &recordingKubectl{}
+		err := CopyCommand{Kubectl: kubectl, State: markedPodStore(t)}.Execute(tc.src, "./f", nil)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("kx cp %s ./f: err = %v, want %q", tc.src, err, tc.want)
+		}
+		if len(kubectl.interactive) != 0 {
+			t.Errorf("kx cp %s ./f ran kubectl %v", tc.src, kubectl.interactive)
+		}
 	}
-	if !strings.Contains(err.Error(), "@api") {
-		t.Errorf("err = %q, want it to name the mark", err.Error())
+}
+
+// A copy that fails against a marked Pod that is gone carries the mark onto
+// the stale error, so isStale reports the mark to retake instead of
+// relisting a listing the mark was never read from.
+func TestCopyCarriesAMarkOntoAStaleResourceError(t *testing.T) {
+	kubectl := &recordingKubectl{exitCode: 1, probeCode: 1}
+	err := CopyCommand{Kubectl: kubectl, State: markedPodStore(t)}.
+		Execute("@api:/etc/foo", "./foo", nil)
+
+	var stale StaleResourceError
+	if !errors.As(err, &stale) {
+		t.Fatalf("err = %#v, want StaleResourceError", err)
 	}
-	if len(kubectl.interactive) != 0 {
-		t.Error("kubectl was called with an unresolved mark")
+	if stale.Ref.Mark != "api" {
+		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "api")
 	}
 }
 

@@ -82,6 +82,7 @@ func mutatingCommandCases() []mutatingCase {
 			return newMetadataWriteCommand(s, "annotate", "annotations", "", "")
 		}, []string{"1", "note=hi"}, `{"metadata":{"annotations":{}}}`},
 		{"cp", kinds.Pod, newCopyCommand, []string{"1:/var/log/app.log", "./app.log"}, ""},
+		{"taint", kinds.Node, newTaintCommand, []string{"1", "dedicated=gpu:NoSchedule"}, ""},
 	}
 }
 
@@ -220,6 +221,48 @@ func TestAgentIndexNoticeMultiIndexPrintsOnePerIndex(t *testing.T) {
 	}
 }
 
+// kx taint prompts only for a NoExecute taint, so unlike delete and drain it
+// is the effect, not --yes, that decides which of the two says where the
+// index came from. A NoSchedule taint asks nothing and must still carry the
+// notice, or an agent's index would be spent on a Node with no word about it.
+func TestAgentIndexNoticeTaintFollowsThePrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantPrompt string
+		wantNotice bool
+	}{
+		{"NoExecute without --yes: prompt suffix, no notice",
+			[]string{"1", "maintenance:NoExecute"},
+			"Evict every Pod on Node/node-a that does not tolerate 'maintenance:NoExecute' — from a kx mcp listing?",
+			false},
+		{"NoExecute with --yes: notice, no prompt",
+			[]string{"1", "maintenance:NoExecute", "--yes"}, "", true},
+		{"NoSchedule asks nothing, so the notice speaks",
+			[]string{"1", "dedicated=gpu:NoSchedule"}, "", true},
+		{"a dry run changes nothing to ask about",
+			[]string{"1", "maintenance:NoExecute", "--dry-run=server"}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			services := switchServices(t, &recordingKubectl{output: "node/node-a tainted"})
+			saveListing(t, services, kinds.Node, "", true, "node-a")
+			var prompted string
+			services.Confirm = func(m string) error { prompted = m; return nil }
+
+			_, stderr, err := runCaptured(t, newTaintCommand(services), tc.args)
+			if err != nil {
+				t.Fatalf("kx taint %v: %v", tc.args, err)
+			}
+			if prompted != tc.wantPrompt {
+				t.Errorf("prompt = %q, want %q", prompted, tc.wantPrompt)
+			}
+			if got := strings.Contains(stderr, noticeSubstring); got != tc.wantNotice {
+				t.Errorf("notice in stderr = %v, want %v — stderr %q", got, tc.wantNotice, stderr)
+			}
+		})
+	}
+}
+
 // (e) Review Focus 4: kx delete 3 without --yes gets the provenance suffix on
 // the confirm prompt and no stderr notice; with --yes it gets the notice and
 // no prompt. Drain is checked the same way.
@@ -320,7 +363,7 @@ func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 		"scale": true, "rollout": true, "cordon": true, "uncordon": true,
 		"debug": true, "edit": true, "exec": true, "label": true,
 		"annotate": true, "cp": true, "delete": true, "drain": true,
-		"set": true,
+		"set": true, "taint": true,
 	}
 	nonMutating := map[string]bool{
 		// docs resolves no index and reads no cluster — it prints

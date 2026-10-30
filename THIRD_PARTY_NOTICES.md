@@ -3,7 +3,8 @@
 kx is a Go program with no runtime dependencies (see `pyproject.toml`). The
 `--html` report pages vendor one third-party JavaScript/CSS asset, compiled
 into the `kx` binary via `go:embed` rather than fetched at runtime. The
-documentation site under `site/` vendors one more, for the same reason.
+documentation site under `site/` vendors three more, a script and two
+typefaces, for the same reason.
 
 ## Tabulator
 
@@ -29,3 +30,24 @@ upstream dist bundle, fetched from jsDelivr's npm mirror; the Hextra theme
 would otherwise fetch the same file at build time, which would make a site
 deploy depend on a CDN being up. `site/hugo.toml` points
 `params.search.flexsearch.js` at the vendored copy.
+
+## Inter
+
+- **Version:** the Google Fonts build (v20), as packaged by `@fontsource-variable/inter` 5.3.0
+- **Source:** https://github.com/rsms/inter
+- **License:** SIL Open Font License 1.1
+- **Vendored at:** `site/assets/vendor/inter/` (`inter-latin-wght-normal.woff2`, `LICENSE`)
+
+The documentation site's text face. The file is the unmodified variable
+font, Latin subset, from Fontsource's npm package; `site/layouts/_partials/custom/head-end.html`
+declares it.
+
+## JetBrains Mono
+
+- **Version:** the Google Fonts build (v24), as packaged by `@fontsource-variable/jetbrains-mono` 5.3.0
+- **Source:** https://github.com/JetBrains/JetBrainsMono
+- **License:** SIL Open Font License 1.1
+- **Vendored at:** `site/assets/vendor/jetbrains-mono/` (`jetbrains-mono-latin-wght-normal.woff2`, `LICENSE`)
+
+The documentation site's code face, used for commands, code blocks and the
+terminal captures. Unmodified, Latin subset, from the same source as Inter.

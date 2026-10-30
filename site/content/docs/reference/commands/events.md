@@ -10,6 +10,8 @@ Shows Kubernetes events recorded against the exact object each index names — u
 
 --since bounds how far back the listing looks, in the same vocabulary kx diag reads — s, m, h or d: 90s, 30m, 12h, 7d. Without it every event the cluster still holds is listed — on a default cluster roughly the last hour, since that is how long the API server keeps an event before dropping it. Set events_max_age in config.toml to choose a window once rather than per run.
 
+--sort orders each table by its columns, named separated by commas as the header reads them, with a leading '-' to sort one from largest down: TYPE, REASON, KIND and MESSAGE as text, AGE as a duration, so 'age' puts the newest first. Ties keep the order the cluster returned them in.
+
 ## Usage
 
 ```text
@@ -27,6 +29,7 @@ kx events [OPTIONS] <index>...
 | Option | Description |
 |---|---|
 | `--since string` | Only events newer than this; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to events_max_age, which is unset: every event the cluster still holds is listed |
+| `--sort string` | Sort the events by their columns: '-type,age' puts Warnings first, the newest first in each |
 
 ## Global options
 
@@ -41,6 +44,7 @@ kx events [OPTIONS] <index>...
 kx events 1
 kx events 1 2
 kx events 1 --since 30m
+kx events 1 --sort -type,age
 kx events 1..3
 kx events 3..
 ```

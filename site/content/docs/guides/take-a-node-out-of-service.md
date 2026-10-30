@@ -54,6 +54,21 @@ kx drain 1 --ignore-daemonsets --delete-emptydir-data
 
 It prompts before doing anything unless you pass `--yes`, and streams kubectl's own progress, which can run for minutes. kubectl's drain flags pass through: `--force`, `--grace-period`, `--ignore-daemonsets`, `--delete-emptydir-data`, `--timeout`.
 
+## Keeping Pods off a Node
+
+A taint keeps Pods off a Node unless they tolerate it, which is how a Node is set aside for one kind of workload rather than taken out of service.
+
+```bash
+kx taint 1 dedicated=gpu:NoSchedule    # only Pods that tolerate it land here
+kx taint 1 --remove dedicated          # drop the key, whatever its effect
+kx taint 1 dedicated=infra:NoSchedule --overwrite
+```
+
+The effect is `NoSchedule`, `PreferNoSchedule` or `NoExecute`.
+The first two only steer the scheduler.
+A `NoExecute` taint also evicts every Pod already running there that does not tolerate it, so it is a drain by another name — and `kx taint` takes one index for the reason `kx drain` does, and asks before setting one unless you pass `--yes`.
+It also refuses kubectl's `--all` and `--selector`: beside a Node's name, kubectl taint applies them to every Node they select rather than refusing the pair, so `--all` would taint the whole cluster.
+
 ## Nodes are not in a namespace
 
 A Node is cluster-scoped, so its listing records no namespace and its captions do not name one — `Nodes · 1 item`, not `Nodes · prod · 1 item`.

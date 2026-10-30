@@ -190,6 +190,9 @@ func columnOf(headers []string, typed string) int {
 	return -1
 }
 
+// ColumnKeys are the keys --sort names headers by, each once, in order.
+func ColumnKeys(headers []string) []string { return appendKeys(nil, headers) }
+
 func appendKeys(keys []string, headers []string) []string {
 	for _, header := range headers {
 		if key := ColumnKey(header); !slices.Contains(keys, key) {

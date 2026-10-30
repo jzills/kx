@@ -255,6 +255,15 @@ type State struct {
 	// exactly the fact old entries have: nobody had written the MCP server
 	// yet, so every one of them really was user-made.
 	Source string `json:"source,omitempty"`
+	// Columns are the keys of the columns the listing was printed with, as
+	// --sort names them — name, ready, restarts — kept so a later --sort over
+	// the same kind can be completed. kubectl decides a kind's columns, and
+	// they differ by kind and by kubectl version, so the listing kx last
+	// printed is the one source that needs no API call. Absent for a listing
+	// with no table of kubectl's (a sweep, a tree), and from entries written
+	// before it existed, which then complete nothing: additive, as Source is,
+	// with no version bump.
+	Columns []string `json:"columns,omitempty"`
 }
 
 // SourceMCP tags a listing an MCP tool saved on an agent's behalf, as opposed

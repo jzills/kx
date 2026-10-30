@@ -861,3 +861,166 @@ func TestEventsToolStaleIndexTargetIsATranslatedError(t *testing.T) {
 		t.Errorf("error = %q, want %q", text, want)
 	}
 }
+
+// describe asks kubectl to describe the resolved target, never a spelling the
+// caller typed, and returns kubectl's text whole. The target is one Kind/name
+// argument: as two, kubectl answered a name with no exact match with every
+// resource whose name it prefixes, labeled as the target.
+func TestDescribeToolDescribesTheResolvedTarget(t *testing.T) {
+	const text = "Name:         api\nNamespace:    prod\nReplicas:     2 desired | 0 available\n"
+	kube := &recordingKubectl{output: text}
+	var out describeOutput
+	decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "describe", map[string]any{
+		"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+	}), &out)
+
+	want := "describe Deployment/api -n prod"
+	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != want {
+		t.Fatalf("kubectl runs = %v, want one %q", kube.runs, want)
+	}
+	if out.Describe != text || out.Truncated {
+		t.Errorf("describe = %q (truncated %v), want kubectl's text whole", out.Describe, out.Truncated)
+	}
+	if out.Kind != "Deployment" || out.Name != "api" || out.Namespace != "prod" || out.Context != kube.CurrentContext() {
+		t.Errorf("out = %+v", out)
+	}
+}
+
+// A cluster-scoped target is described with no -n, which kubectl would
+// otherwise read as the namespace to look in; a mark is named back.
+func TestDescribeToolLeavesTheNamespaceOffANodeAndNamesTheMark(t *testing.T) {
+	kube := &recordingKubectl{output: "Name: node-a\n"}
+	deps := mcpTestDeps(t, kube)
+	if err := deps.State.SaveMark("worker", state.Mark{
+		Resource: state.Resource{Name: "node-a", Kind: kinds.Node}, Context: kube.CurrentContext(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out describeOutput
+	decodeStructured(t, callTool(t, connectMCP(t, deps), "describe",
+		map[string]any{"target": map[string]any{"mark": "@worker"}}), &out)
+
+	if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != "describe Node/node-a" {
+		t.Fatalf("kubectl runs = %v, want one 'describe Node/node-a'", kube.runs)
+	}
+	if out.Mark != "worker" || out.Namespace != "" {
+		t.Errorf("mark %q namespace %q, want worker and none", out.Mark, out.Namespace)
+	}
+}
+
+// A target name shaped like a flag never reaches kubectl's argv.
+func TestDescribeToolRefusesAFlagShapedNameBeforeKubectlRuns(t *testing.T) {
+	kube := &recordingKubectl{}
+	result := callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "describe", map[string]any{
+		"target": map[string]any{"kind": "pods", "name": "--server=https://elsewhere"},
+	})
+	if !result.IsError || !strings.HasPrefix(toolText(result), "Name '--server=https://elsewhere' is not a Kubernetes name") {
+		t.Errorf("result = %q, want the name refusal", toolText(result))
+	}
+	if len(kube.runs) != 0 {
+		t.Errorf("kubectl ran %v before the refusal", kube.runs)
+	}
+}
+
+// A description over the cap keeps its head, cut at a line boundary, and
+// says so; one line longer than the whole cap is cut before a rune, never
+// inside one.
+func TestBoundDescribeBytesKeepsTheHeadAtALineBoundary(t *testing.T) {
+	line := strings.Repeat("x", 99) + "\n"
+	text := "Name: api\n" + strings.Repeat(line, maxDescribeBytes/len(line)+10)
+	got, truncated := boundDescribeBytes(text)
+	if !truncated || len(got) > maxDescribeBytes {
+		t.Fatalf("kept %d bytes (truncated %v), want at most %d and truncated", len(got), truncated, maxDescribeBytes)
+	}
+	if !strings.HasPrefix(text, got) || !strings.HasSuffix(got, "\n") {
+		t.Errorf("kept text is not a whole-line head of the description")
+	}
+
+	runes := strings.Repeat("世", maxDescribeBytes)
+	got, truncated = boundDescribeBytes(runes)
+	if !truncated || !utf8.ValidString(got) || len(got) > maxDescribeBytes || !strings.HasPrefix(runes, got) {
+		t.Errorf("one long line: kept %d bytes, valid UTF-8 %v, want a valid head of at most %d",
+			len(got), utf8.ValidString(got), maxDescribeBytes)
+	}
+
+	if got, truncated := boundDescribeBytes("Name: api\n"); truncated || got != "Name: api\n" {
+		t.Errorf("a short description = %q (truncated %v), want it whole", got, truncated)
+	}
+}
+
+// rollout_history lists the resolved workload's revisions, or with revision
+// shows one of them, through kubectl rollout history and nothing else.
+func TestRolloutHistoryToolReadsTheResolvedWorkloadsRevisions(t *testing.T) {
+	const history = "deployment.apps/api\nREVISION  CHANGE-CAUSE\n1         <none>\n2         image bump\n"
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{}, "rollout history Deployment/api -n prod"},
+		{map[string]any{"revision": 2}, "rollout history Deployment/api -n prod --revision=2"},
+	} {
+		kube := &recordingKubectl{output: history}
+		args := map[string]any{"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}}
+		for key, value := range tc.args {
+			args[key] = value
+		}
+		var out rolloutHistoryOutput
+		decodeStructured(t, callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "rollout_history", args), &out)
+		if len(kube.runs) != 1 || strings.Join(kube.runs[0], " ") != tc.want {
+			t.Errorf("%v: kubectl runs = %v, want one %q", tc.args, kube.runs, tc.want)
+		}
+		if out.History != history || out.Kind != "Deployment" || out.Name != "api" || out.Namespace != "prod" {
+			t.Errorf("%v: out = %+v", tc.args, out)
+		}
+	}
+}
+
+// A kind kubectl keeps no rollout history for, and a revision no history
+// holds, are refused in full sentences before kubectl runs.
+func TestRolloutHistoryToolRefusesBeforeKubectlRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			"a Pod", map[string]any{"target": map[string]any{"kind": "pods", "name": "api", "namespace": "prod"}},
+			"kx rollout history does not support 'Pod' — only Deployments, StatefulSets and DaemonSets.",
+		},
+		{
+			"a negative revision", map[string]any{
+				"target":   map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"},
+				"revision": -1,
+			},
+			"Invalid value for 'revision': '-1'. It is a revision number from the history — 1 or more.",
+		},
+	} {
+		kube := &recordingKubectl{}
+		result := callTool(t, connectMCP(t, mcpTestDeps(t, kube)), "rollout_history", tc.args)
+		if !result.IsError || toolText(result) != tc.want {
+			t.Errorf("%s: result = %q (error %v), want %q", tc.name, toolText(result), result.IsError, tc.want)
+		}
+		if len(kube.runs) != 0 {
+			t.Errorf("%s: kubectl ran %v before the refusal", tc.name, kube.runs)
+		}
+	}
+}
+
+// The read-only guard admits rollout history and none of rollout's other
+// subcommands, which change the workload: a tool that ran rollout restart
+// must fail TestMCPToolsOnlyRead rather than pass as a "rollout".
+func TestReadsOnlyAdmitsRolloutHistoryAlone(t *testing.T) {
+	for args, want := range map[string]bool{
+		"rollout history Deployment/api": true,
+		"rollout restart Deployment/api": false,
+		"rollout undo Deployment/api":    false,
+		"rollout":                        false,
+		"get pods":                       true,
+		"delete pod api":                 false,
+		"":                               false,
+	} {
+		if got := readsOnly(strings.Fields(args)); got != want {
+			t.Errorf("readsOnly(%q) = %v, want %v", args, got, want)
+		}
+	}
+}

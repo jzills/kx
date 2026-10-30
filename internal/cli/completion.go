@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jzills/kx/internal/config"
 	"github.com/jzills/kx/internal/diagnostics"
+	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
@@ -49,6 +52,7 @@ var argCompleters = map[string]completer{
 	"image":           nil, // A registry reference kx has no list of.
 	"port":            nil, // Likewise, and it is a mapping, not a port.
 	"key=value":       nil,
+	"taint":           nil, // A key and value kx has no list of.
 	"command":         nil, // Runs in the pod; local paths would be wrong.
 	"src":             completePath,
 	"dest":            completePath,
@@ -123,8 +127,8 @@ func argCompletion(cmd *cobra.Command, services Services) func(
 		// and `kx scan --engine <TAB>` offered the positional's candidates
 		// instead. The flags are hand-parsed here for the same reason they are
 		// hand-parsed at run time.
-		if candidates, ok := flagValueCompletion(cmd, services, args, toComplete); ok {
-			return candidates, cobra.ShellCompDirectiveNoFileComp
+		if candidates, directive, ok := flagValueCompletion(cmd, services, args, toComplete); ok {
+			return candidates, directive
 		}
 
 		arg, ok := argAt(cmd, len(positionalsOnly(cmd, args)))
@@ -172,6 +176,215 @@ var flagValues = map[string]completer{
 	"scan.fail-on":       completeScanThreshold,
 }
 
+// sortColumns are the columns a command's --sort completes, given the line so
+// far: the fixed columns a sweep, a scan summary and kx events print, and,
+// for a listing whose columns kubectl decides, the ones kx recorded the last
+// time it saved a listing of that kind (recordedColumns). nil for a command with no --sort,
+// and for a kind kx has not listed yet.
+func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
+	// The commands whose columns are kx's own answer first: the table is
+	// the same whatever flags the line carries, so there is no shape to
+	// match and no listing to match it to.
+	switch cmd.Name() {
+	case "diagnostic":
+		return index.ColumnKeys(sweepHeaders)
+	case "scan":
+		return index.ColumnKeys(render.ScanHeaders())
+	case "events":
+		return index.ColumnKeys(render.EventsHeaders)
+	}
+	// The rest print kubectl's columns, read back from a saved listing, so
+	// only a line whose shape kx can match to one has columns to offer.
+	shape := lineShape(cmd)
+	if shape.unknown {
+		return nil
+	}
+	switch cmd.Name() {
+	case "top":
+		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 &&
+			kinds.Normalize(positionals[0]) == kinds.Node {
+			return recordedColumns(services, state.CommandTop, "nodes", listingShape{})
+		}
+		return recordedColumns(services, state.CommandTop, "pods", shape)
+	case "secret":
+		return recordedColumns(services, "", "secrets", shape)
+	case "get":
+		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 {
+			return recordedColumns(services, "", positionals[0], shape)
+		}
+	}
+	return nil
+}
+
+// listingShape is what the line being completed asks of a listing's columns
+// beyond its kind: -A adds NAMESPACE, -o wide or custom-columns change the
+// set, and kx get jobs --last-run adds CRONJOB. unknown is a flag that does
+// none of those and is not known to leave the columns alone, which makes the
+// shape one kx cannot match a saved listing to.
+type listingShape struct {
+	allNamespaces bool
+	output        string
+	lastRun       bool
+	noLimits      bool
+	unknown       bool
+}
+
+// shapeFlags are the flags listingShape models itself, by long name and by
+// the shorthand a saved listing can carry.
+var shapeFlags = []string{"all-namespaces", "A", "output", "o", "last-run", "no-limits"}
+
+// columnNeutralFlags are kubectl's flags that leave a listing's columns
+// alone: they pick which resources are listed, or which cluster they are
+// read from. Any other flag of kubectl's is read as changing the columns,
+// because many do — kubectl top --containers prints POD, kubectl get
+// -L app adds the label — and a wrong column completed is worse than none:
+// the sort refuses it, naming the columns the table really has.
+//
+// Only kubectl's, because only kubectl writes the table. kx's own flags are
+// recognized by the annotation they lack rather than by name (lineShape):
+// listing them here is what left kx top --json and --html completing
+// nothing, each new report flag having to be remembered twice.
+var columnNeutralFlags = []string{
+	// Which resources are listed.
+	"namespace", "n", "selector", "l", "field-selector", "ignore-not-found", "chunk-size",
+	// Which cluster they are read from.
+	"context", "cluster", "user", "kubeconfig", "server", "token", "request-timeout",
+	"certificate-authority", "client-certificate", "client-key", "insecure-skip-tls-verify",
+	"as", "as-group", "as-uid",
+}
+
+// flagShapesColumns reports whether a flag, named as it was written and
+// without its dashes or value, is one kx cannot assume leaves the columns
+// alone.
+func flagShapesColumns(name string) bool {
+	name = strings.TrimLeft(name, "-")
+	name, _, _ = strings.Cut(name, "=")
+	return name != "" && !slices.Contains(shapeFlags, name) && !slices.Contains(columnNeutralFlags, name)
+}
+
+// lineShape reads the shape the line being completed asks for from the flags
+// it set. A flag kx cannot assume leaves the columns alone makes it unknown,
+// so no saved listing stands in for a table kx has not seen: kx top
+// --containers prints a POD column kx top does not, and completing from the
+// plain listing offered cpu%, which --containers refuses.
+func lineShape(cmd *cobra.Command) listingShape {
+	var shape listingShape
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		switch flag.Name {
+		case "all-namespaces":
+			shape.allNamespaces = flag.Value.String() == "true"
+		case "output":
+			shape.output = flag.Value.String()
+		case "last-run":
+			shape.lastRun = flag.Value.String() == "true"
+		case "no-limits":
+			shape.noLimits = flag.Value.String() == "true"
+		default:
+			// Only kubectl's flags can change kubectl's columns. kx's own —
+			// --json, --html, --limit, every report flag added after this —
+			// carry no annotation from kubectl's table, and shape nothing.
+			if len(flag.Annotations[kubectlFlagAnnotation]) > 0 && flagShapesColumns(flag.Name) {
+				shape.unknown = true
+			}
+		}
+	})
+	return shape
+}
+
+// recordedColumns are the columns of the newest saved listing a command made
+// of a kind — kx get's (and its stitched fetch's) for command "", kx top's
+// for state.CommandTop — read from the history and the per-kind slots, so
+// they cost no API call, as -n's completion costs none.
+//
+// A listing in the other scope is used when none in this one is, with the
+// NAMESPACE column an -A listing adds put in or taken out: the rest of a
+// kind's columns are the same either way. One taken in another shape is
+// never used: its columns are another table's, and after kx get pods -o wide
+// a plain --sort offered node, which the plain table then refused.
+func recordedColumns(services Services, command, resource string, shape listingShape) []string {
+	if services.State == nil {
+		return nil
+	}
+	history, err := services.State.LoadHistory()
+	if err != nil {
+		return nil
+	}
+	var entries []state.State
+	for i := len(history.States) - 1; i >= 0; i-- {
+		entries = append(entries, history.States[i])
+	}
+	for _, entry := range history.Named {
+		entries = append(entries, entry)
+	}
+	kind := kinds.Normalize(resource)
+	var otherScope []string
+	for _, entry := range entries {
+		query := entry.Query
+		if query == nil || len(entry.Columns) == 0 || kinds.Normalize(query.Resource) != kind {
+			continue
+		}
+		if query.Command != command && !(command == "" && query.Command == state.CommandFetch) {
+			continue
+		}
+		if output, _, _ := extractString(query.Args, "--output", "-o"); output != shape.output ||
+			query.LastRun != shape.lastRun {
+			continue
+		}
+		// kx top records its own --no-limits beside kubectl's flags, as
+		// refresh reads it back: without it the table has no CPU%/MEM%.
+		if noLimits, _ := extractBool(query.Args, "--no-limits"); noLimits != shape.noLimits {
+			continue
+		}
+		if slices.ContainsFunc(query.Args, flagShapesColumns) {
+			continue
+		}
+		if entry.AllNamespaces == shape.allNamespaces {
+			return entry.Columns
+		}
+		if otherScope == nil {
+			otherScope = rescoped(entry.Columns, shape.allNamespaces)
+		}
+	}
+	return otherScope
+}
+
+// rescoped is a listing's columns in the other scope: with NAMESPACE first
+// for -A, as kubectl puts it, or without it.
+func rescoped(columns []string, allNamespaces bool) []string {
+	without := slices.DeleteFunc(slices.Clone(columns), func(column string) bool { return column == "namespace" })
+	if allNamespaces {
+		return append([]string{"namespace"}, without...)
+	}
+	return without
+}
+
+// sortCandidates completes the last key of a --sort spec against columns,
+// keeping what is typed ahead of it: "status,-re" offers "status,-restarts".
+// A column the spec already names is not offered twice, and the key being
+// typed matches whatever way it is spelled: both are read through
+// index.ColumnKey, as the sort itself reads them, so "Kind" and "top_finding"
+// name kind and top-finding, and "nominated_n" completes nominated-node.
+func sortCandidates(columns []string, toComplete string) []string {
+	head, last := "", toComplete
+	if comma := strings.LastIndex(toComplete, ","); comma >= 0 {
+		head, last = toComplete[:comma+1], toComplete[comma+1:]
+	}
+	if rest, descending := strings.CutPrefix(last, "-"); descending {
+		head, last = head+"-", rest
+	}
+	named := map[string]bool{}
+	for _, key := range strings.Split(head, ",") {
+		named[index.ColumnKey(strings.TrimPrefix(strings.TrimSpace(key), "-"))] = true
+	}
+	var candidates []string
+	for _, column := range columns {
+		if !named[column] && strings.HasPrefix(column, index.ColumnKey(last)) {
+			candidates = append(candidates, head+column)
+		}
+	}
+	return candidates
+}
+
 // lookupFlagValue prefers a command's own completer for a flag, the way
 // lookupCompleter does for an argument.
 //
@@ -192,11 +405,12 @@ func lookupFlagValue(cmd *cobra.Command, name string) (completer, bool) {
 // caller falls through to the positional path.
 func flagValueCompletion(
 	cmd *cobra.Command, services Services, args []string, toComplete string,
-) ([]string, bool) {
+) ([]string, cobra.ShellCompDirective, bool) {
 	if name, prefix, found := strings.Cut(toComplete, "="); found && strings.HasPrefix(name, "--") {
-		complete, ok := lookupFlagValue(cmd, strings.TrimPrefix(name, "--"))
+		flag := strings.TrimPrefix(name, "--")
+		complete, ok := lineFlagValue(cmd, args, flag)
 		if !ok {
-			return nil, false
+			return nil, 0, false
 		}
 		// The shell replaces the whole word, so each candidate has to carry
 		// the "--flag=" it is completing after.
@@ -204,23 +418,44 @@ func flagValueCompletion(
 		for _, candidate := range complete(services, prefix) {
 			candidates = append(candidates, name+"="+candidate)
 		}
-		return candidates, true
+		return candidates, flagValueDirective(flag), true
 	}
 
 	if len(args) == 0 {
-		return nil, false
+		return nil, 0, false
 	}
 	flag := valueFlag(cmd, args[len(args)-1])
 	if flag == "" {
-		return nil, false
+		return nil, 0, false
 	}
-	complete, ok := lookupFlagValue(cmd, flag)
+	complete, ok := lineFlagValue(cmd, args, flag)
 	if !ok {
 		// A flag that takes a value, but not one kx can suggest values for —
 		// a label selector, say. Still not a filename.
-		return nil, true
+		return nil, cobra.ShellCompDirectiveNoFileComp, true
 	}
-	return complete(services, toComplete), true
+	return complete(services, toComplete), flagValueDirective(flag), true
+}
+
+// flagValueDirective is the directive for a completed flag value: never a
+// filename, and for --sort no trailing space, so a comma and the next key can
+// follow the one just completed, as the registered --sort completer leaves it.
+func flagValueDirective(flag string) cobra.ShellCompDirective {
+	if flag == "sort" {
+		return cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+	}
+	return cobra.ShellCompDirectiveNoFileComp
+}
+
+// lineFlagValue is lookupFlagValue with the line so far, which a --sort's
+// columns depend on (sortColumns).
+func lineFlagValue(cmd *cobra.Command, args []string, name string) (completer, bool) {
+	if name == "sort" {
+		return func(services Services, toComplete string) []string {
+			return sortCandidates(sortColumns(cmd, services, args), toComplete)
+		}, true
+	}
+	return lookupFlagValue(cmd, name)
 }
 
 // valueFlag returns the registered name of a flag token that takes a value, or
@@ -559,6 +794,17 @@ func registerFlagCompletions(root *cobra.Command, services Services) {
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
 		cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+			if flag.Name == "sort" {
+				// Without a trailing space, so a comma and the next key can
+				// follow the one just completed.
+				_ = cmd.RegisterFlagCompletionFunc(flag.Name, func(
+					cmd *cobra.Command, args []string, toComplete string,
+				) ([]string, cobra.ShellCompDirective) {
+					return sortCandidates(sortColumns(cmd, services, args), toComplete),
+						cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+				})
+				return
+			}
 			complete, ok := lookupFlagValue(cmd, flag.Name)
 			if !ok && takesPlainValue(cmd, flag) {
 				// Cobra completes a parsed command's flag values itself, and

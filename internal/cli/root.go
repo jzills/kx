@@ -165,6 +165,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newCordonCommand(services, "uncordon"),
 		newDeleteCommand(services),
 		newDrainCommand(services),
+		newTaintCommand(services),
 		newScaleCommand(services),
 		newWaitCommand(services),
 		newRolloutCommand(services),

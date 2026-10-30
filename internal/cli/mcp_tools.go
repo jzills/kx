@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jzills/kx/internal/diagnostics"
 	"github.com/jzills/kx/internal/graph"
@@ -91,6 +92,22 @@ func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 			"nested keys (fields). Secret values and the last-applied annotation are redacted.",
 		Annotations: readOnlyTool("Get YAML"),
 	}, serialized(deps, deps.getYAML))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "describe",
+		Description: "kubectl describe's account of one resource: its settings and status in prose, " +
+			"conditions, the endpoints of a Service, the resources allocated on a Node, and recent " +
+			"events. Secret values are never shown — kubectl describe gives their sizes only. Capped " +
+			"at 256 KiB; truncated says the end was cut.",
+		Annotations: readOnlyTool("Describe"),
+	}, serialized(deps, deps.describe))
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "rollout_history",
+		Description: "A Deployment's, StatefulSet's or DaemonSet's revisions, as kubectl rollout history " +
+			"lists them with each one's change cause — or, given revision, that revision's Pod template, " +
+			"so two can be compared to see what a rollout changed. Rolling back is the user's to do, " +
+			"with kx rollout undo.",
+		Annotations: readOnlyTool("Rollout history"),
+	}, serialized(deps, deps.rolloutHistory))
 	// Not through serialized: a sweep can take minutes, so scan holds the
 	// lock only while it resolves images — see registerScanTool.
 	registerScanTool(server, deps)
@@ -148,6 +165,34 @@ func clampLimit(requested, def, max int) int {
 		return def
 	}
 	return min(requested, max)
+}
+
+// mcpSortKeys reads a tool's sort as kx get reads --sort, refusing it in the
+// tools' words. A control character is refused as validMatch refuses one in
+// a match term: under --write-listings the spec is saved with the listing,
+// and kx prints a saved sort back to the terminal in a relist hint.
+func mcpSortKeys(spec string) ([]index.SortKey, error) {
+	if spec == "" {
+		return nil, nil
+	}
+	if strings.IndexFunc(spec, unicode.IsControl) >= 0 {
+		return nil, errors.New("'sort' cannot hold a control character — no column name does.")
+	}
+	keys, err := index.ParseSortKeys(spec)
+	if err != nil {
+		return nil, sortSpecErrorAs("sort", spec)
+	}
+	return keys, nil
+}
+
+// mcpSortError is a sort's column refusal as a tool gives it, naming the
+// argument 'sort' rather than the flag the command it reuses would name.
+func mcpSortError(err error) error {
+	var column sortColumnError
+	if errors.As(sortError(err), &column) {
+		return errors.New(column.as("sort"))
+	}
+	return err
 }
 
 // mcpMark is one mark as a tool reports it. Resource, not Name, holds the
@@ -267,6 +312,7 @@ type listInput struct {
 	Limit         int    `json:"limit,omitempty" jsonschema:"Most rows to return; default 200, at most 1000. total always counts every row."`
 	Match         string `json:"match,omitempty" jsonschema:"List only the resources whose name contains this, case-insensitively, as kx get -m does."`
 	LastRun       bool   `json:"lastRun,omitempty" jsonschema:"With kind jobs, list only the newest Job of each CronJob, as kx get jobs --last-run does; each row names its CronJob."`
+	Sort          string `json:"sort,omitempty" jsonschema:"Order the rows by the columns kubectl's table for this kind prints, as kx get --sort does: 'status,-restarts' sorts by STATUS, then by RESTARTS from most to fewest. Applied before limit, so limit keeps the first rows of that order."`
 }
 
 type listedResource struct {
@@ -287,6 +333,7 @@ type listOutput struct {
 	AllNamespaces bool             `json:"allNamespaces,omitempty"`
 	Match         string           `json:"match,omitempty"`
 	LastRun       bool             `json:"lastRun,omitempty"`
+	Sort          string           `json:"sort,omitempty"`
 	Total         int              `json:"total"`
 	Resources     []listedResource `json:"resources"`
 }
@@ -302,6 +349,10 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		return nil, listOutput{}, err
 	}
 	if err := validMatch(in.Match); err != nil {
+		return nil, listOutput{}, err
+	}
+	keys, err := mcpSortKeys(in.Sort)
+	if err != nil {
 		return nil, listOutput{}, err
 	}
 	if in.LastRun && kinds.Normalize(in.Kind) != kinds.Job {
@@ -356,7 +407,13 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	if !tabular && strings.TrimSpace(output) != "" {
 		return nil, listOutput{}, fmt.Errorf("kubectl's listing of %s has no NAME column to read names from.", in.Kind)
 	}
-	table := listing.Narrow(in.Match).Number()
+	// Sorted before it is numbered, as kx get sorts, so a saved row's index
+	// is its place in the order returned.
+	sorted, err := listing.Narrow(in.Match).Sort(keys)
+	if err != nil {
+		return nil, listOutput{}, mcpSortError(err)
+	}
+	table := sorted.Number()
 
 	// Saved as `kx get <kind>` saves it, and under the same rules (numberable,
 	// read off the whole reply): an empty listing is saved, since it is the
@@ -372,8 +429,9 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 		recorded = []string{}
 	}
 	if indexed {
-		listed := getListing(in.Kind, in.Match, recorded, namespace, table.Entries)
+		listed := getListing(in.Kind, in.Match, recorded, namespace, table)
 		listed.Query.LastRun = in.LastRun
+		listed.Query.Sort = in.Sort
 		if err := d.listingSave(current)(listed); err != nil {
 			return nil, listOutput{}, err
 		}
@@ -386,8 +444,8 @@ func (d mcpDeps) listResources(_ context.Context, _ *mcp.CallToolRequest, in lis
 	limit := clampLimit(in.Limit, defaultListLimit, maxListLimit)
 	out := listOutput{
 		Context: current, Kind: string(kind), Namespace: namespace,
-		AllNamespaces: in.AllNamespaces, Match: in.Match, LastRun: in.LastRun, Total: len(table.Entries),
-		Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
+		AllNamespaces: in.AllNamespaces, Match: in.Match, LastRun: in.LastRun, Sort: in.Sort,
+		Total: len(table.Entries), Resources: make([]listedResource, 0, min(len(table.Entries), limit)),
 	}
 	for position, entry := range table.Entries[:min(len(table.Entries), limit)] {
 		rowNamespace := namespace
@@ -411,6 +469,8 @@ type diagnoseInput struct {
 	Since         string     `json:"since,omitempty" jsonschema:"Ignore what finished longer ago than this — 30m, 24h, 7d. Ongoing problems are always reported. Defaults to kx's diag_max_age setting."`
 	ShowHealthy   bool       `json:"showHealthy,omitempty" jsonschema:"Include healthy resources in a sweep's results."`
 	Match         string     `json:"match,omitempty" jsonschema:"Sweep only the resources whose name contains this, case-insensitively, as kx diag -m does. Only without a target."`
+	Limit         int        `json:"limit,omitempty" jsonschema:"Most resources a sweep returns, worst first; every one when absent, at most 1000. of counts what the sweep would have returned without it."`
+	Sort          string     `json:"sort,omitempty" jsonschema:"Order a sweep by its columns — kind, name, namespace, verdict, top-finding — on top of the severity ranking, as kx diag --sort does: 'kind' groups it by kind, the worst first in each. Only without a target."`
 }
 
 type diagnoseOutput struct {
@@ -436,8 +496,27 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	if in.Target != nil && in.Match != "" {
 		return nil, diagnoseOutput{}, errMCPMatchBesideTarget
 	}
+	if in.Target != nil && in.Limit != 0 {
+		return nil, diagnoseOutput{}, errors.New(
+			"'limit' applies without a target — a target already names one resource. " +
+				"Drop it, or drop the target to sweep.")
+	}
+	if in.Target != nil && in.Sort != "" {
+		return nil, diagnoseOutput{}, errors.New(
+			"'sort' applies without a target — a target already names one resource. " +
+				"Drop it, or drop the target to sweep.")
+	}
 	if err := validMatch(in.Match); err != nil {
 		return nil, diagnoseOutput{}, err
+	}
+	// Checked against the sweep's columns before anything is swept, as kx
+	// diag checks its --sort, so a misspelled column costs no sweep.
+	keys, err := mcpSortKeys(in.Sort)
+	if err != nil {
+		return nil, diagnoseOutput{}, err
+	}
+	if _, err := index.SortRows(sweepHeaders, nil, keys); err != nil {
+		return nil, diagnoseOutput{}, mcpSortError(err)
 	}
 	window, err := resolveWindowAs("since", in.Since, d.Config.DiagMaxAge)
 	if err != nil {
@@ -477,7 +556,7 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 	// the row's position in the saved sweep.
 	result, err := TriageCommand{
 		Diagnostics: service, Save: d.listingSave(out.Context), Window: window,
-		Match: in.Match, Since: in.Since, NamedNamespace: in.Namespace != "",
+		Match: in.Match, Since: in.Since, Sort: in.Sort, NamedNamespace: in.Namespace != "",
 	}.Execute(ctx, namespace, in.AllNamespaces, true)
 	if err != nil {
 		return nil, diagnoseOutput{}, err
@@ -494,6 +573,15 @@ func (d mcpDeps) diagnose(ctx context.Context, _ *mcp.CallToolRequest, in diagno
 			}
 		}
 		out.Diagnosis.Resources = kept
+	}
+	// Cut here, after the healthy rows are filtered, so a limit counts the
+	// rows it returns — kx diag --limit's "first N of what's shown". Unlike
+	// that flag it cuts only the answer: the sweep was saved whole above, as
+	// list_resources and tree save theirs, so a row past the cut keeps its
+	// index. Of says a cut happened, as it does in kx diag --json.
+	if limit := min(in.Limit, maxListLimit); limit > 0 && len(out.Diagnosis.Resources) > limit {
+		out.Diagnosis.Of = len(out.Diagnosis.Resources)
+		out.Diagnosis.Resources = out.Diagnosis.Resources[:limit]
 	}
 	return nil, out, nil
 }

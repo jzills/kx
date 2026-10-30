@@ -6,7 +6,7 @@ description: "Copy files to or from an indexed Pod via kubectl cp."
 weight: 5
 ---
 
-Copies files to or from an indexed Pod via kubectl cp. Either side of the copy can name a path inside the Pod as index:path.
+Copies files to or from an indexed Pod via kubectl cp. Either side of the copy can name a path inside the Pod as index:path, or as @mark:path for a marked Pod.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
@@ -20,8 +20,8 @@ kx cp [OPTIONS] <src> <dest> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<src>` | Source path, or &lt;index&gt;:&lt;path&gt; inside the Pod |
-| `<dest>` | Destination path, or &lt;index&gt;:&lt;path&gt; inside the Pod |
+| `<src>` | Source path, or &lt;index&gt;:&lt;path&gt; or @&lt;mark&gt;:&lt;path&gt; inside the Pod |
+| `<dest>` | Destination path, or &lt;index&gt;:&lt;path&gt; or @&lt;mark&gt;:&lt;path&gt; inside the Pod |
 
 ## Options
 
@@ -49,4 +49,5 @@ kx cp [OPTIONS] <src> <dest> [kubectl flags]
 ```bash
 kx cp 1:/var/log/app.log ./app.log
 kx cp ./patch.conf 1:/etc/app/patch.conf
+kx cp @api:/var/log/app.log ./app.log
 ```

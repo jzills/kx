@@ -42,14 +42,16 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 | `events` | Warning and normal events recorded against one resource. |
 | `logs` | Recent container logs, one Pod or a workload's Pods aggregated. |
 | `top` | Current CPU and memory, against limits or Node capacity. |
+| `describe` | `kubectl describe`'s account of one resource, which shows a Secret's sizes, never its values. |
 | `get_yaml` | A resource's manifest, narrowable to a few fields, Secrets redacted. |
+| `rollout_history` | A workload's revisions, or one revision's Pod template. |
 | `scan` | Image CVEs from the configured scanner, at most 50 images a call by default. |
 
 Your MCP client lists each tool's arguments itself, from the server's `tools/list` reply, with a description of every one.
 
 ## What it will never do
 
-Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `logs` and `top`; client-go only ever `get`s, `list`s and `watch`es.
+Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs`, `top` and `rollout history`; client-go only ever `get`s, `list`s and `watch`es.
 Nothing an agent calls here deletes, patches, scales, execs, port-forwards or edits anything.
 
 The `mark` tool is the one write, and it writes kx's own state, not the cluster — the same `~/.kx/state.json` a mark set from your terminal lives in, so `@culprit` resolves the same resource whether you or the agent set it.
@@ -98,7 +100,7 @@ That cuts both ways: agent listings count toward `max_history` (10 by default), 
 **Accepted risk.** With `--write-listings` on, an agent's listing becomes your *current* listing the moment it saves, so `kx delete 3` right after can mean the agent's row 3, not the one you last ran `kx get` for.
 Every mutating command now says so when the index it resolves came from an agent's listing.
 The `kx delete` and `kx drain` commands fold that into their confirm prompt, so you see it before you answer; skip the prompt with `--yes`/`-y` and they print the stderr notice below in its place.
-The `kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.`
+The `kx scale`, `kx rollout` (`restart`, `undo`, `pause` and `resume`), `kx cordon`, `kx uncordon`, `kx debug`, `kx edit`, `kx exec`, `kx label`, `kx annotate`, `kx taint` and `kx cp` print a muted line to stderr before they act: `Index 3 is from a kx mcp listing — Pod/web-healthy-abc123. Run 'kx state' to see it.`
 It is a notice, not a prompt — nothing pauses, stdout is unchanged, and the exit code doesn't change either.
 Commands that only read — `kx describe`, `kx logs`, `kx yaml`, `kx port-forward`, `kx events`, `kx tree`, `kx diag`, and `kx rollout status` and `history` — print nothing.
 The `kx state` command shows which listing is current; `kx state back` is the way out if it isn't the one you meant.

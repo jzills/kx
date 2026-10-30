@@ -1,0 +1,25 @@
+{{- /*
+  Every released version's paragraph from release-notes/, newest first.
+
+      {{% kx-release-notes %}}
+
+  Percent delimiters, so the headings this writes are markdown and reach the
+  page's table of contents as one entry per version. The paragraph is the
+  first of a release's three tiers; the list of changes and the commit log
+  stay on GitHub, which each version links to.
+
+  safeHTML on the body because what this emits is markdown, not HTML: without
+  it html/template escaped the paragraph before goldmark ever saw it, and a
+  note writing `kx docs <topic>` published as `kx docs &lt;topic&gt;`. The
+  bodies are release-notes/*.md from this repo, not anything a reader
+  supplies. Whether it showed depended on the Hugo version — 0.169 renders it
+  correctly either way, 0.164, which pages.yml pins, does not.
+*/ -}}
+{{- $releases := partialCached "kx/releases.html" . -}}
+{{- range $releases.notes }}
+## v{{ .version }}
+
+{{ .body | safeHTML }}
+
+[v{{ .version }} on GitHub](https://github.com/jzills/kx/releases/tag/v{{ .version }})
+{{ end -}}
