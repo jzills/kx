@@ -97,13 +97,29 @@ func TestTaintRefusesBeforeKubectlRuns(t *testing.T) {
 // must reach the user as kubectl's error, not as a stale listing to refresh —
 // neither from Execute nor from withRefresh's second look (isStale), which
 // relisted the Nodes over it; only a Node that is really gone is stale.
+//
+// Which Node is gone is decided by a second look, and only a NotFound from
+// it counts: an API server that cannot be reached fails the taint and the
+// look alike, and was reported as a Node that no longer exists.
 func TestTaintReportsAnAbsentTaintAsKubectlsErrorNotAStaleNode(t *testing.T) {
 	absent := kubectl.Error{Stderr: `error: taint "spot" not found`}
+	missing := kubectl.Error{Stderr: `Error from server (NotFound): nodes "node-a" not found`}
+	unreachable := kubectl.Error{
+		Stderr: "The connection to the server 127.0.0.1:6443 was refused — did you specify the right host or port?",
+	}
+	// One --remove of a taint against node-a, run three times over: errs
+	// answers the taint and the second look in turn, so each case differs
+	// only in what kubectl says to each.
+	taint := func(kube *recordingKubectl, ref state.Ref) error {
+		t.Helper()
+		_, _, err := TaintCommand{Kubectl: kube}.
+			Execute(Resolved{Ref: ref, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
+		return err
+	}
 
-	kube := &recordingKubectl{err: absent, probeCode: 0}
-	_, _, err := TaintCommand{Kubectl: kube}.
-		Execute(Resolved{Ref: state.Ref{Index: 1}, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
+	// The taint fails, the Node is there: kubectl's own words, not a refresh.
 	var stale StaleResourceError
+	err := taint(&recordingKubectl{errs: []error{absent, nil}}, state.Ref{Index: 1})
 	if errors.As(err, &stale) {
 		t.Fatalf("err = %v, want kubectl's own error — the Node is still there", err)
 	}
@@ -114,15 +130,23 @@ func TestTaintReportsAnAbsentTaintAsKubectlsErrorNotAStaleNode(t *testing.T) {
 		t.Errorf("isStale(%v) = true — withRefresh would relist the Nodes over a taint that was never there", err)
 	}
 
-	// The control: the same failure on a Node the probe cannot find is stale.
-	gone := &recordingKubectl{err: absent, probeCode: 1}
-	_, _, err = TaintCommand{Kubectl: gone}.
-		Execute(Resolved{Ref: state.Ref{Mark: "worker"}, Name: "node-a", Kind: kinds.Node}, nil, []string{"spot"}, nil)
+	// The control: the same failure on a Node the second look cannot find.
+	err = taint(&recordingKubectl{errs: []error{absent, missing}}, state.Ref{Mark: "worker"})
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want a StaleResourceError for a Node that is gone", err)
 	}
 	if stale.Ref.Mark != "worker" {
 		t.Errorf("Ref.Mark = %q, want %q — the mark was lost building the stale error", stale.Ref.Mark, "worker")
+	}
+
+	// A cluster that cannot be reached answers neither call, and saying the
+	// Node is gone would send the user to relist against the same cluster.
+	err = taint(&recordingKubectl{errs: []error{unreachable, unreachable}}, state.Ref{Index: 1})
+	if errors.As(err, &stale) {
+		t.Fatalf("err = %v, want kubectl's connection error — the cluster is unreachable, not the Node missing", err)
+	}
+	if err == nil || err.Error() != unreachable.Stderr {
+		t.Errorf("err = %v, want kubectl's %q", err, unreachable.Stderr)
 	}
 }
 
