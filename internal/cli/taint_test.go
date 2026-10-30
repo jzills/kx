@@ -11,7 +11,8 @@ import (
 
 // kx taint builds kubectl taint's argv for the indexed Node: the taints to
 // set as given, each --remove with kubectl's trailing '-', and kubectl's own
-// flags last.
+// flags last. --all=false selects no Node of its own, so it is forwarded, not
+// refused as --all is.
 func TestTaintBuildsKubectlTaintForTheIndexedNode(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -24,6 +25,8 @@ func TestTaintBuildsKubectlTaintForTheIndexedNode(t *testing.T) {
 			"taint node nginx dedicated:NoSchedule- spot-"},
 		{[]string{"--overwrite", "1", "dedicated=infra:PreferNoSchedule", "--dry-run=server"},
 			"taint node nginx dedicated=infra:PreferNoSchedule --overwrite --dry-run=server"},
+		{[]string{"1", "dedicated=gpu:NoSchedule", "--all=false"},
+			"taint node nginx dedicated=gpu:NoSchedule --all=false"},
 	} {
 		kube, err := indexCommandOn(t, kinds.Node, newTaintCommand, tc.args...)
 		if err != nil {
@@ -61,6 +64,8 @@ func TestTaintRefusesBeforeKubectlRuns(t *testing.T) {
 		{kinds.Node, []string{"1", "--remove", "dedicated:Never"},
 			"Invalid value for the effect in 'dedicated:Never': 'Never'. Accepted values: NoSchedule, PreferNoSchedule, NoExecute."},
 		{kinds.Node, []string{"1", "dedicated=gpu:NoSchedule", "--all"},
+			"'--all' cannot be combined with an index — kubectl taint would apply it to every Node it selects, not only the indexed one."},
+		{kinds.Node, []string{"1", "dedicated=gpu:NoSchedule", "--all=true"},
 			"'--all' cannot be combined with an index — kubectl taint would apply it to every Node it selects, not only the indexed one."},
 		{kinds.Node, []string{"1", "dedicated=gpu:NoSchedule", "-l", "pool=gpu"},
 			"'--selector' cannot be combined with an index — kubectl taint would apply it to every Node it selects, not only the indexed one."},

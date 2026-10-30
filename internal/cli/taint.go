@@ -110,29 +110,24 @@ func validTaintEffect(taint, effect string) error {
 	return nil
 }
 
-// taintScopeFlags are kubectl taint's flags that pick Nodes of their own.
-// Beside a Node's name kubectl taint does not refuse them, as kubectl label
-// does: --all taints every Node in the cluster, whatever the name says.
-var taintScopeFlags = [][2]string{{"--all", ""}, {"--selector", "-l"}}
-
 // refuseTaintScopeFlag refuses a flag that would widen a taint from the
 // indexed Node to others, read from everything kx forwards, the part after
-// '--' included.
+// '--' included. Beside a Node's name kubectl taint does not refuse them, as
+// kubectl label does: --all taints every Node in the cluster, whatever the
+// name says. --all=false is the flag's own default and selects nothing, so
+// it is read as a boolean, as kubectl reads it, rather than refused on sight.
 func refuseTaintScopeFlag(extra []string) error {
-	for _, flag := range taintScopeFlags {
-		long, short := flag[0], flag[1]
-		if !hasFlag(extra, long, short) {
-			continue
-		}
-		spelling := long
-		if short != "" {
-			spelling = firstSpelling(extra, long, short)
-		}
-		return fmt.Errorf(
-			"'%s' cannot be combined with an index — kubectl taint would apply it to every Node "+
-				"it selects, not only the indexed one.", spelling)
+	spelling := ""
+	if all, _ := extractBool(extra, "--all"); all {
+		spelling = "--all"
+	} else if hasFlag(extra, "--selector", "-l") {
+		spelling = firstSpelling(extra, "--selector", "-l")
+	} else {
+		return nil
 	}
-	return nil
+	return fmt.Errorf(
+		"'%s' cannot be combined with an index — kubectl taint would apply it to every Node "+
+			"it selects, not only the indexed one.", spelling)
 }
 
 func newTaintCommand(services Services) *cobra.Command {
