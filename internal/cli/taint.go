@@ -92,6 +92,14 @@ func parseTaint(taint string) error {
 // taints of every effect, or key:Effect, which drops the one.
 func parseTaintRemoval(taint string) error {
 	key, effect, found := strings.Cut(taint, ":")
+	// The trailing '-' kubectl removes a taint by. Execute appends one of
+	// its own, so kubectl saw 'dedicated--' and answered with the regex a
+	// taint key has to match; the set path already names this mistake.
+	if strings.HasSuffix(key, "-") {
+		return fmt.Errorf(
+			"Invalid value for '--remove': '%s' ends in kubectl's removal '-' — "+
+				"'--remove' adds it, so give the key as '%s'.", taint, strings.TrimSuffix(key, "-"))
+	}
 	if key == "" || strings.Contains(key, "=") {
 		return fmt.Errorf(
 			"Invalid value for '--remove': '%s' is not a valid taint key — give the key, or key:Effect.", taint)
