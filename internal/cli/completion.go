@@ -182,9 +182,15 @@ var flagValues = map[string]completer{
 // time it saved a listing of that kind (recordedColumns). nil for a command with no --sort,
 // and for a kind kx has not listed yet.
 func sortColumns(cmd *cobra.Command, services Services, args []string) []string {
-	allNamespaces := false
+	var shape listingShape
 	if flag := cmd.Flags().Lookup("all-namespaces"); flag != nil {
-		allNamespaces = flag.Value.String() == "true"
+		shape.allNamespaces = flag.Value.String() == "true"
+	}
+	if flag := cmd.Flags().Lookup("output"); flag != nil {
+		shape.output = flag.Value.String()
+	}
+	if flag := cmd.Flags().Lookup("last-run"); flag != nil {
+		shape.lastRun = flag.Value.String() == "true"
 	}
 	switch cmd.Name() {
 	case "diagnostic":
@@ -196,17 +202,26 @@ func sortColumns(cmd *cobra.Command, services Services, args []string) []string 
 	case "top":
 		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 &&
 			kinds.Normalize(positionals[0]) == kinds.Node {
-			return recordedColumns(services, state.CommandTop, "nodes", false)
+			return recordedColumns(services, state.CommandTop, "nodes", listingShape{})
 		}
-		return recordedColumns(services, state.CommandTop, "pods", allNamespaces)
+		return recordedColumns(services, state.CommandTop, "pods", shape)
 	case "secret":
-		return recordedColumns(services, "", "secrets", allNamespaces)
+		return recordedColumns(services, "", "secrets", shape)
 	case "get":
 		if positionals := positionalsOnly(cmd, args); len(positionals) > 0 {
-			return recordedColumns(services, "", positionals[0], allNamespaces)
+			return recordedColumns(services, "", positionals[0], shape)
 		}
 	}
 	return nil
+}
+
+// listingShape is what the line being completed asks of a listing's columns
+// beyond its kind: -A adds NAMESPACE, -o wide or custom-columns change the
+// set, and kx get jobs --last-run adds CRONJOB.
+type listingShape struct {
+	allNamespaces bool
+	output        string
+	lastRun       bool
 }
 
 // recordedColumns are the columns of the newest saved listing a command made
@@ -216,8 +231,11 @@ func sortColumns(cmd *cobra.Command, services Services, args []string) []string 
 //
 // A listing in the other scope is used when none in this one is, with the
 // NAMESPACE column an -A listing adds put in or taken out: the rest of a
-// kind's columns are the same either way.
-func recordedColumns(services Services, command, resource string, allNamespaces bool) []string {
+// kind's columns are the same either way. One taken with another -o or
+// --last-run is never used: its columns are another table's, and after
+// kx get pods -o wide a plain --sort offered node, which the plain table
+// then refused.
+func recordedColumns(services Services, command, resource string, shape listingShape) []string {
 	if services.State == nil {
 		return nil
 	}
@@ -242,11 +260,15 @@ func recordedColumns(services Services, command, resource string, allNamespaces 
 		if query.Command != command && !(command == "" && query.Command == state.CommandFetch) {
 			continue
 		}
-		if entry.AllNamespaces == allNamespaces {
+		if output, _, _ := extractString(query.Args, "--output", "-o"); output != shape.output ||
+			query.LastRun != shape.lastRun {
+			continue
+		}
+		if entry.AllNamespaces == shape.allNamespaces {
 			return entry.Columns
 		}
 		if otherScope == nil {
-			otherScope = rescoped(entry.Columns, allNamespaces)
+			otherScope = rescoped(entry.Columns, shape.allNamespaces)
 		}
 	}
 	return otherScope
