@@ -305,6 +305,14 @@ func TestSortCompletionRefusesAShapeItCannotMatch(t *testing.T) {
 		// the shape being refused, not a listing that was never saved.
 		{[]string{"top", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
 		{[]string{"top", "--selector", "app=api", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		// kx's own flags shape nothing kubectl prints, so each of these
+		// completes the table's columns. They were listed by name once, and
+		// the report flags were missing from that list.
+		{[]string{"top", "--json", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--html", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--out", "/tmp/report.html", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		{[]string{"top", "--limit", "5", "--sort", ""}, "name,cpu,memory,cpu%,mem%"},
+		// kubectl's own, and it does change the columns.
 		{[]string{"top", "--containers", "--sort", ""}, ""},
 		// --no-limits is kx's own and recorded on the listing it took, so
 		// its shape is one kx can match, each line to its own table.

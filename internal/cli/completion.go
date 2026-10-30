@@ -233,12 +233,17 @@ type listingShape struct {
 // the shorthand a saved listing can carry.
 var shapeFlags = []string{"all-namespaces", "A", "output", "o", "last-run", "no-limits"}
 
-// columnNeutralFlags leave a listing's columns alone: they pick which
-// resources are listed or which cluster they come from, or they are kx's own
-// and never reach kubectl's table. Every other flag is read as changing the
-// columns, because many do — kubectl top --containers prints POD, kx get
+// columnNeutralFlags are kubectl's flags that leave a listing's columns
+// alone: they pick which resources are listed, or which cluster they are
+// read from. Any other flag of kubectl's is read as changing the columns,
+// because many do — kubectl top --containers prints POD, kubectl get
 // -L app adds the label — and a wrong column completed is worse than none:
 // the sort refuses it, naming the columns the table really has.
+//
+// Only kubectl's, because only kubectl writes the table. kx's own flags are
+// recognized by the annotation they lack rather than by name (lineShape):
+// listing them here is what left kx top --json and --html completing
+// nothing, each new report flag having to be remembered twice.
 var columnNeutralFlags = []string{
 	// Which resources are listed.
 	"namespace", "n", "selector", "l", "field-selector", "ignore-not-found", "chunk-size",
@@ -246,8 +251,6 @@ var columnNeutralFlags = []string{
 	"context", "cluster", "user", "kubeconfig", "server", "token", "request-timeout",
 	"certificate-authority", "client-certificate", "client-key", "insecure-skip-tls-verify",
 	"as", "as-group", "as-uid",
-	// kx's own, which kubectl's table never sees.
-	"sort", "match", "m", "limit", "watch", "w", "yes", "y", "no-color",
 }
 
 // flagShapesColumns reports whether a flag, named as it was written and
@@ -277,7 +280,10 @@ func lineShape(cmd *cobra.Command) listingShape {
 		case "no-limits":
 			shape.noLimits = flag.Value.String() == "true"
 		default:
-			if flagShapesColumns(flag.Name) {
+			// Only kubectl's flags can change kubectl's columns. kx's own —
+			// --json, --html, --limit, every report flag added after this —
+			// carry no annotation from kubectl's table, and shape nothing.
+			if len(flag.Annotations[kubectlFlagAnnotation]) > 0 && flagShapesColumns(flag.Name) {
 				shape.unknown = true
 			}
 		}
