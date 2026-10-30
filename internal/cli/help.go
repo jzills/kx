@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -593,8 +594,18 @@ func rewriteArgs(root *cobra.Command, args []string) []string {
 // (NoOptDefVal) stands on its own, so the next word really is another flag,
 // and a command that parses its own flags (kx scan) already reaches its
 // completer by this path's absence.
+//
+// Nothing after a '--' is joined either: it is the command kx exec or kx
+// debug runs, and its flags are its own — the --since in `kx exec 1 --
+// journalctl --since -1h` is journalctl's. Cobra stops completing flags once
+// a '--' is on the line, so this changes no answer kx gives today; it is
+// here because "never read what follows '--'" is kx's rule to keep rather
+// than cobra's to keep for it.
 func attachFlagValue(root *cobra.Command, line []string, toComplete string) ([]string, string) {
 	if len(line) == 0 || !strings.HasPrefix(toComplete, "-") || strings.Contains(toComplete, "=") {
+		return line, toComplete
+	}
+	if slices.Contains(line, "--") {
 		return line, toComplete
 	}
 	cmd, _, err := root.Find(line)
@@ -606,7 +617,9 @@ func attachFlagValue(root *cobra.Command, line []string, toComplete string) ([]s
 	if name == "" {
 		return line, toComplete
 	}
-	if flag := cmd.Flags().Lookup(name); flag == nil || flag.NoOptDefVal != "" {
+	// Resolved by valueFlag from this same FlagSet, so it is found: only the
+	// optional value is in question.
+	if cmd.Flags().Lookup(name).NoOptDefVal != "" {
 		return line, toComplete
 	}
 	return line[:len(line)-1], token + "=" + toComplete

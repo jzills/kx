@@ -403,3 +403,35 @@ func TestADashAfterAFlagsValueStillCompletesFlagNames(t *testing.T) {
 		}
 	}
 }
+
+// attachFlagValue is tested directly here, not through a completion run:
+// cobra stops completing flags once a '--' is on the line, so it currently
+// answers the same either way and an end-to-end test could not fail. The
+// rule is kx's own — nothing after '--' is read as kx's — and this is what
+// holds the function to it if cobra's behavior ever moves.
+func TestAttachFlagValueLeavesTheTrailingCommandAlone(t *testing.T) {
+	root := NewRoot(completionServices(t), "test")
+	for _, tc := range []struct {
+		name       string
+		line       []string
+		toComplete string
+		wantLine   string
+		wantTo     string
+	}{
+		// The inner command's own flag, spelled the same as one kx exec
+		// really has: this -c is sh's, not --container's.
+		{"after --, a flag kx also has", []string{"exec", "1", "--", "sh", "-c"}, "-x",
+			"exec 1 -- sh -c", "-x"},
+		{"after --, kx's own spelling", []string{"get", "pods", "--", "--sort"}, "-re",
+			"get pods -- --sort", "-re"},
+		// Before any --, the join still happens.
+		{"before --, joined as usual", []string{"get", "pods", "--sort"}, "-re",
+			"get pods", "--sort=-re"},
+	} {
+		line, toComplete := attachFlagValue(root, tc.line, tc.toComplete)
+		if strings.Join(line, " ") != tc.wantLine || toComplete != tc.wantTo {
+			t.Errorf("%s: attachFlagValue(%v, %q) = (%v, %q), want (%s, %q)",
+				tc.name, tc.line, tc.toComplete, line, toComplete, tc.wantLine, tc.wantTo)
+		}
+	}
+}
