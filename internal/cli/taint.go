@@ -31,14 +31,17 @@ type TaintCommand struct {
 // forwarded after kx's. target is resolved once, by the caller, so the Node
 // its checks read is the Node tainted.
 func (c TaintCommand) Execute(target Resolved, sets, removes, extraArgs []string) (message, output string, err error) {
+	// The kind first: an index that is no Node cannot be tainted whatever
+	// is asked of it, and asking for the taints first sent the user to write
+	// one before learning that.
+	if target.Kind != kinds.Node {
+		return "", "", unsupportedKindError("taint", target.Kind, kinds.Set{kinds.Node})
+	}
 	if len(sets) == 0 && len(removes) == 0 {
 		return "", "", errors.New(
 			"kx taint needs key=value:Effect to set, or --remove to name a taint to drop — neither was given.")
 	}
 	name := target.Name
-	if target.Kind != kinds.Node {
-		return "", "", unsupportedKindError("taint", target.Kind, kinds.Set{kinds.Node})
-	}
 	// No -n: a Node is cluster-scoped.
 	args := append([]string{"taint", "node", name}, sets...)
 	for _, taint := range removes {

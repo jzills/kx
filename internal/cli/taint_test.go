@@ -51,6 +51,10 @@ func TestTaintRefusesBeforeKubectlRuns(t *testing.T) {
 	}{
 		{kinds.Node, []string{"1"},
 			"kx taint needs key=value:Effect to set, or --remove to name a taint to drop — neither was given."},
+		// The kind is answered before the missing taint, so a Pod index is
+		// not asked for a taint it could never be given.
+		{kinds.Pod, []string{"1"},
+			"kx taint does not support 'Pod' — only Nodes."},
 		{kinds.Node, []string{"1", "dedicated=gpu"},
 			"'dedicated=gpu' is not a taint — write key=value:Effect or key:Effect, as in 'dedicated=gpu:NoSchedule'."},
 		{kinds.Node, []string{"1", "=gpu:NoSchedule"},
