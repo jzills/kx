@@ -1257,12 +1257,13 @@ func TestDescribeParsesKubectlFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kx describe --show-events=false 1: %v", err)
 	}
-	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "describe Pod nginx -n prod --show-events=false" {
+	if len(kube.interactive) != 1 || joinArgs(kube.interactive[0]) != "describe Pod/nginx -n prod --show-events=false" {
 		t.Errorf("kubectl = %q, want the index after the flag resolved", kube.interactive)
 	}
 
 	// An argument after the indexes is kubectl's, ahead of its flags, as it
-	// was when kx split argv by hand.
+	// was when kx split argv by hand. kubectl refuses Kind/name beside it, so
+	// the indexed resource keeps its kind and name apart there.
 	kube, err = describe("1", "redis", "--show-events=false")
 	if err != nil {
 		t.Fatalf("kx describe 1 redis: %v", err)
