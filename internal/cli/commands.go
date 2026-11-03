@@ -166,7 +166,7 @@ func newDescribeCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"detail", "details"},
 		Short:      "Show full kubectl describe output for one or more indexed resources.",
 		Long:       "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
-		Example:    "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api\n  kx describe 1 --show-events=false",
+		Example:    "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api\n  kx describe deploy/api -n prod\n  kx describe 1 --show-events=false",
 		Args:       minArgs(1),
 	}
 	kubectlFlags := registerKubectlFlags(cmd, "describe")
@@ -175,11 +175,8 @@ func newDescribeCommand(services Services) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
@@ -216,7 +213,7 @@ func splitLeadingIndexes(args []string) (indexes, rest []string) {
 			return args[:i], args[i:]
 		}
 		if _, err := strconv.Atoi(arg); err != nil &&
-			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") {
+			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") && !typedShaped(arg) {
 			return args[:i], args[i:]
 		}
 	}
@@ -230,7 +227,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short:      "Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the Pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
-		Example:     "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1 --previous\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
+		Example:     "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1 --previous\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f\n  kx logs deploy/api -n prod --context staging",
 		Args:        minArgs(1),
 		Annotations: documentAnnotations,
 	}
@@ -247,11 +244,8 @@ func newLogsCommand(services Services) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		if err := checkFollow(extra, len(resolved)); err != nil {
@@ -752,7 +746,7 @@ func newYamlCommand(services Services) *cobra.Command {
 			"JSON. `--show` cannot be combined with one: it parses the YAML it narrows.\n\n" +
 			"Several indexes are joined the way their format joins documents: YAML separated " +
 			"by `---`, JSON merged into the one List kubectl answers several names with.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml svc/api\n" +
 			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
 		Args:        minArgs(1),
 		Annotations: documentAnnotations,
@@ -765,11 +759,8 @@ func newYamlCommand(services Services) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		// --show narrows the YAML it parsed, so another output format is a
@@ -822,9 +813,9 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		Short:   short,
 		Long:    long,
 		Args:    minArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..\n  kx " + use + " deploy/api -n prod",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolved, err := resolveRefs(services.State, "indexes", args)
+			resolved, err := resolveTargets(services, "indexes", args, namespaceScope(cmd))
 			if err != nil {
 				return err
 			}
@@ -860,6 +851,7 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		cmd.Flags().BoolVarP(&asSelector, "selector", "s", false,
 			"Output as a copy-pastable label selector")
 	}
+	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
 	return cmd
 }
 

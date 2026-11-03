@@ -57,6 +57,27 @@ kx describe 20..30   # ✗ '20..30' starts past the current listing (14 items)
 
 An index you type out is still taken literally: `kx delete 13 99` refuses the whole batch rather than deleting 13, because a delete cannot be undone and a number you wrote yourself is not a gesture at a span.
 
+## Naming a resource directly
+
+When you already know the name, there is no listing to count rows in.
+The read-only commands take the resource as kubectl spells it, kind/name, wherever they take an index:
+
+```bash
+kx diag deploy/api -n prod
+kx logs deploy/api --context staging
+kx tree sts/db
+kx mark api deploy/api -n prod
+```
+
+The namespace and cluster come from `-n` and `--context` as kubectl's would, defaulting to the kubeconfig's current ones.
+That is the one way kind/name differs from an index, which carries both from the listing it was counted in and so refuses those flags.
+The `--context` flag is for the commands that forward kubectl's flags; `kx diag`, `kx tree`, `kx scan`, `kx events`, `kx labels` and `kx annotations` take `-n` alone.
+On a line that also holds an index or a mark, they are refused for the same reason.
+
+Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
+Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
+The commands that change the cluster take an index or a mark only.
+
 ## Dropping the `get`
 
 A first word that names a kind is treated as `kx get <kind>`:

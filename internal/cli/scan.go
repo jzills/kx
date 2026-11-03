@@ -681,7 +681,7 @@ func newScanCommand(services Services) *cobra.Command {
 			"A --limit keeps the first N images of the summary, after --sort orders it: " +
 			"kx scan -A --sort -crit,-high --limit 5 is the five most critical. Every image is " +
 			"still scanned, and --fail-on still reads them all.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n" +
+		Example: "  kx scan\n  kx scan 1\n  kx scan deploy/api -n prod\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n" +
 			"  kx scan -A --sort -crit,-high --limit 5\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
@@ -839,10 +839,19 @@ func newScanCommand(services Services) *cobra.Command {
 			if all {
 				scopeFlag = "--all-namespaces"
 			}
-			if len(indexArgs) > 0 && scopeFlag != "" {
+			// A kind/name takes its namespace from -n, as kubectl's would; -A
+			// is still refused beside it.
+			typed := len(indexArgs) > 0 && typedShaped(indexArgs[0])
+			if len(indexArgs) > 0 && scopeFlag != "" && !(typed && scopeFlag == "--namespace") {
+				if typed {
+					return allNamespacesBesideTypedError(scopeFlag, sweepEverywhereHint)
+				}
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 			if len(indexArgs) > 0 && match != "" {
+				if typed {
+					return errMatchBesideTyped
+				}
 				return errMatchBesideIndex
 			}
 			// pageScope captions the HTML page. Captured in each branch
@@ -897,7 +906,7 @@ func newScanCommand(services Services) *cobra.Command {
 					subject.Namespace = scope.Namespace
 				}
 			} else {
-				ref, err := parseRef("index", indexArgs[0])
+				ref, err := parseTargetArg(services, indexArgs[0], namespace)
 				if err != nil {
 					return err
 				}

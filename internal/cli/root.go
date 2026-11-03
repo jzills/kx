@@ -43,6 +43,11 @@ type Services struct {
 	// test of the version screen does not depend on the kubectl installed on
 	// the machine running it; nil means kubectl.DetectClient.
 	KubectlClient func() kubectl.Client
+	// ClusterNamespace is the namespace kubectl would use for a cluster that
+	// kubectl's flags chose, for a kind/name target given no -n. Injected so a
+	// test need not write a kubeconfig; nil means k8s.NamespaceFor, and the
+	// current namespace (Kubectl.CurrentNamespace) when no flag chose one.
+	ClusterNamespace func(k8s.Cluster) string
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
@@ -132,7 +137,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// or context-mismatched index deserves the same recovery: a fresh listing
 	// to mark from, rather than a dead end. kx unmark takes no index and never
 	// resolves one, so it stays without the wrapper.
-	root.AddCommand(withRefresh(services, newMarkCommand(services)))
+	root.AddCommand(withRefresh(services, acceptsTyped(newMarkCommand(services))))
 	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
 	// withoutRefresh: it resolves no index at all. kx docs reads documentation
 	// built into the binary, and never the cluster or the saved listing, so
@@ -156,8 +161,8 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.AddCommand(withoutRefresh(newSetCommand(services)))
 
 	for _, cmd := range []*cobra.Command{
-		newDescribeCommand(services),
-		newLogsCommand(services),
+		acceptsTyped(newDescribeCommand(services)),
+		acceptsTyped(newLogsCommand(services)),
 		newEditCommand(services),
 		newExecCommand(services),
 		newDebugCommand(services),
@@ -171,21 +176,21 @@ func NewRoot(services Services, version string) *cobra.Command {
 		newRolloutCommand(services),
 		newPortForwardCommand(services),
 		newCopyCommand(services),
-		newYamlCommand(services),
-		newTreeCommand(services),
-		newScanCommand(services),
+		acceptsTyped(newYamlCommand(services)),
+		acceptsTyped(newTreeCommand(services)),
+		acceptsTyped(newScanCommand(services)),
 		newSecretCommand(services, "secret", []string{"secrets"}),
-		newEventsCommand(services),
-		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
-		newMetadataReadCommand(services, "labels",
+		acceptsTyped(newEventsCommand(services)),
+		acceptsTyped(newDiagnosticCommand(services, "diagnostic", []string{"diag"})),
+		acceptsTyped(newMetadataReadCommand(services, "labels",
 			"Show labels for one or more indexed resources; --selector formats output as a label selector.",
 			"Shows every label on one or more indexed resources, one table per resource. "+
 				"--selector reformats the same data as a copy-pastable label selector.",
-			"labels", "LABEL", true),
-		newMetadataReadCommand(services, "annotations",
+			"labels", "LABEL", true)),
+		acceptsTyped(newMetadataReadCommand(services, "annotations",
 			"Show annotations for one or more indexed resources.",
 			"Shows every annotation on one or more indexed resources, one table per resource.",
-			"annotations", "ANNOTATION", false),
+			"annotations", "ANNOTATION", false)),
 		newMetadataWriteCommand(services, "label", "labels",
 			"Set or remove labels on an indexed resource.",
 			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key."),

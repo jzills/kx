@@ -21,6 +21,12 @@ var errMatchBesideIndex = errors.New(
 	"'--match' cannot be combined with an index — an index already names " +
 		"one resource. Drop the flag, or drop the index to sweep the namespace instead.")
 
+// errMatchBesideTyped is errMatchBesideIndex for a resource named as
+// kind/name, which names one resource as surely as an index does.
+var errMatchBesideTyped = errors.New(
+	"'--match' cannot be combined with kind/name — it already names one " +
+		"resource. Drop the flag, or drop the kind/name to sweep the namespace instead.")
+
 // errMatchBesideContextIndex is errMatchBesideIndex for kx get contexts,
 // whose index names the context to switch to rather than a resource in a
 // namespace to sweep.

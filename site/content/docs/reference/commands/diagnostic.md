@@ -38,7 +38,7 @@ kx diagnostic [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -70,6 +70,7 @@ kx diagnostic [OPTIONS] [index]
 ```bash
 kx diagnostic
 kx diagnostic 1
+kx diagnostic deploy/api -n prod
 kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy

@@ -18,12 +18,13 @@ kx labels [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `-s, --selector` | Output as a copy-pastable label selector |
 
 ## Global options
@@ -40,4 +41,5 @@ kx labels 1
 kx labels 1 2 3
 kx labels 1..3
 kx labels 3..
+kx labels deploy/api -n prod
 ```

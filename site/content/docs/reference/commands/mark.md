@@ -8,6 +8,8 @@ weight: 18
 
 Pins whatever `<index>` currently resolves to under `<name>`, so 'kx logs @name' keeps working after a later listing moves every index around it.
 
+`<index>` can also name the resource as kind/name — deploy/api, in -n's namespace or the current one — which is checked against the cluster before it is pinned, so a typo fails here rather than at every command that spends the mark.
+
 With no arguments, lists the marks that are set. That listing carries no index column and saves no state — a mark is spent by the name it was given, never by position.
 
 ## Usage
@@ -21,7 +23,13 @@ kx mark [OPTIONS] [name] [index]
 | Argument | Description |
 |---|---|
 | `[name]` | Name to give the mark |
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 
 ## Global options
 
@@ -35,4 +43,5 @@ kx mark [OPTIONS] [name] [index]
 ```bash
 kx mark
 kx mark api 3
+kx mark api deploy/api -n prod
 ```

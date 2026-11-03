@@ -20,7 +20,7 @@ kx describe [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -50,5 +50,6 @@ kx describe 1 3 5
 kx describe 1..3
 kx describe 3..
 kx describe @api
+kx describe deploy/api -n prod
 kx describe 1 --show-events=false
 ```
