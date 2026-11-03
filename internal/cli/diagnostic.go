@@ -445,7 +445,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.\n\n" +
 			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.\n\n" +
 			"--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.",
-		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " -n prod\n" +
+		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " deploy/api -n prod\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -m api\n" +
 			"  kx " + use + " --show-healthy\n" +
 			"  kx " + use + " -A --sort namespace,kind\n" +
@@ -522,40 +522,49 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if allNamespaces {
 				scopeFlag = "--all-namespaces"
 			}
-			if len(args) > 0 && scopeFlag != "" {
+			// A kind/name takes its namespace from -n, as kubectl's would; -A
+			// is still refused beside it, by settleTyped.
+			typed := len(args) > 0 && typedShaped(args[0])
+			if len(args) > 0 && scopeFlag != "" && !(typed && scopeFlag == "--namespace") {
+				if typed {
+					return allNamespacesBesideTypedError(scopeFlag, sweepEverywhereHint)
+				}
 				return fmt.Errorf(
 					"'%s' cannot be combined with an index — an index already "+
 						"carries the namespace it was listed from. Drop the flag, "+
 						"or drop the index to sweep the namespace instead.", scopeFlag)
 			}
 			if len(args) > 0 && match != "" {
+				if typed {
+					return errMatchBesideTyped
+				}
 				return errMatchBesideIndex
 			}
 			// --show-healthy only changes what a sweep's terminal table includes; a single
 			// indexed resource has nothing to include or leave out.
 			if len(args) > 0 && cmd.Flags().Changed("show-healthy") {
-				return errors.New(
-					"'--show-healthy' cannot be combined with an index — it only affects a " +
-						"namespace sweep. Drop the flag, or drop the index to sweep " +
-						"the namespace instead.")
+				return fmt.Errorf(
+					"'--show-healthy' cannot be combined with %s — it only affects a "+
+						"namespace sweep. Drop the flag, or drop the %s to sweep "+
+						"the namespace instead.", targetNoun(args[0]), targetWord(args[0]))
 			}
 
 			// --sort orders a sweep's rows; one resource's report has none.
 			if len(args) > 0 && cmd.Flags().Changed("sort") {
-				return errors.New(
-					"'--sort' cannot be combined with an index — it sorts a namespace " +
-						"sweep. Drop the flag, or drop the index to sweep the namespace " +
-						"instead.")
+				return fmt.Errorf(
+					"'--sort' cannot be combined with %s — it sorts a namespace "+
+						"sweep. Drop the flag, or drop the %s to sweep the namespace "+
+						"instead.", targetNoun(args[0]), targetWord(args[0]))
 			}
 			// A --limit cuts a sweep's rows, as --sort orders them. Refused
 			// before the count is read, as --sort's is before its column: a
 			// flag the index cannot take at all is the refusal kx diag 1
 			// --limit 0 wants, not the one its count would have earned.
 			if len(args) > 0 && cmd.Flags().Changed("limit") {
-				return errors.New(
-					"'--limit' cannot be combined with an index — it cuts a namespace " +
-						"sweep. Drop the flag, or drop the index to sweep the namespace " +
-						"instead.")
+				return fmt.Errorf(
+					"'--limit' cannot be combined with %s — it cuts a namespace "+
+						"sweep. Drop the flag, or drop the %s to sweep the namespace "+
+						"instead.", targetNoun(args[0]), targetWord(args[0]))
 			}
 			limit, err := limitOf(cmd.Flags().Changed("limit"), limitValue)
 			if err != nil {
@@ -624,7 +633,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return sweepGate(result, failOn, threshold)
 			}
 
-			ref, err := parseRef("index", args[0])
+			ref, err := parseTargetArg(services, args[0], namespace)
 			if err != nil {
 				return err
 			}
@@ -654,7 +663,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if htmlOpts.Enabled {
 				meta, err := pageMeta(services.Config.Theme,
 					"diag · "+string(report.Kind)+"/"+report.Name,
-					invocation(use, args[0], sinceFlag(window), portFlag(port)))
+					invocation(use, typedInvocation(args[0], ref), sinceFlag(window), portFlag(port)))
 				if err != nil {
 					return err
 				}

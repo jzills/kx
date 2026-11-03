@@ -40,6 +40,13 @@ type StaleResourceError struct {
 }
 
 func (e StaleResourceError) Error() string {
+	if e.Ref.Typed() {
+		where := ""
+		if e.Namespace != "" {
+			where = " in namespace '" + e.Namespace + "'"
+		}
+		return fmt.Sprintf("%s/%s was not found%s.", e.Kind, e.Name, where)
+	}
 	if e.Ref.Mark != "" {
 		where := ""
 		if e.Namespace != "" {
@@ -84,7 +91,15 @@ func IsNotFound(err error) bool {
 // resource is genuinely gone, so the caller can refresh rather than report a
 // confusing kubectl message. ref is carried onto the error unchanged, so a
 // mark failure reports rather than replays — see isStale.
+//
+// A typed target is never probed: it came from no listing, so there is
+// nothing to refresh, and kubectl has already said what it could not find —
+// in the cluster the command's own flags chose, which a probe without them
+// would not ask.
 func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace string, ref state.Ref) error {
+	if ref.Typed() {
+		return nil
+	}
 	if kubectl.Probe([]string{"get", string(kind), name, "-n", namespace}) != 0 {
 		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 	}
@@ -102,7 +117,7 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 // returned as it came.
 func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref state.Ref) error {
 	var status apierrors.APIStatus
-	if !apierrors.IsNotFound(err) || !errors.As(err, &status) {
+	if ref.Typed() || !apierrors.IsNotFound(err) || !errors.As(err, &status) {
 		return err
 	}
 	if details := status.Status().Details; details == nil || details.Name != name {
@@ -142,9 +157,9 @@ func forwardExit(
 func isStale(err error) bool {
 	var stale StaleResourceError
 	if errors.As(err, &stale) {
-		// A mark carries no query to replay — see StaleResourceError.Ref — so
-		// only an index failure is refreshable here.
-		return stale.Ref.Mark == ""
+		// A mark or a typed target carries no query to replay — see
+		// StaleResourceError.Ref — so only an index failure is refreshable.
+		return stale.Ref.Mark == "" && !stale.Ref.Typed()
 	}
 	var mismatch state.ContextMismatchError
 	if errors.As(err, &mismatch) {

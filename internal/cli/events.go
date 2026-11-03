@@ -118,11 +118,11 @@ func newEventsCommand(services Services) *cobra.Command {
 			"Without it every event the cluster still holds is listed — on a default cluster roughly the last " +
 			"hour, since that is how long the API server keeps an event before dropping it. Set events_max_age " +
 			"in config.toml to choose a window once rather than per run.\n\n" + eventsSortLong,
-		Example: "  kx events 1\n  kx events 1 2\n  kx events 1 --since 30m\n" +
+		Example: "  kx events 1\n  kx events 1 2\n  kx events 1 --since 30m\n  kx events deploy/api -n prod\n" +
 			"  kx events 1 --sort -type,age\n  kx events 1..3\n  kx events 3..",
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolved, err := resolveRefs(services.State, "indexes", args)
+			resolved, err := resolveTargets(services, "indexes", args, namespaceScope(cmd))
 			if err != nil {
 				return err
 			}
@@ -185,6 +185,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		"events_max_age", services.Config.EventsMaxAge,
 		"every event the cluster still holds is listed"))
 	cmd.Flags().String("sort", "", eventsSortUsage)
+	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
 	return cmd
 }
 

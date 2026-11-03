@@ -173,21 +173,37 @@ func (q Query) Subject() string {
 }
 
 // Ref is what a command's resource argument resolves through: a position in
-// the current listing, or a mark naming one resource directly.
+// the current listing, a mark naming one resource directly, or a resource
+// typed as kind/name.
 //
 // It exists so the commands stop passing a bare int around: an index and a
 // mark answer the same question ("which resource?") and differ only in how
 // they are looked up, and threading two types through twenty commands is what
 // made marks look expensive.
 type Ref struct {
-	// Index is a 1-based position in the current listing. Zero when Mark is set.
+	// Index is a 1-based position in the current listing. Zero when Mark or
+	// Kind is set.
 	Index int
-	// Mark is a mark name without the sigil. Empty when Index is set.
+	// Mark is a mark name without the sigil. Empty when Index or Kind is set.
 	Mark string
+	// Kind, Name and Namespace are a typed target: a resource the user named
+	// as kind/name rather than by position. Kind is already normalized and
+	// Namespace already settled (from -n or the kubeconfig) by the time a Ref
+	// carries them; Namespace is empty for a cluster-scoped kind. A typed ref
+	// reads no state, so it resolves the same with no listing at all.
+	Kind      kinds.Kind
+	Name      string
+	Namespace string
 }
+
+// Typed reports whether r names its resource directly, as kind/name.
+func (r Ref) Typed() bool { return r.Kind != "" }
 
 // String spells a Ref the way the user wrote it, for error messages.
 func (r Ref) String() string {
+	if r.Typed() {
+		return string(r.Kind) + "/" + r.Name
+	}
 	if r.Mark != "" {
 		return "@" + r.Mark
 	}
@@ -1429,6 +1445,9 @@ func checkMarkKind(ref Ref, name string, kind, expected kinds.Kind) error {
 // Fields is the index branch: this is the seam a mark resolves through
 // without every caller learning a second lookup.
 func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err error) {
+	if ref.Typed() {
+		return ref.Name, ref.Namespace, ref.Kind, nil
+	}
 	if ref.Mark != "" {
 		return s.resolveMark(ref)
 	}
@@ -1451,6 +1470,9 @@ func (s *Service) Resolve(ref Ref) (name, namespace string, kind kinds.Kind, err
 // A mark ref answers "": a mark is pinned by a name the user chose, not read
 // off whatever listing happens to be current, so it has no listing to name.
 func (s *Service) ResolveWithSource(ref Ref) (name, namespace string, kind kinds.Kind, source string, err error) {
+	if ref.Typed() {
+		return ref.Name, ref.Namespace, ref.Kind, "", nil
+	}
 	if ref.Mark != "" {
 		name, namespace, kind, err = s.resolveMark(ref)
 		return name, namespace, kind, "", err
@@ -1465,6 +1487,12 @@ func (s *Service) ResolveWithSource(ref Ref) (name, namespace string, kind kinds
 func (s *Service) ResolveExpecting(
 	ref Ref, expected kinds.Kind,
 ) (name, namespace string, err error) {
+	if ref.Typed() {
+		if ref.Kind != expected {
+			return "", "", fmt.Errorf("%s is not %s.", ref, expected)
+		}
+		return ref.Name, ref.Namespace, nil
+	}
 	if ref.Mark != "" {
 		name, namespace, kind, err := s.resolveMark(ref)
 		if err != nil {

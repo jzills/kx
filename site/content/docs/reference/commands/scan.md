@@ -31,7 +31,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -63,6 +63,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 ```bash
 kx scan
 kx scan 1
+kx scan deploy/api -n prod
 kx scan -n prod
 kx scan -m api
 kx scan --sort -crit,-high
