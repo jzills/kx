@@ -130,7 +130,7 @@ Titles are Conventional Commits, and the release notes are generated from them (
 - `type(scope): subject`, lowercase, with no closing period. The scope names the command or area (`yaml`, `cli`, `state`), and several scopes are comma-joined.
 - The subject states the new behavior rather than the act of changing it: `fix(yaml): the separator precedes the banner it comes before`.
 - The subject opens with a word, never a flag, a command or "kx": `fix(get): a -o name listing prints kubectl's reply unchanged`, not `fix(get): -o name prints…`. The generator turns each subject into a release-note sentence by capitalizing its first letter and adding a period, and a flag or "kx" can't take the capital.
-- `feat` becomes a Features bullet, `fix` and `perf` become Fixes bullets, and `chore(deps)`/`build(deps)` become Dependencies bullets. `docs`, `style`, `test`, `refactor`, `ci` and plain `chore` appear only in the commit list.
+- `feat` becomes a Features bullet, `fix` and `perf` become Fixes bullets, and `chore(deps)`/`build(deps)` become Dependencies bullets. `docs`, `style`, `test`, `refactor`, `ci` and plain `chore` are reached only through the release's Full Changelog link.
 - A `!` goes on the **pull request title**, before it merges, whenever an existing command's behavior changes: `fix(state)!: …`. It leads the release's Breaking changes section, and marking it after the merge is too late.
 - Branches are `fix/…`, `feat/…`, `docs/…`, `chore/…`, `test/…` or `style/…`, then a kebab-case description.
 

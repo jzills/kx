@@ -5,7 +5,7 @@ description: Use when writing or revising release-notes/vX.Y.Z.md, the Highlight
 
 # Writing kx release notes
 
-`release-notes/vX.Y.Z.md` is the **Highlights** section, the first thing anyone opening the release reads. The generator adds Breaking changes, Features, Fixes and Dependencies from the PR titles, then GitHub's commit list. Highlights only has to answer two questions: what's new for me, and do I have to change anything?
+`release-notes/vX.Y.Z.md` is the **Highlights** section, the first thing anyone opening the release reads. The generator adds Breaking changes, Features, Fixes and Dependencies from the PR titles, then GitHub's New Contributors and Full Changelog link. Highlights only has to answer two questions: what's new for me, and do I have to change anything?
 
 Someone scanning a release page reads the opening and the bullets, and skips anything longer. v0.10.0 through v0.12.0 ran 250–470 words of paragraphs: why the bug existed, how the flag interacts with three others, every command it reaches. That detail belongs in the PRs and the docs.
 

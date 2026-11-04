@@ -20,7 +20,7 @@ Read RELEASING.md's "Pick the number" before proposing one.
 
 Write `release-notes/vX.Y.Z.md` with the `kx-release-notes` skill: a short lead, a few bullets, and a line on what to change only when something breaks.
 
-Commit it as `docs(release): summarize vX.Y.Z`. A docs type lands in the commit list rather than becoming a bullet above itself.
+Commit it as `docs(release): summarize vX.Y.Z`. A docs type becomes no bullet, so the summary doesn't list itself.
 
 ## 3. Fact-check every claim against a built binary
 
