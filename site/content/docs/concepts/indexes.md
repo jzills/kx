@@ -77,6 +77,7 @@ A mark taken with `--context` is recorded against that context, so spending it f
 On a line that also holds an index or a mark, they are refused for the same reason.
 
 Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
+The [k9s plugin pack](../../guides/use-kx-from-k9s/) is built on it, handing the row under k9s's cursor to kx this way.
 Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
 The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
 
