@@ -291,7 +291,7 @@ const typedArgDoc = "Row number from the current listing, @name for a mark, or k
 // Annotations map is copied rather than written into: it may be one of the
 // shared ones (documentAnnotations).
 func acceptsTyped(cmd *cobra.Command) *cobra.Command {
-	merged := make(map[string]string, len(cmd.Annotations)+2)
+	merged := map[string]string{}
 	for key, value := range cmd.Annotations {
 		merged[key] = value
 	}
@@ -349,9 +349,10 @@ func (k clusterKubectl) with(args []string) []string {
 			break
 		}
 	}
-	out := make([]string, 0, len(args)+len(k.flags))
-	out = append(append(append(out, args[:at]...), k.flags...), args[at:]...)
-	return out
+	var out []string
+	out = append(out, args[:at]...)
+	out = append(out, k.flags...)
+	return append(out, args[at:]...)
 }
 
 func (k clusterKubectl) Run(args []string) (string, error) { return k.Service.Run(k.with(args)) }
