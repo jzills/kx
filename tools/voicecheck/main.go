@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Finding is one breach of a rule, located well enough to jump to.
@@ -259,7 +261,15 @@ func checkMarkdown(path string, content []byte) []Finding {
 		if !opensSentences || !prose {
 			continue
 		}
-		for _, sentence := range sentences(listMarker.ReplaceAllString(line, "")) {
+		text := listMarker.ReplaceAllString(line, "")
+		if releaseNotes && listMarker.MatchString(line) {
+			var finding string
+			text, finding = releaseBullet(text)
+			if finding != "" {
+				findings = append(findings, Finding{File: path, Line: n, Message: finding, Section: "Release notes"})
+			}
+		}
+		for _, sentence := range sentences(text) {
 			switch {
 			case strings.HasPrefix(sentence, "`"):
 				findings = append(findings, Finding{
@@ -277,6 +287,34 @@ func checkMarkdown(path string, content []byte) []Finding {
 		}
 	}
 	return findings
+}
+
+// bulletLabel is a release-note bullet's bold label and the sentence after
+// it: "**Other clusters:** The `--context` flag sends …".
+var bulletLabel = regexp.MustCompile(`^\*\*([^*]+):\*\*\s+(.*)$`)
+
+// releaseBullet checks a release-note bullet's shape. It returns the sentence
+// after the label, which is what the sentence-opening rules then read: with
+// the label in front, "**kind/name targets:** `kx diag …` work" opened with
+// "**" and passed them both. The label is capitalized, and what follows it is
+// a complete sentence, opening with a capital and ending with a period.
+func releaseBullet(item string) (sentence, finding string) {
+	match := bulletLabel.FindStringSubmatch(item)
+	if match == nil {
+		return item, "bullet has no bold label — open it with \"**What changed:**\" and a sentence"
+	}
+	label, sentence := match[1], match[2]
+	if first, _ := utf8.DecodeRuneInString(label); !unicode.IsUpper(first) {
+		return sentence, "bullet label opens in lowercase — capitalize it, and keep a flag or a name out of first place"
+	}
+	// A lowercase "kx" has a finding of its own, which says how to reword it.
+	if first, _ := utf8.DecodeRuneInString(sentence); unicode.IsLower(first) && !lowercaseKx.MatchString(sentence) {
+		return sentence, "sentence after a bullet's label opens in lowercase — make it a complete sentence"
+	}
+	if !strings.HasSuffix(sentence, ".") && !strings.HasSuffix(sentence, "?") && !strings.HasSuffix(sentence, "!") {
+		return sentence, "sentence after a bullet's label has no closing period — make it a complete sentence"
+	}
+	return sentence, ""
 }
 
 // lowercaseKx is a sentence whose first word is kx, possessive included:

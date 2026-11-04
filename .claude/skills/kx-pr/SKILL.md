@@ -30,7 +30,8 @@ The `!` must be on the **PR title** before merge, because that is what the relea
 
 - **Type:** `feat`, `fix` or `perf` produce bullets. `docs`, `style`, `test`, `refactor`, `ci` and `chore` don't. `chore(deps)` and `build(deps)` go under Dependencies.
 - **Scope:** the command or area, comma-joined for several: `fix(label,annotate)`.
-- **Subject:** state the new behavior, not the edit you made. Write `fix(get): -o name prints kubectl's reply unchanged`, not `fix(get): remove header for -o name`.
+- **Subject:** state the new behavior, not the edit you made. Write `fix(get): a -o name listing prints kubectl's reply unchanged`, not `fix(get): remove header for -o name`.
+- **Its first word:** a plain word, never a flag, a command or "kx". The release-notes generator makes the subject a sentence by capitalizing its first letter and adding a period, so `fix(targets): --context reaches diag` and `fix(k9s): kx tree is Shift-T` can't become one. Write `fix(targets): the --context flag reaches diag` or `fix(k9s): the kx tree key is Shift-T`.
 
 One root cause goes on one branch and one PR. Name the branch `<type>/<kebab-description>`.
 
