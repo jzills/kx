@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Change is one merged pull request.
@@ -196,14 +198,33 @@ func Assemble(highlights string, sections []Section, generated string) string {
 	for _, section := range sections {
 		out.WriteString("## " + section.Title + "\n\n")
 		for _, change := range section.Changes {
-			out.WriteString("- " + change.Summary +
-				" (#" + strconv.Itoa(change.Number) + ")\n")
+			out.WriteString("- " + sentence(change.Summary,
+				" (#"+strconv.Itoa(change.Number)+")") + "\n")
 		}
 		out.WriteString("\n")
 	}
 	out.WriteString(spaceHeadings(strings.TrimLeft(generated, "\n")))
 	return out.String()
 }
+
+// sentence is a PR title's subject as a release-note bullet: capitalized,
+// with ref before the closing period, as in "A plugin pack that runs kx on
+// the row under k9s's cursor (#667).". A title is lowercase with no period
+// by convention, and the bullets under Highlights are sentences like every
+// other line in the notes. A subject that opens with a flag or "kx" is left
+// lowercase, since neither takes a capital; the kx-pr skill keeps titles
+// from opening that way.
+func sentence(subject, ref string) string {
+	first, size := utf8.DecodeRuneInString(subject)
+	if unicode.IsLower(first) && !kxFirst.MatchString(subject) {
+		subject = string(unicode.ToUpper(first)) + subject[size:]
+	}
+	subject = strings.TrimRight(subject, ".")
+	return subject + ref + "."
+}
+
+// kxFirst is a subject whose first word is kx, which stays lowercase.
+var kxFirst = regexp.MustCompile(`^kx($|[\s'’,.:;])`)
 
 // spaceHeadings puts a blank line after each heading in GitHub's generated
 // block that runs straight into its list, as "## What's Changed" does. Every

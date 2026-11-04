@@ -129,7 +129,7 @@ func TestSectionsSkipsEmptyCategories(t *testing.T) {
 func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 	notes := Assemble(
 		"Sharpens shell completion.\n",
-		Sections([]Change{{Number: 361, Type: "feat", Summary: "--fail-on completes per command"}}),
+		Sections([]Change{{Number: 361, Type: "feat", Summary: "the --fail-on flag completes per command"}}),
 		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
 	)
 
@@ -147,7 +147,7 @@ func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 		t.Errorf("tiers out of order — highlights=%d features=%d changed=%d:\n%s",
 			highlights, features, changed, notes)
 	}
-	if !strings.Contains(notes, "- --fail-on completes per command (#361)") {
+	if !strings.Contains(notes, "- The --fail-on flag completes per command (#361).") {
 		t.Errorf("bullet missing or misformatted:\n%s", notes)
 	}
 }
@@ -164,6 +164,26 @@ func TestAssembleSpacesTheGeneratedHeading(t *testing.T) {
 		notes := Assemble("Sharpens shell completion.\n", nil, generated)
 		if want := "## What's Changed\n\n* something"; !strings.Contains(notes, want) {
 			t.Errorf("generated %q: want %q in:\n%s", generated, want, notes)
+		}
+	}
+}
+
+// A derived bullet is a sentence, like every other line in the notes: the
+// PR title's lowercase subject is capitalized and closed with a period after
+// its reference. A subject opening with a flag or kx can take no capital, and
+// is left as written — the control that only a letter is raised.
+func TestDerivedBulletsAreSentences(t *testing.T) {
+	for _, tc := range []struct{ summary, want string }{
+		{"a plugin pack that runs kx on the row under k9s's cursor", "- A plugin pack that runs kx on the row under k9s's cursor (#7)."},
+		{"bump k8s.io/client-go from 0.37.1 to 0.37.2", "- Bump k8s.io/client-go from 0.37.1 to 0.37.2 (#7)."},
+		{"Already a sentence.", "- Already a sentence (#7)."},
+		{"--context reaches diag", "- --context reaches diag (#7)."},
+		{"kx tree is Shift-T", "- kx tree is Shift-T (#7)."},
+		{"kxlint passes", "- Kxlint passes (#7)."},
+	} {
+		notes := Assemble("", Sections([]Change{{Number: 7, Type: "fix", Summary: tc.summary}}), "")
+		if !strings.Contains(notes, tc.want+"\n") {
+			t.Errorf("%q: want %q in:\n%s", tc.summary, tc.want, notes)
 		}
 	}
 }
