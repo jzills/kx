@@ -57,17 +57,19 @@ type Services struct {
 }
 
 // kubernetesFor is the API client for cluster: the shared one when no flag
-// chose a cluster, and one built for it otherwise.
+// chose a cluster, and one built for it otherwise — once, however many times
+// the command asks. kx wait asked once per target, loading the kubeconfig
+// and building a client each time.
 func (s Services) kubernetesFor(cluster k8s.Cluster) func() (kubernetes.Interface, error) {
 	if cluster.IsZero() {
 		return s.Kubernetes
 	}
-	return func() (kubernetes.Interface, error) {
+	return sync.OnceValues(func() (kubernetes.Interface, error) {
 		if s.KubernetesFor != nil {
 			return s.KubernetesFor(cluster)
 		}
 		return k8s.ClientFor(cluster)
-	}
+	})
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
