@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jzills/kx/internal/config"
+	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/render"
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
@@ -1221,5 +1223,43 @@ func TestScanWithHTMLPassesACleanGate(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("RunE = %v, want nil for a scan with nothing at the threshold", err)
+	}
+}
+
+// The page's command line names a kind/name target as it was settled, with
+// its namespace and context, as diag's and tree's pages do. It read `kx
+// scan deploy/api` for a scan of another context's Deployment, which rerun
+// scanned a different one. A -n given for the target is named once, not
+// again as a sweep's scope.
+func TestScanPageNamesATypedTargetsNamespaceAndContext(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"deploy/api", "--context", "other"}, "kx scan deploy/api -n other-default --context other"},
+		{[]string{"deploy/api", "-n", "staging"}, "kx scan deploy/api -n staging<"},
+		// Control: a sweep's scope is still named.
+		{[]string{"-n", "staging"}, "kx scan -n staging<"},
+	} {
+		quietRender(t)
+		services, _ := scanHTMLServices(t, `{"Results":[]}`)
+		// One reply for the sweep's list and the target's get alike.
+		services.Kubectl.(*fakeKubectl).output = `{"items":[{"kind":"Pod","spec":{"containers":[{"image":"api:v1"}]}}],` +
+			`"kind":"Deployment","spec":{"template":{"spec":{"containers":[{"image":"api:v1"}]}}}}`
+		services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+		out := filepath.Join(t.TempDir(), "scan.html")
+		cmd := newScanCommand(services)
+		cmd.SetContext(stoppedContext())
+		args := append(tc.args, "--engine", "trivy", "--html", "--out", out)
+		if err := cmd.RunE(cmd, args); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		page, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if !strings.Contains(string(page), tc.want) {
+			t.Errorf("%v: the page does not read %q", tc.args, tc.want)
+		}
 	}
 }
