@@ -24,9 +24,16 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 		if err == nil {
 			return nil
 		}
-		// No listing named what failed, so there is none to refresh.
-		if targets, kube, typed := services.targets.typedOnly(); typed {
-			return typedNotFound(err, targets, kube)
+		// A kind/name that names nothing came from no listing, so there is
+		// none to refresh: it is reported as missing, whatever else is on
+		// the line. A line of kind/name targets alone has no listing in it
+		// at all, and any other failure is reported as it came.
+		targets, kube := services.targets.recorded()
+		if reported, typed := typedNotFound(err, targets, kube); typed {
+			return reported
+		}
+		if allTyped(targets) {
+			return err
 		}
 		if !isStale(err) {
 			return err

@@ -3,9 +3,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
@@ -342,8 +342,10 @@ func typedExists(kube kubectl.Service, target Resolved) error {
 // kind/name target from one about an index. Only an index came from a
 // listing; refreshing the listing for a typo in kind/name answers a mistake
 // the user made with a table about something else.
+//
+// A command resolves and fails on one goroutine, and withRefresh reads the
+// log only after the command returns, so it takes no lock.
 type targetLog struct {
-	mu      sync.Mutex
 	kubectl kubectl.Service
 	targets []Resolved
 }
@@ -352,8 +354,6 @@ func (l *targetLog) record(kube kubectl.Service, resolved []Resolved) {
 	if l == nil {
 		return
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.kubectl = kube
 	l.targets = append(l.targets, resolved...)
 }
@@ -362,46 +362,79 @@ func (l *targetLog) reset() {
 	if l == nil {
 		return
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.kubectl, l.targets = nil, nil
 }
 
-// typedOnly reports whether the command resolved targets and every one was
-// kind/name, returning them and the kubectl they were resolved with.
-func (l *targetLog) typedOnly() ([]Resolved, kubectl.Service, bool) {
+// recorded is what the command resolved, and the kubectl it resolved it
+// with.
+func (l *targetLog) recorded() ([]Resolved, kubectl.Service) {
 	if l == nil {
-		return nil, nil, false
+		return nil, nil
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.targets) == 0 || !allTyped(l.targets) {
-		return nil, nil, false
-	}
-	return l.targets, l.kubectl, true
+	return l.targets, l.kubectl
 }
 
-// typedNotFound is err from a command whose targets were all kind/name: a
-// kubectl not-found that names one of them, confirmed by asking for it, is
-// reported as that resource missing; anything else as it came. kubectl's
-// reply names the resource it could not find, and only that one is asked
-// for — the others may be missing because the command itself just deleted
-// them.
-func typedNotFound(err error, targets []Resolved, kube kubectl.Service) error {
-	var reported kubectl.Error
-	if !IsNotFound(err) || !errors.As(err, &reported) {
-		return err
-	}
-	for _, target := range targets {
-		if !strings.Contains(reported.Stderr, `"`+target.Name+`"`) {
+// notFoundPattern is one resource in kubectl's not-found reply, as in
+// `deployments.apps "api" not found`: the resource it asked for, and the
+// name.
+var notFoundPattern = regexp.MustCompile(`([A-Za-z0-9.-]+) "([^"]*)" not found`)
+
+// namedMissing reports whether kubectl's reply says target is what it could
+// not find. Both the name and the kind are compared: `kx delete deploy/api
+// svc/api` names api twice, and a Service missing must not be read as the
+// Deployment the command just deleted. A kind kx does not name itself, a
+// CRD, may be spelled differently in the reply than it was typed, and is
+// compared by name alone.
+func namedMissing(stderr string, target Resolved) bool {
+	for _, match := range notFoundPattern.FindAllStringSubmatch(stderr, -1) {
+		if match[2] != target.Name {
 			continue
 		}
-		var missing StaleResourceError
-		if errors.As(typedExists(kube, target), &missing) {
-			return missing
+		replied, typed := kinds.Normalize(match[1]), kinds.Normalize(string(target.Kind))
+		if replied == typed {
+			return true
+		}
+		if _, known := kinds.Namespaced(replied); !known {
+			if _, known := kinds.Namespaced(typed); !known {
+				return true
+			}
 		}
 	}
-	return err
+	return false
+}
+
+// typedNotFound is the error a not-found about kind/name targets is
+// reported with, and whether it is about them: kubectl's reply names only
+// kind/name targets. Asking for the one named confirms it is missing, and it
+// is reported as that; otherwise kubectl's own error stands. Only a target
+// kubectl named is asked for — another may be missing because the command
+// itself just deleted it. When kubectl also names a target counted from the
+// listing, the listing is what is stale, and the refresh reports it.
+func typedNotFound(err error, targets []Resolved, kube kubectl.Service) (error, bool) {
+	var reported kubectl.Error
+	if !IsNotFound(err) || !errors.As(err, &reported) {
+		return nil, false
+	}
+	var named []Resolved
+	for _, target := range targets {
+		if !namedMissing(reported.Stderr, target) {
+			continue
+		}
+		if !target.Ref.Typed() {
+			return nil, false
+		}
+		named = append(named, target)
+	}
+	if len(named) == 0 {
+		return nil, false
+	}
+	for _, target := range named {
+		var missing StaleResourceError
+		if errors.As(typedExists(kube, target), &missing) {
+			return missing, true
+		}
+	}
+	return err, true
 }
 
 // typedArgDoc is the index argument's help on a command that also takes
