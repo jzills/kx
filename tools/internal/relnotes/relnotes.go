@@ -248,7 +248,7 @@ func withoutCommitList(generated string) string {
 // lowercase, since neither takes a capital; the kx-pr skill keeps titles
 // from opening that way.
 func sentence(subject, ref string) string {
-	subject = codeFlags(subject)
+	subject = namedOpening(codeFlags(subject))
 	first, size := utf8.DecodeRuneInString(subject)
 	if unicode.IsLower(first) && !kxFirst.MatchString(subject) {
 		subject = string(unicode.ToUpper(first)) + subject[size:]
@@ -266,6 +266,29 @@ var flagWord = regexp.MustCompile(`(^|[\s(])(--?[A-Za-z][A-Za-z0-9-]*(=[^\s,;)]+
 // (STYLE.md), and in the notes a flag is code like every other one there.
 func codeFlags(subject string) string {
 	return flagWord.ReplaceAllString(subject, "$1`$2`")
+}
+
+// openingFlag and openingCommand are a subject that opens with a flag, as
+// codeFlags has written it, or with a kx command.
+var (
+	openingFlag    = regexp.MustCompile("^(`--?[^`]+`)")
+	openingCommand = regexp.MustCompile(`^kx ([a-z][a-z-]*)\b`)
+)
+
+// namedOpening gives a subject that opens with a flag or a kx command a word
+// to open with, as the notes write either mid-sentence: "--context reaches
+// diag" is "The `--context` flag reaches diag", and "kx tree is Shift-T" is
+// "The `kx tree` command is Shift-T". A command is kx and the one word after
+// it, so a subcommand would be read short — pr-title.yml refuses a title
+// opening either way, and this only rewrites ones merged before it did.
+func namedOpening(subject string) string {
+	if match := openingFlag.FindString(subject); match != "" {
+		return "The " + match + " flag" + subject[len(match):]
+	}
+	if match := openingCommand.FindStringSubmatch(subject); match != nil {
+		return "The `kx " + match[1] + "` command" + subject[len(match[0]):]
+	}
+	return subject
 }
 
 // kxFirst is a subject whose first word is kx, which stays lowercase.

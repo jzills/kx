@@ -187,18 +187,23 @@ func TestAssembleKeepsWhatTheCommitListDoesNot(t *testing.T) {
 // A derived bullet is a sentence, like every other line in the notes: the
 // PR title's lowercase subject is capitalized and closed with a period after
 // its reference, and a flag in it, bare in a title, is put in backticks; a
-// word with a dash inside it is not a flag. A subject opening with a flag or kx can take no capital, and
+// word with a dash inside it is not a flag. A subject that opens with a flag
+// or a kx command is given "The … flag" or "The … command" to open with, as
+// v0.12.0's "--context reaches diag" and "kx tree is Shift-T" needed. A
+// possessive kx is left as written, since it names no command. A subject opening with a flag or kx can take no capital, and
 // is left as written — the control that only a letter is raised.
 func TestDerivedBulletsAreSentences(t *testing.T) {
 	for _, tc := range []struct{ summary, want string }{
 		{"a plugin pack that runs kx on the row under k9s's cursor", "- A plugin pack that runs kx on the row under k9s's cursor (#7)."},
 		{"bump k8s.io/client-go from 0.37.1 to 0.37.2", "- Bump k8s.io/client-go from 0.37.1 to 0.37.2 (#7)."},
 		{"Already a sentence.", "- Already a sentence (#7)."},
-		{"--context reaches diag", "- `--context` reaches diag (#7)."},
+		{"--context reaches diag", "- The `--context` flag reaches diag (#7)."},
+		{"--since=1h windows events", "- The `--since=1h` flag windows events (#7)."},
 		{"the --context flag reaches diag, and -o name too", "- The `--context` flag reaches diag, and `-o` name too (#7)."},
-		{"--since=1h windows (events), as kx get -A does", "- `--since=1h` windows (events), as kx get `-A` does (#7)."},
+		{"the --since=1h window (events), as kx get -A does", "- The `--since=1h` window (events), as kx get `-A` does (#7)."},
 		{"Shift-T is the not-found key, off -re", "- Shift-T is the not-found key, off `-re` (#7)."},
-		{"kx tree is Shift-T", "- kx tree is Shift-T (#7)."},
+		{"kx tree is Shift-T", "- The `kx tree` command is Shift-T (#7)."},
+		{"kx's errors share one shape", "- kx's errors share one shape (#7)."},
 		{"kxlint passes", "- Kxlint passes (#7)."},
 	} {
 		notes := Assemble("", Sections([]Change{{Number: 7, Type: "fix", Summary: tc.summary}}), "")
