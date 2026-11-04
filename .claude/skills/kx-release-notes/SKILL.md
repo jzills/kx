@@ -17,13 +17,13 @@ Someone scanning a release page reads the opening and the bullets, and skips any
 - **<What you notice, in a few words>:** <One complete sentence, with one example.>
 - **<…>:** <…>.
 
-<Only when something breaks: what to change, in a sentence or two.>
+<Only when something breaks or needs a step: what to do, in a sentence or two.>
 ```
 
 - **Lead:** two or three sentences, under about 60 words. Say what the release does for someone using kx, not how it's built. A one-fix patch can be the lead alone.
 - **Bullets:** one per change a user would notice, at most six. Each is a bold label of a few words, a colon, then one complete sentence with one example in backticks: a command, or the exact line kx prints. Pick the example that best shows the change; never list every command it reaches.
 - **Label and sentence both open with a capital:** "**Resources by name:**", not "**kind/name targets:**". The sentence after the colon opens the way any kx sentence does, never with inline code or a lowercase name, and ends with a period: "The `--context` flag sends…", not "`--context` sends…".
-- **What to change:** a closing line only when something breaks. Name the invocation that changed and what a script should do instead, as in "If a script reads …, read … now". Every `!` PR title needs its fix spelled out here, since the derived Breaking section only names it. When nothing breaks, leave the line out: "Upgrading asks nothing of you" is filler, and no closing line already says it.
+- **What to do:** a closing line only when something breaks, or when upgrading needs a step: reinstalling completions, adding a symlink. For a break, name the invocation that changed and what a script should do instead, as in "If a script reads …, read … now". Every `!` PR title needs its fix spelled out here, since the derived Breaking section only names it. When nothing breaks, leave the line out: "Upgrading asks nothing of you" is filler, and no closing line already says it.
 - **Length:** about 150 words in all. Over 200 means something belongs in the docs instead.
 
 ## Leave out
@@ -43,10 +43,10 @@ Someone scanning a release page reads the opening and the bullets, and skips any
 
 ## Worked examples
 
-A minor release (v0.12.0, rewritten to this shape):
+A minor release (`release-notes/v0.12.0.md`):
 
 ```markdown
-Every command that takes an index now also takes a resource the way kubectl writes it, so a name you already know needs no `kx get` and no counting rows. A k9s plugin pack brings kx's reports into k9s.
+Every command that takes an index now also takes a resource by name, the way kubectl writes it, so reaching one you already know no longer means listing and counting rows. A new k9s plugin pack runs kx's reports on the row under k9s's cursor.
 
 - **Resources by name:** Commands that take an index also take kind/name, so `kx diag deploy/api` and `kx logs pod/web-7d -f` work wherever `3` or `@api` did.
 - **Other clusters:** The `--context` flag sends a kind/name to another cluster, and a prompt names it first: `Delete Deployment/api in default on context 'prod'?`.
@@ -55,13 +55,13 @@ Every command that takes an index now also takes a resource the way kubectl writ
 - **Plugins for k9s:** Five keys run `kx diag`, `tree`, `scan`, `events` and `mark` from inside k9s ([guide](https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/)).
 ```
 
-A one-fix patch (v0.11.1, rewritten):
+A one-fix patch (`release-notes/v0.11.1.md`):
 
 ```markdown
 Pressing TAB after a descending sort key, as in `kx get pods --sort -re<TAB>`, now completes it, on every command that takes `--sort`. It used to complete nothing.
 ```
 
-A patch that breaks a script (v0.9.1, rewritten):
+A patch that breaks a script (`release-notes/v0.9.1.md`):
 
 ```markdown
 Output kx passes through from kubectl is now kubectl's bytes exactly, and several manifests from `kx yaml` join the way their format does.

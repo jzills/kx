@@ -61,11 +61,10 @@ tool can say why a release matters.
 
 Say what changed for someone using kx, and what to change if something
 broke, in the shape STYLE.md's Release notes section gives: a two- or
-three-sentence lead, at most six bullets, and a closing line only when a
-script has something to change. The
+three-sentence lead, at most six bullets, and a closing line only when
+something breaks or upgrading needs a step. The
 `kx-release-notes` skill (`.claude/skills/kx-release-notes/SKILL.md`) has the
-worked examples. Notes up to v0.12.0 predate that shape and ran to
-paragraphs; don't take them as the model.
+worked examples, and every note in `release-notes/` is written in it.
 
 A release that breaks something says so twice. The `## Breaking changes`
 section is derived, from the conventional-commit `!` on a pull request title —

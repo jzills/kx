@@ -147,9 +147,9 @@ Neither carries attribution trailers or session links.
 
 `release-notes/vX.Y.Z.md` is the Highlights section of a release, and you write only that part; see [RELEASING.md](RELEASING.md) for the rest.
 
-- **Shape:** a lead of two or three sentences, then at most six bullets, one per change a user would notice, then, only when something breaks, a line on what to change. That's about 150 words in all. Each bullet is a capitalized bold label, a colon, and one complete sentence with one example, opening with a capital and ending with a period. The `kx-release-notes` skill has the worked examples.
+- **Shape:** a lead of two or three sentences, then at most six bullets, one per change a user would notice, then, only when something breaks or needs a step, a line on what to do. That's about 150 words in all. Each bullet is a capitalized bold label, a colon, and one complete sentence with one example, opening with a capital and ending with a period. The `kx-release-notes` skill has the worked examples.
 - Write one line per paragraph and per bullet, never hard-wrapped. GitHub turns every newline in a release body into a line break.
 - No headings.
 - Write in the second person, for someone using kx, with commands in backticks. Name the new behavior, not the mechanism or history behind it; that belongs in the PRs.
 - Sentences open the way README and site sentences do: never with inline code, and never with a lowercase "kx", possessive included. A paragraph is one line here, so this holds for every sentence in it, not just the first; `tools/voicecheck` reads each one.
-- When something breaks, the last line says what a script should change. When nothing does, there is no closing line: "upgrading asks nothing of you" is filler.
+- When something breaks or upgrading needs a step, the last line says what to do. When nothing does, there is no closing line: "upgrading asks nothing of you" is filler.
