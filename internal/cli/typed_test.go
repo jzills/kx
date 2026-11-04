@@ -184,17 +184,91 @@ func TestTypedTargetFailureIsNotRefreshed(t *testing.T) {
 	}
 }
 
-// Commands that change the cluster don't take kind/name yet: their confirm
-// prompts and agent notice are reviewed in their own change.
-func TestMutatingCommandsStillRefuseTypedTargets(t *testing.T) {
-	services, kube := typedServices(t)
-	err := Execute(NewRoot(services, "test"), []string{"delete", "deploy/api"})
-	want := "Invalid value for 'indexes': 'deploy/api' is not a valid int."
-	if err == nil || err.Error() != want {
-		t.Errorf("err = %v, want %q", err, want)
+// The commands that change the cluster take kind/name too: each reaches
+// kubectl naming the resource in the namespace it was settled in, and kx
+// delete's prompt names that namespace.
+func TestMutatingCommandsTakeTypedTargets(t *testing.T) {
+	for _, tc := range []struct {
+		argv   []string
+		want   string
+		prompt string
+	}{
+		{[]string{"delete", "deploy/api"}, "delete Deployment api -n prod", "Delete Deployment/api in prod?"},
+		{[]string{"scale", "deploy/api", "3", "-n", "staging"}, "scale Deployment/api --replicas=3 -n staging", ""},
+		{[]string{"rollout", "restart", "sts/db"}, "rollout restart StatefulSet/db -n prod", ""},
+		{[]string{"cordon", "node/worker"}, "cordon worker", ""},
+		{[]string{"exec", "deploy/api", "--", "ls"}, "exec -it Deployment/api -n prod -- ls", ""},
+		{[]string{"taint", "node/worker", "k=v:NoSchedule"}, "taint node worker k=v:NoSchedule", ""},
+	} {
+		services, kube := typedServices(t)
+		var prompts []string
+		services.Confirm = func(prompt string) error { prompts = append(prompts, prompt); return nil }
+		if err := Execute(NewRoot(services, "test"), tc.argv); err != nil {
+			t.Fatalf("%v: %v", tc.argv, err)
+		}
+		calls := append(append([][]string{}, kube.runs...), kube.interactive...)
+		if len(calls) == 0 || !strings.HasPrefix(joinArgs(calls[0]), tc.want) {
+			t.Errorf("%v: kubectl got %v, want a call starting %q", tc.argv, calls, tc.want)
+		}
+		if tc.prompt != "" && (len(prompts) != 1 || prompts[0] != tc.prompt) {
+			t.Errorf("%v: prompts = %q, want %q", tc.argv, prompts, tc.prompt)
+		}
 	}
-	if len(kube.runs)+len(kube.interactive) != 0 {
-		t.Errorf("kubectl ran: %v %v", kube.runs, kube.interactive)
+}
+
+// A cluster flag beside kind/name reaches every kubectl call the command
+// makes, not just the forwarded one: kx label reads the current labels first,
+// and that read asked the current context's cluster while the write went to
+// the one --context named.
+func TestClusterFlagReachesACommandsOwnReads(t *testing.T) {
+	services, kube := typedServices(t)
+	services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+	kube.output = `{"metadata":{"name":"api","labels":{}}}`
+	argv := []string{"label", "deploy/api", "env=prod", "--context", "other"}
+	if err := Execute(NewRoot(services, "test"), argv); err != nil {
+		t.Fatalf("%v: %v", argv, err)
+	}
+	if len(kube.runs) < 2 {
+		t.Fatalf("label made %d kubectl calls, want its read and its write: %v", len(kube.runs), kube.runs)
+	}
+	for _, run := range kube.runs {
+		if !strings.Contains(joinArgs(run), "--context=other") {
+			t.Errorf("kubectl call %q is missing --context=other", joinArgs(run))
+		}
+	}
+	// Control: without the flag, no call carries one.
+	services, kube = typedServices(t)
+	kube.output = `{"metadata":{"name":"api","labels":{}}}`
+	if err := Execute(NewRoot(services, "test"), []string{"label", "deploy/api", "env=prod"}); err != nil {
+		t.Fatalf("label without --context: %v", err)
+	}
+	for _, run := range kube.runs {
+		if strings.Contains(joinArgs(run), "--context") {
+			t.Errorf("kubectl call %q carries a --context nobody gave", joinArgs(run))
+		}
+	}
+}
+
+// A typed target came from no listing, so an agent's listing being current
+// says nothing about it: no notice. The control spends an index out of the
+// same agent listing, which does print one.
+func TestTypedTargetIsNotAnAgentIndex(t *testing.T) {
+	for _, tc := range []struct {
+		argv   []string
+		notice bool
+	}{
+		{[]string{"scale", "deploy/api", "3"}, false},
+		{[]string{"scale", "1", "3"}, true},
+	} {
+		services, _ := typedServices(t)
+		saveListing(t, services, kinds.Deployment, "prod", true, "api")
+		_, stderr, err := runCaptured(t, NewRoot(services, "test"), tc.argv)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.argv, err)
+		}
+		if got := strings.Contains(stderr, noticeSubstring); got != tc.notice {
+			t.Errorf("%v: notice printed = %v, want %v (stderr %q)", tc.argv, got, tc.notice, stderr)
+		}
 	}
 }
 

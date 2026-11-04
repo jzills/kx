@@ -7,6 +7,7 @@ import (
 
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -298,4 +299,108 @@ func acceptsTyped(cmd *cobra.Command) *cobra.Command {
 	merged["arg.indexes"] = typedArgDoc
 	cmd.Annotations = merged
 	return cmd
+}
+
+// parseTargetRef is parseRef for a single-reference command that also takes
+// kind/name. The typed ref's namespace is not settled yet: settleRef does
+// that once the command has split out the argv it reads -n from.
+func parseTargetRef(name, arg string) (state.Ref, error) {
+	if typedShaped(arg) {
+		return parseTyped(arg)
+	}
+	return parseRef(name, arg)
+}
+
+// settleRef settles a ref parsed by parseTargetRef and applies the
+// scope-flag rule to it, as resolveTargets does for several: a typed ref
+// takes its namespace and cluster from extra, and an index or a mark refuses
+// them.
+func settleRef(services Services, ref state.Ref, extra []string) (state.Ref, error) {
+	refs, err := settleTyped(services, []state.Ref{ref}, extra)
+	if err != nil {
+		return state.Ref{}, err
+	}
+	resolved, err := resolveParsed(refs, services.State.Resolve)
+	if err != nil {
+		return state.Ref{}, err
+	}
+	if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		return state.Ref{}, err
+	}
+	return refs[0], nil
+}
+
+// clusterKubectl sends every kubectl call a command makes to the cluster the
+// command's flags chose. The argv a command forwards already carries them,
+// but the reads it makes for itself — a drain's node preflight, a label's
+// current-value fetch, exec's shell probe — were built without them, and
+// beside kind/name, where those flags are allowed, would ask a different
+// cluster than the one being acted on.
+type clusterKubectl struct {
+	kubectl.Service
+	flags []string
+}
+
+func (k clusterKubectl) with(args []string) []string {
+	at := len(args)
+	for i, arg := range args {
+		if arg == "--" {
+			at = i
+			break
+		}
+	}
+	out := make([]string, 0, len(args)+len(k.flags))
+	out = append(append(append(out, args[:at]...), k.flags...), args[at:]...)
+	return out
+}
+
+func (k clusterKubectl) Run(args []string) (string, error) { return k.Service.Run(k.with(args)) }
+func (k clusterKubectl) RunInteractive(args []string, quiet bool) (int, error) {
+	return k.Service.RunInteractive(k.with(args), quiet)
+}
+func (k clusterKubectl) Watch(args []string, onLine func(string) error) error {
+	return k.Service.Watch(k.with(args), onLine)
+}
+func (k clusterKubectl) Probe(args []string) int { return k.Service.Probe(k.with(args)) }
+
+// CurrentNamespace is the default namespace of the cluster the flags chose,
+// as kubectl would use it.
+func (k clusterKubectl) CurrentNamespace() string {
+	return k8s.NamespaceFor(clusterFromArgs(k.flags))
+}
+
+// forCluster is s with its kubectl and API client sent to the cluster extra's
+// flags choose, and s unchanged when they choose none. Called before a
+// command builds anything from s: beside an index those flags are refused
+// before any call is made, so this only ever acts for kind/name.
+func (s Services) forCluster(extra []string) Services {
+	cluster := clusterFromArgs(extra)
+	if cluster.IsZero() {
+		return s
+	}
+	s.Kubectl = clusterKubectl{Service: s.Kubectl, flags: clusterTokens(cluster)}
+	s.Kubernetes = s.kubernetesFor(cluster)
+	return s
+}
+
+// clusterTokens spells cluster as kubectl flags.
+func clusterTokens(cluster k8s.Cluster) []string {
+	var tokens []string
+	for _, flag := range []struct{ name, value string }{
+		{"--kubeconfig", cluster.Kubeconfig}, {"--context", cluster.Context},
+		{"--cluster", cluster.Cluster}, {"--server", cluster.Server},
+	} {
+		if flag.value != "" {
+			tokens = append(tokens, flag.name+"="+flag.value)
+		}
+	}
+	return tokens
+}
+
+// CurrentContext is the context the flags chose, when they chose one by name.
+func (k clusterKubectl) CurrentContext() string {
+	if context := clusterFromArgs(k.flags).Context; context != "" {
+		return context
+	}
+	return k.Service.CurrentContext()
 }

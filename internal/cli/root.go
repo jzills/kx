@@ -48,6 +48,23 @@ type Services struct {
 	// test need not write a kubeconfig; nil means k8s.NamespaceFor, and the
 	// current namespace (Kubectl.CurrentNamespace) when no flag chose one.
 	ClusterNamespace func(k8s.Cluster) string
+	// KubernetesFor is Kubernetes for a cluster kubectl's flags chose. nil
+	// means k8s.ClientFor; with no flag, Kubernetes is used either way.
+	KubernetesFor func(k8s.Cluster) (kubernetes.Interface, error)
+}
+
+// kubernetesFor is the API client for cluster: the shared one when no flag
+// chose a cluster, and one built for it otherwise.
+func (s Services) kubernetesFor(cluster k8s.Cluster) func() (kubernetes.Interface, error) {
+	if cluster.IsZero() {
+		return s.Kubernetes
+	}
+	return func() (kubernetes.Interface, error) {
+		if s.KubernetesFor != nil {
+			return s.KubernetesFor(cluster)
+		}
+		return k8s.ClientFor(cluster)
+	}
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
@@ -163,18 +180,18 @@ func NewRoot(services Services, version string) *cobra.Command {
 	for _, cmd := range []*cobra.Command{
 		acceptsTyped(newDescribeCommand(services)),
 		acceptsTyped(newLogsCommand(services)),
-		newEditCommand(services),
-		newExecCommand(services),
-		newDebugCommand(services),
-		newCordonCommand(services, "cordon"),
-		newCordonCommand(services, "uncordon"),
-		newDeleteCommand(services),
-		newDrainCommand(services),
-		newTaintCommand(services),
-		newScaleCommand(services),
-		newWaitCommand(services),
-		newRolloutCommand(services),
-		newPortForwardCommand(services),
+		acceptsTyped(newEditCommand(services)),
+		acceptsTyped(newExecCommand(services)),
+		acceptsTyped(newDebugCommand(services)),
+		acceptsTyped(newCordonCommand(services, "cordon")),
+		acceptsTyped(newCordonCommand(services, "uncordon")),
+		acceptsTyped(newDeleteCommand(services)),
+		acceptsTyped(newDrainCommand(services)),
+		acceptsTyped(newTaintCommand(services)),
+		acceptsTyped(newScaleCommand(services)),
+		acceptsTyped(newWaitCommand(services)),
+		acceptsTyped(newRolloutCommand(services)),
+		acceptsTyped(newPortForwardCommand(services)),
 		newCopyCommand(services),
 		acceptsTyped(newYamlCommand(services)),
 		acceptsTyped(newTreeCommand(services)),
@@ -191,12 +208,12 @@ func NewRoot(services Services, version string) *cobra.Command {
 			"Show annotations for one or more indexed resources.",
 			"Shows every annotation on one or more indexed resources, one table per resource.",
 			"annotations", "ANNOTATION", false)),
-		newMetadataWriteCommand(services, "label", "labels",
+		acceptsTyped(newMetadataWriteCommand(services, "label", "labels",
 			"Set or remove labels on an indexed resource.",
-			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key."),
-		newMetadataWriteCommand(services, "annotate", "annotations",
+			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key.")),
+		acceptsTyped(newMetadataWriteCommand(services, "annotate", "annotations",
 			"Set or remove annotations on an indexed resource.",
-			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key."),
+			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key.")),
 		newSwitchCommand(services, "namespace", "ns", "List Namespaces, or switch to an indexed one; alias: kx ns.", false),
 		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.", true),
 	} {
