@@ -222,6 +222,40 @@ func TestMutatingCommandsTakeTypedTargets(t *testing.T) {
 	}
 }
 
+// A prompt before something is removed names the cluster a flag chose, so
+// "Delete Deployment/api in default?" is not asked of a delete bound for
+// another context. With no flag the cluster is the current one, as it was,
+// and the prompt is unchanged — the control that the phrase comes from the
+// flag.
+func TestPromptsNameTheClusterAFlagChose(t *testing.T) {
+	for _, tc := range []struct {
+		argv   []string
+		prompt string
+	}{
+		{[]string{"delete", "deploy/api", "--context", "prod"}, "Delete Deployment/api in other-default on context 'prod'?"},
+		{[]string{"delete", "deploy/api", "--cluster", "east"}, "Delete Deployment/api in other-default on cluster 'east'?"},
+		{[]string{"delete", "deploy/api"}, "Delete Deployment/api in other-default?"},
+		{[]string{"drain", "node/worker", "--context", "prod"}, "Evict all Pods from Node/worker on context 'prod'?"},
+		{[]string{"drain", "node/worker"}, "Evict all Pods from Node/worker?"},
+		{[]string{"taint", "node/worker", "k=v:NoExecute", "--context", "prod"},
+			"Evict every Pod on Node/worker on context 'prod' that does not tolerate 'k=v:NoExecute'?"},
+		{[]string{"taint", "node/worker", "k=v:NoExecute"},
+			"Evict every Pod on Node/worker that does not tolerate 'k=v:NoExecute'?"},
+	} {
+		services, _ := typedServices(t)
+		services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+		var prompts []string
+		services.Confirm = func(prompt string) error {
+			prompts = append(prompts, prompt)
+			return errors.New("declined")
+		}
+		_ = Execute(NewRoot(services, "test"), tc.argv)
+		if len(prompts) != 1 || prompts[0] != tc.prompt {
+			t.Errorf("%v: prompts = %q, want %q", tc.argv, prompts, tc.prompt)
+		}
+	}
+}
+
 // A cluster flag beside kind/name reaches every kubectl call the command
 // makes, not just the forwarded one: kx label reads the current labels first,
 // and that read asked the current context's cluster while the write went to

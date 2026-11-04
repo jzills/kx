@@ -54,8 +54,8 @@ func (c TaintCommand) Execute(
 	evicting := evictingTaints(sets)
 	if taintPrompts(evicting, yes, extraArgs) {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict every Pod on Node/%s that does not tolerate '%s'%s?",
-			name, strings.Join(evicting, "', '"), listingProvenance(source))); err != nil {
+			"Evict every Pod on Node/%s%s that does not tolerate '%s'%s?",
+			name, chosenCluster(c.Kubectl), strings.Join(evicting, "', '"), listingProvenance(source))); err != nil {
 			return "", "", err
 		}
 	}

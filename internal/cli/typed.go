@@ -461,6 +461,29 @@ func clusterTokens(cluster k8s.Cluster) []string {
 	return tokens
 }
 
+// chosenCluster names the cluster kube's flags chose, for a prompt asking
+// before something is removed: " on context 'prod'". Empty when no flag chose
+// one, where the cluster is the current context's, as it always was. Beside
+// kind/name a flag sends the command elsewhere, and a prompt that named only
+// the namespace asked "Delete Deployment/api in default?" of a delete bound
+// for production.
+func chosenCluster(kube kubectl.Service) string {
+	flagged, ok := kube.(clusterKubectl)
+	if !ok {
+		return ""
+	}
+	cluster := clusterFromArgs(flagged.flags)
+	for _, chosen := range []struct{ noun, value string }{
+		{"context", cluster.Context}, {"cluster", cluster.Cluster},
+		{"server", cluster.Server}, {"kubeconfig", cluster.Kubeconfig},
+	} {
+		if chosen.value != "" {
+			return " on " + chosen.noun + " '" + chosen.value + "'"
+		}
+	}
+	return ""
+}
+
 // CurrentContext is the context the flags chose, when they chose one by name.
 func (k clusterKubectl) CurrentContext() string {
 	if context := clusterFromArgs(k.flags).Context; context != "" {
