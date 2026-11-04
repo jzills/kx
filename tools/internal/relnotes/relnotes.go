@@ -171,9 +171,10 @@ func Sections(changes []Change) []Section {
 	return sections
 }
 
-// Assemble writes the three tiers in the order a reader needs them: why this
-// release exists, what changed by kind, then every commit for anyone who wants
-// them.
+// Assemble writes the notes in the order a reader needs them: why this
+// release exists, what changed by kind, then what GitHub adds that nothing
+// above gives (withoutCommitList) — new contributors and the link to every
+// commit.
 //
 // Every section is an h2, including the summary's, because GitHub's own
 // generated block opens with "## What's Changed" and these are its siblings
@@ -203,8 +204,40 @@ func Assemble(highlights string, sections []Section, generated string) string {
 		}
 		out.WriteString("\n")
 	}
-	out.WriteString(spaceHeadings(strings.TrimLeft(generated, "\n")))
+	out.WriteString(spaceHeadings(strings.TrimLeft(withoutCommitList(generated), "\n")))
 	return out.String()
+}
+
+// commitListHeading opens the list of every merged PR in GitHub's block.
+const commitListHeading = "## What's Changed"
+
+// withoutCommitList is GitHub's block with its commit list dropped. The
+// list repeated the Features, Fixes and Dependencies bullets nearly line for
+// line: 16 of v0.12.0's 18 entries, the other two a merge-back and a
+// refactor. What stays is what nothing else in the notes gives, New
+// Contributors, which credits a first-time contributor, and the Full
+// Changelog link, which still reaches every commit.
+func withoutCommitList(generated string) string {
+	var kept []string
+	dropping := false
+	for _, line := range strings.Split(generated, "\n") {
+		switch {
+		case strings.TrimSpace(line) == commitListHeading:
+			dropping = true
+			continue
+		case strings.HasPrefix(line, "#"), strings.HasPrefix(line, "**Full Changelog**"):
+			dropping = false
+		}
+		if dropping {
+			continue
+		}
+		// One blank line between parts: the list leaves two behind it.
+		if strings.TrimSpace(line) == "" && len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // sentence is a PR title's subject as a release-note bullet: capitalized,

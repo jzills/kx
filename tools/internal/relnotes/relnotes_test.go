@@ -130,13 +130,14 @@ func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 	notes := Assemble(
 		"Sharpens shell completion.\n",
 		Sections([]Change{{Number: 361, Type: "feat", Summary: "the --fail-on flag completes per command"}}),
-		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
+		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n\n\n"+
+			"**Full Changelog**: https://github.com/jzills/kx/compare/v0.5.2...v0.5.3\n",
 	)
 
 	heading := strings.Index(notes, "## Highlights")
 	highlights := strings.Index(notes, "Sharpens shell completion")
 	features := strings.Index(notes, "## Features")
-	changed := strings.Index(notes, "## What's Changed")
+	changed := strings.Index(notes, "**Full Changelog**")
 	if heading < 0 || highlights < 0 || features < 0 || changed < 0 {
 		t.Fatalf("a tier is missing entirely:\n%s", notes)
 	}
@@ -152,19 +153,34 @@ func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 	}
 }
 
-// GitHub's generated block opens "## What's Changed" straight into its list,
-// where every heading this tool writes is followed by a blank line; the
-// commit list's heading was the one without. Control: a block that already
-// has the blank line gets no second one.
-func TestAssembleSpacesTheGeneratedHeading(t *testing.T) {
-	for _, generated := range []string{
-		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
-		"## What's Changed\n\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
-	} {
-		notes := Assemble("Sharpens shell completion.\n", nil, generated)
-		if want := "## What's Changed\n\n* something"; !strings.Contains(notes, want) {
-			t.Errorf("generated %q: want %q in:\n%s", generated, want, notes)
+// GitHub's block lists every merged PR under "## What's Changed", which the
+// Features, Fixes and Dependencies bullets already say nearly line for line;
+// it is dropped. New Contributors and the Full Changelog link say what
+// nothing else does, and stay, and a heading that ran straight into its list
+// gets the blank line every other heading has. Control: a block with no
+// commit list keeps every line it has.
+func TestAssembleKeepsWhatTheCommitListDoesNot(t *testing.T) {
+	const generated = "## What's Changed\n" +
+		"* feat: a thing by @someone in https://github.com/jzills/kx/pull/361\n" +
+		"* fix: another by @newcomer in https://github.com/jzills/kx/pull/362\n\n" +
+		"## New Contributors\n" +
+		"* @newcomer made their first contribution in https://github.com/jzills/kx/pull/362\n\n\n" +
+		"**Full Changelog**: https://github.com/jzills/kx/compare/v0.5.2...v0.5.3\n"
+	notes := Assemble("Sharpens shell completion.\n", nil, generated)
+	for _, gone := range []string{"## What's Changed", "* feat: a thing", "* fix: another"} {
+		if strings.Contains(notes, gone) {
+			t.Errorf("the commit list survived (%q):\n%s", gone, notes)
 		}
+	}
+	want := "## New Contributors\n\n" +
+		"* @newcomer made their first contribution in https://github.com/jzills/kx/pull/362\n\n" +
+		"**Full Changelog**: https://github.com/jzills/kx/compare/v0.5.2...v0.5.3\n"
+	if !strings.HasSuffix(notes, want) {
+		t.Errorf("want the notes to end:\n%s\ngot:\n%s", want, notes)
+	}
+	control := "## New Contributors\n\n* @newcomer made their first contribution\n"
+	if got := Assemble("", nil, control); got != control {
+		t.Errorf("a block with no commit list changed:\n%q\nwant:\n%q", got, control)
 	}
 }
 

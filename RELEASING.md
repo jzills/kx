@@ -50,10 +50,16 @@ Release notes have three tiers, and you write only the first:
 |---|---|
 | `## Highlights` | `release-notes/vX.Y.Z.md` — you |
 | `## Breaking changes` / `## Features` / `## Fixes` / `## Dependencies` | derived from what merged |
-| `## What's Changed` | GitHub, unchanged |
+| `## New Contributors`, `**Full Changelog**` | GitHub's generated block, without its commit list |
 
 They are siblings at the same heading level, which is the one GitHub's own
 generated block already uses.
+
+GitHub's block also opens with `## What's Changed`, a list of every merged
+pull request. The generator drops it: it repeated the derived bullets nearly
+line for line (16 of v0.12.0's 18 entries). It keeps New Contributors, the
+one place a first-time contributor is credited, and the Full Changelog link,
+which still reaches every commit.
 
 The bullets are derived rather than written so they cannot advertise something
 that never shipped. The paragraph is written rather than derived because no
@@ -87,8 +93,8 @@ go run ./tools/gen-release-notes --version 0.5.3
 ```
 
 Only `feat`, `fix`, `perf` and dependency bumps become bullets. Everything
-else — docs, style, test, refactor, plain chores — appears in the commit list
-below. That is deliberate: the block exists to be scanned. A `!` overrides
+else — docs, style, test, refactor, plain chores — is reached only through
+the Full Changelog link. That is deliberate: the block exists to be scanned. A `!` overrides
 that: any type carrying it leads the block instead, since a chore that raises
 the minimum Go version costs its readers something a feature often does not.
 Each change is listed once, in the first section that claims it.
