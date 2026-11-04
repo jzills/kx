@@ -289,10 +289,13 @@ func typedInvocation(arg string, ref state.Ref, context string) string {
 		return arg
 	}
 	if ref.Namespace != "" {
-		arg += " -n " + ref.Namespace
+		arg += " -n " + shellWord(ref.Namespace)
 	}
+	// A context's name is whatever the kubeconfig calls it, spaces and
+	// shell metacharacters included, and the line is there to be pasted:
+	// --context my cluster reran nothing.
 	if context != "" {
-		arg += " --context " + context
+		arg += " --context " + shellWord(context)
 	}
 	return arg
 }
