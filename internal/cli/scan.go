@@ -874,7 +874,7 @@ func newScanCommand(services Services) *cobra.Command {
 			// subject and not the caption's "Mixed" kind label — a tab
 			// reading "scan · Mixed · prod" says less than "scan · prod".
 			// kx diag titles itself the same way.
-			var pageScope, pageTitle string
+			var pageScope, pageTitle, target string
 			// subject is what --json says the scan was about. Built beside the
 			// page labels rather than derived from them: those are display
 			// strings, and the whole point of the struct is that a machine
@@ -936,6 +936,10 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
+				// As typed, with the namespace and context it was settled
+				// in, as diag's and tree's pages name theirs: a kind/name
+				// rerun without them scans the current context's namespace.
+				target = typedInvocation(indexArgs[0], ref, context)
 				subject = scanSubject{Kind: kind, Name: name, Namespace: resourceNamespace}
 			}
 
@@ -990,12 +994,12 @@ func newScanCommand(services Services) *cobra.Command {
 			// Publishing a report and failing the build are not in conflict:
 			// --html says where the findings go, --fail-on says what they mean.
 			if htmlOpts.Enabled {
-				indexArg := ""
-				if len(indexArgs) > 0 {
-					indexArg = indexArgs[0]
+				scope := scopeArgs(namespace, all)
+				if target != "" {
+					scope = ""
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-					invocation("scan", indexArg, scopeArgs(namespace, all),
+					invocation("scan", target, scope,
 						matchFlag(match), sortFlag(sortSpec), limitFlag(limit), portFlag(port)))
 				if err != nil {
 					return err
