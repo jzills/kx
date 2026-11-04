@@ -830,7 +830,7 @@ func newScanCommand(services Services) *cobra.Command {
 
 			// A leading index selects one workload; without it the whole
 			// namespace is swept. Anything after belongs to the scanner.
-			indexArgs, extra := splitLeadingIndexes(rest)
+			indexArgs, extra := splitLeadingTargets(rest)
 			// Scanner flags start with a dash, so a bare non-numeric first
 			// argument is a mistyped index. Sweeping the namespace instead
 			// would ignore what was typed and act on something else — and
