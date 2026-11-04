@@ -7,6 +7,10 @@ import (
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/state"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // typedServices is argvServices with a recording kubectl and no listing
@@ -304,5 +308,136 @@ func TestMarkTypedTarget(t *testing.T) {
 	marks, _ = services.State.Marks()
 	if _, ok := marks["api"]; ok {
 		t.Error("a mark was saved for a resource the cluster doesn't have")
+	}
+}
+
+// --context beside kind/name reaches the commands that read the API through
+// client-go, which built their client from the current context whatever the
+// flag said. Control: without the flag the shared client is used and no
+// other is built.
+func TestContextReachesClientGoReads(t *testing.T) {
+	for _, argv := range [][]string{
+		{"diag", "deploy/api", "--context", "other"},
+		{"tree", "deploy/api", "--context", "other"},
+		{"events", "deploy/api", "--context", "other"},
+	} {
+		services, _ := typedServices(t)
+		var built []k8s.Cluster
+		services.KubernetesFor = func(cluster k8s.Cluster) (kubernetes.Interface, error) {
+			built = append(built, cluster)
+			return fake.NewSimpleClientset(), nil
+		}
+		services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+		_ = Execute(NewRoot(services, "test"), argv)
+		if len(built) == 0 || built[0].Context != "other" {
+			t.Errorf("%v: clients built for %+v, want one for context other", argv, built)
+		}
+
+		services, _ = typedServices(t)
+		services = withFakeKubernetes(services)
+		built = nil
+		services.KubernetesFor = func(cluster k8s.Cluster) (kubernetes.Interface, error) {
+			built = append(built, cluster)
+			return fake.NewSimpleClientset(), nil
+		}
+		_ = Execute(NewRoot(services, "test"), argv[:2])
+		if len(built) != 0 {
+			t.Errorf("%v without --context built a client for %+v", argv[:2], built)
+		}
+	}
+}
+
+// --context is refused on a sweep, whose rows would be numbered into this
+// cluster's history, and beside an index, which carries its own cluster.
+func TestContextRefusedWithoutATypedTarget(t *testing.T) {
+	sweep := "'--context' needs a kind/name target — a sweep's rows are numbered, and an " +
+		"index is spent in the cluster it was counted in. To sweep another cluster, " +
+		"switch to it with 'kx context'."
+	beside := "'--context' cannot be combined with an index — an index already carries the " +
+		"cluster it was listed from. To act on another cluster, switch to it with 'kx context' " +
+		"and list it there."
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"diag", "--context", "other"}, sweep},
+		{[]string{"tree", "--context", "other"}, sweep},
+		{[]string{"scan", "--context", "other"}, sweep},
+		{[]string{"diag", "1", "--context", "other"}, beside},
+		{[]string{"tree", "1", "--context", "other"}, beside},
+		{[]string{"events", "1", "--context", "other"}, beside},
+		{[]string{"labels", "1", "--context", "other"}, beside},
+		{[]string{"mark", "api", "1", "--context", "other"}, beside},
+	} {
+		services, _ := typedServices(t)
+		services = withFakeKubernetes(services)
+		seedPodListing(t, services)
+		err := Execute(NewRoot(services, "test"), tc.argv)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%v:\n got %v\nwant %q", tc.argv, err, tc.want)
+		}
+	}
+}
+
+// A walk of another cluster is printed but never saved: its rows would be
+// spent against this cluster. Control: the same walk without --context is
+// numbered and saved.
+func TestTreeOfAnotherClusterIsNotSaved(t *testing.T) {
+	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"}}
+	for _, tc := range []struct {
+		argv  []string
+		saved bool
+	}{
+		{[]string{"tree", "deploy/api", "-n", "prod", "--context", "other"}, false},
+		{[]string{"tree", "deploy/api", "-n", "prod"}, true},
+	} {
+		services, _ := typedServices(t)
+		client := fake.NewSimpleClientset(deployment)
+		services.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+		services.KubernetesFor = func(k8s.Cluster) (kubernetes.Interface, error) { return client, nil }
+		if err := Execute(NewRoot(services, "test"), tc.argv); err != nil {
+			t.Fatalf("%v: %v", tc.argv, err)
+		}
+		_, err := services.State.Load()
+		if saved := err == nil; saved != tc.saved {
+			t.Errorf("%v: listing saved = %v (Load err %v), want %v", tc.argv, saved, err, tc.saved)
+		}
+	}
+}
+
+// kx mark --context checks the resource in that cluster and records the
+// mark against it, so spending the mark from another context is refused as
+// any cross-context mark is.
+func TestMarkTypedTargetInAnotherContext(t *testing.T) {
+	services, kube := typedServices(t)
+	services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+	argv := []string{"mark", "api", "deploy/api", "--context", "other"}
+	if err := Execute(NewRoot(services, "test"), argv); err != nil {
+		t.Fatalf("%v: %v", argv, err)
+	}
+	if len(kube.probes) != 1 || !strings.Contains(joinArgs(kube.probes[0]), "--context=other") {
+		t.Errorf("probes = %v, want one carrying --context=other", kube.probes)
+	}
+	marks, _ := services.State.Marks()
+	if got := marks["api"]; got.Context != "other" || got.Namespace != "other-default" {
+		t.Errorf("mark = %+v, want context other, namespace other-default", got)
+	}
+}
+
+// A --context naming the current context is no other cluster: k9s passes
+// its context on every plugin call, and a tree from k9s would otherwise
+// never be numbered. The current context is "test" (recordingKubectl).
+func TestTreeWithTheCurrentContextIsSaved(t *testing.T) {
+	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"}}
+	services, _ := typedServices(t)
+	client := fake.NewSimpleClientset(deployment)
+	services.Kubernetes = func() (kubernetes.Interface, error) { return client, nil }
+	services.KubernetesFor = func(k8s.Cluster) (kubernetes.Interface, error) { return client, nil }
+	argv := []string{"tree", "deploy/api", "-n", "prod", "--context", "test"}
+	if err := Execute(NewRoot(services, "test"), argv); err != nil {
+		t.Fatalf("%v: %v", argv, err)
+	}
+	if _, err := services.State.Load(); err != nil {
+		t.Errorf("tree with the current context saved nothing: %v", err)
 	}
 }

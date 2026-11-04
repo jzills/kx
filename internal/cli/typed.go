@@ -206,24 +206,72 @@ func resolveTargetArg(services Services, name, arg string, extra []string) (Reso
 	return resolved[0], nil
 }
 
-// parseTargetArg is parseRef for a client-go command (kx diag, kx tree, kx
-// scan) that also takes kind/name, with namespace the value of its own -n
-// flag: those commands read -n for a sweep, so it reaches here as a value
-// rather than as kubectl argv.
-func parseTargetArg(services Services, arg, namespace string) (state.Ref, error) {
-	if !typedShaped(arg) {
+// parseTargetArg is parseRef for a command with -n and --context flags of its
+// own (kx diag, kx tree, kx scan) that also takes kind/name. scope is those
+// flags as argv (targetArgv): the commands read -n for a sweep, so it reaches
+// here as a value rather than as kubectl argv. A cluster flag beside an index
+// is refused, as it is everywhere.
+func parseTargetArg(services Services, arg string, scope []string) (state.Ref, error) {
+	if !typedShaped(arg) && clusterFromArgs(scope).IsZero() {
 		return parseRef("index", arg)
 	}
-	var extra []string
-	if namespace != "" {
-		extra = []string{"--namespace=" + namespace}
-	}
-	target, err := resolveTargetArg(services, "index", arg, extra)
+	target, err := resolveTargetArg(services, "index", arg, scope)
 	if err != nil {
 		return state.Ref{}, err
 	}
 	return target.Ref, nil
 }
+
+// targetArgv spells a command's own -n and --context values as the argv
+// settleTyped reads, leaving out whichever is empty.
+func targetArgv(namespace, context string) []string {
+	var argv []string
+	if namespace != "" {
+		argv = append(argv, "--namespace="+namespace)
+	}
+	if context != "" {
+		argv = append(argv, "--context="+context)
+	}
+	return argv
+}
+
+// typedContextUsage is the --context of a command that reads it only for a
+// kind/name target.
+const typedContextUsage = "Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own"
+
+// contextScope is a command's own --context as argv, for a command that
+// takes no kubectl flags.
+func contextScope(cmd *cobra.Command) []string {
+	if !cmd.Flags().Changed("context") {
+		return nil
+	}
+	context, _ := cmd.Flags().GetString("context")
+	return []string{"--context=" + context}
+}
+
+// refuseContextFlag checks a command's own --context against its target
+// before any client is built: it needs kind/name, a sweep refuses it
+// (errContextWithoutTarget), and an index refuses it as it refuses every
+// cluster flag.
+func refuseContextFlag(given bool, args []string) error {
+	switch {
+	case !given:
+		return nil
+	case len(args) == 0:
+		return errContextWithoutTarget
+	case !typedShaped(args[0]):
+		return clusterFlagBesideIndexError("--context")
+	}
+	return nil
+}
+
+// errContextWithoutTarget refuses --context on a sweep. A sweep's rows are
+// numbered, and an index is spent in the cluster it was counted in; kx
+// cannot number another cluster's rows into this one's history.
+var errContextWithoutTarget = errors.New(
+	"'--context' needs a kind/name target — a sweep's rows are numbered, and an " +
+		"index is spent in the cluster it was counted in. To sweep another cluster, " +
+		"switch to it with 'kx context'.")
 
 // targetNoun names what a single-resource argument is, for a refusal that
 // says what a flag cannot stand beside: "an index" covers a mark too, as it
@@ -245,11 +293,17 @@ func targetWord(arg string) string {
 
 // typedInvocation is the argument a report's invocation line shows for ref:
 // the argument as typed, followed for a typed target by the namespace it was
-// settled in, so the line reruns against the same resource from any
-// namespace.
-func typedInvocation(arg string, ref state.Ref) string {
-	if ref.Typed() && ref.Namespace != "" {
-		return arg + " -n " + ref.Namespace
+// settled in and the context a flag chose, so the line reruns against the
+// same resource from any namespace.
+func typedInvocation(arg string, ref state.Ref, context string) string {
+	if !ref.Typed() {
+		return arg
+	}
+	if ref.Namespace != "" {
+		arg += " -n " + ref.Namespace
+	}
+	if context != "" {
+		arg += " --context " + context
 	}
 	return arg
 }

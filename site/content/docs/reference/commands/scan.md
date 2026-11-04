@@ -38,6 +38,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--engine string` | Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default |
 | `--fail-on string` | Exit 2 when any image carries a vulnerability at this severity or worse (critical, high, medium, low) |
 | `--full` | Stream the scanner's full output instead of the summary table |
