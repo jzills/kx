@@ -156,13 +156,24 @@ func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref stat
 // the command succeeded. Returning nil here — which is what ensureExists does
 // on its own when the resource is still there — is why `kx describe 1
 // --bogus-flag` printed kubectl's error and then exited 0.
+//
+// So is a check that could not ask (foundMissing): kubectl has already said
+// why it failed, and a kind/name's check failing the same way printed the
+// same connection error a second time, in place of kubectl's exit code.
 func forwardExit(
 	kubectl kubectl.Service, kind kinds.Kind, name, namespace string, code int, ref state.Ref,
 ) error {
-	if err := ensureExists(kubectl, kind, name, namespace, ref); err != nil {
+	if err := ensureExists(kubectl, kind, name, namespace, ref); foundMissing(err) {
 		return err
 	}
 	return SilentError{Code: code}
+}
+
+// foundMissing reports whether ensureExists found the resource gone, as
+// opposed to failing to ask: an unreachable cluster, an expired login.
+func foundMissing(err error) bool {
+	var missing StaleResourceError
+	return errors.As(err, &missing)
 }
 
 // isStale reports whether an error means the current state entry no longer

@@ -664,3 +664,42 @@ func TestTreeWithTheCurrentContextIsSaved(t *testing.T) {
 		t.Errorf("tree with the current context saved nothing: %v", err)
 	}
 }
+
+// A streamed command that fails, whose kind/name check then fails to ask
+// too, keeps kubectl's exit code and adds nothing: kubectl has already said
+// why. kx describe deploy/api on an unreachable cluster printed the
+// connection error a second time, inside kx's own failure line, and kx exec
+// deploy/api -- test -f /x lost the command's exit code to it.
+func TestTypedCheckThatCannotAskKeepsTheExitCode(t *testing.T) {
+	const unreachable = "The connection to the server 127.0.0.1:1 was refused - did you specify the right host or port?"
+	for _, tc := range []struct {
+		argv []string
+		code int
+	}{
+		{[]string{"describe", "deploy/api"}, 1},
+		{[]string{"exec", "deploy/api", "--", "test", "-f", "/x"}, 2},
+	} {
+		splitRender(t)
+		kube := &recordingKubectl{err: kubectl.Error{Stderr: unreachable}, exitCode: tc.code}
+		services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+		err := Execute(NewRoot(services, "test"), tc.argv)
+		if err == nil || strings.Contains(err.Error(), unreachable) {
+			t.Errorf("%v: err = %v, want kubectl's exit with nothing added", tc.argv, err)
+		}
+		var silent SilentError
+		var exit ExitError
+		code := -1
+		switch {
+		case errors.As(err, &silent):
+			code = silent.Code
+		case errors.As(err, &exit):
+			code = exit.Code
+		}
+		if code != tc.code {
+			t.Errorf("%v: exit code = %d, want kubectl's %d", tc.argv, code, tc.code)
+		}
+		if len(kube.runs) == 0 {
+			t.Errorf("%v: the check never ran, so the test exercises nothing", tc.argv)
+		}
+	}
+}
