@@ -21,7 +21,15 @@ import (
 // binary reads the system trust store at runtime, so there is nothing for a
 // bundled build to be missing.
 func Client() (*kubernetes.Clientset, error) {
-	config, err := restConfig()
+	return ClientFor(Cluster{})
+}
+
+// ClientFor is Client for the cluster c chooses, so a client-go read reaches
+// the cluster kubectl would under the same flags. A cluster a flag chose never
+// falls back to the in-cluster service account: that would answer from a
+// cluster nobody asked for.
+func ClientFor(c Cluster) (*kubernetes.Clientset, error) {
+	config, err := restConfig(c)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +45,7 @@ func Client() (*kubernetes.Clientset, error) {
 	return clientset, nil
 }
 
-// Cluster is the cluster a kubectl command reaches, as kubectl's
+// Cluster is the cluster a command reaches, as kubectl's
 // cluster-selecting flags choose it: --kubeconfig, --context, --cluster and
 // --server. The zero value is the kubeconfig's own choice, which is what every
 // command without those flags gets.
@@ -62,10 +70,13 @@ func clientConfig(c Cluster) clientcmd.ClientConfig {
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
 }
 
-func restConfig() (*rest.Config, error) {
-	config, err := clientConfig(Cluster{}).ClientConfig()
+func restConfig(c Cluster) (*rest.Config, error) {
+	config, err := clientConfig(c).ClientConfig()
 	if err == nil {
 		return config, nil
+	}
+	if !c.IsZero() {
+		return nil, fmt.Errorf("Could not load the Kubernetes configuration: %w.", err)
 	}
 
 	inCluster, inClusterErr := rest.InClusterConfig()

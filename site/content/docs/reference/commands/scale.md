@@ -22,7 +22,7 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `<replicas>` | Number of replicas to scale to |
 
 ## Options
@@ -63,4 +63,5 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 kx scale 1 3
 kx scale 1 3 --current-replicas=2
 kx scale 1 0 --timeout=1m
+kx scale deploy/api 3 -n prod
 ```

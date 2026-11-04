@@ -22,7 +22,7 @@ kx exec [OPTIONS] <index> [kubectl flags] [-- command...]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Passthrough options
@@ -51,4 +51,5 @@ kx exec 1
 kx exec 1 -- ls /app
 kx exec 1 -c sidecar
 kx exec @api
+kx exec deploy/api -n prod
 ```

@@ -234,12 +234,15 @@ func newTaintCommand(services Services) *cobra.Command {
 		_ = cmd.Flags().MarkHidden(name)
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, extra := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) == 0 {
 			return requiredArgsError(cmd)
 		}
 		yes, _ := cmd.Flags().GetBool("yes")
-		ref, err := parseRef("index", positional[0])
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
@@ -267,14 +270,14 @@ func newTaintCommand(services Services) *cobra.Command {
 		if !taintPrompts(evictingTaints(sets), yes, extra) {
 			installAgentIndexNotice(services)
 		}
+		if ref, err = settleRef(services, ref, extra); err != nil {
+			return err
+		}
 		name, namespace, kind, source, err := resolveWithProvenance(services.State, ref)
 		if err != nil {
 			return err
 		}
 		target := Resolved{Ref: ref, Name: name, Namespace: namespace, Kind: kind}
-		if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
-			return err
-		}
 		message, output, err := TaintCommand{Kubectl: services.Kubectl, Confirm: services.confirm()}.
 			Execute(target, sets, removes, extra, yes, source)
 		if err != nil {

@@ -60,12 +60,13 @@ An index you type out is still taken literally: `kx delete 13 99` refuses the wh
 ## Naming a resource directly
 
 When you already know the name, there is no listing to count rows in.
-The read-only commands take the resource as kubectl spells it, kind/name, wherever they take an index:
+Every command that takes an index also takes the resource as kubectl spells it, kind/name:
 
 ```bash
 kx diag deploy/api -n prod
 kx logs deploy/api --context staging
 kx tree sts/db
+kx rollout restart deploy/api -n prod
 kx mark api deploy/api -n prod
 ```
 
@@ -76,7 +77,7 @@ On a line that also holds an index or a mark, they are refused for the same reas
 
 Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
 Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
-The commands that change the cluster take an index or a mark only.
+The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
 
 ## Dropping the `get`
 

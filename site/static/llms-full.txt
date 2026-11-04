@@ -314,12 +314,13 @@ An index you type out is still taken literally: `kx delete 13 99` refuses the wh
 ## Naming a resource directly
 
 When you already know the name, there is no listing to count rows in.
-The read-only commands take the resource as kubectl spells it, kind/name, wherever they take an index:
+Every command that takes an index also takes the resource as kubectl spells it, kind/name:
 
 ```bash
 kx diag deploy/api -n prod
 kx logs deploy/api --context staging
 kx tree sts/db
+kx rollout restart deploy/api -n prod
 kx mark api deploy/api -n prod
 ```
 
@@ -330,7 +331,7 @@ On a line that also holds an index or a mark, they are refused for the same reas
 
 Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
 Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
-The commands that change the cluster take an index or a mark only.
+The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
 
 ## Dropping the `get`
 
@@ -1919,7 +1920,7 @@ kx annotate [OPTIONS] <index> [key=value...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[key=value]...` | Key and value to set; repeatable |
 
 ## Options
@@ -2079,7 +2080,7 @@ kx cordon [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2192,7 +2193,7 @@ kx debug [OPTIONS] <index> [kubectl flags] [-- command...]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Options
@@ -2271,7 +2272,7 @@ kx delete [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2317,6 +2318,7 @@ kx delete 3
 kx delete 3 5 -y
 kx delete 3..5
 kx delete 3..
+kx delete pod/api-7d9f -n prod
 kx delete 3 --force --grace-period=0
 ```
 
@@ -2487,7 +2489,7 @@ kx drain [OPTIONS] <index> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2549,7 +2551,7 @@ kx edit [OPTIONS] <index> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -2661,7 +2663,7 @@ kx exec [OPTIONS] <index> [kubectl flags] [-- command...]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Passthrough options
@@ -2690,6 +2692,7 @@ kx exec 1
 kx exec 1 -- ls /app
 kx exec 1 -c sidecar
 kx exec @api
+kx exec deploy/api -n prod
 ```
 
 ---
@@ -2817,7 +2820,7 @@ kx label [OPTIONS] <index> [key=value...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[key=value]...` | Key and value to set; repeatable |
 
 ## Options
@@ -3098,7 +3101,7 @@ kx port-forward [OPTIONS] <index> <port> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `<port>` | Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port |
 
 ## Passthrough options
@@ -3198,7 +3201,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 | Argument | Description |
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -3232,6 +3235,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 ```bash
 kx rollout status 1
 kx rollout restart 1
+kx rollout restart deploy/api -n prod
 kx rollout undo 1
 kx rollout undo 1 --to-revision=2
 kx rollout status 1 --timeout=2m
@@ -3261,7 +3265,7 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `<replicas>` | Number of replicas to scale to |
 
 ## Options
@@ -3302,6 +3306,7 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 kx scale 1 3
 kx scale 1 3 --current-replicas=2
 kx scale 1 0 --timeout=1m
+kx scale deploy/api 3 -n prod
 ```
 
 ---
@@ -3538,7 +3543,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[taint]...` | A taint to set, key=value:Effect or key:Effect; repeatable |
 
 ## Options
@@ -3742,7 +3747,7 @@ kx uncordon [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -3846,7 +3851,7 @@ kx wait [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
