@@ -98,7 +98,7 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (mes
 	// repainting status line cannot be read.
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
+			"Delete %s/%s in %s%s%s?", kind, name, namespace, chosenCluster(c.Kubectl), listingProvenance(source))); err != nil {
 			return "", "", err
 		}
 	}
