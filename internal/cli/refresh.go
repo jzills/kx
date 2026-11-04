@@ -37,6 +37,9 @@ type StaleResourceError struct {
 	// mark carries no query, and replaying the history stack's would answer
 	// it with an unrelated listing.
 	Ref state.Ref
+	// Cluster is where a kind/name was looked for, when a flag chose it:
+	// " on context 'prod'" (chosenCluster). Empty for the current context.
+	Cluster string
 }
 
 func (e StaleResourceError) Error() string {
@@ -45,7 +48,7 @@ func (e StaleResourceError) Error() string {
 		if e.Namespace != "" {
 			where = " in namespace '" + e.Namespace + "'"
 		}
-		return fmt.Sprintf("%s/%s was not found%s.", e.Kind, e.Name, where)
+		return fmt.Sprintf("%s/%s was not found%s%s.", e.Kind, e.Name, where, e.Cluster)
 	}
 	if e.Ref.Mark != "" {
 		where := ""
@@ -57,6 +60,23 @@ func (e StaleResourceError) Error() string {
 			e.Ref, e.Kind, e.Name, where, e.Ref.Mark)
 	}
 	return string(e.Kind) + "/" + e.Name + " no longer exists"
+}
+
+// onCluster is err with the cluster a flag chose named on it, when err is a
+// kind/name found missing there. Every path that finds one missing builds
+// the error without knowing where it looked — some read through client-go,
+// where no kubectl is in hand — and the command's kubectl, which the target
+// log holds, is the one sent to the chosen cluster. Without it kx scale
+// deploy/api 3 --context prod said "Deployment/api was not found in
+// namespace 'default'.", and the user went looking for a typo on the
+// cluster they were in, where deploy/api exists.
+func onCluster(err error, log *targetLog) error {
+	missing, ok := err.(StaleResourceError)
+	if !ok || !missing.Ref.Typed() || missing.Cluster != "" || log == nil || log.kubectl == nil {
+		return err
+	}
+	missing.Cluster = chosenCluster(log.kubectl)
+	return missing
 }
 
 // kubectl reports a missing resource in these shapes; there is no exit code

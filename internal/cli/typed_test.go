@@ -369,6 +369,10 @@ func TestPromptsNameTheClusterAFlagChose(t *testing.T) {
 		{[]string{"delete", "deploy/api", "--context", "prod"}, "Delete Deployment/api in other-default on context 'prod'?"},
 		{[]string{"delete", "deploy/api", "--cluster", "east"}, "Delete Deployment/api in other-default on cluster 'east'?"},
 		{[]string{"delete", "deploy/api"}, "Delete Deployment/api in other-default?"},
+		{[]string{"delete", "node/worker"}, "Delete Node/worker?"},
+		{[]string{"delete", "node/worker", "--context", "prod"}, "Delete Node/worker on context 'prod'?"},
+		{[]string{"delete", "deploy/api", "--context", "prod", "--server", "https://staging:6443"},
+			"Delete Deployment/api in other-default on context 'prod', server 'https://staging:6443'?"},
 		{[]string{"drain", "node/worker", "--context", "prod"}, "Evict all Pods from Node/worker on context 'prod'?"},
 		{[]string{"drain", "node/worker"}, "Evict all Pods from Node/worker?"},
 		{[]string{"taint", "node/worker", "k=v:NoExecute", "--context", "prod"},
@@ -386,6 +390,36 @@ func TestPromptsNameTheClusterAFlagChose(t *testing.T) {
 		_ = Execute(NewRoot(services, "test"), tc.argv)
 		if len(prompts) != 1 || prompts[0] != tc.prompt {
 			t.Errorf("%v: prompts = %q, want %q", tc.argv, prompts, tc.prompt)
+		}
+	}
+}
+
+// A kind/name a flag sent to another cluster, found missing there, is
+// reported with that cluster named, on every path that finds it missing:
+// kubectl's captured reply (scale), a streamed command's exit (describe),
+// and the API server's (diag). kx scale deploy/api 3 --context prod said
+// only "in namespace 'default'", and the user looked for a typo on the
+// cluster they were in. Control: with no flag nothing is added.
+func TestTypedNotFoundNamesTheClusterAFlagChose(t *testing.T) {
+	const notFound = `Error from server (NotFound): deployments.apps "gone" not found`
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"scale", "deploy/gone", "3", "--context", "prod"}, "Deployment/gone was not found in namespace 'other-default' on context 'prod'."},
+		{[]string{"describe", "deploy/gone", "--context", "prod"}, "Deployment/gone was not found in namespace 'other-default' on context 'prod'."},
+		{[]string{"diag", "deploy/gone", "--context", "prod"}, "Deployment/gone was not found in namespace 'other-default' on context 'prod'."},
+		{[]string{"scale", "deploy/gone", "3"}, "Deployment/gone was not found in namespace 'other-default'."},
+		{[]string{"diag", "deploy/gone"}, "Deployment/gone was not found in namespace 'other-default'."},
+	} {
+		splitRender(t)
+		kube := &recordingKubectl{err: kubectl.Error{Stderr: notFound}, exitCode: 1, probeCode: 1}
+		services := withFakeKubernetes(staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}}))
+		services.ClusterNamespace = func(k8s.Cluster) string { return "other-default" }
+		services.KubernetesFor = func(k8s.Cluster) (kubernetes.Interface, error) { return services.Kubernetes() }
+		err := Execute(NewRoot(services, "test"), tc.argv)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%v: err = %v, want %q", tc.argv, err, tc.want)
 		}
 	}
 }
