@@ -248,12 +248,24 @@ func withoutCommitList(generated string) string {
 // lowercase, since neither takes a capital; the kx-pr skill keeps titles
 // from opening that way.
 func sentence(subject, ref string) string {
+	subject = codeFlags(subject)
 	first, size := utf8.DecodeRuneInString(subject)
 	if unicode.IsLower(first) && !kxFirst.MatchString(subject) {
 		subject = string(unicode.ToUpper(first)) + subject[size:]
 	}
 	subject = strings.TrimRight(subject, ".")
 	return subject + ref + "."
+}
+
+// flagWord is a flag as a PR title writes it, bare: --context, -o,
+// --since=1h. Only at the start of a word, so Shift-T and not-found are
+// words, not flags.
+var flagWord = regexp.MustCompile(`(^|[\s(])(--?[A-Za-z][A-Za-z0-9-]*(=[^\s,;)]+)?)`)
+
+// codeFlags puts each flag in a subject in backticks. A title carries none
+// (STYLE.md), and in the notes a flag is code like every other one there.
+func codeFlags(subject string) string {
+	return flagWord.ReplaceAllString(subject, "$1`$2`")
 }
 
 // kxFirst is a subject whose first word is kx, which stays lowercase.
