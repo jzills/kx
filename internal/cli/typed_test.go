@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/kubectl"
 	"github.com/jzills/kx/internal/state"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -283,8 +285,8 @@ func TestMarkTypedTarget(t *testing.T) {
 	if err := Execute(NewRoot(services, "test"), []string{"mark", "api", "deploy/api", "-n", "staging"}); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	if len(kube.probes) != 1 || joinArgs(kube.probes[0]) != "get Deployment api -n staging" {
-		t.Errorf("probes = %v, want one 'get Deployment api -n staging'", kube.probes)
+	if len(kube.runs) != 1 || joinArgs(kube.runs[0]) != "get Deployment api -n staging" {
+		t.Errorf("runs = %v, want one 'get Deployment api -n staging'", kube.runs)
 	}
 	marks, err := services.State.Marks()
 	if err != nil {
@@ -299,7 +301,7 @@ func TestMarkTypedTarget(t *testing.T) {
 	}
 
 	services, kube = typedServices(t)
-	kube.probeCode = 1
+	kube.err = kubectl.Error{Stderr: `Error from server (NotFound): deployments.apps "nope" not found`}
 	err = Execute(NewRoot(services, "test"), []string{"mark", "api", "deploy/nope"})
 	want := "Deployment/nope was not found in namespace 'prod'."
 	if err == nil || err.Error() != want {
@@ -405,6 +407,25 @@ func TestTreeOfAnotherClusterIsNotSaved(t *testing.T) {
 	}
 }
 
+// kx mark reports a failure to ask the cluster as itself. It checked with an
+// exit code alone, so a kubectl missing from PATH, an expired login or a bad
+// context all read as "Deployment/api was not found" and sent the user
+// looking for a typo. The control is the not-found reply, in
+// TestMarkTypedTarget.
+func TestMarkTypedTargetReportsWhyTheCheckFailed(t *testing.T) {
+	services, kube := typedServices(t)
+	missing := "kubectl not found on PATH — install kubectl (https://kubernetes.io/docs/tasks/tools/) and ensure it is on your PATH."
+	kube.err = errors.New(missing)
+	err := Execute(NewRoot(services, "test"), []string{"mark", "api", "deploy/api"})
+	if err == nil || err.Error() != missing {
+		t.Errorf("err = %v, want %q", err, missing)
+	}
+	marks, _ := services.State.Marks()
+	if _, ok := marks["api"]; ok {
+		t.Error("a mark was saved though the cluster was never asked")
+	}
+}
+
 // kx mark --context checks the resource in that cluster and records the
 // mark against it, so spending the mark from another context is refused as
 // any cross-context mark is.
@@ -415,8 +436,8 @@ func TestMarkTypedTargetInAnotherContext(t *testing.T) {
 	if err := Execute(NewRoot(services, "test"), argv); err != nil {
 		t.Fatalf("%v: %v", argv, err)
 	}
-	if len(kube.probes) != 1 || !strings.Contains(joinArgs(kube.probes[0]), "--context=other") {
-		t.Errorf("probes = %v, want one carrying --context=other", kube.probes)
+	if len(kube.runs) != 1 || !strings.Contains(joinArgs(kube.runs[0]), "--context=other") {
+		t.Errorf("runs = %v, want one carrying --context=other", kube.runs)
 	}
 	marks, _ := services.State.Marks()
 	if got := marks["api"]; got.Context != "other" || got.Namespace != "other-default" {
