@@ -33,7 +33,8 @@ The house voice — errors, captions, help text, docs, comments, commits, releas
 
 - `kx-command` — adding or changing a command: the ordered checklist, the hand-kept pinning lists, and which files are generated.
 - `kx-pr` — branch names, commit messages, PR titles and descriptions, and when a change takes `!`.
-- `kx-release` — choosing the version, writing `release-notes/vX.Y.Z.md`, and fact-checking it against built binaries.
+- `kx-release` — choosing the version, cutting the branch, and fact-checking the notes against built binaries.
+- `kx-release-notes` — writing `release-notes/vX.Y.Z.md`: a short lead, a few bullets, one line on upgrading.
 - `kx-tests` — writing a test that can fail, proving it does, and running the gate apart from the commit.
 - `kx-verify` — running a change end-to-end against a cluster: isolated state, the seeded `diagnostics` namespace, flows and exit codes worth checking.
 - `kx-voice` — writing or rewording any text kx shows or ships: errors, captions, help, docs, comments, commits, release notes.

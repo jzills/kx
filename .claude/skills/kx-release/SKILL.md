@@ -1,6 +1,6 @@
 ---
 name: kx-release
-description: Use when preparing a kx release, choosing its version number, writing release-notes/vX.Y.Z.md, or checking a release after it publishes.
+description: Use when preparing a kx release, choosing its version number, cutting and pushing the release branch, or checking a release after it publishes. For writing release-notes/vX.Y.Z.md itself, use kx-release-notes.
 ---
 
 # Preparing a kx release
@@ -18,12 +18,9 @@ Read RELEASING.md's "Pick the number" before proposing one.
 
 ## 2. Write the summary
 
-Write `release-notes/vX.Y.Z.md`, in the `STYLE.md` Release notes shape:
+Write `release-notes/vX.Y.Z.md` with the `kx-release-notes` skill: a short lead, a few bullets, and one line on upgrading.
 
-- One line per paragraph, never hard-wrapped. GitHub turns each newline into a `<br>`.
-- No headings, written in the second person.
-- The last paragraph says what upgrading asks of the reader.
-- Commit it as `docs(release): summarize vX.Y.Z`. A docs type lands in the commit list rather than becoming a bullet above itself.
+Commit it as `docs(release): summarize vX.Y.Z`. A docs type lands in the commit list rather than becoming a bullet above itself.
 
 ## 3. Fact-check every claim against a built binary
 
