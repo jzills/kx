@@ -19,8 +19,16 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 		return cmd
 	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
+		services.targets.reset()
 		err := inner(c, args)
-		if err == nil || !isStale(err) {
+		if err == nil {
+			return nil
+		}
+		// No listing named what failed, so there is none to refresh.
+		if targets, kube, typed := services.targets.typedOnly(); typed {
+			return typedNotFound(err, targets, kube)
+		}
+		if !isStale(err) {
 			return err
 		}
 		// Reported here, rather than by the entrypoint, so the refreshed

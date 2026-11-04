@@ -51,6 +51,9 @@ type Services struct {
 	// KubernetesFor is Kubernetes for a cluster kubectl's flags chose. nil
 	// means k8s.ClientFor; with no flag, Kubernetes is used either way.
 	KubernetesFor func(k8s.Cluster) (kubernetes.Interface, error)
+	// targets records what the running command resolved its targets to
+	// (targetLog). Set by NewRoot; nil records nothing.
+	targets *targetLog
 }
 
 // kubernetesFor is the API client for cluster: the shared one when no flag
@@ -123,6 +126,9 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// Resolved here so an unstamped build reports its module and VCS metadata
 	// everywhere the version appears, not just under --version.
 	info := buildinfo.Resolve(version)
+	if services.targets == nil {
+		services.targets = &targetLog{}
+	}
 	root := &cobra.Command{
 		Use:           "kx",
 		Short:         "Select Kubernetes resources by index instead of typing names.",
