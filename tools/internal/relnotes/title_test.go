@@ -27,7 +27,7 @@ func TestTitleProblems(t *testing.T) {
 	}
 	for _, title := range []string{
 		"feat(targets): the --context flag reaches diag",
-		"fix(k9s): the kx tree key is Shift-T",
+		"fix(k9s): the kx tree command is Shift-T",
 		"fix(get)!: a -o name listing prints kubectl's reply",
 		"chore(deps): bump k8s.io/client-go from 0.37.1 to 0.37.2",
 		"docs: kxlint is mentioned",

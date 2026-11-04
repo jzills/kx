@@ -27,7 +27,7 @@ func TitleProblems(title string) []string {
 			"The subject opens with the flag '%s' — open with a word, as in 'the %s flag …'.", first, first))
 	case titleOpensWithKx.MatchString(subject):
 		problems = append(problems,
-			"The subject opens with 'kx' — open with another word, as in 'the kx tree key …'.")
+			"The subject opens with 'kx' — open with another word, as in 'the kx tree command …'.")
 	}
 	if strings.Contains(subject, "`") {
 		problems = append(problems, "The subject has backticks — leave them out; the release notes add them to flags.")
