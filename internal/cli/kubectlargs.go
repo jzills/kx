@@ -443,7 +443,7 @@ func indexArgv(cmd *cobra.Command, args []string, recorded *kubectlArgs) (indexe
 // apart from kubectl's flags, for a command that refuses them (refuseStray).
 func splitIndexArgv(cmd *cobra.Command, args []string, recorded *kubectlArgs) (indexes, stray, forward []string, err error) {
 	positional, forward := kubectlArgv(cmd, args, recorded)
-	indexes, stray = splitLeadingIndexes(positional)
+	indexes, stray = splitLeadingTargets(positional)
 	if len(indexes) == 0 {
 		if len(positional) > 0 {
 			return nil, nil, nil, fmt.Errorf(

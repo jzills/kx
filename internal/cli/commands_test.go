@@ -52,6 +52,10 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		// check alone would have taken for a malformed range.
 		{[]string{"1", "--since=.."}, 1, "--since=.."},
 		{[]string{"--output=jsonpath={..metadata.name}"}, 0, "--output=jsonpath={..metadata.name}"},
+		// A kind/name is kubectl's here — kx get forwards it — and a target
+		// only to the commands that take one (splitLeadingTargets).
+		{[]string{"1", "deploy/api"}, 1, "deploy/api"},
+		{[]string{"deploy/api", "-o", "wide"}, 0, "deploy/api -o wide"},
 	}
 	for _, tc := range cases {
 		indexes, rest := splitLeadingIndexes(tc.args)
@@ -60,6 +64,38 @@ func TestSplitLeadingIndexes(t *testing.T) {
 		}
 		if joinArgs(rest) != tc.wantRest {
 			t.Errorf("splitLeadingIndexes(%v) rest = %q, want %q", tc.args, joinArgs(rest), tc.wantRest)
+		}
+	}
+}
+
+// A command that takes kind/name as a target keeps it in the leading run,
+// beside an index or a mark.
+func TestSplitLeadingTargetsKeepsKindName(t *testing.T) {
+	targets, rest := splitLeadingTargets([]string{"1", "deploy/api", "@db", "-o", "wide"})
+	if joinArgs(targets) != "1 deploy/api @db" || joinArgs(rest) != "-o wide" {
+		t.Errorf("splitLeadingTargets = %q, %q; want the three targets, then -o wide", joinArgs(targets), joinArgs(rest))
+	}
+}
+
+// kx get forwards kind/name to kubectl, as v0.11.1 did: `kx get pod/a
+// deploy/b` lists both. When kind/name became a target, get's split took
+// deploy/b for one and refused it as "not a valid int".
+func TestGetForwardsKindName(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"get", "pod/a", "deploy/b"}, "get pod/a deploy/b"},
+		{[]string{"get", "pods", "a", "deploy/b"}, "get pods a deploy/b"},
+	} {
+		services, kube := typedServices(t)
+		kube.output = "NAME   READY\npod/a   1/1"
+		if err := Execute(NewRoot(services, "test"), tc.argv); err != nil {
+			t.Errorf("%v: %v", tc.argv, err)
+			continue
+		}
+		if len(kube.runs) == 0 || !strings.HasPrefix(joinArgs(kube.runs[0]), tc.want) {
+			t.Errorf("%v: kubectl got %v, want a call starting %q", tc.argv, kube.runs, tc.want)
 		}
 	}
 }

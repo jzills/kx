@@ -210,13 +210,28 @@ func newDescribeCommand(services Services) *cobra.Command {
 // flag's value can legitimately hold "..": `kx logs 1 --since=..` and kx get's
 // forwarded `--output=jsonpath={..metadata.name}` were each read as a
 // malformed range.
+//
+// A kind/name ends the run too: kx get forwards it to kubectl, as it always
+// has (`kx get pods 1 deploy/api`). A command that takes kind/name as a
+// target splits with splitLeadingTargets instead.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
+	return splitLeading(args, false)
+}
+
+// splitLeadingTargets is splitLeadingIndexes for a command whose targets may
+// also be kind/name, which belongs to the leading run beside an index or a
+// mark.
+func splitLeadingTargets(args []string) (targets, rest []string) {
+	return splitLeading(args, true)
+}
+
+func splitLeading(args []string, typed bool) (leading, rest []string) {
 	for i, arg := range args {
 		if strings.HasPrefix(arg, "-") {
 			return args[:i], args[i:]
 		}
 		if _, err := strconv.Atoi(arg); err != nil &&
-			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") && !typedShaped(arg) {
+			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") && !(typed && typedShaped(arg)) {
 			return args[:i], args[i:]
 		}
 	}

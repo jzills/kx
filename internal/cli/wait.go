@@ -420,7 +420,7 @@ func newWaitCommand(services Services) *cobra.Command {
 		// beside kind/name, the only place those flags are allowed.
 		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
-		indexArgs, stray := splitLeadingIndexes(positional)
+		indexArgs, stray := splitLeadingTargets(positional)
 		if len(indexArgs) == 0 {
 			return requiredArgsError(cmd)
 		}
