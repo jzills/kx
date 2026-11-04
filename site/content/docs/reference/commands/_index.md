@@ -13,7 +13,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | Command | Description |
 |---|---|
 | [`kx annotate <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](annotate/) | Set or remove annotations on an indexed resource. |
-| [`kx annotations <index>...`](annotations/) | Show annotations for one or more indexed resources. |
+| [`kx annotations <index>... [--namespace/-n str]`](annotations/) | Show annotations for one or more indexed resources. |
 | [`kx context [<index>]`](context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | [`kx cordon <index>... [--dry-run[=str]] [kubectl flags...]`](cordon/) | Mark one or more indexed Nodes unschedulable. |
 | [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](cp/) | Copy files to or from an indexed Pod via kubectl cp. |
@@ -23,13 +23,13 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](drain/) | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](edit/) | Open an indexed resource in your editor via kubectl edit. |
-| [`kx events <index>... [--since str] [--sort str]`](events/) | Show Kubernetes events for one or more indexed resources. |
+| [`kx events <index>... [--namespace/-n str] [--since str] [--sort str]`](events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--last-run] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](label/) | Set or remove labels on an indexed resource. |
-| [`kx labels <index>... [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
+| [`kx labels <index>... [--namespace/-n str] [--selector/-s]`](labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | [`kx logs <index>... [--since str] [kubectl flags...]`](logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
-| [`kx mark [<name>] [<index>]`](mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
+| [`kx mark [<name>] [<index>] [--namespace/-n str]`](mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | [`kx namespace [<index>]`](namespace/) | List Namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx ref <index>... [--kind] [--name] [--namespace]`](ref/) | Print what an index refers to, for commands kx doesn't wrap. |

@@ -18,7 +18,7 @@ kx tree [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -46,6 +46,7 @@ kx tree [OPTIONS] [index]
 ```bash
 kx tree
 kx tree 1
+kx tree deploy/api -n prod
 kx tree --no-index
 kx tree -A
 kx tree -m api

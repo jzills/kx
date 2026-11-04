@@ -26,10 +26,13 @@ func newMarkCommand(services Services) *cobra.Command {
 		Short: "Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.",
 		Long: "Pins whatever `<index>` currently resolves to under `<name>`, so 'kx logs @name' keeps " +
 			"working after a later listing moves every index around it.\n\n" +
+			"`<index>` can also name the resource as kind/name — deploy/api, in -n's namespace " +
+			"or the current one — which is checked against the cluster before it is pinned, " +
+			"so a typo fails here rather than at every command that spends the mark.\n\n" +
 			"With no arguments, lists the marks that are set. That listing carries no index " +
 			"column and saves no state — a mark is spent by the name it was given, never by " +
 			"position.",
-		Example: "  kx mark\n  kx mark api 3",
+		Example: "  kx mark\n  kx mark api 3\n  kx mark api deploy/api -n prod",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 || len(args) == 2 {
 				return nil
@@ -48,11 +51,19 @@ func newMarkCommand(services Services) *cobra.Command {
 			if err := validMarkName(name); err != nil {
 				return err
 			}
-			resolved, err := resolveRefs(services.State, "index", []string{indexArg})
+			resolved, err := resolveTargets(services, "index", []string{indexArg}, namespaceScope(cmd))
 			if err != nil {
 				return err
 			}
 			resource := resolved[0]
+			// An index or a mark was listed from the cluster; kind/name was
+			// only typed, and a mark on a typo would fail at every command
+			// that spent it rather than here, where the typo was made.
+			if resource.Ref.Typed() {
+				if err := typedExists(services, resource); err != nil {
+					return err
+				}
+			}
 			if err := services.State.SaveMark(name, state.Mark{
 				Resource: state.Resource{
 					Name: resource.Name, Kind: resource.Kind, Namespace: resource.Namespace,
@@ -65,6 +76,7 @@ func newMarkCommand(services Services) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
 	return cmd
 }
 

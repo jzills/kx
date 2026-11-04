@@ -236,7 +236,7 @@ func newTreeCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"graph", "owners", "children"},
 		Short:      "Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default.",
 		Long:       "Graphs ownership references from controllers down to containers. With no index, graphs every workload in the current namespace, or in the namespace given by -n, or every namespace as a forest with -A. -m keeps only the top-level workloads whose name matches, each with everything it owns. A Namespace index graphs that namespace. Assigns indexes to tree nodes by default; --no-index skips that.",
-		Example: "  kx tree\n  kx tree 1\n  kx tree --no-index\n  kx tree -A\n  kx tree -m api\n" +
+		Example: "  kx tree\n  kx tree 1\n  kx tree deploy/api -n prod\n  kx tree --no-index\n  kx tree -A\n  kx tree -m api\n" +
 			"  kx tree -n prod --html\n  kx tree --json\n  kx tree --out tree.html",
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -278,10 +278,19 @@ func newTreeCommand(services Services) *cobra.Command {
 			if allNamespaces {
 				scopeFlag = "--all-namespaces"
 			}
-			if len(args) > 0 && scopeFlag != "" {
+			// A kind/name takes its namespace from -n, as kubectl's would; -A
+			// is still refused beside it, by settleTyped.
+			typed := len(args) > 0 && typedShaped(args[0])
+			if len(args) > 0 && scopeFlag != "" && !(typed && scopeFlag == "--namespace") {
+				if typed {
+					return allNamespacesBesideTypedError(scopeFlag, sweepEverywhereHint)
+				}
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 			if len(args) > 0 && match != "" {
+				if typed {
+					return errMatchBesideTyped
+				}
 				return errMatchBesideIndex
 			}
 
@@ -374,7 +383,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				return deliverPage(ctx, page, htmlOpts)
 			}
 
-			ref, err := parseRef("index", args[0])
+			ref, err := parseTargetArg(services, args[0], namespaceFlag)
 			if err != nil {
 				return err
 			}
@@ -423,7 +432,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
 			meta, err := pageMeta(services.Config.Theme, "tree · "+node.Label,
-				treeInvocation(args[0], "", indexed, port))
+				treeInvocation(typedInvocation(args[0], ref), "", indexed, port))
 			if err != nil {
 				return err
 			}
