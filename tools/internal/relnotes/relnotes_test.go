@@ -252,3 +252,36 @@ func TestSectionsCategorisesABreakingChoreAsBreaking(t *testing.T) {
 		t.Errorf("sections = %+v, want Breaking changes alone", sections)
 	}
 }
+
+// A title's subject becomes a release-note sentence, so one that can't take
+// a capital, or carries its own backticks or period, is refused when the PR
+// is opened rather than found in the release preview — v0.12.0 shipped
+// "--context reaches diag" and "kx tree is Shift-T". Controls: the same
+// subjects reworded, a flag later in the subject, and a word that only
+// starts with kx, pass.
+func TestTitleProblems(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{"feat(targets): --context reaches diag", "opens with the flag '--context'"},
+		{"fix(k9s): kx tree is Shift-T", "opens with 'kx'"},
+		{"fix(k9s): kx's tree key is Shift-T", "opens with 'kx'"},
+		{"fix(get): the `-o name` listing prints kubectl's reply", "has backticks"},
+		{"fix(get): the -o name listing prints kubectl's reply.", "ends with a period"},
+		{"Release v0.12.0", "isn't 'type(scope): subject'"},
+	} {
+		got := TitleProblems(tc.title)
+		if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+			t.Errorf("%q: problems = %q, want one containing %q", tc.title, got, tc.want)
+		}
+	}
+	for _, title := range []string{
+		"feat(targets): the --context flag reaches diag",
+		"fix(k9s): the kx tree key is Shift-T",
+		"fix(get)!: a -o name listing prints kubectl's reply",
+		"chore(deps): bump k8s.io/client-go from 0.37.1 to 0.37.2",
+		"docs: kxlint is mentioned",
+	} {
+		if got := TitleProblems(title); len(got) != 0 {
+			t.Errorf("%q: problems = %q, want none", title, got)
+		}
+	}
+}
