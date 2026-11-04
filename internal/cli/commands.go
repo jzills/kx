@@ -812,7 +812,11 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		Args:    minArgs(1),
 		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..\n  kx " + use + " deploy/api -n prod",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolved, err := resolveTargets(services, "indexes", args, namespaceScope(cmd))
+			// The cluster --context names, beside kind/name; beside an index
+			// it is refused before anything is read.
+			services := services.forCluster(contextScope(cmd))
+			resolved, err := resolveTargets(services, "indexes", args,
+				append(namespaceScope(cmd), contextScope(cmd)...))
 			if err != nil {
 				return err
 			}
@@ -849,6 +853,7 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 			"Output as a copy-pastable label selector")
 	}
 	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
+	cmd.Flags().String("context", "", typedContextUsage)
 	return cmd
 }
 

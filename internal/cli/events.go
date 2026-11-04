@@ -122,7 +122,11 @@ func newEventsCommand(services Services) *cobra.Command {
 			"  kx events 1 --sort -type,age\n  kx events 1..3\n  kx events 3..",
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolved, err := resolveTargets(services, "indexes", args, namespaceScope(cmd))
+			// The cluster --context names, beside kind/name; beside an index
+			// it is refused before anything is read.
+			services := services.forCluster(contextScope(cmd))
+			resolved, err := resolveTargets(services, "indexes", args,
+				append(namespaceScope(cmd), contextScope(cmd)...))
 			if err != nil {
 				return err
 			}
@@ -186,6 +190,7 @@ func newEventsCommand(services Services) *cobra.Command {
 		"every event the cluster still holds is listed"))
 	cmd.Flags().String("sort", "", eventsSortUsage)
 	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
+	cmd.Flags().String("context", "", typedContextUsage)
 	return cmd
 }
 

@@ -51,7 +51,11 @@ func newMarkCommand(services Services) *cobra.Command {
 			if err := validMarkName(name); err != nil {
 				return err
 			}
-			resolved, err := resolveTargets(services, "index", []string{indexArg}, namespaceScope(cmd))
+			// The cluster --context names, beside kind/name; beside an index
+			// it is refused before anything is read.
+			services := services.forCluster(contextScope(cmd))
+			resolved, err := resolveTargets(services, "index", []string{indexArg},
+				append(namespaceScope(cmd), contextScope(cmd)...))
 			if err != nil {
 				return err
 			}
@@ -77,6 +81,7 @@ func newMarkCommand(services Services) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
+	cmd.Flags().String("context", "", typedContextUsage)
 	return cmd
 }
 

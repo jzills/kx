@@ -28,6 +28,7 @@ kx events [OPTIONS] <index>...
 
 | Option | Description |
 |---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `--since string` | Only events newer than this; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to events_max_age, which is unset: every event the cluster still holds is listed |
 | `--sort string` | Sort the events by their columns: '-type,age' puts Warnings first, the newest first in each |

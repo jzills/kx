@@ -24,6 +24,7 @@ kx labels [OPTIONS] <index>...
 
 | Option | Description |
 |---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `-s, --selector` | Output as a copy-pastable label selector |
 

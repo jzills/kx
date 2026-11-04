@@ -265,6 +265,23 @@ func newTreeCommand(services Services) *cobra.Command {
 						"machine and the other for a browser.", htmlFlagName(html))
 			}
 
+			// --context reaches a kind/name target's cluster; an index carries
+			// its own, and a sweep would number another cluster's rows here.
+			context, _ := cmd.Flags().GetString("context")
+			if err := refuseContextFlag(cmd.Flags().Changed("context"), args); err != nil {
+				return err
+			}
+			// A walk of another cluster prints unnumbered, as kx get prints
+			// a listing taken with --context: an index is spent in the
+			// cluster it was counted in, and this one isn't it. A --context
+			// naming the current one — as k9s passes it on every plugin
+			// call — is no other cluster, and is indexed as usual.
+			crossCluster := context != "" && indexed && context != services.Kubectl.CurrentContext()
+			services := services.forCluster(targetArgv("", context))
+			if crossCluster {
+				indexed = false
+			}
+
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
@@ -383,7 +400,7 @@ func newTreeCommand(services Services) *cobra.Command {
 				return deliverPage(ctx, page, htmlOpts)
 			}
 
-			ref, err := parseTargetArg(services, args[0], namespaceFlag)
+			ref, err := parseTargetArg(services, args[0], targetArgv(namespaceFlag, context))
 			if err != nil {
 				return err
 			}
@@ -402,6 +419,9 @@ func newTreeCommand(services Services) *cobra.Command {
 				if !asJSON {
 					render.Banner(string(kind), name, namespace, "")
 				}
+			}
+			if crossCluster && !asJSON {
+				render.Caption("trees with '--context' can't be indexed — printing the walk unnumbered")
 			}
 			stop := render.Status("resolving ownership graph")
 			node, err := command.Execute(ctx, ref, indexed)
@@ -432,7 +452,7 @@ func newTreeCommand(services Services) *cobra.Command {
 			// builds the root that way), so the page title reuses it rather
 			// than re-deriving kind/name separately.
 			meta, err := pageMeta(services.Config.Theme, "tree · "+node.Label,
-				treeInvocation(typedInvocation(args[0], ref), "", indexed, port))
+				treeInvocation(typedInvocation(args[0], ref, context), "", indexed, port))
 			if err != nil {
 				return err
 			}
@@ -450,6 +470,7 @@ func newTreeCommand(services Services) *cobra.Command {
 		"Skip assigning indexes to tree nodes and don't update state")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().String("context", "", typedContextUsage)
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace, as a forest of per-namespace trees; tree nodes are indexed continuously across it")
 	cmd.Flags().Bool("html", false,

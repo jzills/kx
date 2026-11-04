@@ -807,11 +807,20 @@ func newScanCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hasContext := hasFlag(rest, "--context", "")
+			context, rest, err := extractString(rest, "--context", "")
+			if err != nil {
+				return err
+			}
 			if hasNamespace && all {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
 			}
 
+			// --context reaches a kind/name target's cluster; an index
+			// carries its own, and a sweep would number another cluster's
+			// rows here.
+			services := services.forCluster(targetArgv("", context))
 			command := ScanCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
@@ -841,6 +850,9 @@ func newScanCommand(services Services) *cobra.Command {
 			}
 			// A kind/name takes its namespace from -n, as kubectl's would; -A
 			// is still refused beside it.
+			if err := refuseContextFlag(hasContext, indexArgs); err != nil {
+				return err
+			}
 			typed := len(indexArgs) > 0 && typedShaped(indexArgs[0])
 			if len(indexArgs) > 0 && scopeFlag != "" && !(typed && scopeFlag == "--namespace") {
 				if typed {
@@ -906,7 +918,7 @@ func newScanCommand(services Services) *cobra.Command {
 					subject.Namespace = scope.Namespace
 				}
 			} else {
-				ref, err := parseTargetArg(services, indexArgs[0], namespace)
+				ref, err := parseTargetArg(services, indexArgs[0], targetArgv(namespace, context))
 				if err != nil {
 					return err
 				}
@@ -1013,6 +1025,7 @@ func newScanCommand(services Services) *cobra.Command {
 	cmd.Flags().Int("limit", 0, "Keep the first N images of the summary, after --sort")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().String("context", "", typedContextUsage)
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace")
 	cmd.Flags().StringP("match", "m", "", matchUsage)

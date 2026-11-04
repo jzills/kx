@@ -438,14 +438,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 		Aliases:    aliases,
 		Long: "Analyzes health signals — replica counts, container states, resource usage and warning events — and reports findings by severity.\n\n" +
 			"With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.\n\n" +
-			"A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
+			"A Node is diagnosed by index — from kx get nodes or kx top nodes — or by name, as `node/<name>`. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.\n\n" +
 			sinceOverview(services.Config.DiagMaxAge) + "\n\n" +
 			"A window only ever hides what finished: a warning event, a restart or OOMKill a container recovered from, a Pod or run that failed. What is still going wrong is always reported, however long it has been going wrong — a container in CrashLoopBackOff or ImagePullBackOff, a Pending Pod, a Service with no endpoints.\n\n" +
 			"Every finding says which it is. '· for 24d' is how long something has been true, and no window hides it; '· 2m ago' is when something happened, and a narrow enough one will.\n\n" +
 			"A schedule longer than the window wants a wider one: a weekly CronJob whose last run failed six days ago needs --since 7d.\n\n" +
 			"A sweep is ranked most severe first, and --sort orders it on top of that, by KIND, NAME, NAMESPACE, VERDICT or TOP FINDING, with a leading - for largest first: --sort kind groups it by kind with the worst first in each, and the indexes follow the order shown. The order carries into --json and the --html page.\n\n" +
 			"--limit keeps the first rows the table shows, after the ranking and any --sort: kx diag -A --limit 5 is the five worst resources, numbered 1 to 5, and the rest of the sweep is neither saved nor reported. The caption says how many it could have shown, and --fail-on still reads the whole sweep.",
-		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " deploy/api -n prod\n  kx " + use + " -n prod\n" +
+		Example: "  kx " + use + "\n  kx " + use + " 1\n  kx " + use + " deploy/api -n prod\n  kx " + use + " deploy/api --context staging\n  kx " + use + " -n prod\n" +
 			"  kx " + use + " -m api\n" +
 			"  kx " + use + " --show-healthy\n" +
 			"  kx " + use + " -A --sort namespace,kind\n" +
@@ -508,6 +508,14 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if err != nil {
 				return err
 			}
+
+			// --context reaches a kind/name target's cluster; an index carries
+			// its own, and a sweep would number another cluster's rows here.
+			context, _ := cmd.Flags().GetString("context")
+			if err := refuseContextFlag(cmd.Flags().Changed("context"), args); err != nil {
+				return err
+			}
+			services := services.forCluster(targetArgv("", context))
 
 			if cmd.Flags().Changed("namespace") && allNamespaces {
 				return errors.New(
@@ -633,7 +641,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 				return sweepGate(result, failOn, threshold)
 			}
 
-			ref, err := parseTargetArg(services, args[0], namespace)
+			ref, err := parseTargetArg(services, args[0], targetArgv(namespace, context))
 			if err != nil {
 				return err
 			}
@@ -663,7 +671,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 			if htmlOpts.Enabled {
 				meta, err := pageMeta(services.Config.Theme,
 					"diag · "+string(report.Kind)+"/"+report.Name,
-					invocation(use, typedInvocation(args[0], ref), sinceFlag(window), portFlag(port)))
+					invocation(use, typedInvocation(args[0], ref, context), sinceFlag(window), portFlag(port)))
 				if err != nil {
 					return err
 				}
@@ -680,6 +688,7 @@ func newDiagnosticCommand(services Services, use string, aliases []string) *cobr
 	}
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().String("context", "", typedContextUsage)
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace; each row is indexed and carries its own namespace")
 	cmd.Flags().StringP("match", "m", "", matchUsage)

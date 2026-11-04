@@ -72,7 +72,8 @@ kx mark api deploy/api -n prod
 
 The namespace and cluster come from `-n` and `--context` as kubectl's would, defaulting to the kubeconfig's current ones.
 That is the one way kind/name differs from an index, which carries both from the listing it was counted in and so refuses those flags.
-The `--context` flag is for the commands that forward kubectl's flags; `kx diag`, `kx tree`, `kx scan`, `kx events`, `kx labels` and `kx annotations` take `-n` alone.
+A sweep refuses `--context`, since its rows would be numbered into this cluster's history, and a `kx tree` of another cluster prints its walk unnumbered for the same reason.
+A mark taken with `--context` is recorded against that context, so spending it from another one is refused as any mark's is.
 On a line that also holds an index or a mark, they are refused for the same reason.
 
 Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
