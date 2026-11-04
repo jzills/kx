@@ -112,3 +112,21 @@ func TestK9sPluginsRunCommandsKxAccepts(t *testing.T) {
 		}
 	}
 }
+
+// k9sBuiltinShiftKeys are the Shift bindings k9s v0.51.0's own help screen
+// lists in the views the pack is scoped to (pods, deployments, services,
+// nodes): the sorts, Jump Owner, Port-Forward, and Goto Bottom under
+// NAVIGATION. A plugin on one of them takes the key away from k9s, which is
+// how tree came to sit on Goto Bottom — the menu bar the pack was first
+// checked against leaves the navigation keys out.
+var k9sBuiltinShiftKeys = []string{"Shift-A", "Shift-F", "Shift-G", "Shift-J", "Shift-N", "Shift-O", "Shift-S"}
+
+func TestK9sPluginsLeaveK9sOwnKeysAlone(t *testing.T) {
+	for name, plugin := range loadK9sPack(t) {
+		for _, builtin := range k9sBuiltinShiftKeys {
+			if strings.EqualFold(plugin.ShortCut, builtin) {
+				t.Errorf("%s binds %s, which k9s already uses", name, plugin.ShortCut)
+			}
+		}
+	}
+}

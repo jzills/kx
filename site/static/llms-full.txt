@@ -1768,7 +1768,7 @@ The pack needs kx 0.12 or later, the first release where these commands take kin
 | Key | Runs | Views |
 |---|---|---|
 | Shift-D | `kx diag` | workloads, Pods, Services, PVCs, Ingresses, Nodes |
-| Shift-G | `kx tree` | workloads, Pods, Services, Namespaces |
+| Shift-T | `kx tree` | workloads, Pods, Services, Namespaces |
 | Shift-V | `kx scan` | Pods and workloads |
 | Shift-E | `kx events` | every view |
 | Shift-K | `kx mark` | every view |
