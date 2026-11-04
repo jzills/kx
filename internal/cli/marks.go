@@ -64,7 +64,7 @@ func newMarkCommand(services Services) *cobra.Command {
 			// only typed, and a mark on a typo would fail at every command
 			// that spent it rather than here, where the typo was made.
 			if resource.Ref.Typed() {
-				if err := typedExists(services, resource); err != nil {
+				if err := typedExists(services.Kubectl, resource); err != nil {
 					return err
 				}
 			}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jzills/kx/internal/k8s"
 	"github.com/jzills/kx/internal/kinds"
@@ -194,6 +195,7 @@ func resolveTargets(services Services, name string, args, extra []string) ([]Res
 	if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 		return nil, err
 	}
+	services.targets.record(services.Kubectl, resolved)
 	return resolved, nil
 }
 
@@ -324,8 +326,10 @@ func namespaceScope(cmd *cobra.Command) []string {
 }
 
 // typedExists confirms a typed target names a resource the cluster has,
-// reporting any other failure to ask as itself.
-func typedExists(services Services, target Resolved) error {
+// reporting any other failure to ask as itself. kube is the command's own
+// kubectl, which a flag beside the target has already sent to the cluster it
+// chose (Services.forCluster).
+func typedExists(kube kubectl.Service, target Resolved) error {
 	argv := []string{"get", string(target.Kind), target.Name}
 	if target.Namespace != "" {
 		argv = append(argv, "-n", target.Namespace)
@@ -334,13 +338,80 @@ func typedExists(services Services, target Resolved) error {
 	// resource from a missing kubectl, an expired login or a bad context,
 	// and reporting any of those as "not found" sends the user looking for
 	// a typo that isn't there.
-	_, err := services.Kubectl.Run(argv)
+	_, err := kube.Run(argv)
 	if err == nil {
 		return nil
 	}
 	if IsNotFound(err) {
 		return StaleResourceError{
 			Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+		}
+	}
+	return err
+}
+
+// targetLog is what the running command resolved its targets to, and the
+// kubectl it resolved them with, so withRefresh can tell a failure about a
+// kind/name target from one about an index. Only an index came from a
+// listing; refreshing the listing for a typo in kind/name answers a mistake
+// the user made with a table about something else.
+type targetLog struct {
+	mu      sync.Mutex
+	kubectl kubectl.Service
+	targets []Resolved
+}
+
+func (l *targetLog) record(kube kubectl.Service, resolved []Resolved) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.kubectl = kube
+	l.targets = append(l.targets, resolved...)
+}
+
+func (l *targetLog) reset() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.kubectl, l.targets = nil, nil
+}
+
+// typedOnly reports whether the command resolved targets and every one was
+// kind/name, returning them and the kubectl they were resolved with.
+func (l *targetLog) typedOnly() ([]Resolved, kubectl.Service, bool) {
+	if l == nil {
+		return nil, nil, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.targets) == 0 || !allTyped(l.targets) {
+		return nil, nil, false
+	}
+	return l.targets, l.kubectl, true
+}
+
+// typedNotFound is err from a command whose targets were all kind/name: a
+// kubectl not-found that names one of them, confirmed by asking for it, is
+// reported as that resource missing; anything else as it came. kubectl's
+// reply names the resource it could not find, and only that one is asked
+// for — the others may be missing because the command itself just deleted
+// them.
+func typedNotFound(err error, targets []Resolved, kube kubectl.Service) error {
+	var reported kubectl.Error
+	if !IsNotFound(err) || !errors.As(err, &reported) {
+		return err
+	}
+	for _, target := range targets {
+		if !strings.Contains(reported.Stderr, `"`+target.Name+`"`) {
+			continue
+		}
+		var missing StaleResourceError
+		if errors.As(typedExists(kube, target), &missing) {
+			return missing
 		}
 	}
 	return err
@@ -390,6 +461,7 @@ func settleRef(services Services, ref state.Ref, extra []string) (state.Ref, err
 	if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 		return state.Ref{}, err
 	}
+	services.targets.record(services.Kubectl, resolved)
 	return refs[0], nil
 }
 

@@ -161,32 +161,102 @@ func TestTypedTargetRefusals(t *testing.T) {
 	}
 }
 
-// A typed target that kubectl can't find is reported as kubectl reported it:
-// no existence probe (which would ask without the command's cluster flags),
-// and no relist of the saved listing, which the target never came from.
-func TestTypedTargetFailureIsNotRefreshed(t *testing.T) {
-	services, kube := typedServices(t)
-	seedPodListing(t, services)
-	kube.exitCode, kube.probeCode = 1, 1
-	err := Execute(NewRoot(services, "test"), []string{"describe", "deploy/gone"})
-	if err == nil {
-		t.Fatal("describe of a missing resource succeeded")
+// A kind/name target that names nothing is reported as missing, in kx's
+// words and the namespace it was looked for in, on every path a command
+// fails by: kubectl's captured not-found (scale, yaml, delete), a streamed
+// command's exit (describe, exec), an empty event list, and the API server's
+// not-found (diag, tree). The listing is never run again — no listing named
+// it. kx scale deploy/typo 3 relisted the user's saved pods, kx exec
+// pod/typo said no shell was found, and kx events deploy/typo that it had no
+// events.
+func TestTypedTargetNotFoundIsReportedNotRefreshed(t *testing.T) {
+	const notFound = `Error from server (NotFound): deployments.apps "gone" not found`
+	const want = "Deployment/gone was not found in namespace 'prod'."
+	for _, argv := range [][]string{
+		{"scale", "deploy/gone", "3"},
+		{"yaml", "deploy/gone"},
+		{"delete", "deploy/gone", "--yes"},
+		{"rollout", "restart", "deploy/gone"},
+		{"labels", "deploy/gone"},
+		{"describe", "deploy/gone"},
+		{"exec", "deploy/gone", "--", "ls"},
+		{"exec", "deploy/gone"},
+		{"events", "deploy/gone"},
+		{"diag", "deploy/gone"},
+		{"tree", "deploy/gone"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			stdout, stderr := splitRender(t)
+			kube := &recordingKubectl{err: kubectl.Error{Stderr: notFound}, exitCode: 1, probeCode: 1}
+			services := withFakeKubernetes(staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}}))
+			err := Execute(NewRoot(services, "test"), argv)
+			if err == nil || err.Error() != want {
+				t.Errorf("err = %v, want %q", err, want)
+			}
+			if out := stdout.String() + stderr.String(); strings.Contains(out, "refresh") {
+				t.Errorf("a typed target's failure named the listing:\n%s", out)
+			}
+			for _, run := range kube.runs {
+				if joinArgs(run) == "get pods" {
+					t.Errorf("the saved listing was run again: %v", kube.runs)
+				}
+			}
+		})
 	}
-	if len(kube.probes) != 0 {
-		t.Errorf("probed %v for a typed target", kube.probes)
+	// Control: an index that fails the same way is refreshed, so the fixture
+	// does reach the refresh the typed targets above are kept from.
+	stdout, stderr := splitRender(t)
+	kube := &recordingKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): pods "api-old" not found`}}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	_ = Execute(NewRoot(services, "test"), []string{"delete", "1", "--yes"})
+	if out := stdout.String() + stderr.String(); !strings.Contains(out, "refresh") {
+		t.Errorf("the index control was not refreshed — it no longer exercises the refresh:\n%s", out)
 	}
-	for _, run := range kube.runs {
-		if len(run) > 0 && run[0] == "get" {
-			t.Errorf("relisted with %v after a typed target failed", run)
-		}
+}
+
+// A not-found about something other than the target — a container, a
+// resource the command read on the way — is reported as kubectl said it,
+// and the target is not called missing.
+func TestTypedTargetOtherNotFoundIsKubectls(t *testing.T) {
+	const other = `error: container "sidecar" not found in pod "api-7d"`
+	kube := &recordingKubectl{errs: []error{kubectl.Error{Stderr: other}}}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	splitRender(t)
+	err := Execute(NewRoot(services, "test"), []string{"yaml", "deploy/api"})
+	if err == nil || err.Error() != other {
+		t.Errorf("err = %v, want kubectl's %q", err, other)
 	}
-	// Control: an index that fails the same way is probed.
-	services, kube = typedServices(t)
-	seedPodListing(t, services)
-	kube.exitCode, kube.probeCode = 1, 1
-	_ = Execute(NewRoot(services, "test"), []string{"describe", "1"})
-	if len(kube.probes) == 0 {
-		t.Error("an index that failed was not probed — the control no longer exercises the probe")
+}
+
+// deletingKubectl is a cluster of Deployments: delete removes one, and
+// asking for one that is not there answers as kubectl does.
+type deletingKubectl struct {
+	recordingKubectl
+	gone map[string]bool
+}
+
+func (k *deletingKubectl) Run(args []string) (string, error) {
+	k.runs = append(k.runs, args)
+	name := args[2]
+	if k.gone[name] {
+		return "", kubectl.Error{Stderr: `Error from server (NotFound): deployments.apps "` + name + `" not found`}
+	}
+	if args[0] == "delete" {
+		k.gone[name] = true
+	}
+	return "", nil
+}
+
+// Of several targets, the one kubectl said it could not find is the one
+// reported — not one the command itself deleted a moment before, which a
+// check of every target in turn finds missing first.
+func TestTypedTargetNotFoundNamesTheOneKubectlCouldNotFind(t *testing.T) {
+	kube := &deletingKubectl{gone: map[string]bool{"b": true}}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	splitRender(t)
+	err := Execute(NewRoot(services, "test"), []string{"delete", "deploy/a", "deploy/b", "--yes"})
+	if want := "Deployment/b was not found in namespace 'prod'."; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q; kubectl got %v", err, want, kube.runs)
 	}
 }
 

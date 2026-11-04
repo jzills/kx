@@ -90,15 +90,14 @@ func IsNotFound(err error) bool {
 // ensureExists converts a command failure into a StaleResourceError when the
 // resource is genuinely gone, so the caller can refresh rather than report a
 // confusing kubectl message. ref is carried onto the error unchanged, so a
-// mark failure reports rather than replays — see isStale.
+// mark or a typed target reports rather than replays — see isStale.
 //
-// A typed target is never probed: it came from no listing, so there is
-// nothing to refresh, and kubectl has already said what it could not find —
-// in the cluster the command's own flags chose, which a probe without them
-// would not ask.
+// A typed target is asked for with Run (typedExists), so a failure to ask
+// reads as itself rather than as a typo. kubectl is the command's own, which
+// a flag beside the target has already sent to the cluster it chose.
 func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace string, ref state.Ref) error {
 	if ref.Typed() {
-		return nil
+		return typedExists(kubectl, Resolved{Kind: kind, Name: name, Namespace: namespace, Ref: ref})
 	}
 	if kubectl.Probe([]string{"get", string(kind), name, "-n", namespace}) != 0 {
 		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
@@ -112,12 +111,13 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 // printed `pods "x" not found` for an index whose resource had gone and
 // stopped there, where every kubectl-backed command refreshed the listing.
 //
-// Only a not-found naming the indexed resource itself is stale: something
-// else the command read being missing says nothing about the listing, and is
-// returned as it came.
+// Only a not-found naming the resource itself is stale: something else the
+// command read being missing says nothing about the listing, and is returned
+// as it came. A typed target comes back as missing too, in kx's words rather
+// than the API server's, and isStale reports it rather than refreshing.
 func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref state.Ref) error {
 	var status apierrors.APIStatus
-	if ref.Typed() || !apierrors.IsNotFound(err) || !errors.As(err, &status) {
+	if !apierrors.IsNotFound(err) || !errors.As(err, &status) {
 		return err
 	}
 	if details := status.Status().Details; details == nil || details.Name != name {
