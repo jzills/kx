@@ -323,18 +323,27 @@ func namespaceScope(cmd *cobra.Command) []string {
 	return []string{"--namespace=" + namespace}
 }
 
-// typedExists confirms a typed target names a resource the cluster has.
+// typedExists confirms a typed target names a resource the cluster has,
+// reporting any other failure to ask as itself.
 func typedExists(services Services, target Resolved) error {
 	argv := []string{"get", string(target.Kind), target.Name}
 	if target.Namespace != "" {
 		argv = append(argv, "-n", target.Namespace)
 	}
-	if services.Kubectl.Probe(argv) == 0 {
+	// Run rather than Probe: an exit code alone can't tell a missing
+	// resource from a missing kubectl, an expired login or a bad context,
+	// and reporting any of those as "not found" sends the user looking for
+	// a typo that isn't there.
+	_, err := services.Kubectl.Run(argv)
+	if err == nil {
 		return nil
 	}
-	return StaleResourceError{
-		Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+	if IsNotFound(err) {
+		return StaleResourceError{
+			Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+		}
 	}
+	return err
 }
 
 // typedArgDoc is the index argument's help on a command that also takes
