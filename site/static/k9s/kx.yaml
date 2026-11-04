@@ -34,7 +34,7 @@ plugins:
       - $NAMESPACE
       - $CONTEXT
   kx-tree:
-    shortCut: Shift-G
+    shortCut: Shift-T
     description: kx tree
     scopes:
       - deployments
