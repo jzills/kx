@@ -152,6 +152,22 @@ func TestAssembleOrdersTheThreeTiers(t *testing.T) {
 	}
 }
 
+// GitHub's generated block opens "## What's Changed" straight into its list,
+// where every heading this tool writes is followed by a blank line; the
+// commit list's heading was the one without. Control: a block that already
+// has the blank line gets no second one.
+func TestAssembleSpacesTheGeneratedHeading(t *testing.T) {
+	for _, generated := range []string{
+		"## What's Changed\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
+		"## What's Changed\n\n* something by @someone in https://github.com/jzills/kx/pull/361\n",
+	} {
+		notes := Assemble("Sharpens shell completion.\n", nil, generated)
+		if want := "## What's Changed\n\n* something"; !strings.Contains(notes, want) {
+			t.Errorf("generated %q: want %q in:\n%s", generated, want, notes)
+		}
+	}
+}
+
 // The paragraph is the one part a person wrote. It must survive verbatim
 // rather than being reflowed or re-headed.
 func TestAssembleKeepsTheHighlightsVerbatim(t *testing.T) {

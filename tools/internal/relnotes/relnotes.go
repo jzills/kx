@@ -201,6 +201,23 @@ func Assemble(highlights string, sections []Section, generated string) string {
 		}
 		out.WriteString("\n")
 	}
-	out.WriteString(strings.TrimLeft(generated, "\n"))
+	out.WriteString(spaceHeadings(strings.TrimLeft(generated, "\n")))
 	return out.String()
+}
+
+// spaceHeadings puts a blank line after each heading in GitHub's generated
+// block that runs straight into its list, as "## What's Changed" does. Every
+// heading this tool writes has one, and the commit list's was the only one
+// without it. Nothing else in the block is touched: it stays what GitHub
+// produced, one blank line apart.
+func spaceHeadings(generated string) string {
+	lines := strings.Split(generated, "\n")
+	var out []string
+	for i, line := range lines {
+		out = append(out, line)
+		if strings.HasPrefix(line, "#") && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" {
+			out = append(out, "")
+		}
+	}
+	return strings.Join(out, "\n")
 }
