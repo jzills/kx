@@ -1230,7 +1230,8 @@ func TestScanWithHTMLPassesACleanGate(t *testing.T) {
 // its namespace and context, as diag's and tree's pages do. It read `kx
 // scan deploy/api` for a scan of another context's Deployment, which rerun
 // scanned a different one. A -n given for the target is named once, not
-// again as a sweep's scope.
+// again as a sweep's scope, and a context name a shell would split is
+// quoted.
 func TestScanPageNamesATypedTargetsNamespaceAndContext(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -1238,6 +1239,9 @@ func TestScanPageNamesATypedTargetsNamespaceAndContext(t *testing.T) {
 	}{
 		{[]string{"deploy/api", "--context", "other"}, "kx scan deploy/api -n other-default --context other"},
 		{[]string{"deploy/api", "-n", "staging"}, "kx scan deploy/api -n staging<"},
+		// A context named with a space is quoted, so the line pastes back as
+		// one argument; unquoted it read --context my cluster.
+		{[]string{"deploy/api", "--context", "my cluster"}, "kx scan deploy/api -n other-default --context &#34;my cluster&#34;<"},
 		// Control: a sweep's scope is still named.
 		{[]string{"-n", "staging"}, "kx scan -n staging<"},
 	} {
