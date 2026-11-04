@@ -228,8 +228,9 @@ func TestTypedTargetOtherNotFoundIsKubectls(t *testing.T) {
 	}
 }
 
-// deletingKubectl is a cluster of Deployments: delete removes one, and
-// asking for one that is not there answers as kubectl does.
+// deletingKubectl is a cluster of Deployments and Services, keyed
+// Kind/name: delete removes one, and asking for one that is not there
+// answers as kubectl does, naming the resource it asked for.
 type deletingKubectl struct {
 	recordingKubectl
 	gone map[string]bool
@@ -237,26 +238,89 @@ type deletingKubectl struct {
 
 func (k *deletingKubectl) Run(args []string) (string, error) {
 	k.runs = append(k.runs, args)
-	name := args[2]
-	if k.gone[name] {
-		return "", kubectl.Error{Stderr: `Error from server (NotFound): deployments.apps "` + name + `" not found`}
+	key := args[1] + "/" + args[2]
+	if k.gone[key] {
+		resource := map[string]string{"Deployment": "deployments.apps", "Service": "services"}[args[1]]
+		return "", kubectl.Error{Stderr: `Error from server (NotFound): ` + resource + ` "` + args[2] + `" not found`}
 	}
 	if args[0] == "delete" {
-		k.gone[name] = true
+		k.gone[key] = true
 	}
 	return "", nil
 }
 
 // Of several targets, the one kubectl said it could not find is the one
 // reported — not one the command itself deleted a moment before, which a
-// check of every target in turn finds missing first.
+// check of every target in turn finds missing first. kubectl names the
+// resource as well as the name, and both are read: deploy/api svc/api share
+// a name, and the missing Service was reported as the Deployment kx had
+// just deleted.
 func TestTypedTargetNotFoundNamesTheOneKubectlCouldNotFind(t *testing.T) {
-	kube := &deletingKubectl{gone: map[string]bool{"b": true}}
-	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	for _, tc := range []struct {
+		argv []string
+		gone string
+		want string
+	}{
+		{[]string{"delete", "deploy/a", "deploy/b", "--yes"}, "Deployment/b", "Deployment/b was not found in namespace 'prod'."},
+		{[]string{"delete", "deploy/api", "svc/api", "--yes"}, "Service/api", "Service/api was not found in namespace 'prod'."},
+	} {
+		kube := &deletingKubectl{gone: map[string]bool{tc.gone: true}}
+		services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+		splitRender(t)
+		err := Execute(NewRoot(services, "test"), tc.argv)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%v: err = %v, want %q; kubectl got %v", tc.argv, err, tc.want, kube.runs)
+		}
+	}
+}
+
+// A kind kx does not name itself, a CRD, is matched to kubectl's reply by
+// name: kubectl spells the resource its own way (widgets.example.com for a
+// widget typed as widget.example.com), and kx cannot tell the spellings
+// apart.
+func TestTypedCRDNotFoundIsMatchedByName(t *testing.T) {
 	splitRender(t)
-	err := Execute(NewRoot(services, "test"), []string{"delete", "deploy/a", "deploy/b", "--yes"})
-	if want := "Deployment/b was not found in namespace 'prod'."; err == nil || err.Error() != want {
-		t.Errorf("err = %v, want %q; kubectl got %v", err, want, kube.runs)
+	kube := &recordingKubectl{err: kubectl.Error{Stderr: `Error from server (NotFound): widgets.example.com "gone" not found`}}
+	services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+	err := Execute(NewRoot(services, "test"), []string{"yaml", "widget.example.com/gone"})
+	if want := "widget.example.com/gone was not found in namespace 'prod'."; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+// A kind/name that names nothing is reported as missing on a line that also
+// spends an index: the index came from a listing, the typo did not, and
+// refreshing the listing answered kx yaml 1 deploy/typo with "Run 'kx get
+// pods' to refresh the list." and kx labels 1 deploy/typo with the saved
+// pods table. Control: when kubectl names the index's resource as well, the
+// listing is what went stale, and it is refreshed.
+func TestTypedTargetNotFoundBesideAnIndexIsReported(t *testing.T) {
+	const want = "Deployment/gone was not found in namespace 'prod'."
+	for _, argv := range [][]string{
+		{"yaml", "1", "deploy/gone"},
+		{"labels", "1", "deploy/gone"},
+		{"delete", "1", "deploy/gone", "--yes"},
+	} {
+		for _, tc := range []struct {
+			stderr  string
+			refresh bool
+		}{
+			{`Error from server (NotFound): deployments.apps "gone" not found`, false},
+			{"Error from server (NotFound): pods \"api-old\" not found\n" +
+				`Error from server (NotFound): deployments.apps "gone" not found`, true},
+		} {
+			stdout, stderr := splitRender(t)
+			kube := &recordingKubectl{err: kubectl.Error{Stderr: tc.stderr}, exitCode: 1, probeCode: 1}
+			services := staleServices(t, kube, &state.Query{Resource: "pods", Args: []string{}})
+			err := Execute(NewRoot(services, "test"), argv)
+			refreshed := strings.Contains(stdout.String()+stderr.String(), "refresh")
+			if refreshed != tc.refresh {
+				t.Errorf("%v, kubectl %q: refreshed = %v, want %v:\n%s%s", argv, tc.stderr, refreshed, tc.refresh, stdout, stderr)
+			}
+			if !tc.refresh && (err == nil || err.Error() != want) {
+				t.Errorf("%v: err = %v, want %q", argv, err, want)
+			}
+		}
 	}
 }
 
