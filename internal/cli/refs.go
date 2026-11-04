@@ -166,12 +166,22 @@ func markRefusedForSlot(ref state.Ref, subject string) error {
 // mark names one resource, and a range is positional by definition, so the
 // two cannot be combined in either spelling or on either side.
 func parseRefs(resolver IndexResolver, name string, args []string) ([]state.Ref, error) {
+	return parseRefsTyped(resolver, name, args, false)
+}
+
+// parseRefsTyped is parseRefs that also reads kind/name when typed is set
+// (parseTyped), for the commands that take a typed target. A typed ref is
+// deduped by what it spells, as a mark is by name; its namespace is settled
+// afterwards, so two spellings in two namespaces are told apart by
+// resolveParsed's dedupe rather than here.
+func parseRefsTyped(resolver IndexResolver, name string, args []string, typed bool) ([]state.Ref, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("Missing argument '%s'.", name)
 	}
 	refs := make([]state.Ref, 0, len(args))
 	seenIndex := make(map[int]bool, len(args))
 	seenMark := make(map[string]bool, len(args))
+	seenTyped := make(map[state.Ref]bool, len(args))
 	keep := func(candidates ...int) {
 		for _, index := range candidates {
 			if seenIndex[index] {
@@ -182,6 +192,17 @@ func parseRefs(resolver IndexResolver, name string, args []string) ([]state.Ref,
 		}
 	}
 	for _, arg := range args {
+		if typed && typedShaped(arg) {
+			ref, err := parseTyped(arg)
+			if err != nil {
+				return nil, err
+			}
+			if !seenTyped[ref] {
+				seenTyped[ref] = true
+				refs = append(refs, ref)
+			}
+			continue
+		}
 		if strings.Contains(arg, "..") && strings.Contains(arg, "@") {
 			return nil, fmt.Errorf(
 				"Invalid value for '%s': '%s' is not a valid range — a mark names one "+

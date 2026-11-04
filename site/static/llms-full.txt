@@ -311,6 +311,30 @@ kx describe 20..30   # ✗ '20..30' starts past the current listing (14 items)
 
 An index you type out is still taken literally: `kx delete 13 99` refuses the whole batch rather than deleting 13, because a delete cannot be undone and a number you wrote yourself is not a gesture at a span.
 
+## Naming a resource directly
+
+When you already know the name, there is no listing to count rows in.
+Every command that takes an index also takes the resource as kubectl spells it, kind/name:
+
+```bash
+kx diag deploy/api -n prod
+kx logs deploy/api --context staging
+kx tree sts/db
+kx rollout restart deploy/api -n prod
+kx mark api deploy/api -n prod
+```
+
+The namespace and cluster come from `-n` and `--context` as kubectl's would, defaulting to the kubeconfig's current ones.
+That is the one way kind/name differs from an index, which carries both from the listing it was counted in and so refuses those flags.
+A sweep refuses `--context`, since its rows would be numbered into this cluster's history, and a `kx tree` of another cluster prints its walk unnumbered for the same reason.
+A mark taken with `--context` is recorded against that context, so spending it from another one is refused as any mark's is.
+On a line that also holds an index or a mark, they are refused for the same reason.
+
+Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
+The [k9s plugin pack](https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/) is built on it, handing the row under k9s's cursor to kx this way.
+Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
+The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
+
 ## Dropping the `get`
 
 A first word that names a kind is treated as `kx get <kind>`:
@@ -1716,6 +1740,57 @@ A real MCP client keeps its stdin pipe open for the life of the session, so this
 
 ---
 
+# Use kx from k9s
+
+Source: https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/
+
+Five k9s plugins that run kx diag, tree, scan, events and mark on the row under the cursor, and wait for Enter before handing the screen back.
+
+k9s numbers nothing — you move a cursor — so kx's indexes have no place inside it.
+What does carry over is everything kx does with a resource once it has one, because every kx command also takes a resource as kind/name.
+The kx plugin pack binds five keys that hand the selected row to kx in that form, in the row's namespace and k9s's context.
+
+## Install
+
+The pack is one file, for the plugins directory k9s reads:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/k9s/kx.yaml \
+  -o "${XDG_CONFIG_HOME:-$HOME/.config}/k9s/plugins/kx.yaml"
+```
+
+On macOS without `XDG_CONFIG_HOME` set, k9s reads `~/Library/Application Support/k9s` instead.
+Running `k9s info` prints the directory either way.
+The pack needs kx 0.12 or later, the first release where these commands take kind/name and `--context`.
+
+## The keys
+
+| Key | Runs | Views |
+|---|---|---|
+| Shift-D | `kx diag` | workloads, Pods, Services, PVCs, Ingresses, Nodes |
+| Shift-T | `kx tree` | workloads, Pods, Services, Namespaces |
+| Shift-V | `kx scan` | Pods and workloads |
+| Shift-E | `kx events` | every view |
+| Shift-K | `kx mark` | every view |
+
+None of them is a key k9s binds itself in those views.
+Each runs in the foreground, then waits for Enter so the report stays on screen until you are done reading it.
+
+## From k9s back to the terminal
+
+The one key that outlives the k9s session is Shift-K.
+It asks for a name and pins the row as a [mark](https://jzills.github.io/kx/docs/concepts/marks/), so the same resource is one word away in a plain terminal:
+
+```bash
+kx logs @api -f
+kx rollout restart @api
+```
+
+The mark is recorded against k9s's context, so it is spent there and refused from any other, as every mark is.
+A `kx tree` run from k9s is numbered and saved as usual when k9s's context is your current one, and printed unnumbered when it is another.
+
+---
+
 # Reference
 
 Source: https://jzills.github.io/kx/docs/reference/
@@ -1812,34 +1887,34 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | Command | Description |
 |---|---|
 | [`kx annotate <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/annotate/) | Set or remove annotations on an indexed resource. |
-| [`kx annotations <index>...`](https://jzills.github.io/kx/docs/reference/commands/annotations/) | Show annotations for one or more indexed resources. |
+| [`kx annotations <index>... [--context str] [--namespace/-n str]`](https://jzills.github.io/kx/docs/reference/commands/annotations/) | Show annotations for one or more indexed resources. |
 | [`kx context [<index>]`](https://jzills.github.io/kx/docs/reference/commands/context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
 | [`kx cordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/cordon/) | Mark one or more indexed Nodes unschedulable. |
 | [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/cp/) | Copy files to or from an indexed Pod via kubectl cp. |
 | [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host). |
 | [`kx delete <index>... [--dry-run[=str]] [--output/-o str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
 | [`kx describe <index>... [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--context str] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
 | [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/drain/) | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
 | [`kx edit <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/edit/) | Open an indexed resource in your editor via kubectl edit. |
-| [`kx events <index>... [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
+| [`kx events <index>... [--context str] [--namespace/-n str] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
 | [`kx exec <index> [<command>...] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
 | [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--last-run] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
 | [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/label/) | Set or remove labels on an indexed resource. |
-| [`kx labels <index>... [--selector/-s]`](https://jzills.github.io/kx/docs/reference/commands/labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
+| [`kx labels <index>... [--context str] [--namespace/-n str] [--selector/-s]`](https://jzills.github.io/kx/docs/reference/commands/labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
 | [`kx logs <index>... [--since str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
-| [`kx mark [<name>] [<index>]`](https://jzills.github.io/kx/docs/reference/commands/mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
+| [`kx mark [<name>] [<index>] [--context str] [--namespace/-n str]`](https://jzills.github.io/kx/docs/reference/commands/mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | [`kx namespace [<index>]`](https://jzills.github.io/kx/docs/reference/commands/namespace/) | List Namespaces, or switch to an indexed one; alias: kx ns. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx ref <index>... [--kind] [--name] [--namespace]`](https://jzills.github.io/kx/docs/reference/commands/ref/) | Print what an index refers to, for commands kx doesn't wrap. |
 | [`kx rollout <action> <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
 | [`kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| [`kx scan [<index>] [--all-namespaces/-A] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| [`kx scan [<index>] [--all-namespaces/-A] [--context str] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
 | [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
 | [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
 | [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
 | [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
-| [`kx tree [<index>] [--all-namespaces/-A] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
+| [`kx tree [<index>] [--all-namespaces/-A] [--context str] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
 | [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
 | [`kx unmark [<name>...] [--all]`](https://jzills.github.io/kx/docs/reference/commands/unmark/) | Remove marks by name; --all removes every mark. |
 | [`kx wait <index>... [--for str] [--output/-o str] [--timeout duration] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/wait/) | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
@@ -1898,7 +1973,7 @@ kx annotate [OPTIONS] <index> [key=value...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[key=value]...` | Key and value to set; repeatable |
 
 ## Options
@@ -1965,7 +2040,14 @@ kx annotations [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 
 ## Global options
 
@@ -1981,6 +2063,7 @@ kx annotations 1
 kx annotations 1 2 3
 kx annotations 1..3
 kx annotations 3..
+kx annotations deploy/api -n prod
 ```
 
 ---
@@ -2051,7 +2134,7 @@ kx cordon [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2164,7 +2247,7 @@ kx debug [OPTIONS] <index> [kubectl flags] [-- command...]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Options
@@ -2243,7 +2326,7 @@ kx delete [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2289,6 +2372,7 @@ kx delete 3
 kx delete 3 5 -y
 kx delete 3..5
 kx delete 3..
+kx delete pod/api-7d9f -n prod
 kx delete 3 --force --grace-period=0
 ```
 
@@ -2314,7 +2398,7 @@ kx describe [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -2344,6 +2428,7 @@ kx describe 1 3 5
 kx describe 1..3
 kx describe 3..
 kx describe @api
+kx describe deploy/api -n prod
 kx describe 1 --show-events=false
 ```
 
@@ -2359,7 +2444,7 @@ Analyzes health signals — replica counts, container states, resource usage and
 
 With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.
 
-A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
+A Node is diagnosed by index — from kx get nodes or kx top nodes — or by name, as `node/<name>`. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
 --since bounds how far back the report looks, in s, m, h or d: 90s, 30m, 12h, 7d. A fraction or a mixture works too — 1.5h, 1h30m — except with d, which takes a fraction but not a mixture: 1.5d, never 1d12h. Without it everything is reported, however old — which is what holds a resource at warnings, and a --fail-on gate red, over a failure from last month. Set diag_max_age in config.toml to choose a window once rather than per run.
 
@@ -2387,13 +2472,14 @@ kx diagnostic [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace; each row is indexed and carries its own namespace |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
@@ -2419,6 +2505,8 @@ kx diagnostic [OPTIONS] [index]
 ```bash
 kx diagnostic
 kx diagnostic 1
+kx diagnostic deploy/api -n prod
+kx diagnostic deploy/api --context staging
 kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy
@@ -2457,7 +2545,7 @@ kx drain [OPTIONS] <index> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2519,7 +2607,7 @@ kx edit [OPTIONS] <index> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -2578,12 +2666,14 @@ kx events [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `--since string` | Only events newer than this; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to events_max_age, which is unset: every event the cluster still holds is listed |
 | `--sort string` | Sort the events by their columns: '-type,age' puts Warnings first, the newest first in each |
 
@@ -2600,6 +2690,7 @@ kx events [OPTIONS] <index>...
 kx events 1
 kx events 1 2
 kx events 1 --since 30m
+kx events deploy/api -n prod
 kx events 1 --sort -type,age
 kx events 1..3
 kx events 3..
@@ -2629,7 +2720,7 @@ kx exec [OPTIONS] <index> [kubectl flags] [-- command...]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[command]...` | Command to run in the Pod instead of a shell |
 
 ## Passthrough options
@@ -2658,6 +2749,7 @@ kx exec 1
 kx exec 1 -- ls /app
 kx exec 1 -c sidecar
 kx exec @api
+kx exec deploy/api -n prod
 ```
 
 ---
@@ -2785,7 +2877,7 @@ kx label [OPTIONS] <index> [key=value...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[key=value]...` | Key and value to set; repeatable |
 
 ## Options
@@ -2852,12 +2944,14 @@ kx labels [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `-s, --selector` | Output as a copy-pastable label selector |
 
 ## Global options
@@ -2874,6 +2968,7 @@ kx labels 1
 kx labels 1 2 3
 kx labels 1..3
 kx labels 3..
+kx labels deploy/api -n prod
 ```
 
 ---
@@ -2900,7 +2995,7 @@ kx logs [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -2947,6 +3042,7 @@ kx logs 1 --previous
 kx logs 1..3
 kx logs 3..
 kx logs @api -f
+kx logs deploy/api -n prod --context staging
 ```
 
 ---
@@ -2958,6 +3054,8 @@ Source: https://jzills.github.io/kx/docs/reference/commands/mark/
 Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.
 
 Pins whatever `<index>` currently resolves to under `<name>`, so 'kx logs @name' keeps working after a later listing moves every index around it.
+
+`<index>` can also name the resource as kind/name — deploy/api, in -n's namespace or the current one — which is checked against the cluster before it is pinned, so a typo fails here rather than at every command that spends the mark.
 
 With no arguments, lists the marks that are set. That listing carries no index column and saves no state — a mark is spent by the name it was given, never by position.
 
@@ -2972,7 +3070,14 @@ kx mark [OPTIONS] [name] [index]
 | Argument | Description |
 |---|---|
 | `[name]` | Name to give the mark |
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 
 ## Global options
 
@@ -2986,6 +3091,7 @@ kx mark [OPTIONS] [name] [index]
 ```bash
 kx mark
 kx mark api 3
+kx mark api deploy/api -n prod
 ```
 
 ---
@@ -3054,7 +3160,7 @@ kx port-forward [OPTIONS] <index> <port> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `<port>` | Port mapping, local:remote — e.g. 8080:80, or :80 to pick a local port |
 
 ## Passthrough options
@@ -3154,7 +3260,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 | Argument | Description |
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -3188,6 +3294,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 ```bash
 kx rollout status 1
 kx rollout restart 1
+kx rollout restart deploy/api -n prod
 kx rollout undo 1
 kx rollout undo 1 --to-revision=2
 kx rollout status 1 --timeout=2m
@@ -3217,7 +3324,7 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `<replicas>` | Number of replicas to scale to |
 
 ## Options
@@ -3258,6 +3365,7 @@ kx scale [OPTIONS] <index> <replicas> [kubectl flags]
 kx scale 1 3
 kx scale 1 3 --current-replicas=2
 kx scale 1 0 --timeout=1m
+kx scale deploy/api 3 -n prod
 ```
 
 ---
@@ -3293,13 +3401,14 @@ kx scan [OPTIONS] [index] [scanner flags]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--engine string` | Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default |
 | `--fail-on string` | Exit 2 when any image carries a vulnerability at this severity or worse (critical, high, medium, low) |
 | `--full` | Stream the scanner's full output instead of the summary table |
@@ -3325,6 +3434,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 ```bash
 kx scan
 kx scan 1
+kx scan deploy/api -n prod
 kx scan -n prod
 kx scan -m api
 kx scan --sort -crit,-high
@@ -3493,7 +3603,7 @@ kx taint [OPTIONS] <index> [taint...] [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 | `[taint]...` | A taint to set, key=value:Effect or key:Effect; repeatable |
 
 ## Options
@@ -3636,13 +3746,14 @@ kx tree [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace, as a forest of per-namespace trees; tree nodes are indexed continuously across it |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--html` | Render the tree as HTML and serve it in a browser |
 | `--json` | Print the ownership graph as JSON instead of a tree |
 | `-m, --match string` | Match by name (substring, case-insensitive) |
@@ -3664,6 +3775,7 @@ kx tree [OPTIONS] [index]
 ```bash
 kx tree
 kx tree 1
+kx tree deploy/api -n prod
 kx tree --no-index
 kx tree -A
 kx tree -m api
@@ -3696,7 +3808,7 @@ kx uncordon [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -3800,7 +3912,7 @@ kx wait [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -3869,7 +3981,7 @@ kx yaml [OPTIONS] <index>... [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
@@ -3920,6 +4032,7 @@ kx yaml 1
 kx yaml 1 2
 kx yaml 1 --show metadata,spec
 kx yaml 1..3
+kx yaml svc/api
 kx yaml 3..
 kx yaml 1 --show-managed-fields
 ```

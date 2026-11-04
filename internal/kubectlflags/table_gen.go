@@ -3,7 +3,7 @@
 package kubectlflags
 
 // Version is the kubectl release this table was read from.
-const Version = "v1.37.1"
+const Version = "v1.37.2"
 
 var global = []Flag{
 	{Name: "as", Type: "string", Usage: "Username to impersonate for the operation. User could be a regular user or a service account in a namespace."},

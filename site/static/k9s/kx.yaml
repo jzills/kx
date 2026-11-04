@@ -1,0 +1,113 @@
+# kx plugins for k9s: run kx on the row under the cursor.
+#
+# Install into the plugins directory k9s reads ('k9s info' prints it):
+#   curl -fsSL https://jzills.github.io/kx/k9s/kx.yaml \
+#     -o "${XDG_CONFIG_HOME:-$HOME/.config}/k9s/plugins/kx.yaml"
+#
+# Each plugin hands kx the row as kind/name in its namespace and k9s's
+# context, then waits for Enter so the output stays on screen.
+# Needs kx 0.12 or later.
+plugins:
+  kx-diag:
+    shortCut: Shift-D
+    description: kx diag
+    scopes:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - jobs
+      - cronjobs
+      - services
+      - persistentvolumeclaims
+      - ingresses
+      - pods
+      - nodes
+    command: sh
+    background: false
+    args:
+      - -c
+      - |-
+        kx diag "$1/$2" ${3:+-n "$3"} --context "$4"; printf '\nPress Enter to return to k9s. '; read -r _
+      - kx-k9s
+      - $RESOURCE_NAME
+      - $NAME
+      - $NAMESPACE
+      - $CONTEXT
+  kx-tree:
+    shortCut: Shift-T
+    description: kx tree
+    scopes:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+      - jobs
+      - cronjobs
+      - pods
+      - services
+      - namespaces
+    command: sh
+    background: false
+    args:
+      - -c
+      - |-
+        kx tree "$1/$2" ${3:+-n "$3"} --context "$4"; printf '\nPress Enter to return to k9s. '; read -r _
+      - kx-k9s
+      - $RESOURCE_NAME
+      - $NAME
+      - $NAMESPACE
+      - $CONTEXT
+  kx-scan:
+    shortCut: Shift-V
+    description: kx scan
+    scopes:
+      - pods
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+      - jobs
+      - cronjobs
+    command: sh
+    background: false
+    args:
+      - -c
+      - |-
+        kx scan "$1/$2" ${3:+-n "$3"} --context "$4"; printf '\nPress Enter to return to k9s. '; read -r _
+      - kx-k9s
+      - $RESOURCE_NAME
+      - $NAME
+      - $NAMESPACE
+      - $CONTEXT
+  kx-events:
+    shortCut: Shift-E
+    description: kx events
+    scopes:
+      - all
+    command: sh
+    background: false
+    args:
+      - -c
+      - |-
+        kx events "$1/$2" ${3:+-n "$3"} --context "$4"; printf '\nPress Enter to return to k9s. '; read -r _
+      - kx-k9s
+      - $RESOURCE_NAME
+      - $NAME
+      - $NAMESPACE
+      - $CONTEXT
+  kx-mark:
+    shortCut: Shift-K
+    description: kx mark
+    scopes:
+      - all
+    command: sh
+    background: false
+    args:
+      - -c
+      - |-
+        printf 'Mark %s/%s as: ' "$1" "$2"; read -r mark; [ -n "$mark" ] && kx mark "$mark" "$1/$2" ${3:+-n "$3"} --context "$4"; printf '\nPress Enter to return to k9s. '; read -r _
+      - kx-k9s
+      - $RESOURCE_NAME
+      - $NAME
+      - $NAMESPACE
+      - $CONTEXT

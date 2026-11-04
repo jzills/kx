@@ -19,8 +19,23 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 		return cmd
 	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
-		err := inner(c, args)
-		if err == nil || !isStale(err) {
+		services.targets.reset()
+		err := onCluster(inner(c, args), services.targets)
+		if err == nil {
+			return nil
+		}
+		// A kind/name that names nothing came from no listing, so there is
+		// none to refresh: it is reported as missing, whatever else is on
+		// the line. A line of kind/name targets alone has no listing in it
+		// at all, and any other failure is reported as it came.
+		targets, kube := services.targets.recorded()
+		if reported, typed := typedNotFound(err, targets, kube); typed {
+			return reported
+		}
+		if allTyped(targets) {
+			return err
+		}
+		if !isStale(err) {
 			return err
 		}
 		// Reported here, rather than by the entrypoint, so the refreshed

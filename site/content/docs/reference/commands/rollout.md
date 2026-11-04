@@ -23,7 +23,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 | Argument | Description |
 |---|---|
 | `<action>` | status, restart, pause, resume, history, or undo |
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 
@@ -57,6 +57,7 @@ kx rollout [OPTIONS] <action> <index> [kubectl flags]
 ```bash
 kx rollout status 1
 kx rollout restart 1
+kx rollout restart deploy/api -n prod
 kx rollout undo 1
 kx rollout undo 1 --to-revision=2
 kx rollout status 1 --timeout=2m

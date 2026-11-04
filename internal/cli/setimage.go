@@ -241,7 +241,7 @@ func newSetCommand(services Services) *cobra.Command {
 	// Wrapped here rather than at the root: withRefresh wraps the RunE that
 	// resolves an index, and the group's own only refuses. A stale index then
 	// relists as it does for scale.
-	cmd.AddCommand(withRefresh(services, newSetImageCommand(services)))
+	cmd.AddCommand(withRefresh(services, acceptsTyped(newSetImageCommand(services))))
 	return cmd
 }
 
@@ -271,6 +271,9 @@ func newSetImageCommand(services Services) *cobra.Command {
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "set image")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, extra := kubectlArgv(cmd, args, kubectlFlags)
 		// Every positional after the index is a spec: a flag's value is
 		// attached to its flag by the parse, so none is mistaken for one.
@@ -279,8 +282,11 @@ func newSetImageCommand(services Services) *cobra.Command {
 		}
 		specs := positional[1:]
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
+			return err
+		}
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		name, namespace, kind, err := services.State.Resolve(ref)
@@ -288,9 +294,6 @@ func newSetImageCommand(services Services) *cobra.Command {
 			return err
 		}
 		target := Resolved{Ref: ref, Name: name, Namespace: namespace, Kind: kind}
-		if err := refuseScopeFlagResolved([]Resolved{target}, extra); err != nil {
-			return err
-		}
 		changes, output, err := SetImageCommand{Kubectl: services.Kubectl}.
 			Execute(target, specs, extra)
 		if err != nil {

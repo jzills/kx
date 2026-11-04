@@ -97,8 +97,14 @@ func (c DeleteCommand) Execute(ref state.Ref, yes bool, extraArgs []string) (mes
 	// The prompt must stay outside the spinner: a prompt underneath a
 	// repainting status line cannot be read.
 	if !yes {
+		// A cluster-scoped kind (Node) has no namespace to name, and the
+		// prompt read "Delete Node/worker in ?".
+		where := ""
+		if namespace != "" {
+			where = " in " + namespace
+		}
 		if err := c.Confirm(fmt.Sprintf(
-			"Delete %s/%s in %s%s?", kind, name, namespace, listingProvenance(source))); err != nil {
+			"Delete %s/%s%s%s%s?", kind, name, where, chosenCluster(c.Kubectl), listingProvenance(source))); err != nil {
 			return "", "", err
 		}
 	}
@@ -586,7 +592,9 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
+			// Only a resource found gone replaces the command's exit code;
+			// a check that could not ask leaves it (see forwardExit).
+			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); foundMissing(err) {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed

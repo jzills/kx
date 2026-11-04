@@ -10,7 +10,7 @@ Analyzes health signals — replica counts, container states, resource usage and
 
 With no index, sweeps every workload in the current namespace, or in the namespace given by -n, or in every namespace with -A; -m narrows a sweep to the resources whose name matches. Healthy resources are left out of the terminal table by default; --show-healthy includes them. The HTML report (--html) includes them either way.
 
-A Node is diagnosed by index only — from kx get nodes or kx top nodes. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
+A Node is diagnosed by index — from kx get nodes or kx top nodes — or by name, as `node/<name>`. Nodes are not namespaced, so they do not appear in a namespace sweep or in -A.
 
 --since bounds how far back the report looks, in s, m, h or d: 90s, 30m, 12h, 7d. A fraction or a mixture works too — 1.5h, 1h30m — except with d, which takes a fraction but not a mixture: 1.5d, never 1d12h. Without it everything is reported, however old — which is what holds a resource at warnings, and a --fail-on gate red, over a failure from last month. Set diag_max_age in config.toml to choose a window once rather than per run.
 
@@ -38,13 +38,14 @@ kx diagnostic [OPTIONS] [index]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace; each row is indexed and carries its own namespace |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--fail-on string` | Exit 2 when a verdict reaches this severity or worse (critical, warning) |
 | `--html` | Render the report as HTML and serve it in a browser |
 | `--json` | Print the report as JSON instead of a table |
@@ -70,6 +71,8 @@ kx diagnostic [OPTIONS] [index]
 ```bash
 kx diagnostic
 kx diagnostic 1
+kx diagnostic deploy/api -n prod
+kx diagnostic deploy/api --context staging
 kx diagnostic -n prod
 kx diagnostic -m api
 kx diagnostic --show-healthy

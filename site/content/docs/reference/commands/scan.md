@@ -31,13 +31,14 @@ kx scan [OPTIONS] [index] [scanner flags]
 
 | Argument | Description |
 |---|---|
-| `[index]` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `[index]` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
 | `-A, --all-namespaces` | Sweep every namespace |
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
 | `--engine string` | Vulnerability scanner to use; run 'kx engine' to see available engines and the configured default |
 | `--fail-on string` | Exit 2 when any image carries a vulnerability at this severity or worse (critical, high, medium, low) |
 | `--full` | Stream the scanner's full output instead of the summary table |
@@ -63,6 +64,7 @@ kx scan [OPTIONS] [index] [scanner flags]
 ```bash
 kx scan
 kx scan 1
+kx scan deploy/api -n prod
 kx scan -n prod
 kx scan -m api
 kx scan --sort -crit,-high

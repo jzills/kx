@@ -20,7 +20,7 @@ kx edit [OPTIONS] <index> [kubectl flags]
 
 | Argument | Description |
 |---|---|
-| `<index>` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Passthrough options
 

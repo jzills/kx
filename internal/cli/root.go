@@ -43,6 +43,33 @@ type Services struct {
 	// test of the version screen does not depend on the kubectl installed on
 	// the machine running it; nil means kubectl.DetectClient.
 	KubectlClient func() kubectl.Client
+	// ClusterNamespace is the namespace kubectl would use for a cluster that
+	// kubectl's flags chose, for a kind/name target given no -n. Injected so a
+	// test need not write a kubeconfig; nil means k8s.NamespaceFor, and the
+	// current namespace (Kubectl.CurrentNamespace) when no flag chose one.
+	ClusterNamespace func(k8s.Cluster) string
+	// KubernetesFor is Kubernetes for a cluster kubectl's flags chose. nil
+	// means k8s.ClientFor; with no flag, Kubernetes is used either way.
+	KubernetesFor func(k8s.Cluster) (kubernetes.Interface, error)
+	// targets records what the running command resolved its targets to
+	// (targetLog). Set by NewRoot; nil records nothing.
+	targets *targetLog
+}
+
+// kubernetesFor is the API client for cluster: the shared one when no flag
+// chose a cluster, and one built for it otherwise — once, however many times
+// the command asks. kx wait asked once per target, loading the kubeconfig
+// and building a client each time.
+func (s Services) kubernetesFor(cluster k8s.Cluster) func() (kubernetes.Interface, error) {
+	if cluster.IsZero() {
+		return s.Kubernetes
+	}
+	return sync.OnceValues(func() (kubernetes.Interface, error) {
+		if s.KubernetesFor != nil {
+			return s.KubernetesFor(cluster)
+		}
+		return k8s.ClientFor(cluster)
+	})
 }
 
 // confirm is the consent prompt, falling back to the renderer's when a caller
@@ -101,6 +128,9 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// Resolved here so an unstamped build reports its module and VCS metadata
 	// everywhere the version appears, not just under --version.
 	info := buildinfo.Resolve(version)
+	if services.targets == nil {
+		services.targets = &targetLog{}
+	}
 	root := &cobra.Command{
 		Use:           "kx",
 		Short:         "Select Kubernetes resources by index instead of typing names.",
@@ -132,7 +162,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 	// or context-mismatched index deserves the same recovery: a fresh listing
 	// to mark from, rather than a dead end. kx unmark takes no index and never
 	// resolves one, so it stays without the wrapper.
-	root.AddCommand(withRefresh(services, newMarkCommand(services)))
+	root.AddCommand(withRefresh(services, acceptsTyped(newMarkCommand(services))))
 	root.AddCommand(withoutRefresh(newUnmarkCommand(services)))
 	// withoutRefresh: it resolves no index at all. kx docs reads documentation
 	// built into the binary, and never the cluster or the saved listing, so
@@ -156,42 +186,42 @@ func NewRoot(services Services, version string) *cobra.Command {
 	root.AddCommand(withoutRefresh(newSetCommand(services)))
 
 	for _, cmd := range []*cobra.Command{
-		newDescribeCommand(services),
-		newLogsCommand(services),
-		newEditCommand(services),
-		newExecCommand(services),
-		newDebugCommand(services),
-		newCordonCommand(services, "cordon"),
-		newCordonCommand(services, "uncordon"),
-		newDeleteCommand(services),
-		newDrainCommand(services),
-		newTaintCommand(services),
-		newScaleCommand(services),
-		newWaitCommand(services),
-		newRolloutCommand(services),
-		newPortForwardCommand(services),
+		acceptsTyped(newDescribeCommand(services)),
+		acceptsTyped(newLogsCommand(services)),
+		acceptsTyped(newEditCommand(services)),
+		acceptsTyped(newExecCommand(services)),
+		acceptsTyped(newDebugCommand(services)),
+		acceptsTyped(newCordonCommand(services, "cordon")),
+		acceptsTyped(newCordonCommand(services, "uncordon")),
+		acceptsTyped(newDeleteCommand(services)),
+		acceptsTyped(newDrainCommand(services)),
+		acceptsTyped(newTaintCommand(services)),
+		acceptsTyped(newScaleCommand(services)),
+		acceptsTyped(newWaitCommand(services)),
+		acceptsTyped(newRolloutCommand(services)),
+		acceptsTyped(newPortForwardCommand(services)),
 		newCopyCommand(services),
-		newYamlCommand(services),
-		newTreeCommand(services),
-		newScanCommand(services),
+		acceptsTyped(newYamlCommand(services)),
+		acceptsTyped(newTreeCommand(services)),
+		acceptsTyped(newScanCommand(services)),
 		newSecretCommand(services, "secret", []string{"secrets"}),
-		newEventsCommand(services),
-		newDiagnosticCommand(services, "diagnostic", []string{"diag"}),
-		newMetadataReadCommand(services, "labels",
+		acceptsTyped(newEventsCommand(services)),
+		acceptsTyped(newDiagnosticCommand(services, "diagnostic", []string{"diag"})),
+		acceptsTyped(newMetadataReadCommand(services, "labels",
 			"Show labels for one or more indexed resources; --selector formats output as a label selector.",
 			"Shows every label on one or more indexed resources, one table per resource. "+
 				"--selector reformats the same data as a copy-pastable label selector.",
-			"labels", "LABEL", true),
-		newMetadataReadCommand(services, "annotations",
+			"labels", "LABEL", true)),
+		acceptsTyped(newMetadataReadCommand(services, "annotations",
 			"Show annotations for one or more indexed resources.",
 			"Shows every annotation on one or more indexed resources, one table per resource.",
-			"annotations", "ANNOTATION", false),
-		newMetadataWriteCommand(services, "label", "labels",
+			"annotations", "ANNOTATION", false)),
+		acceptsTyped(newMetadataWriteCommand(services, "label", "labels",
 			"Set or remove labels on an indexed resource.",
-			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key."),
-		newMetadataWriteCommand(services, "annotate", "annotations",
+			"Sets or removes labels on one indexed resource — key=value to set, --remove to drop a key.")),
+		acceptsTyped(newMetadataWriteCommand(services, "annotate", "annotations",
 			"Set or remove annotations on an indexed resource.",
-			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key."),
+			"Sets or removes annotations on one indexed resource — key=value to set, --remove to drop a key.")),
 		newSwitchCommand(services, "namespace", "ns", "List Namespaces, or switch to an indexed one; alias: kx ns.", false),
 		newSwitchCommand(services, "context", "contexts", "List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.", true),
 	} {

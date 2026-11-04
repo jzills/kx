@@ -416,8 +416,11 @@ func newWaitCommand(services Services) *cobra.Command {
 	registerOutputFlag(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "wait")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
-		indexArgs, stray := splitLeadingIndexes(positional)
+		indexArgs, stray := splitLeadingTargets(positional)
 		if len(indexArgs) == 0 {
 			return requiredArgsError(cmd)
 		}
@@ -428,15 +431,16 @@ func newWaitCommand(services Services) *cobra.Command {
 		}
 		// Every reference resolved before any wait begins: a typo in the
 		// last one should cost nothing, not minutes of waiting first.
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
 			return err
 		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
-			return err
-		}
 		command := WaitCommand{
-			Kubectl: services.Kubectl, Kubernetes: services.Kubernetes, Status: render.Status,
+			Kubectl: services.Kubectl, Status: render.Status,
+			// The cluster its kubectl calls go to (forCluster), which beside
+			// kind/name a flag may choose; beside an index the flags are
+			// refused.
+			Kubernetes: services.Kubernetes,
 		}
 		return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
 			func(target Resolved, met, output string) {

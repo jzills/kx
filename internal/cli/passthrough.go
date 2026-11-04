@@ -240,6 +240,12 @@ func refuseScopeFlag(args []string, namespace string) error {
 // namespace it needs is on each Resolved, and asking for it again cost a state
 // load per index on a path that had the answer in hand.
 func refuseScopeFlagResolved(resolved []Resolved, args []string) error {
+	// Typed targets alone take their namespace and cluster from the flags, as
+	// kubectl's would (settleTyped). Beside an index or a mark the flags are
+	// refused, typed targets or not: one of them would contradict the other.
+	if allTyped(resolved) {
+		return nil
+	}
 	if flag := clusterFlagIn(args); flag != "" {
 		return clusterFlagBesideIndexError(flag)
 	}

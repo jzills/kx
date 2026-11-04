@@ -18,7 +18,14 @@ kx annotations [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 
 ## Global options
 
@@ -34,4 +41,5 @@ kx annotations 1
 kx annotations 1 2 3
 kx annotations 1..3
 kx annotations 3..
+kx annotations deploy/api -n prod
 ```

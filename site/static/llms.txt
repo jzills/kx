@@ -31,6 +31,7 @@ Every page below is also published as Markdown in one file at https://jzills.git
 - [Take a node out of service](https://jzills.github.io/kx/docs/guides/take-a-node-out-of-service/): Diagnose a node, stop the scheduler using it, and evict what is already there.
 - [Use kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/): --json prints the analysis as a document, --fail-on turns it into a gate that exits 2.
 - [Use kx from an agent](https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/): kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only against the cluster; it reads your indexes always, and saves its own listings only if you opt in.
+- [Use kx from k9s](https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/): Five k9s plugins that run kx diag, tree, scan, events and mark on the row under the cursor, and wait for Enter before handing the screen back.
 
 ## Reference
 

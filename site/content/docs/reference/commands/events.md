@@ -22,12 +22,14 @@ kx events [OPTIONS] <index>...
 
 | Argument | Description |
 |---|---|
-| `<index>...` | Row number from the current listing, or @name for a mark; kx state or kx mark shows them |
+| `<index>...` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
 
 ## Options
 
 | Option | Description |
 |---|---|
+| `--context string` | Kubeconfig context of a kind/name target; defaults to the current one. An index carries its own |
+| `-n, --namespace string` | Namespace of a kind/name target; defaults to the current namespace. An index carries its own |
 | `--since string` | Only events newer than this; s, m, h or d: 90s, 30m, 12h, 7d. Defaults to events_max_age, which is unset: every event the cluster still holds is listed |
 | `--sort string` | Sort the events by their columns: '-type,age' puts Warnings first, the newest first in each |
 
@@ -44,6 +46,7 @@ kx events [OPTIONS] <index>...
 kx events 1
 kx events 1 2
 kx events 1 --since 30m
+kx events deploy/api -n prod
 kx events 1 --sort -type,age
 kx events 1..3
 kx events 3..

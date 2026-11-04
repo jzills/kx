@@ -166,20 +166,20 @@ func newDescribeCommand(services Services) *cobra.Command {
 		SuggestFor: []string{"detail", "details"},
 		Short:      "Show full kubectl describe output for one or more indexed resources.",
 		Long:       "Shows full kubectl describe output for one or more indexed resources, printing each under its own Kind/name banner.",
-		Example:    "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api\n  kx describe 1 --show-events=false",
+		Example:    "  kx describe 1\n  kx describe 1 3 5\n  kx describe 1..3\n  kx describe 3..\n  kx describe @api\n  kx describe deploy/api -n prod\n  kx describe 1 --show-events=false",
 		Args:       minArgs(1),
 	}
 	kubectlFlags := registerKubectlFlags(cmd, "describe")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		indexArgs, extra, err := indexArgv(cmd, args, kubectlFlags)
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		command := DescribeCommand{Kubectl: services.Kubectl, State: services.State}
@@ -210,13 +210,28 @@ func newDescribeCommand(services Services) *cobra.Command {
 // flag's value can legitimately hold "..": `kx logs 1 --since=..` and kx get's
 // forwarded `--output=jsonpath={..metadata.name}` were each read as a
 // malformed range.
+//
+// A kind/name ends the run too: kx get forwards it to kubectl, as it always
+// has (`kx get pods 1 deploy/api`). A command that takes kind/name as a
+// target splits with splitLeadingTargets instead.
 func splitLeadingIndexes(args []string) (indexes, rest []string) {
+	return splitLeading(args, false)
+}
+
+// splitLeadingTargets is splitLeadingIndexes for a command whose targets may
+// also be kind/name, which belongs to the leading run beside an index or a
+// mark.
+func splitLeadingTargets(args []string) (targets, rest []string) {
+	return splitLeading(args, true)
+}
+
+func splitLeading(args []string, typed bool) (leading, rest []string) {
 	for i, arg := range args {
 		if strings.HasPrefix(arg, "-") {
 			return args[:i], args[i:]
 		}
 		if _, err := strconv.Atoi(arg); err != nil &&
-			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") {
+			!strings.Contains(arg, "..") && !strings.HasPrefix(arg, "@") && !(typed && typedShaped(arg)) {
 			return args[:i], args[i:]
 		}
 	}
@@ -230,7 +245,7 @@ func newLogsCommand(services Services) *cobra.Command {
 		Short:      "Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.",
 		Long: "Streams logs for an indexed resource. Deployments, StatefulSets, DaemonSets, Jobs and Services aggregate logs across the Pods they own.\n\n" +
 			"kubectl's own flags pass through. --since is the exception: it is read here first, so it takes the day spelling kx uses everywhere else (7d) as well as the ones kubectl understands.",
-		Example:     "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1 --previous\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f",
+		Example:     "  kx logs 1\n  kx logs 1 2\n  kx logs 1 -f --tail=100\n  kx logs 1 --since 7d\n  kx logs 1 --previous\n  kx logs 1..3\n  kx logs 3..\n  kx logs @api -f\n  kx logs deploy/api -n prod --context staging",
 		Args:        minArgs(1),
 		Annotations: documentAnnotations,
 	}
@@ -240,6 +255,9 @@ func newLogsCommand(services Services) *cobra.Command {
 		"Only logs newer than this; "+config.DurationUnits+": "+config.DurationExamples)
 	kubectlFlags := registerKubectlFlags(cmd, "logs")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		// Indexes lead, kubectl's arguments follow. Without the split a
 		// second index reaches kubectl as a positional, where it means a
 		// container name.
@@ -247,11 +265,8 @@ func newLogsCommand(services Services) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		if err := checkFollow(extra, len(resolved)); err != nil {
@@ -340,23 +355,21 @@ func newEditCommand(services Services) *cobra.Command {
 	}
 	kubectlFlags := registerKubectlFlags(cmd, "edit")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) == 0 {
 			return requiredArgsError(cmd)
 		}
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
-		if err != nil {
-			return err
-		}
-		_, namespace, kind, err := services.State.Resolve(ref)
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
 		// Anything after the index is kubectl's, ahead of its flags.
 		extra := append(positional[1:len(positional):len(positional)], forward...)
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		return EditCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -372,12 +385,15 @@ func newExecCommand(services Services) *cobra.Command {
 		Short:      "Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).",
 		Long: "Runs a command inside an indexed resource. With no command, tries each configured shell in turn — bash, then sh, unless the shells key in the config file says otherwise.\n\n" +
 			"Given a workload rather than a Pod, kubectl picks one of its Pods — the same way kx port-forward leaves the choice to kubectl. Which Pod is not guaranteed to be the same one across the shell probe and the session that follows.",
-		Example:     "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api",
+		Example:     "  kx exec 1\n  kx exec 1 -- ls /app\n  kx exec 1 -c sidecar\n  kx exec @api\n  kx exec deploy/api -n prod",
 		Args:        minArgs(1),
 		Annotations: mutatingDocumentAnnotations,
 	}
 	kubectlFlags := registerKubectlFlags(cmd, "exec")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		// Everything after -- is the command to run in the container.
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		command := afterDash(cmd, args)
@@ -385,17 +401,12 @@ func newExecCommand(services Services) *cobra.Command {
 			return requiredArgsError(cmd)
 		}
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
-		if err != nil {
-			return err
-		}
-		_, namespace, kind, err := services.State.Resolve(ref)
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
 		extra := append(positional[1:len(positional):len(positional)], forward...)
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		return ExecCommand{
@@ -440,6 +451,9 @@ func newDebugCommand(services Services) *cobra.Command {
 		"Container to share a process namespace with, for a Pod with several; not for Nodes")
 	kubectlFlags := registerKubectlFlags(cmd, "debug")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		// Everything after -- is the command to run in the debug container.
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		command := afterDash(cmd, args)
@@ -448,17 +462,12 @@ func newDebugCommand(services Services) *cobra.Command {
 			return requiredArgsError(cmd)
 		}
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
-		if err != nil {
-			return err
-		}
-		_, namespace, kind, err := services.State.Resolve(ref)
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
 		extra := append(positional[1:len(positional):len(positional)], forward...)
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		return DebugCommand{
@@ -480,7 +489,7 @@ func newDeleteCommand(services Services) *cobra.Command {
 			"will not go, --cascade=orphan, --wait=false, --dry-run. A --dry-run still " +
 			"prompts — kx does not read kubectl's flag semantics, and reading " +
 			"--dry-run=none as a dry run would skip the prompt on a real delete.",
-		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..\n" +
+		Example: "  kx delete 3\n  kx delete 3 5 -y\n  kx delete 3..5\n  kx delete 3..\n  kx delete pod/api-7d9f -n prod\n" +
 			"  kx delete 3 --force --grace-period=0",
 		Args:        minArgs(1),
 		Annotations: mutatingAnnotations,
@@ -489,6 +498,9 @@ func newDeleteCommand(services Services) *cobra.Command {
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "delete")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		yes, _ := cmd.Flags().GetBool("yes")
 		// Only with --yes: without it, the confirm prompt already names
 		// the listing's provenance (listingProvenance), and printing the
@@ -504,11 +516,8 @@ func newDeleteCommand(services Services) *cobra.Command {
 		if err := refuseStray(cmd, kubectlFlags, stray); err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		command := DeleteCommand{
@@ -541,19 +550,22 @@ func newScaleCommand(services Services) *cobra.Command {
 			"conditional, --timeout, --dry-run. --replicas is the exception: kx builds it " +
 			"from the replica count given here, so a second one is refused rather than " +
 			"left for kubectl to choose between.",
-		Example:     "  kx scale 1 3\n  kx scale 1 3 --current-replicas=2\n  kx scale 1 0 --timeout=1m",
+		Example:     "  kx scale 1 3\n  kx scale 1 3 --current-replicas=2\n  kx scale 1 0 --timeout=1m\n  kx scale deploy/api 3 -n prod",
 		Args:        minArgs(2),
 		Annotations: mutatingAnnotations,
 	}
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "scale")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) < 2 {
 			return requiredArgsError(cmd)
 		}
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
@@ -571,12 +583,7 @@ func newScaleCommand(services Services) *cobra.Command {
 				"'--replicas' cannot be combined with a replica count — kx builds " +
 					"the flag from the count given here. Drop one of the two.")
 		}
-		_, namespace, kind, err := services.State.Resolve(ref)
-		if err != nil {
-			return err
-		}
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		message, output, err := ScaleCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -599,7 +606,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 			"live and blocks until the rollout settles; the other actions run and return immediately.\n\n" +
 			"kubectl's own flags pass through, which is how undo reaches a particular " +
 			"revision: --to-revision, --revision for history, --timeout for status.",
-		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout undo 1\n" +
+		Example: "  kx rollout status 1\n  kx rollout restart 1\n  kx rollout restart deploy/api -n prod\n  kx rollout undo 1\n" +
 			"  kx rollout undo 1 --to-revision=2\n  kx rollout status 1 --timeout=2m",
 		// No ValidArgs: cobra stops completing entirely once it is set, which
 		// left `kx rollout status <TAB>` offering filenames instead of the
@@ -620,6 +627,9 @@ func newRolloutCommand(services Services) *cobra.Command {
 	cmd.Flags().Lookup("revision").Usage = "With status, the revision whose status to show " +
 		"(0, the default, is the latest); with history, the revision to show in full."
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) < 2 {
 			return requiredArgsError(cmd)
@@ -638,7 +648,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 		if rolloutActionMutates(action) {
 			installAgentIndexNotice(services)
 		}
-		ref, err := parseRef("index", positional[1])
+		ref, err := parseTargetRef("index", positional[1])
 		if err != nil {
 			return err
 		}
@@ -646,12 +656,7 @@ func newRolloutCommand(services Services) *cobra.Command {
 			return err
 		}
 		extra := forward
-		_, namespace, kind, err := services.State.Resolve(ref)
-		if err != nil {
-			return err
-		}
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		output, err := RolloutCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -683,22 +688,20 @@ func newPortForwardCommand(services Services) *cobra.Command {
 	}
 	kubectlFlags := registerKubectlFlags(cmd, "port-forward")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, forward := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) < 2 {
 			return requiredArgsError(cmd)
 		}
-		ref, err := parseRef("index", positional[0])
-		if err != nil {
-			return err
-		}
-		_, namespace, kind, err := services.State.Resolve(ref)
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
 		// Further ports are kubectl's, ahead of its flags: it forwards several.
 		extra := append(positional[2:len(positional):len(positional)], forward...)
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		return PortForwardCommand{Kubectl: services.Kubectl, State: services.State}.
@@ -752,7 +755,7 @@ func newYamlCommand(services Services) *cobra.Command {
 			"JSON. `--show` cannot be combined with one: it parses the YAML it narrows.\n\n" +
 			"Several indexes are joined the way their format joins documents: YAML separated " +
 			"by `---`, JSON merged into the one List kubectl answers several names with.",
-		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n" +
+		Example: "  kx yaml 1\n  kx yaml 1 2\n  kx yaml 1 --show metadata,spec\n  kx yaml 1..3\n  kx yaml svc/api\n" +
 			"  kx yaml 3..\n  kx yaml 1 --show-managed-fields",
 		Args:        minArgs(1),
 		Annotations: documentAnnotations,
@@ -760,16 +763,16 @@ func newYamlCommand(services Services) *cobra.Command {
 	cmd.Flags().String("show", "", "Comma-separated fields to display (e.g. metadata,spec)")
 	kubectlFlags := registerKubectlFlags(cmd, "get")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		show, _ := cmd.Flags().GetString("show")
 		indexArgs, extra, err := indexArgv(cmd, args, kubectlFlags)
 		if err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		// --show narrows the YAML it parsed, so another output format is a
@@ -822,9 +825,13 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		Short:   short,
 		Long:    long,
 		Args:    minArgs(1),
-		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..",
+		Example: "  kx " + use + " 1\n  kx " + use + " 1 2 3\n  kx " + use + " 1..3\n  kx " + use + " 3..\n  kx " + use + " deploy/api -n prod",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolved, err := resolveRefs(services.State, "indexes", args)
+			// The cluster --context names, beside kind/name; beside an index
+			// it is refused before anything is read.
+			services := services.forCluster(contextScope(cmd))
+			resolved, err := resolveTargets(services, "indexes", args,
+				append(namespaceScope(cmd), contextScope(cmd)...))
 			if err != nil {
 				return err
 			}
@@ -860,6 +867,8 @@ func newMetadataReadCommand(services Services, use, short, long, field, header s
 		cmd.Flags().BoolVarP(&asSelector, "selector", "s", false,
 			"Output as a copy-pastable label selector")
 	}
+	cmd.Flags().StringP("namespace", "n", "", typedNamespaceUsage)
+	cmd.Flags().String("context", "", typedContextUsage)
 	return cmd
 }
 
@@ -880,6 +889,9 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, verb)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		positional, extra := kubectlArgv(cmd, args, kubectlFlags)
 		if len(positional) == 0 {
 			return requiredArgsError(cmd)
@@ -887,7 +899,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 		removes, _ := cmd.Flags().GetStringArray("remove")
 		overwrite, _ := cmd.Flags().GetBool("overwrite")
 		installAgentIndexNotice(services)
-		ref, err := parseRef("index", positional[0])
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
@@ -898,12 +910,7 @@ func newMetadataWriteCommand(services Services, verb, field, short, long string)
 		if err != nil {
 			return err
 		}
-		_, namespace, kind, err := services.State.Resolve(ref)
-		if err != nil {
-			return err
-		}
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		message, output, err := MetadataWriteCommand{

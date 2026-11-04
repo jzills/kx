@@ -21,7 +21,15 @@ import (
 // binary reads the system trust store at runtime, so there is nothing for a
 // bundled build to be missing.
 func Client() (*kubernetes.Clientset, error) {
-	config, err := restConfig()
+	return ClientFor(Cluster{})
+}
+
+// ClientFor is Client for the cluster c chooses, so a client-go read reaches
+// the cluster kubectl would under the same flags. A cluster a flag chose never
+// falls back to the in-cluster service account: that would answer from a
+// cluster nobody asked for.
+func ClientFor(c Cluster) (*kubernetes.Clientset, error) {
+	config, err := restConfig(c)
 	if err != nil {
 		return nil, err
 	}
@@ -37,13 +45,38 @@ func Client() (*kubernetes.Clientset, error) {
 	return clientset, nil
 }
 
-func restConfig() (*rest.Config, error) {
+// Cluster is the cluster a command reaches, as kubectl's
+// cluster-selecting flags choose it: --kubeconfig, --context, --cluster and
+// --server. The zero value is the kubeconfig's own choice, which is what every
+// command without those flags gets.
+type Cluster struct {
+	Kubeconfig string
+	Context    string
+	Cluster    string
+	Server     string
+}
+
+// IsZero reports whether no flag chose a cluster.
+func (c Cluster) IsZero() bool { return c == Cluster{} }
+
+// clientConfig is the kubeconfig loaded as kubectl loads it, with c's
+// overrides applied the way kubectl applies its own flags.
+func clientConfig(c Cluster) clientcmd.ClientConfig {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		rules, &clientcmd.ConfigOverrides{},
-	).ClientConfig()
+	rules.ExplicitPath = c.Kubeconfig
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: c.Context}
+	overrides.Context.Cluster = c.Cluster
+	overrides.ClusterInfo.Server = c.Server
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+}
+
+func restConfig(c Cluster) (*rest.Config, error) {
+	config, err := clientConfig(c).ClientConfig()
 	if err == nil {
 		return config, nil
+	}
+	if !c.IsZero() {
+		return nil, fmt.Errorf("Could not load the Kubernetes configuration: %w.", err)
 	}
 
 	inCluster, inClusterErr := rest.InClusterConfig()
@@ -58,10 +91,13 @@ func restConfig() (*rest.Config, error) {
 // Namespace reports the namespace the current kubeconfig context selects,
 // falling back to "default".
 func Namespace() string {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	namespace, _, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		rules, &clientcmd.ConfigOverrides{},
-	).Namespace()
+	return NamespaceFor(Cluster{})
+}
+
+// NamespaceFor is Namespace for the cluster c chooses: the default namespace
+// of the context --context names, as kubectl would use it.
+func NamespaceFor(c Cluster) string {
+	namespace, _, err := clientConfig(c).Namespace()
 	if err != nil || namespace == "" {
 		return "default"
 	}

@@ -681,7 +681,7 @@ func newScanCommand(services Services) *cobra.Command {
 			"A --limit keeps the first N images of the summary, after --sort orders it: " +
 			"kx scan -A --sort -crit,-high --limit 5 is the five most critical. Every image is " +
 			"still scanned, and --fail-on still reads them all.",
-		Example: "  kx scan\n  kx scan 1\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n" +
+		Example: "  kx scan\n  kx scan 1\n  kx scan deploy/api -n prod\n  kx scan -n prod\n  kx scan -m api\n  kx scan --sort -crit,-high\n" +
 			"  kx scan -A --sort -crit,-high --limit 5\n  kx scan 1 --full\n" +
 			"  kx scan --html\n  kx scan -A --json\n" +
 			"  kx scan -A --fail-on high --out report.html",
@@ -807,11 +807,20 @@ func newScanCommand(services Services) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hasContext := hasFlag(rest, "--context", "")
+			context, rest, err := extractString(rest, "--context", "")
+			if err != nil {
+				return err
+			}
 			if hasNamespace && all {
 				return errors.New(
 					"'--all-namespaces' and '--namespace' cannot be combined.")
 			}
 
+			// --context reaches a kind/name target's cluster; an index
+			// carries its own, and a sweep would number another cluster's
+			// rows here.
+			services := services.forCluster(targetArgv("", context))
 			command := ScanCommand{
 				Kubectl: services.Kubectl,
 				State:   services.State,
@@ -821,7 +830,7 @@ func newScanCommand(services Services) *cobra.Command {
 
 			// A leading index selects one workload; without it the whole
 			// namespace is swept. Anything after belongs to the scanner.
-			indexArgs, extra := splitLeadingIndexes(rest)
+			indexArgs, extra := splitLeadingTargets(rest)
 			// Scanner flags start with a dash, so a bare non-numeric first
 			// argument is a mistyped index. Sweeping the namespace instead
 			// would ignore what was typed and act on something else — and
@@ -839,10 +848,22 @@ func newScanCommand(services Services) *cobra.Command {
 			if all {
 				scopeFlag = "--all-namespaces"
 			}
-			if len(indexArgs) > 0 && scopeFlag != "" {
+			// A kind/name takes its namespace from -n, as kubectl's would; -A
+			// is still refused beside it.
+			if err := refuseContextFlag(hasContext, indexArgs); err != nil {
+				return err
+			}
+			typed := len(indexArgs) > 0 && typedShaped(indexArgs[0])
+			if len(indexArgs) > 0 && scopeFlag != "" && !(typed && scopeFlag == "--namespace") {
+				if typed {
+					return allNamespacesBesideTypedError(scopeFlag, sweepEverywhereHint)
+				}
 				return scopeFlagBesideIndexError(scopeFlag, sweepInsteadHint)
 			}
 			if len(indexArgs) > 0 && match != "" {
+				if typed {
+					return errMatchBesideTyped
+				}
 				return errMatchBesideIndex
 			}
 			// pageScope captions the HTML page. Captured in each branch
@@ -853,7 +874,7 @@ func newScanCommand(services Services) *cobra.Command {
 			// subject and not the caption's "Mixed" kind label — a tab
 			// reading "scan · Mixed · prod" says less than "scan · prod".
 			// kx diag titles itself the same way.
-			var pageScope, pageTitle string
+			var pageScope, pageTitle, target string
 			// subject is what --json says the scan was about. Built beside the
 			// page labels rather than derived from them: those are display
 			// strings, and the whole point of the struct is that a machine
@@ -897,7 +918,7 @@ func newScanCommand(services Services) *cobra.Command {
 					subject.Namespace = scope.Namespace
 				}
 			} else {
-				ref, err := parseRef("index", indexArgs[0])
+				ref, err := parseTargetArg(services, indexArgs[0], targetArgv(namespace, context))
 				if err != nil {
 					return err
 				}
@@ -915,6 +936,10 @@ func newScanCommand(services Services) *cobra.Command {
 				}
 				pageScope = string(kind) + "/" + name + " · " + resourceNamespace
 				pageTitle = string(kind) + "/" + name
+				// As typed, with the namespace and context it was settled
+				// in, as diag's and tree's pages name theirs: a kind/name
+				// rerun without them scans the current context's namespace.
+				target = typedInvocation(indexArgs[0], ref, context)
 				subject = scanSubject{Kind: kind, Name: name, Namespace: resourceNamespace}
 			}
 
@@ -969,12 +994,12 @@ func newScanCommand(services Services) *cobra.Command {
 			// Publishing a report and failing the build are not in conflict:
 			// --html says where the findings go, --fail-on says what they mean.
 			if htmlOpts.Enabled {
-				indexArg := ""
-				if len(indexArgs) > 0 {
-					indexArg = indexArgs[0]
+				scope := scopeArgs(namespace, all)
+				if target != "" {
+					scope = ""
 				}
 				meta, err := pageMeta(services.Config.Theme, "scan · "+pageTitle,
-					invocation("scan", indexArg, scopeArgs(namespace, all),
+					invocation("scan", target, scope,
 						matchFlag(match), sortFlag(sortSpec), limitFlag(limit), portFlag(port)))
 				if err != nil {
 					return err
@@ -1004,6 +1029,7 @@ func newScanCommand(services Services) *cobra.Command {
 	cmd.Flags().Int("limit", 0, "Keep the first N images of the summary, after --sort")
 	cmd.Flags().StringP("namespace", "n", "",
 		"Namespace to sweep; defaults to the current namespace")
+	cmd.Flags().String("context", "", typedContextUsage)
 	cmd.Flags().BoolP("all-namespaces", "A", false,
 		"Sweep every namespace")
 	cmd.Flags().StringP("match", "m", "", matchUsage)

@@ -57,6 +57,30 @@ kx describe 20..30   # ✗ '20..30' starts past the current listing (14 items)
 
 An index you type out is still taken literally: `kx delete 13 99` refuses the whole batch rather than deleting 13, because a delete cannot be undone and a number you wrote yourself is not a gesture at a span.
 
+## Naming a resource directly
+
+When you already know the name, there is no listing to count rows in.
+Every command that takes an index also takes the resource as kubectl spells it, kind/name:
+
+```bash
+kx diag deploy/api -n prod
+kx logs deploy/api --context staging
+kx tree sts/db
+kx rollout restart deploy/api -n prod
+kx mark api deploy/api -n prod
+```
+
+The namespace and cluster come from `-n` and `--context` as kubectl's would, defaulting to the kubeconfig's current ones.
+That is the one way kind/name differs from an index, which carries both from the listing it was counted in and so refuses those flags.
+A sweep refuses `--context`, since its rows would be numbered into this cluster's history, and a `kx tree` of another cluster prints its walk unnumbered for the same reason.
+A mark taken with `--context` is recorded against that context, so spending it from another one is refused as any mark's is.
+On a line that also holds an index or a mark, they are refused for the same reason.
+
+Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
+The [k9s plugin pack](../../guides/use-kx-from-k9s/) is built on it, handing the row under k9s's cursor to kx this way.
+Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
+The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
+
 ## Dropping the `get`
 
 A first word that names a kind is treated as `kx get <kind>`:

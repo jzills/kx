@@ -99,7 +99,7 @@ func (c DrainCommand) Execute(ref state.Ref, yes bool, extraArgs []string) error
 	}
 	if !yes {
 		if err := c.Confirm(fmt.Sprintf(
-			"Evict all Pods from Node/%s%s?", name, listingProvenance(source))); err != nil {
+			"Evict all Pods from Node/%s%s%s?", name, chosenCluster(c.Kubectl), listingProvenance(source))); err != nil {
 			return err
 		}
 	}
@@ -140,6 +140,9 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 	registerDryRunFlag(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, verb)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		installAgentIndexNotice(services)
 		indexArgs, stray, extra, err := splitIndexArgv(cmd, args, kubectlFlags)
 		if err != nil {
@@ -148,14 +151,11 @@ func newCordonCommand(services Services, verb string) *cobra.Command {
 		if err := refuseStray(cmd, kubectlFlags, stray); err != nil {
 			return err
 		}
-		resolved, err := resolveRefs(services.State, "indexes", indexArgs)
+		resolved, err := resolveTargets(services, "indexes", indexArgs, extra)
 		if err != nil {
 			return err
 		}
 		if err := validateNodeIndexes(resolved, verb); err != nil {
-			return err
-		}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
 			return err
 		}
 		command := NodeCommand{Kubectl: services.Kubectl, State: services.State, Verb: verb}
@@ -202,6 +202,9 @@ func newDrainCommand(services Services) *cobra.Command {
 	cmd.Flags().Duration("timeout", 0, "Give up waiting after this long")
 	kubectlFlags := registerKubectlFlags(cmd, "drain")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
 		yes, _ := cmd.Flags().GetBool("yes")
 		// Only with --yes: without it, the confirm prompt already names the
 		// listing's provenance (listingProvenance).
@@ -212,20 +215,15 @@ func newDrainCommand(services Services) *cobra.Command {
 		if len(positional) == 0 {
 			return requiredArgsError(cmd)
 		}
-		ref, err := parseRef("index", positional[0])
+		ref, err := parseTargetRef("index", positional[0])
 		if err != nil {
 			return err
 		}
 		if err := refuseStray(cmd, kubectlFlags, positional[1:]); err != nil {
 			return err
 		}
-		_, namespace, kind, err := services.State.Resolve(ref)
-		if err != nil {
-			return err
-		}
 		extra := forward
-		resolved := []Resolved{{Ref: ref, Namespace: namespace, Kind: kind}}
-		if err := refuseScopeFlagResolved(resolved, extra); err != nil {
+		if ref, err = settleRef(services, ref, extra); err != nil {
 			return err
 		}
 		return DrainCommand{

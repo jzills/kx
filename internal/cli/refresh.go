@@ -37,9 +37,19 @@ type StaleResourceError struct {
 	// mark carries no query, and replaying the history stack's would answer
 	// it with an unrelated listing.
 	Ref state.Ref
+	// Cluster is where a kind/name was looked for, when a flag chose it:
+	// " on context 'prod'" (chosenCluster). Empty for the current context.
+	Cluster string
 }
 
 func (e StaleResourceError) Error() string {
+	if e.Ref.Typed() {
+		where := ""
+		if e.Namespace != "" {
+			where = " in namespace '" + e.Namespace + "'"
+		}
+		return fmt.Sprintf("%s/%s was not found%s%s.", e.Kind, e.Name, where, e.Cluster)
+	}
 	if e.Ref.Mark != "" {
 		where := ""
 		if e.Namespace != "" {
@@ -50,6 +60,23 @@ func (e StaleResourceError) Error() string {
 			e.Ref, e.Kind, e.Name, where, e.Ref.Mark)
 	}
 	return string(e.Kind) + "/" + e.Name + " no longer exists"
+}
+
+// onCluster is err with the cluster a flag chose named on it, when err is a
+// kind/name found missing there. Every path that finds one missing builds
+// the error without knowing where it looked — some read through client-go,
+// where no kubectl is in hand — and the command's kubectl, which the target
+// log holds, is the one sent to the chosen cluster. Without it kx scale
+// deploy/api 3 --context prod said "Deployment/api was not found in
+// namespace 'default'.", and the user went looking for a typo on the
+// cluster they were in, where deploy/api exists.
+func onCluster(err error, log *targetLog) error {
+	missing, ok := err.(StaleResourceError)
+	if !ok || !missing.Ref.Typed() || missing.Cluster != "" || log == nil || log.kubectl == nil {
+		return err
+	}
+	missing.Cluster = chosenCluster(log.kubectl)
+	return missing
 }
 
 // kubectl reports a missing resource in these shapes; there is no exit code
@@ -83,8 +110,15 @@ func IsNotFound(err error) bool {
 // ensureExists converts a command failure into a StaleResourceError when the
 // resource is genuinely gone, so the caller can refresh rather than report a
 // confusing kubectl message. ref is carried onto the error unchanged, so a
-// mark failure reports rather than replays — see isStale.
+// mark or a typed target reports rather than replays — see isStale.
+//
+// A typed target is asked for with Run (typedExists), so a failure to ask
+// reads as itself rather than as a typo. kubectl is the command's own, which
+// a flag beside the target has already sent to the cluster it chose.
 func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace string, ref state.Ref) error {
+	if ref.Typed() {
+		return typedExists(kubectl, Resolved{Kind: kind, Name: name, Namespace: namespace, Ref: ref})
+	}
 	if kubectl.Probe([]string{"get", string(kind), name, "-n", namespace}) != 0 {
 		return StaleResourceError{Kind: kind, Name: name, Namespace: namespace, Ref: ref}
 	}
@@ -97,9 +131,10 @@ func ensureExists(kubectl kubectl.Service, kind kinds.Kind, name, namespace stri
 // printed `pods "x" not found` for an index whose resource had gone and
 // stopped there, where every kubectl-backed command refreshed the listing.
 //
-// Only a not-found naming the indexed resource itself is stale: something
-// else the command read being missing says nothing about the listing, and is
-// returned as it came.
+// Only a not-found naming the resource itself is stale: something else the
+// command read being missing says nothing about the listing, and is returned
+// as it came. A typed target comes back as missing too, in kx's words rather
+// than the API server's, and isStale reports it rather than refreshing.
 func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref state.Ref) error {
 	var status apierrors.APIStatus
 	if !apierrors.IsNotFound(err) || !errors.As(err, &status) {
@@ -121,13 +156,24 @@ func staleIfMissing(err error, kind kinds.Kind, name, namespace string, ref stat
 // the command succeeded. Returning nil here — which is what ensureExists does
 // on its own when the resource is still there — is why `kx describe 1
 // --bogus-flag` printed kubectl's error and then exited 0.
+//
+// So is a check that could not ask (foundMissing): kubectl has already said
+// why it failed, and a kind/name's check failing the same way printed the
+// same connection error a second time, in place of kubectl's exit code.
 func forwardExit(
 	kubectl kubectl.Service, kind kinds.Kind, name, namespace string, code int, ref state.Ref,
 ) error {
-	if err := ensureExists(kubectl, kind, name, namespace, ref); err != nil {
+	if err := ensureExists(kubectl, kind, name, namespace, ref); foundMissing(err) {
 		return err
 	}
 	return SilentError{Code: code}
+}
+
+// foundMissing reports whether ensureExists found the resource gone, as
+// opposed to failing to ask: an unreachable cluster, an expired login.
+func foundMissing(err error) bool {
+	var missing StaleResourceError
+	return errors.As(err, &missing)
 }
 
 // isStale reports whether an error means the current state entry no longer
@@ -142,9 +188,9 @@ func forwardExit(
 func isStale(err error) bool {
 	var stale StaleResourceError
 	if errors.As(err, &stale) {
-		// A mark carries no query to replay — see StaleResourceError.Ref — so
-		// only an index failure is refreshable here.
-		return stale.Ref.Mark == ""
+		// A mark or a typed target carries no query to replay — see
+		// StaleResourceError.Ref — so only an index failure is refreshable.
+		return stale.Ref.Mark == "" && !stale.Ref.Typed()
 	}
 	var mismatch state.ContextMismatchError
 	if errors.As(err, &mismatch) {
