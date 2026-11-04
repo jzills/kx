@@ -5,7 +5,7 @@ description: Use when writing or revising release-notes/vX.Y.Z.md, the Highlight
 
 # Writing kx release notes
 
-`release-notes/vX.Y.Z.md` is the **Highlights** section, the first thing anyone opening the release reads. The generator adds Breaking changes, Features, Fixes and Dependencies from the PR titles, then GitHub's commit list. Highlights only has to answer two questions: what's new for me, and do I have to do anything?
+`release-notes/vX.Y.Z.md` is the **Highlights** section, the first thing anyone opening the release reads. The generator adds Breaking changes, Features, Fixes and Dependencies from the PR titles, then GitHub's commit list. Highlights only has to answer two questions: what's new for me, and do I have to change anything?
 
 Someone scanning a release page reads the opening and the bullets, and skips anything longer. v0.10.0 through v0.12.0 ran 250–470 words of paragraphs: why the bug existed, how the flag interacts with three others, every command it reaches. That detail belongs in the PRs and the docs.
 
@@ -17,12 +17,12 @@ Someone scanning a release page reads the opening and the bullets, and skips any
 - **<What you notice, in a few words>:** <one sentence, with one example>.
 - **<…>:** <…>.
 
-<Upgrading: one sentence, two if something breaks.>
+<Only when something breaks: what to change, in a sentence or two.>
 ```
 
-- **Lead:** two or three sentences, under about 60 words. Say what the release does for someone using kx, not how it's built. A one-fix patch can stop at the lead and the upgrading line.
+- **Lead:** two or three sentences, under about 60 words. Say what the release does for someone using kx, not how it's built. A one-fix patch can be the lead alone.
 - **Bullets:** one per change a user would notice, at most six. Each is a bold label of a few words, a colon, then one sentence with one example in backticks: a command, or the exact line kx prints. Pick the example that best shows the change; never list every command it reaches.
-- **Upgrading:** the last line, always, even when the answer is nothing. When something breaks, say which invocation changed and what to change in a script. Every `!` PR title needs its fix spelled out here, since the derived Breaking section only names it.
+- **What to change:** a closing line only when something breaks. Name the invocation that changed and what a script should do instead, as in "If a script reads …, read … now". Every `!` PR title needs its fix spelled out here, since the derived Breaking section only names it. When nothing breaks, leave the line out: "Upgrading asks nothing of you" is filler, and no closing line already says it.
 - **Length:** about 150 words in all. Over 200 means something belongs in the docs instead.
 
 ## Leave out
@@ -51,16 +51,12 @@ Every command that takes an index now also takes a resource the way kubectl writ
 - **Typos reported, not relisted:** a kind/name that names nothing prints `Deployment/typo was not found in namespace 'default'.` and leaves your listing alone.
 - **Marks by name:** `kx mark api deploy/api` pins a resource without listing it first.
 - **k9s plugins:** five keys run `kx diag`, `tree`, `scan`, `events` and `mark` on the row under k9s's cursor ([guide](https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/)).
-
-Upgrading asks nothing of you: every argument kx accepted before is read the same way, and your saved state carries over.
 ```
 
 A one-fix patch (v0.11.1, rewritten):
 
 ```markdown
 Pressing TAB after a descending sort key, as in `kx get pods --sort -re<TAB>`, now completes it, on every command that takes `--sort`. It used to complete nothing.
-
-Upgrading asks nothing of you: only what the shell offers has changed.
 ```
 
 A patch that breaks a script (v0.9.1, rewritten):
@@ -71,7 +67,7 @@ Output kx passes through from kubectl is now kubectl's bytes exactly, and severa
 - **No trailing blank line:** `kx get pods -o json` and `kubectl get pods -o json` now match byte for byte.
 - **Valid JSON for several manifests:** `kx yaml 1 2 -o json | jq` reads one List instead of failing after the first object.
 
-Upgrading changes one script shape: read `kx yaml <several indexes> -o json` as `.items[]`, since it is now a List. One index still prints the bare object.
+If a script reads `kx yaml <several indexes> -o json`, read `.items[]` now: several manifests come back as one List. One index still prints the bare object.
 ```
 
 ## Before you commit

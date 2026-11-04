@@ -18,7 +18,7 @@ Read RELEASING.md's "Pick the number" before proposing one.
 
 ## 2. Write the summary
 
-Write `release-notes/vX.Y.Z.md` with the `kx-release-notes` skill: a short lead, a few bullets, and one line on upgrading.
+Write `release-notes/vX.Y.Z.md` with the `kx-release-notes` skill: a short lead, a few bullets, and a line on what to change only when something breaks.
 
 Commit it as `docs(release): summarize vX.Y.Z`. A docs type lands in the commit list rather than becoming a bullet above itself.
 
@@ -34,7 +34,7 @@ git worktree add /tmp/kx-prev v<last> && go -C /tmp/kx-prev build -o /tmp/kx-old
 
 For each sentence in the summary, run the command it describes on `/tmp/kx-new`, and on `/tmp/kx-old` for anything it calls changed or fixed. Use isolated state from the `kx-verify` skill. Rewrite or drop any sentence the binaries don't bear out.
 
-The closing paragraph's "upgrading asks nothing of you" is a claim too. Check it against every merged fix: a command that now succeeds where it used to fail has changed its exit code, so "only wording changed" is false even when every change is a fix. v0.9.2's draft said exactly that, and the fact-check caught it.
+A note with no closing "what to change" line claims nothing breaks, and that is a claim too. Check it against every merged fix: a command that now succeeds where it used to fail has changed its exit code, so "only wording changed" is false even when every change is a fix. v0.9.2's draft said exactly that, and the fact-check caught it.
 
 Before you call something a regression, check whether the previous tag already behaved that way. If it did, file it as an issue rather than fixing it inside the release.
 
