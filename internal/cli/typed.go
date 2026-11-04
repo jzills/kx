@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -67,23 +68,9 @@ func clusterFromArgs(args []string) k8s.Cluster {
 
 // flagValue is the last value argv gives a flag, "" when it is absent:
 // kubectl takes the last of a repeated flag, so kx reads the same one.
+// extractString's reading, so a flag is read one way wherever kx reads it.
 func flagValue(args []string, long, short string) string {
-	value := ""
-	for i, arg := range args {
-		for _, name := range []string{long, short} {
-			if name == "" {
-				continue
-			}
-			switch {
-			case strings.HasPrefix(arg, name+"="):
-				value = strings.TrimPrefix(arg, name+"=")
-			case arg == name && i+1 < len(args):
-				value = args[i+1]
-			case len(name) == 2 && len(arg) > 2 && strings.HasPrefix(arg, name):
-				value = strings.TrimPrefix(arg, name)
-			}
-		}
-	}
+	value, _, _ := extractString(args, long, short)
 	return value
 }
 
@@ -486,7 +473,13 @@ func (k clusterKubectl) with(args []string) []string {
 	}
 	var out []string
 	out = append(out, args[:at]...)
-	out = append(out, k.flags...)
+	// Only what the argv lacks: a command forwards the flags it was given,
+	// and adding them again sent kubectl --context=prod twice.
+	for _, flag := range k.flags {
+		if !slices.Contains(args[:at], flag) {
+			out = append(out, flag)
+		}
+	}
 	return append(out, args[at:]...)
 }
 

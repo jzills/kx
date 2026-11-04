@@ -437,9 +437,10 @@ func newWaitCommand(services Services) *cobra.Command {
 		}
 		command := WaitCommand{
 			Kubectl: services.Kubectl, Status: render.Status,
-			// The cluster kubectl is sent to, which beside kind/name a flag
-			// may choose; beside an index the flags are refused.
-			Kubernetes: services.kubernetesFor(clusterFromArgs(extra)),
+			// The cluster its kubectl calls go to (forCluster), which beside
+			// kind/name a flag may choose; beside an index the flags are
+			// refused.
+			Kubernetes: services.Kubernetes,
 		}
 		return command.ExecuteAll(cmd.Context(), resolved, timeout, extra,
 			func(target Resolved, met, output string) {
