@@ -586,7 +586,9 @@ func (c ExecCommand) Execute(ref state.Ref, command, extraArgs []string) error {
 			return err
 		}
 		if code != 0 {
-			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); err != nil {
+			// Only a resource found gone replaces the command's exit code;
+			// a check that could not ask leaves it (see forwardExit).
+			if err := ensureExists(c.Kubectl, kind, name, namespace, ref); foundMissing(err) {
 				return err
 			}
 			// The message has to be kx's own — kubectl's stderr is suppressed
