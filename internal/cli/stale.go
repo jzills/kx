@@ -20,7 +20,7 @@ func withRefresh(services Services, cmd *cobra.Command) *cobra.Command {
 	}
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		services.targets.reset()
-		err := inner(c, args)
+		err := onCluster(inner(c, args), services.targets)
 		if err == nil {
 			return nil
 		}

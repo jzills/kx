@@ -332,6 +332,7 @@ func typedExists(kube kubectl.Service, target Resolved) error {
 	if IsNotFound(err) {
 		return StaleResourceError{
 			Kind: target.Kind, Name: target.Name, Namespace: target.Namespace, Ref: target.Ref,
+			Cluster: chosenCluster(kube),
 		}
 	}
 	return err
@@ -532,21 +533,30 @@ func clusterTokens(cluster k8s.Cluster) []string {
 // kind/name a flag sends the command elsewhere, and a prompt that named only
 // the namespace asked "Delete Deployment/api in default?" of a delete bound
 // for production.
+//
+// Every flag set is named, not only the first: --server overrides the
+// context's server and --kubeconfig changes which file the context is read
+// from, so "on context 'prod'" alone could name the wrong cluster for a
+// delete bound for --server's.
 func chosenCluster(kube kubectl.Service) string {
 	flagged, ok := kube.(clusterKubectl)
 	if !ok {
 		return ""
 	}
 	cluster := clusterFromArgs(flagged.flags)
+	var named []string
 	for _, chosen := range []struct{ noun, value string }{
 		{"context", cluster.Context}, {"cluster", cluster.Cluster},
 		{"server", cluster.Server}, {"kubeconfig", cluster.Kubeconfig},
 	} {
 		if chosen.value != "" {
-			return " on " + chosen.noun + " '" + chosen.value + "'"
+			named = append(named, chosen.noun+" '"+chosen.value+"'")
 		}
 	}
-	return ""
+	if len(named) == 0 {
+		return ""
+	}
+	return " on " + strings.Join(named, ", ")
 }
 
 // CurrentContext is the context the flags chose, when they chose one by name.
