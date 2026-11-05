@@ -120,6 +120,32 @@ func TestNonProseIsNotReadAsASentence(t *testing.T) {
 	findings(t, "CONTRIBUTING.md", "The colour of a row.\n", 1)
 }
 
+// A release-note bullet is a bold label and a complete sentence. With the
+// label first, the sentence-opening rules read "**" and let
+// "**kind/name targets:** `kx diag …` work" through; they now read the
+// sentence after the label. Controls: the same bullets reworded pass.
+func TestReleaseNoteBulletsAreLabeledSentences(t *testing.T) {
+	for _, tc := range []struct{ item, want string }{
+		{"- A fix to the banner.", "no bold label"},
+		{"- **kind/name targets:** Commands take kind/name.", "label opens in lowercase"},
+		{"- **Other clusters:** the flag sends it elsewhere.", "opens in lowercase"},
+		{"- **Other clusters:** The flag sends it elsewhere", "no closing period"},
+		{"- **Other clusters:** `--context` sends it elsewhere.", "inline code"},
+		{"- **Other clusters:** kx sends it elsewhere.", `lowercase "kx"`},
+	} {
+		got := findings(t, "release-notes/v9.9.9.md", tc.item+"\n", 1)
+		if !strings.Contains(got[0].Message, tc.want) {
+			t.Errorf("%q: finding = %v, want %q", tc.item, got[0], tc.want)
+		}
+	}
+	findings(t, "release-notes/v9.9.9.md",
+		"- **Other clusters:** The `--context` flag sends a kind/name elsewhere.\n"+
+			"- **Plugins for k9s:** Five keys run `kx diag` from inside k9s ([guide](https://example.com)).\n"+
+			"- **Typos reported:** A kind/name that names nothing prints `Deployment/typo was not found.`, and that is all?\n", 0)
+	// README bullets are not release notes, and keep their own shape.
+	findings(t, "README.md", "- one item\n", 0)
+}
+
 func TestHardWrappedReleaseNotes(t *testing.T) {
 	got := findings(t, "release-notes/v9.9.9.md", "A patch that fixes\nthe banner order.\n\nUpgrading asks nothing of you.\n", 1)
 	if got[0].Line != 2 || got[0].Section != "Release notes" {
@@ -128,10 +154,10 @@ func TestHardWrappedReleaseNotes(t *testing.T) {
 	findings(t, "release-notes/v9.9.9.md", "A patch that fixes the banner order.\n\nUpgrading asks nothing of you.\n", 0)
 	// A list is one item per line, not a wrapped paragraph; an item wrapped
 	// onto a second line still is one.
-	findings(t, "release-notes/v9.9.9.md", "Two fixes:\n\n- one\n- two\n1. three\n", 0)
-	got = findings(t, "release-notes/v9.9.9.md", "- one item that\n  wraps\n", 1)
-	if got[0].Line != 2 {
-		t.Errorf("finding = %v, want the wrapped item on line 2", got[0])
+	findings(t, "release-notes/v9.9.9.md", "Two fixes:\n\n- **One:** A fix.\n- **Two:** A fix.\n1. **Three:** A fix.\n", 0)
+	got = findings(t, "release-notes/v9.9.9.md", "- **One:** An item that wraps\n  onto a second line.\n", 2)
+	if got[1].Line != 2 || !strings.Contains(got[1].Message, "hard-wrapped") {
+		t.Errorf("findings = %v, want the wrapped item on line 2", got)
 	}
 	// Consecutive lines are only a wrap in a release note; README prose is
 	// one sentence per line by design.

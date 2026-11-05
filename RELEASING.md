@@ -65,9 +65,12 @@ The bullets are derived rather than written so they cannot advertise something
 that never shipped. The paragraph is written rather than derived because no
 tool can say why a release matters.
 
-Say what changed for someone using kx, and whether upgrading asks anything of
-them. [`release-notes/v0.5.2.md`](release-notes/v0.5.2.md) is the worked
-example — it names the one thing that needed a reinstall.
+Say what changed for someone using kx, and what to change if something
+broke, in the shape STYLE.md's Release notes section gives: a two- or
+three-sentence lead, at most six bullets, and a closing line only when
+something breaks or upgrading needs a step. The
+`kx-release-notes` skill (`.claude/skills/kx-release-notes/SKILL.md`) has the
+worked examples, and every note in `release-notes/` is written in it.
 
 A release that breaks something says so twice. The `## Breaking changes`
 section is derived, from the conventional-commit `!` on a pull request title —
@@ -76,7 +79,7 @@ the title is what puts it there, and marking it after the merge is too late.
 The bullet names the change; the paragraph is where you say what to do about
 it. Bump the minor for one, per "Pick the number" above.
 
-**One line per paragraph — do not hard-wrap it.** GitHub renders a release
+**One line per paragraph or bullet — do not hard-wrap it.** GitHub renders a release
 body with line breaks on, so every newline inside a paragraph becomes a
 literal `<br>` and the text breaks at whatever column it was typed to,
 however wide the reader's window is. The generator copies the paragraph

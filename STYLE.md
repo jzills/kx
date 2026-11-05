@@ -129,7 +129,8 @@ Titles are Conventional Commits, and the release notes are generated from them (
 
 - `type(scope): subject`, lowercase, with no closing period. The scope names the command or area (`yaml`, `cli`, `state`), and several scopes are comma-joined.
 - The subject states the new behavior rather than the act of changing it: `fix(yaml): the separator precedes the banner it comes before`.
-- `feat` becomes a Features bullet, `fix` and `perf` become Fixes bullets, and `chore(deps)`/`build(deps)` become Dependencies bullets. `docs`, `style`, `test`, `refactor`, `ci` and plain `chore` appear only in the commit list.
+- The subject opens with a word, never a flag, a command or "kx": `fix(get): a -o name listing prints kubectl's reply unchanged`, not `fix(get): -o name prints…`. The generator turns each subject into a release-note sentence by capitalizing its first letter and adding a period, and a flag or "kx" can't take the capital.
+- `feat` becomes a Features bullet, `fix` and `perf` become Fixes bullets, and `chore(deps)`/`build(deps)` become Dependencies bullets. `docs`, `style`, `test`, `refactor`, `ci` and plain `chore` are reached only through the release's Full Changelog link.
 - A `!` goes on the **pull request title**, before it merges, whenever an existing command's behavior changes: `fix(state)!: …`. It leads the release's Breaking changes section, and marking it after the merge is too late.
 - Branches are `fix/…`, `feat/…`, `docs/…`, `chore/…`, `test/…` or `style/…`, then a kebab-case description.
 
@@ -146,8 +147,9 @@ Neither carries attribution trailers or session links.
 
 `release-notes/vX.Y.Z.md` is the Highlights section of a release, and you write only that part; see [RELEASING.md](RELEASING.md) for the rest.
 
-- Write one line per paragraph, never hard-wrapped. GitHub turns every newline in a release body into a line break.
+- **Shape:** a lead of two or three sentences, then at most six bullets, one per change a user would notice, then, only when something breaks or needs a step, a **Breaking:** or **After upgrading:** line on what to do. That's about 150 words in all. Each bullet is a capitalized bold label, a colon, and one complete sentence with one example, opening with a capital and ending with a period. The `kx-release-notes` skill has the worked examples.
+- Write one line per paragraph and per bullet, never hard-wrapped. GitHub turns every newline in a release body into a line break.
 - No headings.
-- Write in the second person, for someone using kx, with commands in backticks and concrete before-and-after examples.
+- Write in the second person, for someone using kx, with commands in backticks. Name the new behavior, not the mechanism or history behind it; that belongs in the PRs.
 - Sentences open the way README and site sentences do: never with inline code, and never with a lowercase "kx", possessive included. A paragraph is one line here, so this holds for every sentence in it, not just the first; `tools/voicecheck` reads each one.
-- The last paragraph says what upgrading asks of the reader, even when the answer is nothing.
+- When something breaks or upgrading needs a step, the last line says what to do. When nothing does, there is no closing line: "upgrading asks nothing of you" is filler.
