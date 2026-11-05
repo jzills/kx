@@ -168,7 +168,18 @@ See [completion](https://jzills.github.io/kx/docs/concepts/completion/) for the 
 
 Source: https://jzills.github.io/kx/docs/getting-started/quickstart/
 
-One listing, then five minutes of doing things to it by number.
+Install kx, list something, then five minutes of doing things to it by number.
+
+## Install
+
+The only requirement is `kubectl` on your `PATH`.
+The install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | sh
+```
+
+Homebrew, krew, uv, pipx and a standalone binary are on the [install page](https://jzills.github.io/kx/docs/getting-started/install/).
 
 ## List something
 

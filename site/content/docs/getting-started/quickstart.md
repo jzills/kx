@@ -1,8 +1,19 @@
 ---
 title: Quickstart
-description: One listing, then five minutes of doing things to it by number.
+description: Install kx, list something, then five minutes of doing things to it by number.
 weight: 2
 ---
+
+## Install
+
+The only requirement is `kubectl` on your `PATH`.
+The install script fetches the newest build, checks it against the release's checksums, and installs it without `sudo`:
+
+```bash
+curl -fsSL https://jzills.github.io/kx/install.sh | sh
+```
+
+Homebrew, krew, uv, pipx and a standalone binary are on the [install page](../install/).
 
 ## List something
 

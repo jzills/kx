@@ -10,6 +10,10 @@ baseURL = "https://jzills.github.io/kx/"
 # home page with this alone and every other page as "Page – this", so the
 # tagline closes both.
 title = "kubectl, indexed."
+# No tag or category pages: no page has either, so Hugo's default /tags/ and
+# /categories/ were empty, and listed in the sitemap they were indexed as thin
+# pages.
+disableKinds = ["taxonomy", "term"]
 [languages.en]
   label = "English"
 
@@ -106,36 +110,42 @@ title = "kubectl, indexed."
     default = "dark"
     displayToggle = true
 
-# Documentation leads, then Install, the one landing-page section a reader comes back
-# for. The page's other sections are a scroll away and no longer each take a
-# slot in the bar: a menu of five fragments read as a table of contents,
-# where the tools this site is laid out like name a handful of destinations.
-# "Themes" left earlier too; its palettes are a scroll away on the landing
-# page, and the bar keeps only a light/dark button.
+# The bar holds a first visitor's top tasks, the same on each of the project
+# sites: Docs, Quickstart, Releases, Search, GitHub and the light/dark button.
+# The footer already covers the rest (Get started, Learn, Project).
+# Quickstart replaced Install, which overlapped it: the quickstart opens with
+# the install. Releases is there because kx ships often, and was otherwise
+# linked only from the footer. A menu of the landing page's own sections read
+# as a table of contents, and "Themes" left too; its palettes are a scroll
+# away on the landing page, and the bar keeps only a light/dark button.
 [menu]
   [[menu.main]]
-    name = "Documentation"
+    name = "Docs"
     pageRef = "/docs"
     weight = 1
   [[menu.main]]
-    name = "Install"
-    pageRef = "/#install"
+    name = "Quickstart"
+    pageRef = "/docs/getting-started/quickstart"
     weight = 2
   [[menu.main]]
-    name = "Search"
+    name = "Releases"
+    pageRef = "/releases"
     weight = 3
+  [[menu.main]]
+    name = "Search"
+    weight = 4
     [menu.main.params]
       type = "search"
   [[menu.main]]
     identifier = "github"
     name = "GitHub"
     url = "https://github.com/jzills/kx"
-    weight = 4
+    weight = 5
     [menu.main.params]
       icon = "github"
   # The light/dark button; see params.theme above.
   [[menu.main]]
     name = "Theme"
-    weight = 5
+    weight = 6
     [menu.main.params]
       type = "theme-toggle"
