@@ -106,7 +106,7 @@ kx get pods -n prod -l app=api  # anything else passes through to kubectl
   So is `--context`, `--kubeconfig`, `--cluster` or `--server`, for the cluster, and a listing taken with one prints unnumbered.
 - Listings made with `-A` are indexed too, each row with its own namespace.
 - Known kinds drop the `get` — `kx pods`, `kx deploy -n kube-system` — kubectl's shorthands and your CRDs included.
-- The `--watch`/`-w` flag redraws the table in place rather than appending lines.
+- The `--watch`/`-w` flag redraws the table in place rather than appending lines, and each row keeps its index as the table changes.
 - Tab completion, from `kx completion <shell>`, shows the resource behind each index: `kx describe <TAB>` offers `1  api-7d8f (Pod)`, not a bare number.
 
 See the [indexes guide](https://jzills.github.io/kx/docs/concepts/indexes/) for more.

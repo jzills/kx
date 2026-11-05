@@ -3084,3 +3084,44 @@ func TestOnAgentIndexFiresOnlyForIndexRefsIntoTaggedEntries(t *testing.T) {
 		}
 	})
 }
+
+// ReplaceCurrent overwrites only the entry its caller last wrote. The first
+// replace is the control: without it, a ReplaceCurrent that never replaced
+// anything would pass both refusals below. After it, another listing is
+// pushed (a second terminal's kx get svc), and then the watch's own query is
+// re-run with different rows (a kx get pods there); in neither case may the
+// watch's next save land.
+func TestReplaceCurrentReplacesOnlyItsOwnEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	query := &Query{Resource: "pods", Args: []string{}}
+	first := State{Resources: pods("api"), Namespace: "prod", Query: query, Context: "c"}
+	save(t, service, first)
+
+	second := State{Resources: pods("api", "web"), Namespace: "prod", Query: query, Context: "c"}
+	if replaced, err := service.ReplaceCurrent(first, second); err != nil || !replaced {
+		t.Fatalf("ReplaceCurrent(own entry) = %v, %v; want replaced", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "api,web" {
+		t.Fatalf("current = %v, want api,web", got.Names())
+	}
+
+	services := State{Resources: NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
+		Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"}
+	save(t, service, services)
+	third := State{Resources: pods("api", "web", "worker"), Namespace: "prod", Query: query, Context: "c"}
+	if replaced, err := service.ReplaceCurrent(second, third); err != nil || replaced {
+		t.Fatalf("ReplaceCurrent over another listing = %v, %v; want refused", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "db" {
+		t.Errorf("current = %v, want the svc listing left alone", got.Names())
+	}
+
+	relisted := State{Resources: pods("web", "api"), Namespace: "prod", Query: query, Context: "c"}
+	save(t, service, relisted)
+	if replaced, err := service.ReplaceCurrent(second, third); err != nil || replaced {
+		t.Fatalf("ReplaceCurrent over a re-run of its query = %v, %v; want refused", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "web,api" {
+		t.Errorf("current = %v, want the re-run's rows left alone", got.Names())
+	}
+}

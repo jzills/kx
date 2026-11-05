@@ -387,5 +387,5 @@ func registerFormatFlags(cmd *cobra.Command) {
 // unregistered made a kx feature visible only in the README.
 func registerWatchFlag(cmd *cobra.Command) {
 	cmd.Flags().BoolP("watch", "w", false,
-		"Redraw the listing live as resources change; a watch never completes, so results are not indexed")
+		"Redraw the listing live as resources change, numbering each row as it appears")
 }

@@ -724,6 +724,57 @@ func (s *Service) saveHistory(history History) error {
 	return nil
 }
 
+// ReplaceCurrent overwrites the cursor's entry with next, but only while that
+// entry is still prev, the one the caller last wrote; it reports whether it
+// did. A live `kx get --watch` renumbers as rows arrive and saves each time,
+// and between its saves another terminal can list something else. A plain
+// Save would then push the watch's rows over that listing, so its `kx
+// describe 2` quietly described a pod. Here the watch finds its entry gone
+// and stops writing instead.
+//
+// prev is compared as it reads on disk, encoded, rather than field by field:
+// a listing that repeats the watch's query replaces its entry with different
+// rows, and those rows are what make it someone else's. A slotted kind's
+// slot is replaced on the same condition, since a later `kx ns` may have
+// refreshed it.
+//
+// Nothing is written when the cursor's entry is not prev, when there is no
+// entry, or when the file cannot be read: in each case the listing on disk
+// is not the one the caller numbered.
+func (s *Service) ReplaceCurrent(prev, next State) (bool, error) {
+	prev, next = s.stamp(prev), s.stamp(next)
+	want, err := json.Marshal(prev)
+	if err != nil {
+		return false, err
+	}
+	replaced := false
+	err = s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil || len(history.States) == 0 ||
+			history.Cursor < 0 || history.Cursor >= len(history.States) {
+			return nil
+		}
+		if !sameEncoding(history.States[history.Cursor], want) {
+			return nil
+		}
+		history.States[history.Cursor] = next
+		if kind := soleKind(next); slottedKinds[kind] {
+			if slot, ok := history.Named[kind]; ok && sameEncoding(slot, want) {
+				history.Named[kind] = next
+			}
+		}
+		replaced = true
+		return s.saveHistory(history)
+	})
+	return replaced, err
+}
+
+// sameEncoding reports whether entry encodes to want.
+func sameEncoding(entry State, want []byte) bool {
+	got, err := json.Marshal(entry)
+	return err == nil && string(got) == string(want)
+}
+
 // Save pushes a new entry, truncating any entries ahead of the cursor and
 // trimming the stack to MaxHistory.
 //

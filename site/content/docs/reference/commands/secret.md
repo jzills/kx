@@ -43,7 +43,7 @@ kx secret [OPTIONS] [index]... [kubectl flags]
 | `--no-headers` | Leave out the header row; kx can't number a table without one |
 | `-o, --output string` | Output format, as kubectl takes it; kx numbers only a table |
 | `--sort string` | Sort by the columns shown, before indexing: 'type,-age' sorts by TYPE, then by AGE from oldest to newest |
-| `-w, --watch` | Redraw the listing live as resources change; a watch never completes, so results are not indexed |
+| `-w, --watch` | Redraw the listing live as resources change, numbering each row as it appears |
 | `-y, --yes` | Skip the confirmation prompt for a namespace-wide --decode |
 
 ## Passthrough options

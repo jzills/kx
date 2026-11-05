@@ -159,9 +159,16 @@ The `--watch`/`-w` flag redraws the table live as resources are added, changed a
 kx get pods --watch
 ```
 
-It is display-only.
-A watch never completes, so there is no final listing to number — nothing is indexed and the saved state is left as it was.
-With a non-tabular output format, or with `--no-headers`, kx streams kubectl's own watch output straight through rather than trying to redraw it.
+Each row is numbered the first time it appears and keeps that index while the watch runs.
+A row that changes, or moves under `--sort`, is still the number it was.
+A deleted row's index is never given to another resource, and a Pod recreated under the same name gets its old index back.
+
+The watch saves its rows as your current listing each time it numbers a new one, so `kx describe 3` in another terminal reaches the row drawn as 3.
+If you list something else in the meantime, that listing stays current: the watch stops saving, drops its numbers, and its footer says a newer listing replaced them.
+If an index names a row that has since been deleted, the listing kx refreshes with is the plain `kx get`, without `--watch`.
+
+A watch with `--context` or another cluster flag is drawn unnumbered, as that cluster's listings are.
+With a non-tabular output format, or with `--no-headers`, kx streams kubectl's own watch output straight through rather than trying to redraw it, and numbers nothing.
 
 ## When an index has gone stale
 
