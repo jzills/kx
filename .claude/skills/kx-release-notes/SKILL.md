@@ -34,7 +34,7 @@ Someone scanning a release page reads the opening and the bullets, and skips any
 - **Flag combinations:** how a flag behaves beside `--json`, `--html` and `--fail-on`. Mention one only when it is the change.
 - **Anything the derived sections already say:** a bullet that restates one PR title adds nothing. Fold small fixes into one bullet, or leave them to the Fixes list.
 - **Internal names:** functions, files, field names. A JSON field a script reads is fine.
-- **Our own vocabulary:** words from code review rather than from the docs: a "stale" index, a "relist", "provenance", "spending" an index, the "shape" a listing was taken in. Name what the user sees instead: a deleted resource, the line kx prints. Index, mark and listing are the docs' own words and stay.
+- **Our own vocabulary:** words from code review rather than from the docs: a "stale" index, a "relist", "provenance", the "shape" a listing was taken in. Name what the user sees instead: a deleted resource, the line kx prints. Index, mark and listing are the docs' own words and stay, and so is "spending" an index, which the docs use for a mark too.
 
 ## Format rules (`tools/voicecheck` enforces them)
 
