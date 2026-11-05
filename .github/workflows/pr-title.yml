@@ -37,16 +37,10 @@ jobs:
       # Passed through env, never interpolated into the script: a title is
       # whatever its author typed.
       #
-      # A squash merge of a one-commit PR keeps that commit's subject rather
-      # than the title (the repository's COMMIT_OR_PR_TITLE setting), so the
-      # subject is checked too when there is only one.
+      # Only the title is checked. The repository squash-merges with the PR
+      # title (its PR_TITLE setting) whatever the commits say, and the
+      # develop-required-checks ruleset makes this check required.
       - name: Check the title
         env:
           TITLE: ${{ github.event.pull_request.title }}
-          COMMITS: ${{ github.event.pull_request.commits }}
-        run: |
-          if [ "$COMMITS" = "1" ]; then
-            go run ./tools/check-pr-title "$TITLE" "$(git log -1 --format=%s HEAD)"
-          else
-            go run ./tools/check-pr-title "$TITLE"
-          fi
+        run: go run ./tools/check-pr-title "$TITLE"

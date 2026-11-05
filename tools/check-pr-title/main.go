@@ -3,9 +3,8 @@
 //
 //	go run ./tools/check-pr-title "fix(get): the -o name listing prints kubectl's reply"
 //
-// Each argument is a title. pr-title.yml passes the PR's title, and the
-// subject of its one commit when it has one, since a squash merge of a
-// single-commit PR keeps that commit's subject rather than the title.
+// Each argument is a title. pr-title.yml passes the PR's title, which is
+// what a squash merge into develop keeps as the commit subject.
 package main
 
 import (
