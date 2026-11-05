@@ -250,7 +250,7 @@ func withoutCommitList(generated string) string {
 func sentence(subject, ref string) string {
 	subject = namedOpening(codeFlags(subject))
 	first, size := utf8.DecodeRuneInString(subject)
-	if unicode.IsLower(first) && !kxFirst.MatchString(subject) {
+	if unicode.IsLower(first) && !lowercaseName.MatchString(subject) {
 		subject = string(unicode.ToUpper(first)) + subject[size:]
 	}
 	subject = strings.TrimRight(subject, ".")
@@ -291,8 +291,12 @@ func namedOpening(subject string) string {
 	return subject
 }
 
-// kxFirst is a subject whose first word is kx, which stays lowercase.
-var kxFirst = regexp.MustCompile(`^kx($|[\s'’,.:;])`)
+// lowercaseName is a subject whose first word is a name written lowercase:
+// kx or kubectl, possessive included, or an identifier such as
+// list_resources. Capitalized, each is a different word, Kubectl or
+// List_resources, so it is left as written; the title check refuses a title
+// that opens with one.
+var lowercaseName = regexp.MustCompile(`^(kx|kubectl)($|[\s'’,.:;])|^[a-z0-9]+_[a-z0-9_]+\b`)
 
 // spaceHeadings puts a blank line after each heading in GitHub's generated
 // block that runs straight into its list, as "## What's Changed" does. Every

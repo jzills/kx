@@ -19,6 +19,11 @@ func TestTitleProblems(t *testing.T) {
 		{"fix(get): the `-o name` listing prints kubectl's reply", "has backticks"},
 		{"fix(get): the -o name listing prints kubectl's reply.", "ends with a period"},
 		{"Release v0.12.0", "isn't 'type(scope): subject'"},
+		{"fix(get): kubectl's path flags offer files", "opens with 'kubectl'"},
+		{"feat(mcp): list_resources takes lastRun", "opens with 'list_resources'"},
+		{"fix: ten findings from the fourth v0.7.0..develop review", "names a review"},
+		{"fix: two regressions and two nits from #444 and #445", "names a review"},
+		{"fix(cli): eight bugs from the v0.7.0..develop pass", "names a review"},
 	} {
 		got := TitleProblems(tc.title)
 		if len(got) != 1 || !strings.Contains(got[0], tc.want) {
@@ -31,6 +36,10 @@ func TestTitleProblems(t *testing.T) {
 		"fix(get)!: a -o name listing prints kubectl's reply",
 		"chore(deps): bump k8s.io/client-go from 0.37.1 to 0.37.2",
 		"docs: kxlint is mentioned",
+		"fix(get): path flags from kubectl offer files",
+		"feat(mcp): the list_resources tool takes lastRun",
+		"docs(release): the review pass on every release's Highlights",
+		"ci(review): findings are posted as comments",
 	} {
 		if got := TitleProblems(title); len(got) != 0 {
 			t.Errorf("%q: problems = %q, want none", title, got)
