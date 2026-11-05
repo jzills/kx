@@ -68,20 +68,20 @@ func TestWatchRowsKeysByNamespaceAndNameForAllNamespaces(t *testing.T) {
 }
 
 func TestWatchNamespaceAllNamespaces(t *testing.T) {
-	if got := watchNamespace([]string{"-A"}, &fakeKubectl{}); got != "all namespaces" {
+	if got := watchNamespace("pods", []string{"-A"}, "", &fakeKubectl{}); got != "all namespaces" {
 		t.Errorf("watchNamespace = %q, want %q", got, "all namespaces")
 	}
 }
 
 func TestWatchNamespaceExplicit(t *testing.T) {
-	if got := watchNamespace([]string{"-n", "staging"}, &fakeKubectl{}); got != "staging" {
+	if got := watchNamespace("pods", []string{"-n", "staging"}, "", &fakeKubectl{}); got != "staging" {
 		t.Errorf("watchNamespace = %q, want %q", got, "staging")
 	}
 }
 
 func TestWatchNamespaceFallsBackToCurrentNamespace(t *testing.T) {
 	kube := &fakeKubectl{namespace: "prod"}
-	if got := watchNamespace(nil, kube); got != "prod" {
+	if got := watchNamespace("pods", nil, "", kube); got != "prod" {
 		t.Errorf("watchNamespace = %q, want %q", got, "prod")
 	}
 }
@@ -102,7 +102,7 @@ func TestWatchNamespaceFromAnotherCluster(t *testing.T) {
 		{[]string{"--context=b", "-n", "staging"}, "staging"},
 		{[]string{"--context=b", "-A"}, "all namespaces"},
 	} {
-		if got := watchNamespace(tc.args, kube); got != tc.want {
+		if got := watchNamespace("pods", tc.args, "", kube); got != tc.want {
 			t.Errorf("watchNamespace(%q) = %q, want %q", tc.args, got, tc.want)
 		}
 	}

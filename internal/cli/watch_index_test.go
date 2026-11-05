@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,29 +144,50 @@ func TestWatchSavesItsNumberedRowsAsTheListing(t *testing.T) {
 	}
 }
 
-// Once another terminal lists something else, the watch stops saving and
-// says so, rather than push its rows back over that listing: kx describe 1
-// there would otherwise describe the watch's pod instead of the Service
-// listed last. The uninterrupted watch above is the control, saving all four.
-func TestWatchStopsSavingOnceAnotherListingIsCurrent(t *testing.T) {
-	kube := interleavedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod", watchLines: churn}, at: 3}
+// manualTicks replaces the watch's once-a-second ticker with one the test
+// drives: the returned func ticks the running watch, synchronously, so a
+// test can place a tick between two events exactly.
+func manualTicks(t *testing.T) func() {
+	t.Helper()
+	var tick func()
+	previous := watchTicker
+	watchTicker = func(f func()) func() { tick = f; return func() {} }
+	t.Cleanup(func() { watchTicker = previous })
+	return func() { tick() }
+}
+
+// interleavedWatch runs kx get pods -w over lines on a terminal, calling
+// between after the line at position at with the watch's services and its
+// tick, and returns the frames drawn and the services.
+func interleavedWatch(t *testing.T, lines []string, at int, between func(Services, func())) ([]string, Services) {
+	t.Helper()
+	tick := manualTicks(t)
+	kube := interleavedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod", watchLines: lines}, at: at}
 	services := switchServices(t, kube)
-	kube.between = func() {
-		if err := services.State.Save(state.State{
-			Resources: state.NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
-			Query: &state.Query{Resource: "svc", Args: []string{}},
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	kube.between = func() { between(services, tick) }
 	services.Kubectl = kube
 	var term terminalBuffer
 	render.SetOutput(&term, &bytes.Buffer{}, "github-dark")
 	if err := executeArgv(newGetCommand(services), []string{"pods", "-w"}); err != nil {
 		t.Fatal(err)
 	}
-	frames := framesOf(term.String())
+	return framesOf(term.String()), services
+}
 
+// listServices saves a Service listing, as kx get svc in another terminal.
+func listServices(t *testing.T, services Services) {
+	t.Helper()
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
+		Query: &state.Query{Resource: "svc", Args: []string{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertServicesCurrent fails unless the Service listing is still current.
+func assertServicesCurrent(t *testing.T, services Services) {
+	t.Helper()
 	entry, err := services.State.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -171,12 +195,160 @@ func TestWatchStopsSavingOnceAnotherListingIsCurrent(t *testing.T) {
 	if got := strings.Join(entry.Names(), ","); got != "db" || entry.Query.Resource != "svc" {
 		t.Errorf("current listing %s of %s, want the svc listing left alone", got, entry.Query.Resource)
 	}
+}
+
+// Once another terminal lists something else, the watch's next save does not
+// land, and the watch says so and drops its numbers: kx describe 1 there
+// would otherwise describe the watch's pod instead of the Service listed
+// last. The uninterrupted watch (TestWatchSavesItsNumberedRowsAsTheListing)
+// is the control, saving all four.
+func TestWatchStopsSavingOnceAnotherListingIsCurrent(t *testing.T) {
+	frames, services := interleavedWatch(t, churn, 3, func(services Services, tick func()) {
+		tick()
+		listServices(t, services)
+	})
+	assertServicesCurrent(t, services)
 	last := frames[len(frames)-1]
 	if !strings.Contains(last, supersededWatchNote) {
 		t.Errorf("last frame has no %q note:\n%s", supersededWatchNote, last)
 	}
 	if got := numbersIn(last); len(got) != 0 {
 		t.Errorf("last frame still numbers rows %v:\n%s", got, last)
+	}
+}
+
+// A quiet watch notices too: after the other listing, its rows only change
+// state, so no save ever runs, and only the tick's check can drop numbers
+// that now resolve against the Service listing. The frame asserted on is
+// the one the MODIFIED line draws, before the watch ends.
+func TestQuietWatchDropsItsNumbersOnceAnotherListingIsCurrent(t *testing.T) {
+	lines := []string{
+		watchHeader,
+		"ADDED      api    1/1     Running            2          1d",
+		"ADDED      db     0/1     CrashLoopBackOff   14         1d",
+		"MODIFIED   api    1/1     Running            3          1d",
+	}
+	frames, services := interleavedWatch(t, lines, 2, func(services Services, tick func()) {
+		tick()
+		listServices(t, services)
+		tick()
+	})
+	assertServicesCurrent(t, services)
+	modified := frames[len(frames)-1]
+	if !regexp.MustCompile(`api\s+1/1\s+Running\s+3\s`).MatchString(modified) {
+		t.Fatalf("last frame is not the MODIFIED one:\n%s", modified)
+	}
+	if !strings.Contains(modified, supersededWatchNote) || len(numbersIn(modified)) != 0 {
+		t.Errorf("MODIFIED frame still numbers its rows:\n%s", modified)
+	}
+}
+
+// A re-run of the watch's own query — the refresh a deleted row's index
+// triggers, or kx get pods in another terminal — renumbers the rows, and the
+// note names that rather than "a newer listing".
+func TestWatchNamesARerunOfItsOwnListing(t *testing.T) {
+	frames, _ := interleavedWatch(t, churn[:3], 2, func(services Services, tick func()) {
+		tick()
+		if err := services.State.Save(state.State{
+			Resources: state.NewResources([]string{"db", "api"}, kinds.Pod), Namespace: "prod",
+			Query: &state.Query{Resource: "pods", Args: []string{}}, Context: "test-context",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		tick()
+	})
+	if last := frames[len(frames)-1]; !strings.Contains(last, relistedWatchNote) {
+		t.Errorf("last frame has no %q note:\n%s", relistedWatchNote, last)
+	}
+}
+
+// A burst of new rows is saved on the tick after it, in one write, not one
+// write per row: after three rows and no tick nothing is saved yet. The tick
+// is the control — after it the burst must be there, whole.
+func TestWatchSavesABurstOfRowsOnTheNextTick(t *testing.T) {
+	interleavedWatch(t, churn[:5], 3, func(services Services, tick func()) {
+		if _, err := services.State.Load(); !errors.Is(err, state.ErrNoState) {
+			t.Errorf("rows were saved before a tick: %v", err)
+		}
+		tick()
+		entry, err := services.State.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(entry.Names(), ","); got != "api,db,web" {
+			t.Errorf("tick saved %s, want the burst api,db,web", got)
+		}
+	})
+}
+
+// A state file kx cannot write ends the numbering, not the watch: before
+// watches were numbered one never wrote it. The watch still draws every row.
+func TestWatchKeepsWatchingWhenItCannotSave(t *testing.T) {
+	tick := manualTicks(t)
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kube := interleavedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod", watchLines: churn[:4]}, at: 1}
+	kube.between = func() { tick() }
+	services := switchServices(t, kube)
+	services.State.Path = filepath.Join(blocker, "state.json")
+	var term terminalBuffer
+	render.SetOutput(&term, &bytes.Buffer{}, "github-dark")
+	if err := executeArgv(newGetCommand(services), []string{"pods", "-w"}); err != nil {
+		t.Fatalf("watch ended on the failed save: %v", err)
+	}
+	frames := framesOf(term.String())
+	last := frames[len(frames)-1]
+	if !strings.Contains(last, unsavedWatchNote) || !strings.Contains(last, "web ") || len(numbersIn(last)) != 0 {
+		t.Errorf("last frame should draw every row unnumbered under %q:\n%s", unsavedWatchNote, last)
+	}
+}
+
+// Past maxWatchIndexes a new row is drawn without a number, and no number
+// already given changes: the saved listing stops growing.
+func TestWatchStopsNumberingAtItsLimit(t *testing.T) {
+	previous := maxWatchIndexes
+	maxWatchIndexes = 2
+	t.Cleanup(func() { maxWatchIndexes = previous })
+	frames, services := watchTerminal(t, &fakeKubectl{namespace: "prod", watchLines: churn[:4]}, "pods", "-w")
+	last := frames[len(frames)-1]
+	if got, want := numbersIn(last), map[string]string{"api": "1", "db": "2"}; !maps.Equal(got, want) {
+		t.Errorf("numbers %v, want %v:\n%s", got, want, last)
+	}
+	if !strings.Contains(last, "web ") || !strings.Contains(last, fullWatchNote(2)) {
+		t.Errorf("last frame should draw web unnumbered under %q:\n%s", fullWatchNote(2), last)
+	}
+	if entry, err := services.State.Load(); err != nil || strings.Join(entry.Names(), ",") != "api,db" {
+		t.Errorf("saved %v (%v), want api,db", entry.Names(), err)
+	}
+}
+
+// A watch of indexes saves its listing as kx get of them does: under the
+// listing's namespace, with no -n the user never typed in the query.
+func TestWatchOfIndexesKeepsTheScopeOutOfItsQuery(t *testing.T) {
+	kube := &fakeKubectl{namespace: "default", watchLines: churn[:2]}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"api"}, kinds.Pod), Namespace: "prod",
+		Query: &state.Query{Resource: "pods", Args: []string{"-n", "prod"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var term terminalBuffer
+	render.SetOutput(&term, &bytes.Buffer{}, "github-dark")
+	if err := executeArgv(newGetCommand(services), []string{"pods", "1", "-w"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(kube.watchArgs, "prod") {
+		t.Fatalf("kubectl watched %v, want it under -n prod", kube.watchArgs)
+	}
+	entry, err := services.State.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Namespace != "prod" || slices.Contains(entry.Query.Args, "-n") {
+		t.Errorf("saved namespace %q args %v, want prod with no -n", entry.Namespace, entry.Query.Args)
 	}
 }
 
