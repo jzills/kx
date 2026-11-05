@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -192,29 +193,28 @@ func watchNamespace(resource string, extra []string, scope string, kube kubectl.
 }
 
 // The standing notes under a live table, drawn for as long as the watch
-// runs, each a fact and then what the screen is doing. watchNote is the one
-// off a terminal, where nothing is drawn or numbered, and numberedWatchNote
-// the one while the rows' indexes are the ones kx resolves. The rest say why
-// the numbers went: another listing became current, the same listing ran
-// again — a refresh after a deleted row's index was used, or a kx get in
-// another terminal — or the listing could not be saved at all.
+// runs, each a fact and then what the screen is doing, short enough to fit
+// an 80-column terminal on one line. watchNote is the one off a terminal,
+// where nothing is drawn or numbered, and numberedWatchNote the one while
+// the rows' indexes are the ones kx resolves. The rest say why the numbers
+// went: another listing became current; the same listing ran again — a
+// refresh after a deleted row's index was used, or a kx get in another
+// terminal; the saved listings were cleared, by kx state drop --all or a
+// schema reset; or the state file could not be written or read.
 const (
-	watchNote           = "watches can't be indexed — showing a live view; press Ctrl-C to stop"
-	numberedWatchNote   = "rows keep their indexes as they change — showing a live view; press Ctrl-C to stop"
-	supersededWatchNote = "a newer listing replaced this watch's indexes — showing a live view; press Ctrl-C to stop"
-	relistedWatchNote   = "the same listing ran again and renumbered these rows — showing a live view; press Ctrl-C to stop"
-	unsavedWatchNote    = "this watch's indexes couldn't be saved — showing a live view; press Ctrl-C to stop"
+	watchNote             = "watches can't be indexed — showing a live view; press Ctrl-C to stop"
+	numberedWatchNote     = "rows keep their indexes — showing a live view; press Ctrl-C to stop"
+	supersededWatchNote   = "another listing is now current — showing a live view; press Ctrl-C to stop"
+	relistedWatchNote     = "a rerun renumbered these rows — showing a live view; press Ctrl-C to stop"
+	clearedWatchNote      = "the saved listings were cleared — showing a live view; press Ctrl-C to stop"
+	unkeptWatchNote       = "these indexes couldn't be kept — showing a live view; press Ctrl-C to stop"
+	crossClusterWatchNote = "another cluster isn't indexed — showing a live view; press Ctrl-C to stop"
 )
 
-// crossClusterWatchNote is the note under a watch of another cluster, which
-// kx draws but never numbers, as it never numbers that cluster's listing.
-func crossClusterWatchNote(flag string) string {
-	return "watches with '" + flag + "' can't be indexed — showing a live view; press Ctrl-C to stop"
-}
-
-// fullWatchNote is the note once a watch has numbered maxWatchIndexes rows.
+// fullWatchNote is the note once a watch has numbered n rows, the most it
+// numbers (maxWatchIndexes).
 func fullWatchNote(n int) string {
-	return fmt.Sprintf("this watch numbered %d rows, the most it keeps — new rows are unnumbered; press Ctrl-C to stop", n)
+	return fmt.Sprintf("rows past %d aren't indexed — showing a live view; press Ctrl-C to stop", n)
 }
 
 // maxWatchIndexes is the most rows a watch numbers. A deleted row keeps its
@@ -230,22 +230,33 @@ var maxWatchIndexes = 1000
 // notices that another listing has replaced it — a watch whose rows only
 // change state otherwise has no event to notice it on. A variable so a test
 // can tick the watch itself, between two of its events.
+//
+// stop returns only once no tick is running or will run, so nothing is drawn
+// or saved after the watch has returned.
 var watchTicker = func(tick func()) (stop func()) {
 	ticker := time.NewTicker(time.Second)
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		for {
 			select {
-			case <-ticker.C:
-				tick()
 			case <-done:
 				return
+			case <-ticker.C:
+				select {
+				case <-done:
+					return
+				default:
+					tick()
+				}
 			}
 		}
 	}()
 	return func() {
 		ticker.Stop()
 		close(done)
+		<-exited
 	}
 }
 
@@ -301,8 +312,12 @@ func (w *watchListing) tick(headers []string, entries []index.Entry) (ended bool
 	if w.dirty {
 		w.save(headers, entries)
 	} else if w.saved != nil {
-		if current, err := w.state.Load(); err != nil || !sameEncoding(current, *w.saved) {
-			w.end(current)
+		current, err := w.state.IsCurrent(*w.saved)
+		switch {
+		case err != nil:
+			w.fail(err)
+		case !current:
+			w.end()
 		}
 	}
 	return w.ended != ""
@@ -317,7 +332,7 @@ func (w *watchListing) save(headers []string, entries []index.Entry) {
 	w.dirty = false
 	if w.saved == nil {
 		if err := w.state.Save(next); err != nil {
-			w.ended = unsavedWatchNote
+			w.fail(err)
 			return
 		}
 		w.saved = &next
@@ -326,32 +341,36 @@ func (w *watchListing) save(headers []string, entries []index.Entry) {
 	replaced, err := w.state.ReplaceCurrent(*w.saved, next)
 	switch {
 	case err != nil:
-		w.ended = unsavedWatchNote
+		w.fail(err)
 	case !replaced:
-		current, _ := w.state.Load()
-		w.end(current)
+		w.end()
 	default:
 		w.saved = &next
 	}
 }
 
-// end stops the numbering because current replaced the watch's entry, naming
-// a re-run of the watch's own query apart from another listing.
-func (w *watchListing) end(current state.State) {
-	w.ended = supersededWatchNote
-	if current.Query != nil && sameEncoding(*current.Query, *w.saved.Query) {
-		w.ended = relistedWatchNote
+// fail stops the numbering because the state file could not be used: gone
+// or reset, it says the listings were cleared, which is not another listing
+// taking over; anything else, that the indexes could not be kept.
+func (w *watchListing) fail(err error) {
+	w.ended = unkeptWatchNote
+	if errors.Is(err, state.ErrNoState) || errors.Is(err, state.ErrSchemaChanged) {
+		w.ended = clearedWatchNote
 	}
 }
 
-// sameEncoding reports whether a and b encode alike, as they read on disk.
-func sameEncoding[T any](a, b T) bool {
-	left, err := json.Marshal(a)
+// end stops the numbering because another entry replaced the watch's,
+// naming a re-run of the watch's own query apart from another listing.
+func (w *watchListing) end() {
+	w.ended = supersededWatchNote
+	current, err := w.state.Load()
 	if err != nil {
-		return false
+		w.fail(err)
+		return
 	}
-	right, err := json.Marshal(b)
-	return err == nil && string(left) == string(right)
+	if current.Query != nil && reflect.DeepEqual(*current.Query, *w.saved.Query) {
+		w.ended = relistedWatchNote
+	}
 }
 
 // watchSession is one live watch: the rows, the listing it saves, and the
@@ -498,9 +517,9 @@ func runWatch(services Services, resource string, extra []string, scope, match, 
 	if !render.Redrawing() {
 		render.Caption(watchNote)
 	}
-	switch flag := clusterFlagIn(extra); {
-	case flag != "":
-		session.footer = crossClusterWatchNote(flag)
+	switch {
+	case clusterFlagIn(extra) != "":
+		session.footer = crossClusterWatchNote
 	case render.Redrawing():
 		session.listing = newWatchListing(services, resource, match, sortSpec, scope, extra)
 		stop := watchTicker(session.tick)

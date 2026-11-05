@@ -416,15 +416,15 @@ func enableNameFlex(headers []string, columns []Column) {
 func (r *Renderer) RedrawTable(
 	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
 ) int {
-	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), footer, captionParts...)
+	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), r.width(), footer, captionParts...)
 }
 
 // redrawTable is RedrawTable with the terminal check injected, the same seam
 // status() uses (internal/render/status.go:45) so this is testable without a
 // real terminal.
 func (r *Renderer) redrawTable(
-	headers []string, rows [][]string, previousLines int, enabled bool,
-	footer string, captionParts ...string,
+	headers []string, rows [][]string, previousLines int, enabled bool, termWidth int,
+	footer string, caption ...string,
 ) int {
 	if !enabled {
 		return 0
@@ -434,14 +434,29 @@ func (r *Renderer) redrawTable(
 	}
 	columns, cells := styledColumnsAndCells(headers, rows)
 	enableNameFlex(headers, columns)
-	r.Caption(captionParts...)
+	r.Caption(caption...)
 	r.Table(columns, cells)
-	lines := 2 + len(cells) // caption line + header line + one per body row
+	// The header and each row fit the width (enableNameFlex). The caption
+	// and the footer are prose and wrap, and the next redraw moves the
+	// cursor up by this count, so each counts the lines it takes: counted as
+	// one, a footer wider than the terminal left a line of every frame on
+	// screen.
+	lines := wrappedLines(strings.Join(captionParts(caption...), " · "), termWidth) + 1 + len(cells)
 	if footer != "" {
 		r.Caption(footer)
-		lines++
+		lines += wrappedLines(footer, termWidth)
 	}
 	return lines
+}
+
+// wrappedLines is how many terminal lines text takes at width columns: at
+// least one, since an empty line is still a line.
+func wrappedLines(text string, columns int) int {
+	cells := width(text)
+	if columns <= 0 || cells <= columns {
+		return 1
+	}
+	return (cells + columns - 1) / columns
 }
 
 // RedrawTable is the package-level wrapper, matching every other render entry point.

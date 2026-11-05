@@ -3125,3 +3125,21 @@ func TestReplaceCurrentReplacesOnlyItsOwnEntry(t *testing.T) {
 		t.Errorf("current = %v, want the re-run's rows left alone", got.Names())
 	}
 }
+
+// IsCurrent compares the cursor's entry as it was written, not as Load
+// returns it: Load backfills an empty namespace with "default", and compared
+// that way an entry saved with none never matched itself, so a watch would
+// have dropped its numbers on its first quiet tick. The listing pushed after
+// is the control: IsCurrent must turn false.
+func TestIsCurrentComparesTheEntryAsWritten(t *testing.T) {
+	service := newTestService(t, 10)
+	entry := State{Resources: pods("api"), Query: &Query{Resource: "pods", Args: []string{}}, Context: "c"}
+	save(t, service, entry)
+	if current, err := service.IsCurrent(entry); err != nil || !current {
+		t.Fatalf("IsCurrent(own entry) = %v, %v; want true", current, err)
+	}
+	save(t, service, State{Resources: pods("web"), Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"})
+	if current, err := service.IsCurrent(entry); err != nil || current {
+		t.Errorf("IsCurrent after another listing = %v, %v; want false", current, err)
+	}
+}

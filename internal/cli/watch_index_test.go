@@ -9,7 +9,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/kinds"
 	"github.com/jzills/kx/internal/kubectl"
@@ -300,8 +303,8 @@ func TestWatchKeepsWatchingWhenItCannotSave(t *testing.T) {
 	}
 	frames := framesOf(term.String())
 	last := frames[len(frames)-1]
-	if !strings.Contains(last, unsavedWatchNote) || !strings.Contains(last, "web ") || len(numbersIn(last)) != 0 {
-		t.Errorf("last frame should draw every row unnumbered under %q:\n%s", unsavedWatchNote, last)
+	if !strings.Contains(last, unkeptWatchNote) || !strings.Contains(last, "web ") || len(numbersIn(last)) != 0 {
+		t.Errorf("last frame should draw every row unnumbered under %q:\n%s", unkeptWatchNote, last)
 	}
 }
 
@@ -365,7 +368,7 @@ func TestWatchSavesNothingItDoesNotNumber(t *testing.T) {
 	}{
 		{"terminal", true, []string{"pods", "-w"}, true, numberedWatchNote},
 		{"off a terminal", false, []string{"pods", "-w"}, false, watchNote},
-		{"another cluster", true, []string{"pods", "-w", "--context=b"}, false, crossClusterWatchNote("--context")},
+		{"another cluster", true, []string{"pods", "-w", "--context=b"}, false, crossClusterWatchNote},
 	} {
 		services := switchServices(t, &fakeKubectl{namespace: "prod", watchLines: churn[:3]})
 		var out bytes.Buffer
@@ -392,5 +395,63 @@ func TestWatchSavesNothingItDoesNotNumber(t *testing.T) {
 		if !strings.Contains(out.String(), tc.note) {
 			t.Errorf("%s: output has no %q:\n%s", tc.name, tc.note, out.String())
 		}
+	}
+}
+
+// kx state drop --all in another terminal clears the listings; that is not
+// another listing replacing the watch's, and the note says which it was.
+// The control is TestQuietWatchDropsItsNumbersOnceAnotherListingIsCurrent,
+// where a listing did replace it.
+func TestWatchSaysWhenTheSavedListingsWereCleared(t *testing.T) {
+	frames, _ := interleavedWatch(t, churn[:4], 2, func(services Services, tick func()) {
+		tick()
+		if err := os.Remove(services.State.Path); err != nil {
+			t.Fatal(err)
+		}
+		tick()
+	})
+	if last := frames[len(frames)-1]; !strings.Contains(last, clearedWatchNote) || len(numbersIn(last)) != 0 {
+		t.Errorf("last frame should drop its numbers under %q:\n%s", clearedWatchNote, last)
+	}
+}
+
+// Every footer a watch draws fits an 80-column terminal on one line, with the column after it to spare: some terminals wrap a line that fills the width exactly. The
+// redraw counts a wrapped footer's lines too (render), but a footer that
+// wraps at the commonest width is still one that reads badly.
+func TestWatchFootersFitEightyColumns(t *testing.T) {
+	for _, note := range []string{
+		watchNote, numberedWatchNote, supersededWatchNote, relistedWatchNote,
+		clearedWatchNote, unkeptWatchNote, crossClusterWatchNote, fullWatchNote(maxWatchIndexes),
+	} {
+		if n := utf8.RuneCountInString(note); n > 79 {
+			t.Errorf("%d columns: %q", n, note)
+		}
+	}
+}
+
+// Stopping the ticker waits for a tick already running, so no tick draws or
+// saves after the watch has returned. The real ticker, so this waits about a
+// second for its first tick. The control is the tick being released: stop
+// must then return.
+func TestWatchTickerStopWaitsForARunningTick(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	stop := watchTicker(func() {
+		once.Do(func() { close(entered) })
+		<-release
+	})
+	<-entered
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("stop returned while a tick was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop never returned after the tick finished")
 	}
 }

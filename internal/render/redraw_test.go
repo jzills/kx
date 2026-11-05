@@ -14,7 +14,7 @@ func TestRedrawTableWritesCaptionAndTable(t *testing.T) {
 
 	headers := []string{"NAME", "STATUS"}
 	rows := [][]string{{"nginx", "Running"}}
-	lines := r.redrawTable(headers, rows, 0, true, "", "Pods", "prod", "watching")
+	lines := r.redrawTable(headers, rows, 0, true, 80, "", "Pods", "prod", "watching")
 
 	got := out.String()
 	if !strings.Contains(got, "Pods · prod · watching") {
@@ -33,9 +33,9 @@ func TestRedrawTableClearsPreviousFrame(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, "")
+	r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, 80, "")
 	out.Reset()
-	r.redrawTable([]string{"NAME"}, [][]string{{"b"}}, 2, true, "")
+	r.redrawTable([]string{"NAME"}, [][]string{{"b"}}, 2, true, 80, "")
 
 	got := out.String()
 	if !strings.HasPrefix(got, "\x1b[2A\x1b[J") {
@@ -47,7 +47,7 @@ func TestRedrawTableNoopOffTerminal(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, false, "")
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, false, 80, "")
 
 	if out.Len() != 0 {
 		t.Errorf("output = %q, want nothing written when disabled", out.String())
@@ -91,7 +91,7 @@ func TestRedrawTableDrawsTheFooterUnderTheTable(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true,
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true, 80,
 		"press Ctrl-C to stop", "Pods", "prod", "watching")
 
 	got := out.String()
@@ -116,9 +116,25 @@ func TestRedrawTableWithoutAFooterCountsOnlyTheTable(t *testing.T) {
 	var out bytes.Buffer
 	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
 
-	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true, "", "Pods", "prod")
+	lines := r.redrawTable([]string{"NAME"}, [][]string{{"nginx"}}, 0, true, 80, "", "Pods", "prod")
 
 	if lines != 3 {
 		t.Errorf("lines = %d, want 3 (caption + header + row)", lines)
+	}
+}
+
+// A footer wider than the terminal wraps, and the next redraw moves the
+// cursor up by the count returned, so the count includes each line it
+// wraps onto: counted as one, every frame left a line of the last on
+// screen. The same footer at a width it fits is the control.
+func TestRedrawTableCountsTheLinesAWrappedFooterTakes(t *testing.T) {
+	var out bytes.Buffer
+	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
+	footer := strings.Repeat("x", 100)
+	if lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, 120, footer, "Pods"); lines != 4 {
+		t.Errorf("at 120 columns: lines = %d, want 4 (caption, header, row, footer)", lines)
+	}
+	if lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, 80, footer, "Pods"); lines != 5 {
+		t.Errorf("at 80 columns: lines = %d, want 5, the footer taking two", lines)
 	}
 }
