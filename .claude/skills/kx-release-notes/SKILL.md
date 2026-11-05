@@ -88,7 +88,7 @@ Pressing TAB after a descending sort key, as in `kx get pods --sort -re<TAB>`, n
 A patch that breaks a script (`release-notes/v0.9.1.md`):
 
 ```markdown
-A patch for two defects in output a program reads, both found while checking v0.9.0's notes against a real cluster.
+A patch for two defects in output a program reads.
 
 - **No trailing blank line:** The output of `kx get pods -o json` now matches `kubectl get pods -o json` byte for byte.
 - **Valid JSON for several manifests:** Piping `kx yaml 1 2 -o json` to `jq` reads one List instead of failing after the first object.
