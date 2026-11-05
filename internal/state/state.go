@@ -724,6 +724,88 @@ func (s *Service) saveHistory(history History) error {
 	return nil
 }
 
+// ReplaceCurrent overwrites the cursor's entry with next, but only while that
+// entry is still prev, the one the caller last wrote; it reports whether it
+// did. A live `kx get --watch` renumbers as rows arrive and saves each time,
+// and between its saves another terminal can list something else. A plain
+// Save would then push the watch's rows over that listing, so its `kx
+// describe 2` quietly described a pod. Here the watch finds its entry gone
+// and stops writing instead.
+//
+// Whether the entry is still prev is IsCurrent's rule (holds). A slotted
+// kind's slot is replaced on the same condition, since a later `kx ns` may
+// have refreshed it.
+//
+// Nothing is written when the cursor's entry is not prev, when there is no
+// entry, or when the file cannot be read: in each case the listing on disk
+// is not the one the caller numbered.
+func (s *Service) ReplaceCurrent(prev, next State) (bool, error) {
+	next = s.stamp(next)
+	want, err := s.encoding(prev)
+	if err != nil {
+		return false, err
+	}
+	replaced := false
+	err = s.withLock(func() error {
+		history, err := s.loadLocked()
+		if err != nil || !holds(history, want) {
+			return nil
+		}
+		history.States[history.Cursor] = next
+		if kind := soleKind(next); slottedKinds[kind] {
+			if slot, ok := history.Named[kind]; ok && sameEncoding(slot, want) {
+				history.Named[kind] = next
+			}
+		}
+		replaced = true
+		return s.saveHistory(history)
+	})
+	return replaced, err
+}
+
+// IsCurrent reports whether the cursor's entry is still entry, as the caller
+// last wrote it. A watch asks between its saves, so one whose rows have gone
+// quiet still learns that another listing took its place. It reads without
+// the lock, as every reader does. A file with no state, or one reset for a
+// schema change, is returned as ErrNoState or ErrSchemaChanged, since
+// neither is another listing replacing this one.
+//
+// The entry is compared as it reads on disk, encoded, rather than field by
+// field and not backfilled as Load returns it: a listing that repeats the
+// caller's query replaces its entry with different rows, and those rows are
+// what make it someone else's.
+func (s *Service) IsCurrent(entry State) (bool, error) {
+	want, err := s.encoding(entry)
+	if err != nil {
+		return false, err
+	}
+	history, err := s.loadHistory()
+	if err != nil {
+		return false, err
+	}
+	return holds(history, want), nil
+}
+
+// encoding is entry as Save writes it, for IsCurrent and ReplaceCurrent to
+// compare the cursor's entry with.
+func (s *Service) encoding(entry State) ([]byte, error) {
+	return json.Marshal(s.stamp(entry))
+}
+
+// holds reports whether the cursor's entry encodes to want.
+func holds(history History, want []byte) bool {
+	if history.Cursor < 0 || history.Cursor >= len(history.States) {
+		return false
+	}
+	return sameEncoding(history.States[history.Cursor], want)
+}
+
+// sameEncoding reports whether entry encodes to want.
+func sameEncoding(entry State, want []byte) bool {
+	got, err := json.Marshal(entry)
+	return err == nil && string(got) == string(want)
+}
+
 // Save pushes a new entry, truncating any entries ahead of the cursor and
 // trimming the stack to MaxHistory.
 //

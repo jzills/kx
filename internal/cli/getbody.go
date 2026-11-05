@@ -368,18 +368,18 @@ func runGet(services Services, resource string, args []string, options getOption
 	}
 
 	if isWatch(extra) {
-		extra = append(extra, replayScope(scope, extra)...)
-		// A watch stream never completes, so there is no finished table to
-		// index or save (Run() would otherwise block forever, since kubectl
-		// get --watch never exits on its own). For the default/wide,
-		// single-namespace table shape, kx tracks ADDED/MODIFIED/DELETED via
-		// --output-watch-events and redraws a live themed table in place.
-		// Anything else (-o json/yaml/name/custom-columns, -A) streams
-		// straight through instead, the same way `logs -f` does — re-theming
-		// non-tabular output doesn't make sense.
+		// A watch stream never completes (Run() would block forever, since
+		// kubectl get --watch never exits on its own). For the default/wide
+		// table shape, kx tracks ADDED/MODIFIED/DELETED via
+		// --output-watch-events and redraws a live themed table in place,
+		// numbering and saving its rows as they arrive (runWatch). Anything
+		// else (-o json/yaml/name/custom-columns, --no-headers) streams
+		// straight through instead, the same way `logs -f` does, unnumbered —
+		// re-theming non-tabular output doesn't make sense.
 		if wantsLiveTable(extra) {
-			return runWatch(services, resource, extra, options.Match, options.Sort)
+			return runWatch(services, resource, extra, scope, options.Match, options.Sort)
 		}
+		extra = append(extra, replayScope(scope, extra)...)
 		// Not ahead of a stream another program reads: `kx get ns -w -o name`
 		// opened with a line that is not a name, and a headerless watch's rows
 		// are for a program too.
