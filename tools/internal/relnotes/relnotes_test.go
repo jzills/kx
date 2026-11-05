@@ -205,6 +205,8 @@ func TestDerivedBulletsAreSentences(t *testing.T) {
 		{"kx tree is Shift-T", "- The `kx tree` command is Shift-T (#7)."},
 		{"kx's errors share one shape", "- kx's errors share one shape (#7)."},
 		{"kxlint passes", "- Kxlint passes (#7)."},
+		{"kubectl's path flags offer files", "- kubectl's path flags offer files (#7)."},
+		{"list_resources takes lastRun", "- list_resources takes lastRun (#7)."},
 	} {
 		notes := Assemble("", Sections([]Change{{Number: 7, Type: "fix", Summary: tc.summary}}), "")
 		if !strings.Contains(notes, tc.want+"\n") {
