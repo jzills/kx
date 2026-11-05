@@ -1104,6 +1104,20 @@ html.dark .kx-mode__icon--moon {
   font-size: 0.9em;
 }
 
+/* A code span is a command or a value, and a browser breaks a line at any
+   hyphen, so `kx scan -A --sort -crit,-high` wrapped between "--" and "sort"
+   on the release notes page. As an inline block it moves to the next line
+   whole when the rest of this one can't hold it, and only a span longer than
+   the whole column, such as a refresh command quoted in full, wraps inside
+   its own box. That holds at every width: nowrap clipped those long spans
+   on a phone and ran them into the sidebar on a desktop. Non-breaking
+   hyphens would have kept the break away too, but a pasted command would
+   carry them into the shell. */
+.content code:not(pre code) {
+  display: inline-block;
+  max-width: 100%;
+}
+
 .content a code:not(pre code) {
   color: var(--kx-accent);
 }
