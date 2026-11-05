@@ -7,11 +7,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jzills/kx/internal/events"
 	"github.com/jzills/kx/internal/index"
 	"github.com/jzills/kx/internal/kinds"
+	"github.com/jzills/kx/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
 )
@@ -55,6 +57,7 @@ type eventsInput struct {
 	Target mcpTarget `json:"target" jsonschema:"The resource whose events to show."`
 	Since  string    `json:"since,omitempty" jsonschema:"Only events newer than this — 30m, 24h, 7d. Defaults to kx's events_max_age setting."`
 	Limit  int       `json:"limit,omitempty" jsonschema:"Most events to return, newest first; default 100, at most 500."`
+	Sort   string    `json:"sort,omitempty" jsonschema:"Order the events by their columns, as kx events --sort does: type, reason, kind, age and message. '-type,age' puts Warnings first, the newest first in each. Ties stay newest first. Applied before limit, so limit keeps the first events of that order."`
 }
 
 // mcpEvent is one event as a tool reports it.
@@ -86,6 +89,15 @@ func (d mcpDeps) events(ctx context.Context, _ *mcp.CallToolRequest, in eventsIn
 	if err != nil {
 		return nil, eventsOutput{}, err
 	}
+	// Checked against the columns before the cluster is read, as kx events
+	// checks its --sort, so a misspelled column costs no API call.
+	keys, err := mcpSortKeys(in.Sort)
+	if err != nil {
+		return nil, eventsOutput{}, err
+	}
+	if _, err := index.SortRows(render.EventsHeaders, nil, keys); err != nil {
+		return nil, eventsOutput{}, mcpSortError(err)
+	}
 	// The context before the client, as diagnose and tree read it.
 	out := eventsOutput{Context: d.Kubectl.CurrentContext()}
 	client, err := d.Kubernetes()
@@ -114,6 +126,10 @@ func (d mcpDeps) events(ctx context.Context, _ *mcp.CallToolRequest, in eventsIn
 	}
 
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Timestamp.After(rows[j].Timestamp) })
+	// sortEvents is stable, so whatever the keys tie on stays newest first.
+	if rows, err = sortEvents(rows, keys, time.Now()); err != nil {
+		return nil, eventsOutput{}, mcpSortError(err)
+	}
 	out.Total = len(rows)
 	limit := clampLimit(in.Limit, defaultEventsLimit, maxEventsLimit)
 	kept := rows

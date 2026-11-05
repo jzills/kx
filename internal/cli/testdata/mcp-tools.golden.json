@@ -358,6 +358,10 @@
             "description": "Only events newer than this — 30m, 24h, 7d. Defaults to kx's events_max_age setting.",
             "type": "string"
           },
+          "sort": {
+            "description": "Order the events by their columns, as kx events --sort does: type, reason, kind, age and message. '-type,age' puts Warnings first, the newest first in each. Ties stay newest first. Applied before limit, so limit keeps the first events of that order.",
+            "type": "string"
+          },
           "target": {
             "additionalProperties": false,
             "description": "The resource whose events to show.",
