@@ -147,7 +147,7 @@ Neither carries attribution trailers or session links.
 
 `release-notes/vX.Y.Z.md` is the Highlights section of a release, and you write only that part; see [RELEASING.md](RELEASING.md) for the rest.
 
-- **Shape:** a lead of two or three sentences, then at most six bullets, one per change a user would notice, then, only when something breaks or needs a step, a line on what to do. That's about 150 words in all. Each bullet is a capitalized bold label, a colon, and one complete sentence with one example, opening with a capital and ending with a period. The `kx-release-notes` skill has the worked examples.
+- **Shape:** a lead of two or three sentences, then at most six bullets, one per change a user would notice, then, only when something breaks or needs a step, a **Breaking:** or **After upgrading:** line on what to do. That's about 150 words in all. Each bullet is a capitalized bold label, a colon, and one complete sentence with one example, opening with a capital and ending with a period. The `kx-release-notes` skill has the worked examples.
 - Write one line per paragraph and per bullet, never hard-wrapped. GitHub turns every newline in a release body into a line break.
 - No headings.
 - Write in the second person, for someone using kx, with commands in backticks. Name the new behavior, not the mechanism or history behind it; that belongs in the PRs.
