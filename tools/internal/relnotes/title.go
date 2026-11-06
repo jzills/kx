@@ -20,7 +20,9 @@ func TitleProblems(title string) []string {
 	}
 	subject := match[4]
 	var problems []string
-	first := strings.Fields(subject + " ")[0]
+	// conventional admits no blank subject, so a matched title always has a
+	// first word to read.
+	first := strings.Fields(subject)[0]
 	switch {
 	case strings.HasPrefix(first, "-"):
 		problems = append(problems, fmt.Sprintf(

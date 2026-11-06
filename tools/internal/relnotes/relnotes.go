@@ -84,7 +84,13 @@ var (
 	// than merely tolerated — matched and discarded, it let `feat!: …` render
 	// as an ordinary Features bullet, indistinguishable from a change that
 	// asks nothing of anyone.
-	conventional = regexp.MustCompile(`^([a-z]+)(?:\(([^)]*)\))?(!)?:\s+(.*)$`)
+	//
+	// The subject has to open with a non-space character, so a prefix with
+	// nothing after it is not a conventional commit at all. Admitted as one
+	// with an empty subject, "fix: " crashed TitleProblems on the first word
+	// of no words, and would have become a release-note bullet of a single
+	// period.
+	conventional = regexp.MustCompile(`^([a-z]+)(?:\(([^)]*)\))?(!)?:\s+(\S.*)$`)
 	// A release branch's own merge-back, and the version bump inside it. Both
 	// are the release machinery recording itself; neither is a change anyone
 	// reading the notes came looking for.

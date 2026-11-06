@@ -220,6 +220,33 @@ func TestWatchStopsSavingOnceAnotherListingIsCurrent(t *testing.T) {
 	}
 }
 
+// A watch is the current listing from the moment it starts, before kubectl
+// has sent a row, so a listing that lands while it is still quiet supersedes
+// it like any other. Deferred to the first numbered row, that save was an
+// ordinary push whenever the row finally arrived: here the Service listing
+// lands before any row, and the four rows after it used to go over the top of
+// it, leaving `kx describe 1` on a pod. The entry claimed at the start is
+// rowless and under the watch's own query.
+func TestWatchIsTheCurrentListingBeforeItsFirstRow(t *testing.T) {
+	frames, services := interleavedWatch(t, churn, 0, func(services Services, tick func()) {
+		switch entry, err := services.State.Load(); {
+		case err != nil:
+			t.Errorf("the watch saved no listing as it started: %v", err)
+		case len(entry.Names()) != 0 || entry.Query == nil || entry.Query.Resource != "pods":
+			t.Errorf("started on %v of %+v, want no rows under the pods query", entry.Names(), entry.Query)
+		}
+		listServices(t, services)
+	})
+	assertServicesCurrent(t, services)
+	last := frames[len(frames)-1]
+	if !strings.Contains(last, supersededWatchNote) {
+		t.Errorf("last frame has no %q note:\n%s", supersededWatchNote, last)
+	}
+	if got := numbersIn(last); len(got) != 0 {
+		t.Errorf("last frame still numbers rows %v:\n%s", got, last)
+	}
+}
+
 // A quiet watch notices too: after the other listing, its rows only change
 // state, so no save ever runs, and only the tick's check can drop numbers
 // that now resolve against the Service listing. The frame asserted on is
@@ -266,12 +293,16 @@ func TestWatchNamesARerunOfItsOwnListing(t *testing.T) {
 }
 
 // A burst of new rows is saved on the tick after it, in one write, not one
-// write per row: after three rows and no tick nothing is saved yet. The tick
-// is the control — after it the burst must be there, whole.
+// write per row: after three rows and no tick the entry the watch claimed as
+// it started is still rowless. The tick is the control — after it the burst
+// must be there, whole.
 func TestWatchSavesABurstOfRowsOnTheNextTick(t *testing.T) {
 	interleavedWatch(t, churn[:5], 3, func(services Services, tick func()) {
-		if _, err := services.State.Load(); !errors.Is(err, state.ErrNoState) {
-			t.Errorf("rows were saved before a tick: %v", err)
+		switch entry, err := services.State.Load(); {
+		case err != nil:
+			t.Errorf("the watch saved no listing as it started: %v", err)
+		case len(entry.Names()) != 0:
+			t.Errorf("rows were saved before a tick: %v", entry.Names())
 		}
 		tick()
 		entry, err := services.State.Load()

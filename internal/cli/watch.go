@@ -261,8 +261,9 @@ var watchTicker = func(tick func()) (stop func()) {
 }
 
 // watchListing saves a live watch's numbered rows as the listing kx get
-// would save. The first save is an ordinary one, pushing beside the listing
-// before it or replacing one of the same query. Every later save replaces
+// would save. The first save (start) is an ordinary one, made as the watch
+// begins and before it has a row, pushing beside the listing before it or
+// replacing one of the same query. Every later save replaces
 // that entry only while it is still the current one
 // (state.Service.ReplaceCurrent), and between saves each tick checks that it
 // still is. Once another listing has taken its place the watch's numbers are
@@ -301,6 +302,23 @@ func newWatchListing(services Services, resource, match, sortSpec, scope string,
 		},
 	}
 }
+
+// start claims the current listing as the watch begins, before kubectl has
+// sent anything. `kx get` saves even when it found nothing, for the reason
+// GetCommand.Execute gives: an empty listing that saved no entry left the
+// *previous* listing resolving indexes. A watch that deferred its first save
+// until a row was numbered had the same hole, and held it open for as long as
+// the namespace stayed quiet — `kx get jobs -w` on an idle namespace, a `kx
+// get svc` in another terminal, and the Job that turned up minutes later
+// pushed its row over that Service listing without a word, so `kx describe 1`
+// there reached the Job.
+//
+// Saving here closes it: the watch is the current listing from the start, so
+// every later write is a ReplaceCurrent and a listing that lands meanwhile is
+// noticed on the next tick. It is also what makes the first frame's note
+// true — a state file kx cannot write says so before the screen draws
+// numbers nothing resolves.
+func (w *watchListing) start() { w.save(nil, nil) }
 
 // tick saves the rows numbered so far if any is new, and otherwise checks
 // the watch's entry is still the current one. It reports whether the watch
@@ -415,11 +433,18 @@ func (s *watchSession) note() string {
 // indefinitely once the cluster goes quiet — exactly what "the initial
 // ADDED burst only shows one row" turned out to be.
 func (s *watchSession) redraw() error {
-	headers, rows := s.headers, s.rows.Snapshot()
+	// One snapshot, the frame's own: both copy every row, and a redraw runs
+	// on every event, so taking the plain one first and discarding it under
+	// numbering — the ordinary terminal case — copied a table of up to
+	// maxWatchIndexes rows twice per event to draw it once.
+	var headers []string
+	var rows [][]string
 	if s.numbering() {
 		// The index rides after the last column while the rows are sorted,
 		// so a sort orders them by their own cells and each keeps its number.
 		headers, rows = s.numbered, s.rows.NumberedSnapshot()
+	} else {
+		headers, rows = s.headers, s.rows.Snapshot()
 	}
 	sorted, err := index.SortRows(s.headers, rows, s.keys)
 	if err != nil {
@@ -483,9 +508,10 @@ func (s *watchSession) tick() {
 // A --sort orders the live table, sorted afresh from the rows as they stand
 // on every redraw, so a row that changes moves to where its new cells sort.
 //
-// On a terminal the table is numbered, and saved within about a second of a
-// row being numbered (watchListing), so `kx describe 3` in another terminal
-// reaches the row drawn as 3. Off a terminal nothing is drawn, so nothing is
+// On a terminal the table is numbered: the listing is saved as the watch
+// starts, and again within about a second of a row being numbered
+// (watchListing), so `kx describe 3` in another terminal reaches the row
+// drawn as 3. Off a terminal nothing is drawn, so nothing is
 // numbered either: an index nobody saw would replace the listing someone
 // did. Another cluster's watch is drawn unnumbered, as its listing is
 // printed unnumbered.
@@ -522,6 +548,7 @@ func runWatch(services Services, resource string, extra []string, scope, match, 
 		session.footer = crossClusterWatchNote
 	case render.Redrawing():
 		session.listing = newWatchListing(services, resource, match, sortSpec, scope, extra)
+		session.listing.start()
 		stop := watchTicker(session.tick)
 		// A watch kubectl ends saves what it numbered since the last tick.
 		// Ctrl-C ends kx with it, so at most a second's new rows go unsaved.
