@@ -305,10 +305,21 @@ html.kx-motion [data-kx-reveal].is-revealed {
   overflow: hidden;
 }
 
+/* The lift under the hero window and the wide report screenshots. Black at
+   the strength a dark page needs spread into a gray halo on a white one, so
+   the light page gets a shorter, fainter shadow. */
+:root {
+  --kx-lift: 0 12px 32px -16px rgb(0 0 0 / 0.14);
+}
+
+html.dark {
+  --kx-lift: 0 24px 64px -24px rgb(0 0 0 / 0.45);
+}
+
 .kx-window--hero {
   margin-top: 1rem;
   border-color: var(--kx-command-edge);
-  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.45),
+  box-shadow: var(--kx-lift),
     0 30px 80px -44px color-mix(in srgb, var(--kx-accent) 16%, transparent);
 }
 
@@ -453,6 +464,10 @@ html.kx-motion [data-kx-reveal].is-revealed {
 }
 
 .kx-shot--wide .kx-media {
+  box-shadow: var(--kx-lift);
+}
+
+html.dark .kx-shot--wide .kx-media {
   box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.35);
 }
 
