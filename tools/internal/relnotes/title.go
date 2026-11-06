@@ -16,13 +16,19 @@ import (
 func TitleProblems(title string) []string {
 	match := conventional.FindStringSubmatch(title)
 	if match == nil {
-		return []string{"The title isn't 'type(scope): subject' — see STYLE.md's Commits and pull requests."}
+		return []string{shapeProblem}
 	}
 	subject := match[4]
+	// A blank subject is no subject. Read with strings.Fields, which splits on
+	// every Unicode space where the pattern's \s knows only ASCII ones, so a
+	// subject of a no-break space is blank here too; reading the first word
+	// of no words was a panic that exited 2 in place of this sentence.
+	words := strings.Fields(subject)
+	if len(words) == 0 {
+		return []string{shapeProblem}
+	}
 	var problems []string
-	// conventional admits no blank subject, so a matched title always has a
-	// first word to read.
-	first := strings.Fields(subject)[0]
+	first := words[0]
 	switch {
 	case strings.HasPrefix(first, "-"):
 		problems = append(problems, fmt.Sprintf(
@@ -52,6 +58,9 @@ func TitleProblems(title string) []string {
 	}
 	return problems
 }
+
+// shapeProblem is a title that isn't a conventional commit with a subject.
+const shapeProblem = "The title isn't 'type(scope): subject' — see STYLE.md's Commits and pull requests."
 
 // titleOpensWithKx is a subject whose first word is kx, possessive included.
 var titleOpensWithKx = regexp.MustCompile(`^kx($|[\s'’,.:;])`)
