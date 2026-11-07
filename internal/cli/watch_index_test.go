@@ -220,6 +220,111 @@ func TestWatchStopsSavingOnceAnotherListingIsCurrent(t *testing.T) {
 	}
 }
 
+// A listing that lands while the watch waits for its first row is not
+// written over when the row comes. The first save was an ordinary push: on a
+// quiet namespace, `kx get jobs -w`, a `kx get svc` in another terminal, and
+// the Job that turned up later went over the Service listing, leaving `kx
+// describe 1` there on the Job. Here the Service listing lands after the
+// header, before any row, and the four rows after it must leave it current.
+// The uninterrupted watch (TestWatchSavesItsNumberedRowsAsTheListing) is the
+// control, saving all four.
+func TestWatchLeavesAListingThatLandedBeforeItsFirstRow(t *testing.T) {
+	frames, services := interleavedWatch(t, churn, 0, func(services Services, tick func()) {
+		tick()
+		listServices(t, services)
+	})
+	assertServicesCurrent(t, services)
+	last := frames[len(frames)-1]
+	if !strings.Contains(last, supersededWatchNote) {
+		t.Errorf("last frame has no %q note:\n%s", supersededWatchNote, last)
+	}
+	if got := numbersIn(last); len(got) != 0 {
+		t.Errorf("last frame still numbers rows %v:\n%s", got, last)
+	}
+}
+
+// A watch writes nothing until it has a row, so one that kubectl refuses, kx
+// refuses on the header, or that ends with no row leaves the saved listings
+// byte for byte as it found them. A first fix saved as the watch started,
+// and then a mistyped `kx get pdos -w` replaced the user's listing with an
+// empty one, and cut the history ahead of it, on its way to failing. The
+// last case is the control: a watch that does number a row rewrites the file.
+func TestWatchWithNoRowLeavesTheSavedListingsAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		kube    *fakeKubectl
+		argv    []string
+		fails   bool
+		changes bool
+	}{
+		{"kubectl refuses", &fakeKubectl{watchErr: errors.New(`error: the server doesn't have a resource type "pdos"`)},
+			[]string{"pdos", "-w"}, true, false},
+		{"no EVENT column", &fakeKubectl{watchLines: []string{"NAME    READY   STATUS"}},
+			[]string{"pods", "-w"}, true, false},
+		{"a sort the watch has no column for", &fakeKubectl{watchLines: churn},
+			[]string{"pods", "-w", "--sort", "bogus"}, true, false},
+		{"ends before a row", &fakeKubectl{watchLines: churn[:1]}, []string{"pods", "-w"}, false, false},
+		{"numbers a row", &fakeKubectl{watchLines: churn[:2]}, []string{"pods", "-w"}, false, true},
+	} {
+		tc.kube.namespace = "prod"
+		services := switchServices(t, tc.kube)
+		listServices(t, services)
+		before, err := os.ReadFile(services.State.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		render.SetOutput(&terminalBuffer{}, &bytes.Buffer{}, "github-dark")
+		if err := executeArgv(newGetCommand(services), tc.argv); (err != nil) != tc.fails {
+			t.Errorf("%s: err = %v, want failed = %v", tc.name, err, tc.fails)
+		}
+		after, err := os.ReadFile(services.State.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed := !bytes.Equal(before, after); changed != tc.changes {
+			t.Errorf("%s: state changed = %v, want %v:\n%s", tc.name, changed, tc.changes, after)
+		}
+	}
+}
+
+// A watch of the query already current keeps that listing's rows until its
+// own are saved, and then replaces it as a re-run of kx get would. A first
+// fix saved an empty entry as the watch started, which replaced kx get pods'
+// rows at once and kept them gone if no row ever came. This is also the
+// control for the first save's guard: here the listing the watch started
+// beside is still current, so the save must land.
+func TestWatchOfTheCurrentQueryKeepsItsRowsUntilItSaves(t *testing.T) {
+	tick := manualTicks(t)
+	kube := interleavedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod", watchLines: churn}, at: 0}
+	services := switchServices(t, kube)
+	if err := services.State.Save(state.State{
+		Resources: state.NewResources([]string{"old-a", "old-b"}, kinds.Pod), Namespace: "prod",
+		Query: &state.Query{Resource: "pods", Args: []string{}}, Context: "test-context",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kube.between = func() {
+		tick()
+		if entry, err := services.State.Load(); err != nil || strings.Join(entry.Names(), ",") != "old-a,old-b" {
+			t.Errorf("before a row, current = %v (%v), want kx get pods' old-a,old-b", entry.Names(), err)
+		}
+	}
+	services.Kubectl = kube
+	var term terminalBuffer
+	render.SetOutput(&term, &bytes.Buffer{}, "github-dark")
+	if err := executeArgv(newGetCommand(services), []string{"pods", "-w"}); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := services.State.Load()
+	if err != nil || strings.Join(entry.Names(), ",") != "api,db,web,cache" {
+		t.Errorf("after the watch, current = %v (%v), want its rows api,db,web,cache", entry.Names(), err)
+	}
+	frames := framesOf(term.String())
+	if last := frames[len(frames)-1]; !strings.Contains(last, numberedWatchNote) {
+		t.Errorf("last frame has no %q note:\n%s", numberedWatchNote, last)
+	}
+}
+
 // A quiet watch notices too: after the other listing, its rows only change
 // state, so no save ever runs, and only the tick's check can drop numbers
 // that now resolve against the Service listing. The frame asserted on is

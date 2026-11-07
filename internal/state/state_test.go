@@ -3126,6 +3126,63 @@ func TestReplaceCurrentReplacesOnlyItsOwnEntry(t *testing.T) {
 	}
 }
 
+// SaveIfCurrent saves only while the cursor's entry is the one Baseline read.
+// The first two saves are the controls — no file and an unchanged entry must
+// both save, or the refusals after them would pass for a SaveIfCurrent that
+// never saves. Then a listing pushed after the baseline (a second terminal's
+// kx get svc), a file removed after it (kx state drop --all), and a file that
+// appeared where the baseline found none, are each refused and left alone.
+func TestSaveIfCurrentSavesOnlyOverItsBaseline(t *testing.T) {
+	service := newTestService(t, 10)
+	query := &Query{Resource: "pods", Args: []string{}}
+	watch := State{Resources: pods("api"), Namespace: "prod", Query: query, Context: "c"}
+	services := State{Resources: NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
+		Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"}
+	saveIfCurrent := func(base []byte, next State) bool {
+		t.Helper()
+		saved, err := service.SaveIfCurrent(base, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	current := func() string {
+		t.Helper()
+		got, err := service.Load()
+		if err != nil {
+			return err.Error()
+		}
+		return strings.Join(got.Names(), ",")
+	}
+
+	if !saveIfCurrent(service.Baseline(), watch) || current() != "api" {
+		t.Fatalf("over no file: current %s, want the save to land", current())
+	}
+	save(t, service, services)
+	if base := service.Baseline(); !saveIfCurrent(base, watch) || current() != "api" {
+		t.Fatalf("over an unchanged baseline: current %s, want the save to land", current())
+	}
+
+	base := service.Baseline()
+	save(t, service, services)
+	if saveIfCurrent(base, watch) || current() != "db" {
+		t.Errorf("over a listing pushed after the baseline: current %s, want db left alone", current())
+	}
+
+	base = service.Baseline()
+	if err := os.Remove(service.Path); err != nil {
+		t.Fatal(err)
+	}
+	if saveIfCurrent(base, watch) {
+		t.Errorf("over a file removed after the baseline: saved, want refused")
+	}
+
+	save(t, service, services)
+	if saveIfCurrent(nil, watch) || current() != "db" {
+		t.Errorf("with no baseline over a file that appeared: current %s, want db left alone", current())
+	}
+}
+
 // IsCurrent compares the cursor's entry as it was written, not as Load
 // returns it: Load backfills an empty namespace with "default", and compared
 // that way an entry saved with none never matched itself, so a watch would

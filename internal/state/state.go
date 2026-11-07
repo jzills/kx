@@ -763,6 +763,56 @@ func (s *Service) ReplaceCurrent(prev, next State) (bool, error) {
 	return replaced, err
 }
 
+// Baseline is the cursor's entry as it reads on disk, encoded, for a later
+// SaveIfCurrent to compare against; nil when there is no entry to read,
+// including a file that is missing, reset or unreadable. A watch takes it as
+// it starts, so its first save can tell whether another listing landed while
+// it waited for a row, without writing anything itself before then.
+func (s *Service) Baseline() []byte {
+	history, err := s.loadHistory()
+	if err != nil {
+		return nil
+	}
+	return cursorEncoding(history)
+}
+
+// SaveIfCurrent is Save, made only while the cursor's entry still encodes to
+// base (Baseline), the check and the write under one lock hold. It reports
+// whether it saved. A base of nil matches a file with no entry to read, which
+// Save heals as it always does.
+func (s *Service) SaveIfCurrent(base []byte, next State) (bool, error) {
+	maxHistory := s.MaxHistory
+	if maxHistory < 1 {
+		maxHistory = 1
+	}
+	next = s.stamp(next)
+	saved := false
+	err := s.withLock(func() error {
+		var current []byte
+		if history, err := s.loadLocked(); err == nil {
+			current = cursorEncoding(history)
+		}
+		if string(current) != string(base) {
+			return nil
+		}
+		saved = true
+		return s.save(next, maxHistory)
+	})
+	return saved, err
+}
+
+// cursorEncoding is the cursor's entry encoded, nil when the cursor is on none.
+func cursorEncoding(history History) []byte {
+	if history.Cursor < 0 || history.Cursor >= len(history.States) {
+		return nil
+	}
+	encoded, err := json.Marshal(history.States[history.Cursor])
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
 // IsCurrent reports whether the cursor's entry is still entry, as the caller
 // last wrote it. A watch asks between its saves, so one whose rows have gone
 // quiet still learns that another listing took its place. It reads without

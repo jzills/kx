@@ -261,16 +261,27 @@ var watchTicker = func(tick func()) (stop func()) {
 }
 
 // watchListing saves a live watch's numbered rows as the listing kx get
-// would save. The first save is an ordinary one, pushing beside the listing
-// before it or replacing one of the same query. Every later save replaces
-// that entry only while it is still the current one
-// (state.Service.ReplaceCurrent), and between saves each tick checks that it
-// still is. Once another listing has taken its place the watch's numbers are
-// no longer what an index resolves to, so it stops for good, ended naming
-// why, rather than push its rows back over that listing.
+// would save. Nothing is written until a row is numbered, so a watch kubectl
+// refuses, or one that ends before any row, leaves the saved listings as it
+// found them.
+//
+// Every save lands only while the listing it would replace is the one the
+// watch expects. The first pushes beside, or replaces one of the same query,
+// the entry that was current as the watch started (base) — only if that entry
+// is still current (state.Service.SaveIfCurrent). An ordinary push there let a
+// watch on a quiet namespace, `kx get jobs -w`, put its first row over a `kx
+// get svc` run in another terminal while it waited, so `kx describe 1` there
+// reached the Job. Every later save replaces the watch's own entry only while
+// it is still the current one (state.Service.ReplaceCurrent), and between
+// saves each tick checks that it still is. Once another listing has taken its
+// place the watch's numbers are no longer what an index resolves to, so it
+// stops for good, ended naming why, rather than push its rows over that
+// listing.
 type watchListing struct {
 	state *state.Service
 	entry func(entries []index.Entry) state.State
+	// base is the current entry as the watch started (state.Service.Baseline).
+	base  []byte
 	saved *state.State
 	// dirty is set when a row was numbered since the last save.
 	dirty bool
@@ -293,6 +304,7 @@ func newWatchListing(services Services, resource, match, sortSpec, scope string,
 	context := services.Kubectl.CurrentContext()
 	return &watchListing{
 		state: services.State,
+		base:  services.State.Baseline(),
 		entry: func(entries []index.Entry) state.State {
 			listed := getListing(resource, match, args, namespace, index.Table{Entries: entries})
 			listed.Query.Sort = sortSpec
@@ -331,11 +343,15 @@ func (w *watchListing) save(headers []string, entries []index.Entry) {
 	next.Columns = listingColumns(index.Table{Headers: headers})
 	w.dirty = false
 	if w.saved == nil {
-		if err := w.state.Save(next); err != nil {
+		saved, err := w.state.SaveIfCurrent(w.base, next)
+		switch {
+		case err != nil:
 			w.fail(err)
-			return
+		case !saved:
+			w.end()
+		default:
+			w.saved = &next
 		}
-		w.saved = &next
 		return
 	}
 	replaced, err := w.state.ReplaceCurrent(*w.saved, next)
@@ -359,8 +375,10 @@ func (w *watchListing) fail(err error) {
 	}
 }
 
-// end stops the numbering because another entry replaced the watch's,
-// naming a re-run of the watch's own query apart from another listing.
+// end stops the numbering because another entry replaced the watch's, or the
+// one it started beside, naming a re-run of the watch's own query apart from
+// another listing. Before the first save there is no entry of the watch's own,
+// so its query is read from the entry it would have saved.
 func (w *watchListing) end() {
 	w.ended = supersededWatchNote
 	current, err := w.state.Load()
@@ -368,7 +386,7 @@ func (w *watchListing) end() {
 		w.fail(err)
 		return
 	}
-	if current.Query != nil && reflect.DeepEqual(*current.Query, *w.saved.Query) {
+	if current.Query != nil && reflect.DeepEqual(*current.Query, *w.entry(nil).Query) {
 		w.ended = relistedWatchNote
 	}
 }
@@ -415,11 +433,18 @@ func (s *watchSession) note() string {
 // indefinitely once the cluster goes quiet — exactly what "the initial
 // ADDED burst only shows one row" turned out to be.
 func (s *watchSession) redraw() error {
-	headers, rows := s.headers, s.rows.Snapshot()
+	// One snapshot, the frame's own: both copy every row, and a redraw runs
+	// on every event, so taking the plain one first and discarding it under
+	// numbering — the ordinary terminal case — copied a table of up to
+	// maxWatchIndexes rows twice per event to draw it once.
+	var headers []string
+	var rows [][]string
 	if s.numbering() {
 		// The index rides after the last column while the rows are sorted,
 		// so a sort orders them by their own cells and each keeps its number.
 		headers, rows = s.numbered, s.rows.NumberedSnapshot()
+	} else {
+		headers, rows = s.headers, s.rows.Snapshot()
 	}
 	sorted, err := index.SortRows(s.headers, rows, s.keys)
 	if err != nil {
