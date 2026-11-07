@@ -6,7 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	k8s.io/cli-runtime v0.37.2
 	k8s.io/component-base v0.37.2
 	k8s.io/kubectl v0.37.2
