@@ -162,10 +162,14 @@ func (r *Renderer) podTable(pods []diagnostics.PodDiagnostic) {
 			if offset == 0 {
 				name, phaseCell, readyCell = Plain(pod.Name), phase, Plain(ready)
 			}
+			containerName := container.Name
+			if container.Init {
+				containerName += " (init)"
+			}
 			rows = append(rows, []Cell{
 				name, phaseCell, readyCell,
 				Plain(restarts(container)),
-				Plain(container.Name),
+				Plain(containerName),
 				Styled(containerState(container), statusColor(container.State)),
 				reasonCell,
 			})
@@ -317,8 +321,12 @@ func (r *Renderer) logs(pods []diagnostics.PodDiagnostic) {
 			// Nothing matched a severity token, so this is just the tail.
 			note += " · recent output"
 		}
+		which := "container "
+		if e.container.Init {
+			which = "init container "
+		}
 		r.line("    " + r.style(theme.Muted,
-			"Pod/"+e.pod.Name+" · container "+e.container.Name+note))
+			"Pod/"+e.pod.Name+" · "+which+e.container.Name+note))
 		for _, line := range e.container.LogLines {
 			r.line("      " + r.highlightSeverity(line))
 		}

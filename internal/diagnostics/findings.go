@@ -321,7 +321,23 @@ func ingressFindings(ingress IngressHealth) []Finding {
 
 func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	var findings []Finding
+	// A failing init container is the cause, and everything else the pod
+	// says follows from it: its app containers wait on PodInitializing and
+	// the pod stays Pending. Reporting those too restated the cause twice,
+	// as warnings, beside the critical it explains.
+	initFailing := false
 	for _, container := range pod.Containers {
+		if !container.Init {
+			continue
+		}
+		own := containerFindings(pod.Name, container, since, pod.UnhealthySince)
+		initFailing = initFailing || len(own) > 0
+		findings = append(findings, own...)
+	}
+	for _, container := range pod.Containers {
+		if container.Init || (initFailing && container.WaitingReason == "PodInitializing") {
+			continue
+		}
 		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
 	}
 
@@ -350,7 +366,7 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 		// the row had said anything ("Pod report-unschedulable-57d7… unsc…").
 		findings = append(findings, ongoing(Critical, Cause, pod.UnhealthySince, fmt.Sprintf(
 			"Unschedulable: %s (Pod %s)", detail, pod.Name)))
-	case pod.Phase == "Pending":
+	case pod.Phase == "Pending" && !initFailing:
 		findings = append(findings, ongoing(Warning, Aggregate, pod.UnhealthySince,
 			"Pod "+pod.Name+" pending"))
 	// A failed pod finished failing, dated by the last of its containers to
@@ -375,6 +391,14 @@ func containerFindings(
 ) []Finding {
 	var findings []Finding
 	reason := container.WaitingReason
+	// Where it happened, in the two shapes the messages take: "in Pod x" and
+	// "Container c in Pod x". An init container is named in both, since a pod
+	// stuck before its app starts says nothing about which step failed.
+	place, subject := "Pod "+podName, "Container "+container.Name
+	if container.Init {
+		place = "init container " + container.Name + " of Pod " + podName
+		subject = "Init container " + container.Name
+	}
 	// What the container is doing now is reported however old it is; what it
 	// did last time is reported only if it happened inside the window. A
 	// container that OOMKilled once and has been running ever since has been
@@ -390,20 +414,20 @@ func containerFindings(
 	switch {
 	case reason == "CrashLoopBackOff":
 		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
-			"CrashLoopBackOff in Pod %s (%d restarts)", podName, container.RestartCount)))
+			"CrashLoopBackOff in %s (%d restarts)", place, container.RestartCount)))
 	case imagePullReasons[reason]:
 		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
-			"Image pull failure (%s) in Pod %s", reason, podName)))
+			"Image pull failure (%s) in %s", reason, place)))
 	case configErrorReasons[reason]:
 		detail := container.WaitingMessage
 		if detail == "" {
 			detail = reason
 		}
 		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
-			"Container config error in Pod %s: %s", podName, detail)))
+			"Container config error in %s: %s", place, detail)))
 	case reason != "":
 		findings = append(findings, ongoing(Warning, Cause, unhealthySince, fmt.Sprintf(
-			"Container %s in Pod %s waiting: %s", container.Name, podName, reason)))
+			"%s in Pod %s waiting: %s", subject, podName, reason)))
 	}
 
 	switch {
@@ -414,15 +438,15 @@ func containerFindings(
 	// previous one against settled.
 	case container.TerminatedReason == "OOMKilled" && !finished:
 		findings = append(findings, dated(Critical, Cause, container.TerminatedAt,
-			"OOMKilled in Pod "+podName))
+			"OOMKilled in "+place))
 	case container.LastTerminatedReason == "OOMKilled" && !settled:
 		findings = append(findings, dated(Critical, Cause, container.LastTerminatedAt,
-			"OOMKilled in Pod "+podName))
+			"OOMKilled in "+place))
 	case container.TerminatedReason != "" && container.TerminatedReason != "Completed" &&
 		container.ExitCode != nil && *container.ExitCode != 0 && !finished:
 		findings = append(findings, dated(Critical, Cause, container.TerminatedAt, fmt.Sprintf(
-			"Container %s in Pod %s terminated: %s (exit %d)",
-			container.Name, podName, container.TerminatedReason, *container.ExitCode)))
+			"%s in Pod %s terminated: %s (exit %d)",
+			subject, podName, container.TerminatedReason, *container.ExitCode)))
 	}
 
 	// Only when not waiting: a CrashLoopBackOff finding already reports the
@@ -437,8 +461,8 @@ func containerFindings(
 	if reason == "" && !outsideWindow(restarted, since) &&
 		container.RestartCount >= restartWarnThreshold {
 		findings = append(findings, dated(Warning, Cause, restarted, fmt.Sprintf(
-			"Container %s in Pod %s restarted %d times",
-			container.Name, podName, container.RestartCount)))
+			"%s in Pod %s restarted %d times",
+			subject, podName, container.RestartCount)))
 	}
 	return append(findings, usageFindings(container)...)
 }

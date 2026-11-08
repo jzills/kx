@@ -1661,3 +1661,35 @@ func TestRenderDiagMarksASortedSweep(t *testing.T) {
 		}
 	}
 }
+
+// The page marks an init container's row as the terminal table does, and
+// leaves an app container's row unmarked.
+func TestRenderDiagMarksInitContainers(t *testing.T) {
+	report := criticalReport(t)
+	report.Pods[0].Containers[0].Init = true
+	name := report.Pods[0].Containers[0].Name
+
+	out, err := RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	marked := `<td>` + name + ` <span class="dim">(init)</span></td>`
+	if !strings.Contains(string(out), marked) {
+		t.Errorf("page is missing the init row %q", marked)
+	}
+
+	report.Pods[0].Containers[0].Init = false
+	out, err = RenderDiag(DiagPage{
+		Meta: testMeta(t), Single: true,
+		Reports: []diagnostics.Report{report},
+	})
+	if err != nil {
+		t.Fatalf("RenderDiag returned %v", err)
+	}
+	if !strings.Contains(string(out), `<td>`+name+`</td>`) {
+		t.Errorf("an app container's row is not plain <td>%s</td>", name)
+	}
+}
