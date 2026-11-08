@@ -128,3 +128,108 @@ func TestPodFailedInInitIsDatedByItsExit(t *testing.T) {
 		t.Errorf("StoppedAt = %v, want the init container's exit %v", got, exited)
 	}
 }
+
+// twoInitPod is initPod with a second init container queued behind the
+// first, the way the kubelet reports it: Waiting, reason PodInitializing.
+func twoInitPod(first corev1.ContainerStatus) *corev1.Pod {
+	pod := initPod(first)
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{Name: "seed"})
+	pod.Status.InitContainerStatuses = append(pod.Status.InitContainerStatuses,
+		waiting("seed", "PodInitializing", ""))
+	return pod
+}
+
+// An init container queued behind another is Waiting on PodInitializing, as
+// the app is. It used to get a row and its own "waiting" warning, and that
+// warning counted as a failure, hiding the pod's real state: the step that
+// is running, and the pod pending on it.
+func TestQueuedInitContainerSaysNothing(t *testing.T) {
+	inProgress := running("migrate")
+	inProgress.Ready = false
+	diagnostic := podDiagnostic(twoInitPod(inProgress))
+
+	for _, c := range diagnostic.Containers {
+		if c.Name == "seed" {
+			t.Errorf("queued init container has a row: %+v", c)
+		}
+	}
+	got := summaries(podFindings(diagnostic, unbounded))
+	want := []string{
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// Behind a failing init container, the queued one adds nothing beside the
+// critical that explains it.
+func TestQueuedInitContainerBehindAFailureSaysNothing(t *testing.T) {
+	crashing := waiting("migrate", "CrashLoopBackOff", "")
+	got := summaries(podFindings(podDiagnostic(twoInitPod(crashing)), unbounded))
+	want := []string{"CrashLoopBackOff in init container migrate of Pod api-1 (0 restarts)"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A running init container near its memory limit has a finding and has
+// failed nothing, so the pod is still reported pending on it. Keying the
+// suppression on "produced a finding" hid both.
+func TestRunningInitContainerWithAUsageWarningIsNotAFailure(t *testing.T) {
+	pod := PodDiagnostic{
+		Name: "api-1", Phase: "Pending", Scheduling: SchedulingInfo{Schedulable: true},
+		Containers: []ContainerDiagnostic{
+			{Name: "migrate", Init: true, State: "Running",
+				MemoryUsage: quantity("85Mi"), MemoryLimit: quantity("100Mi")},
+			{Name: "app", State: "Waiting", WaitingReason: "PodInitializing"},
+		},
+	}
+	got := summaries(podFindings(pod, unbounded))
+	want := []string{
+		"Memory at 85% of limit (85Mi/100Mi)",
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A Job pod that failed in init a month ago is history under a 24h window:
+// its init finding and "failed" are both outside it. The app still waits on
+// PodInitializing, and that ongoing warning used to survive every window
+// because suppression keyed on findings, which the window had emptied.
+func TestOldInitFailureLeavesNothingInsideTheWindow(t *testing.T) {
+	now := time.Now()
+	status := terminated("migrate", "Error", 1)
+	status.State.Terminated.FinishedAt = metav1.NewTime(now.Add(-30 * 24 * time.Hour))
+	pod := initPod(status)
+	pod.Status.Phase = corev1.PodFailed
+
+	got := summaries(podFindings(podDiagnostic(pod), now.Add(-24*time.Hour)))
+	if len(got) != 0 {
+		t.Errorf("findings = %q, want none inside a 24h window", got)
+	}
+}
+
+// An init container that got through only after OOMKills is not quiet: the
+// kills are findings while the window holds them. It used to be dropped
+// with every other exit 0.
+func TestInitContainerThatSucceededAfterCrashingKeepsItsFindings(t *testing.T) {
+	status := terminated("migrate", "Completed", 0)
+	status.RestartCount = 3
+	status.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{
+		Reason: "OOMKilled", ExitCode: 137, FinishedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+	}
+	pod := initPod(status)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{running("app")}
+
+	got := summaries(podFindings(podDiagnostic(pod), unbounded))
+	want := []string{"OOMKilled in init container migrate of Pod api-1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}

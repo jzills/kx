@@ -218,9 +218,9 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	// Init containers first, the order the kubelet runs them in. A native
 	// sidecar (restartPolicy Always) runs beside the app for the pod's whole
 	// life, so it counts toward READY as kubectl counts it. Any other init
-	// container that finished cleanly is left out: it did its job, and a row
-	// for it would put a Completed line, and a log fetch, in every healthy
-	// report. One that has not finished, or failed, is why the pod is stuck.
+	// container is left out when it has nothing to say (see quietInit); one
+	// that is running, failing, or got through only after failing is why the
+	// pod is stuck, or was.
 	for i := range pod.Status.InitContainerStatuses {
 		status := &pod.Status.InitContainerStatuses[i]
 		spec := specInit[status.Name]
@@ -231,7 +231,7 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 			if status.Ready {
 				ready++
 			}
-		} else if completed(status) {
+		} else if quietInit(status) {
 			continue
 		}
 		diagnostic := containerDiagnostic(status, spec)
@@ -263,10 +263,17 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	}
 }
 
-// completed reports whether an init container ran to a clean exit.
-func completed(status *corev1.ContainerStatus) bool {
+// quietInit reports whether an init container has nothing to report, and
+// so gets no row: it is queued behind another (the kubelet holds it in
+// Waiting with PodInitializing, and it has no logs to fetch), or it ran to a
+// clean exit first time. One that exited 0 only after restarting keeps its
+// row, since the crashes before it are findings the window may still show.
+func quietInit(status *corev1.ContainerStatus) bool {
+	if waiting := status.State.Waiting; waiting != nil && waiting.Reason == "PodInitializing" {
+		return true
+	}
 	terminated := status.State.Terminated
-	return terminated != nil && terminated.ExitCode == 0
+	return terminated != nil && terminated.ExitCode == 0 && status.RestartCount == 0
 }
 
 // unhealthySince is how long a pod has been failing: since it stopped being

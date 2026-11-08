@@ -325,14 +325,18 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	// says follows from it: its app containers wait on PodInitializing and
 	// the pod stays Pending. Reporting those too restated the cause twice,
 	// as warnings, beside the critical it explains.
+	//
+	// Failing is the container's state, not whether it produced a finding:
+	// a running init container near its memory limit has a finding and has
+	// failed nothing, and one that failed a month ago has none under a 24h
+	// window and still holds the app in PodInitializing.
 	initFailing := false
 	for _, container := range pod.Containers {
 		if !container.Init {
 			continue
 		}
-		own := containerFindings(pod.Name, container, since, pod.UnhealthySince)
-		initFailing = initFailing || len(own) > 0
-		findings = append(findings, own...)
+		initFailing = initFailing || initFailed(container)
+		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
 	}
 	for _, container := range pod.Containers {
 		if container.Init || (initFailing && container.WaitingReason == "PodInitializing") {
@@ -384,6 +388,16 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 			pod.Name, pod.ReadyContainers, pod.TotalContainers)))
 	}
 	return findings
+}
+
+// initFailed reports whether an init container is stuck: waiting for a
+// reason (a queued one, waiting on PodInitializing, never gets a row), or
+// stopped with a non-zero exit.
+func initFailed(container ContainerDiagnostic) bool {
+	if container.WaitingReason != "" {
+		return true
+	}
+	return container.State == "Terminated" && container.ExitCode != nil && *container.ExitCode != 0
 }
 
 func containerFindings(
