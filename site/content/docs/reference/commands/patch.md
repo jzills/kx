@@ -8,7 +8,7 @@ weight: 20
 
 Patches one indexed resource via kubectl patch. The patch itself is kubectl's: -p gives it inline, --patch-file reads it from a file, and --type picks strategic (the default), merge or json.
 
-kubectl's other flags pass through too — --dry-run to preview the change, -o to print the patched object, --subresource to patch status or scale.
+kubectl's other flags pass through too — --dry-run to preview the change, -o to print the patched object, --subresource to patch status or scale. -f, -k and --local are refused, since each names the resource to patch, which the index already does.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 
@@ -37,12 +37,8 @@ kx patch [OPTIONS] <index> [kubectl flags]
 |---|---|
 | `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
 | `--field-manager string` | Name of the manager used to track field ownership. |
-| `-f, --filename strings` | Filename, directory, or URL to files identifying the resource to update |
-| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
-| `--local` | If true, patch will operate on the content of the file, not the server-side resource. |
 | `-p, --patch string` | The patch to be applied to the resource JSON file. |
 | `--patch-file string` | A file containing a patch to be applied to the resource. |
-| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
 | `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
 | `--subresource string` | If specified, patch will operate on the subresource of the requested object. |
 | `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |

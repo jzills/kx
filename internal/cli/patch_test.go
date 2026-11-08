@@ -35,6 +35,13 @@ func TestPatchRefusesBeforeKubectlRuns(t *testing.T) {
 		{[]string{"1", "--bogus"}, "'--bogus' isn't a flag of kubectl patch"},
 		{[]string{"-n", "other", "1", "-p", "{}"}, "'--namespace' cannot be combined with an index"},
 		{[]string{"-p", "{}"}, "requires <index>"},
+		// Each names the resource to patch, which the index already does;
+		// kubectl refuses every one beside a name.
+		{[]string{"1", "-f", "cm.yaml", "-p", "{}"},
+			"'--filename' cannot be combined with an index — it names the resource to patch, which the index already does."},
+		{[]string{"1", "-k", "overlay", "-p", "{}"}, "'--kustomize' cannot be combined with an index"},
+		{[]string{"1", "--local", "-p", "{}"}, "'--local' cannot be combined with an index"},
+		{[]string{"1", "-R", "-p", "{}"}, "'--recursive' cannot be combined with an index"},
 	} {
 		kube, err := indexCommandOn(t, kinds.Deployment, newPatchCommand, tc.args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -72,5 +79,48 @@ func TestPatchSaysWhenNothingChanged(t *testing.T) {
 		if message != tc.want {
 			t.Errorf("message for %q = %q, want %q", tc.reply, message, tc.want)
 		}
+	}
+}
+
+// --local=false is the flag's own default and names nothing, so it is read as
+// kubectl reads a boolean and reaches kubectl. The control for the refusals
+// above: they are about the flags' meaning, not their spelling.
+func TestPatchPassesASourceFlagThatSelectsNothing(t *testing.T) {
+	kube, err := indexCommandOn(t, kinds.Deployment, newPatchCommand, "1", "--local=false", "-p", "{}")
+	if err != nil {
+		t.Fatalf("kx patch 1 --local=false: %v", err)
+	}
+	if len(kube.runs) != 1 {
+		t.Errorf("kubectl ran %d times, want once", len(kube.runs))
+	}
+}
+
+// The refused flags are not offered: help and completion leave them out.
+func TestPatchHidesTheFlagsItRefuses(t *testing.T) {
+	cmd := newPatchCommand(argvServices(t))
+	for _, name := range patchSourceFlags {
+		flag := cmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("--%s is not registered, so it would be refused as unknown, not named", name)
+		}
+		if !flag.Hidden {
+			t.Errorf("--%s is offered in help, though kx patch refuses it", name)
+		}
+	}
+}
+
+// With -o kubectl prints the object, not its summary line, and the object
+// may hold any text. A field reading "(no change)" made kx report a real
+// change as a no-op.
+func TestPatchReadsNoChangeFromTheSummaryLineAlone(t *testing.T) {
+	object := "apiVersion: v1\nkind: ConfigMap\ndata:\n  note: patched (no change)\n"
+	message, _, err := PatchCommand{
+		Kubectl: &recordingKubectl{output: object}, State: workload("x", kinds.ConfigMap),
+	}.Execute(state.Ref{Index: 1}, []string{"--output=yaml"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Patched ConfigMap/x"; message != want {
+		t.Errorf("message = %q, want %q", message, want)
 	}
 }

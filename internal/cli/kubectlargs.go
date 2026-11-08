@@ -250,6 +250,7 @@ var pathFlags = map[string]pathKind{
 	"profile-output":        pathFile,
 	"cache-dir":             pathDir,
 	"kustomize":             pathDir,
+	"patch-file":            pathFile,
 }
 
 // recordedKubectlArgs is cmd's recorder, for code that sees the command but

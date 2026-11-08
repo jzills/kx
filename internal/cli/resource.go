@@ -227,10 +227,15 @@ func (c PatchCommand) Execute(ref state.Ref, extraArgs []string) (message, outpu
 	// kx replaces kubectl's output with this line, so it has to carry what
 	// kubectl's said: that a patch matching what was there changed nothing,
 	// and that a dry run changed nothing either.
+	//
+	// Only kubectl's summary line says "(no change)", and only that line's
+	// end is read: with -o kubectl prints the object instead, whose fields
+	// may hold any text, and says nothing about whether it changed — so kx,
+	// reading the same output, can't say either.
 	switch {
 	case isDryRun(extraArgs):
 		message += " (dry run — nothing was changed)"
-	case strings.Contains(output, "(no change)"):
+	case !askedForOutput(extraArgs) && strings.HasSuffix(strings.TrimSpace(output), " patched (no change)"):
 		message += " (no change — it already matched)"
 	}
 	return message, output, nil
