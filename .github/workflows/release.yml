@@ -11,6 +11,14 @@ jobs:
   # release branch exactly as it was pushed.
   build:
     name: Build
+    # The publish job's version-bump commit is pushed with RELEASE_PAT, and a
+    # PAT push to release/** starts this workflow again, unlike a push made
+    # with GITHUB_TOKEN. That second run would fail at the bump ("nothing to
+    # commit"), so it stops here, and every other job, needing this one,
+    # stops with it. The commit used to carry [skip ci] instead, but that
+    # also skips pull_request workflows, and the bump commit is the head of
+    # the merge-back PR, whose required checks then never ran (v0.13.0).
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: bump version to ') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -159,7 +167,8 @@ jobs:
       # release/** is protected by the restrict-release ruleset, and that
       # bypasses only a specific user, not the github-actions bot (Integration
       # bypass actors require an org-owned repo, which this isn't). RELEASE_PAT
-      # is a fine-grained PAT for this repo (Contents: read and write) issued
+      # is a fine-grained PAT for this repo (Contents and Pull requests: read
+      # and write; the merge-back job opens and merges a PR with it) issued
       # under that user's account, so the push authenticates as an actor the
       # ruleset already trusts.
       - uses: actions/checkout@v7
@@ -173,18 +182,16 @@ jobs:
         run: |
           sed -i "s/^version = .*/version = \"${{ needs.build.outputs.version }}\"/" pyproject.toml
 
-      # [skip ci] matters here specifically because this pushes with
-      # RELEASE_PAT rather than the default GITHUB_TOKEN: GitHub only
-      # suppresses on-push retriggering for the built-in token, so a PAT
-      # push to release/** would otherwise kick off a second run of this
-      # same workflow, which fails at this exact step ("nothing to commit")
-      # since the version was already bumped by the first run.
+      # This push starts the workflow again, since it is made with
+      # RELEASE_PAT. The build job's condition stops that run by this
+      # message's prefix, so keep the two in step. No [skip ci]: this commit
+      # heads the merge-back PR, and [skip ci] would skip its checks.
       - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml
-          git commit -m "chore: bump version to ${{ needs.build.outputs.version }} [skip ci]"
+          git commit -m "chore: bump version to ${{ needs.build.outputs.version }}"
           git push origin "${{ github.ref_name }}"
 
       - name: Download wheels
@@ -433,14 +440,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build, publish]
     permissions:
-      contents: write
-      pull-requests: write
-      # To dispatch pages.yml below.
-      actions: write
+      contents: read
     steps:
+      # RELEASE_PAT, not GITHUB_TOKEN: develop's ruleset requires checks that
+      # run on pull_request, and a PR opened with GITHUB_TOKEN starts no
+      # workflow, so its checks never ran and it could never merge. Opened
+      # and merged with the PAT, the PR runs its checks, and the merge's
+      # push to develop starts pages.yml, which reads the bumped version.
       - name: Create PR to merge release branch back into develop
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
           AHEAD=$(gh api repos/$GITHUB_REPOSITORY/compare/develop...${{ github.ref_name }} --jq '.ahead_by')
           if [ "$AHEAD" -eq 0 ]; then
@@ -456,21 +465,13 @@ jobs:
           # --auto errors when the PR is already in clean status (nothing
           # pending to wait on); merge directly in that case.
           gh pr merge "$PR_URL" --merge --auto || gh pr merge "$PR_URL" --merge
-          # --auto can return before the merge lands; for v0.10.1 it landed
-          # after this workflow had finished. Wait for it, so the site rebuild
-          # below reads the bumped pyproject.toml rather than the old one.
-          for _ in $(seq 60); do
+          # --auto returns before the merge lands, which now waits on the
+          # required checks. Wait for it, so a merge-back that never lands
+          # fails this job instead of leaving develop and the site a release
+          # behind without a word.
+          for _ in $(seq 120); do
             [ "$(gh pr view "$PR_URL" --json state --jq .state)" = MERGED ] && exit 0
             sleep 10
           done
-          echo "::error::$PR_URL did not merge within ten minutes; the site still shows the previous release"
+          echo "::error::$PR_URL did not merge within twenty minutes; the site still shows the previous release"
           exit 1
-
-      # The site's release notes page reads the latest version from
-      # develop, and the merge above, made with GITHUB_TOKEN, starts no
-      # workflow of its own. A dispatch is one of the two events that token
-      # is allowed to start.
-      - name: Rebuild the site
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref develop

@@ -196,12 +196,19 @@ Each of these is a scar.
   protects `release/**` and bypasses a specific user, not the Actions bot —
   integration bypass actors need an org-owned repository. The version-bump
   commit, pushed from the publish job, uses a fine-grained PAT issued under
-  that user.
+  that user. It needs Contents and Pull requests, both read and write.
 
-- **`[skip ci]` on the bump commit.** GitHub suppresses on-push retriggering
-  only for the built-in token. A PAT push to `release/**` would start a second
-  run of this same workflow, which fails at the bump step because the version
-  is already bumped.
+- **The merge-back PR is opened with `RELEASE_PAT` too.** `develop` requires
+  checks that run on `pull_request`, and a PR opened with `GITHUB_TOKEN`
+  starts no workflow, so its checks never run and it can't merge. v0.13.0's
+  merge-back stuck there and had to be redone by hand.
+
+- **No `[skip ci]` on the bump commit; the build job skips it instead.**
+  GitHub suppresses on-push retriggering only for the built-in token, so the
+  PAT push of the bump starts this workflow again, and that run would fail at
+  the bump. The build job's `if:` stops it by the commit's message, so the
+  two must stay in step. `[skip ci]` did that job until v0.13.0, but it also
+  skips `pull_request` workflows, and the bump commit heads the merge-back PR.
 
 - **`kx/LICENSE` inside every archive.** krew-index refuses a plugin whose
   archive carries no license. The PyInstaller bundles satisfied this by

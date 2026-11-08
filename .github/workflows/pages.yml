@@ -47,11 +47,9 @@ on:
       - "release-notes/**"
       - "pyproject.toml"
       - ".github/workflows/pages.yml"
-  # Also how a release reaches the site. The notes page lists each released
-  # version, but release.yml merges the version bump back
-  # into develop with GITHUB_TOKEN, and a push made with that token starts no
-  # workflow, so the paths above never see it land. release.yml dispatches
-  # this once the merge has landed instead.
+  # By hand. A release reaches the site through the push paths above:
+  # release.yml merges the version bump back into develop with RELEASE_PAT,
+  # and a push made with a PAT starts workflows.
   workflow_dispatch:
 
 permissions:
