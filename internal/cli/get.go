@@ -91,6 +91,24 @@ type GetCommand struct {
 	LastRun bool
 }
 
+// listingNamespace is the namespace a listing of resource records: none for
+// -A or a cluster-scoped kind (see GetCommand.Execute), else the -n typed,
+// else scope — the namespace of the listing an index came from — else the
+// current one. kx get and its live watch both save their listing under it,
+// and the watch's caption names it.
+func listingNamespace(kube kubectl.Service, resource string, args []string, scope string) string {
+	if allNamespaces(args) || clusterScoped(string(listingKind(resource))) {
+		return ""
+	}
+	if namespace := extractNamespace(args); namespace != "" {
+		return namespace
+	}
+	if scope != "" {
+		return scope
+	}
+	return kube.CurrentNamespace()
+}
+
 // replayScope is the -n a listing is taken under when its arguments name no
 // scope of their own: Scope's, if any.
 func replayScope(scope string, extraArgs []string) []string {
@@ -270,15 +288,7 @@ func (c GetCommand) Execute(
 	// This is display and saved state only. kubectl ignores -n for a
 	// cluster-scoped resource, and accepts an empty one, so the commands that
 	// resolve these indexes need no change.
-	if !allNamespaces(extraArgs) && !clusterScoped(string(listingKind(resource))) {
-		namespace = extractNamespace(extraArgs)
-		if namespace == "" && scope != nil {
-			namespace = c.Scope
-		}
-		if namespace == "" {
-			namespace = c.Kubectl.CurrentNamespace()
-		}
-	}
+	namespace = listingNamespace(c.Kubectl, resource, extraArgs, c.Scope)
 
 	listing, tabular := c.Index.Parse(output)
 	if c.LastRun && tabular {

@@ -3084,3 +3084,119 @@ func TestOnAgentIndexFiresOnlyForIndexRefsIntoTaggedEntries(t *testing.T) {
 		}
 	})
 }
+
+// ReplaceCurrent overwrites only the entry its caller last wrote. The first
+// replace is the control: without it, a ReplaceCurrent that never replaced
+// anything would pass both refusals below. After it, another listing is
+// pushed (a second terminal's kx get svc), and then the watch's own query is
+// re-run with different rows (a kx get pods there); in neither case may the
+// watch's next save land.
+func TestReplaceCurrentReplacesOnlyItsOwnEntry(t *testing.T) {
+	service := newTestService(t, 10)
+	query := &Query{Resource: "pods", Args: []string{}}
+	first := State{Resources: pods("api"), Namespace: "prod", Query: query, Context: "c"}
+	save(t, service, first)
+
+	second := State{Resources: pods("api", "web"), Namespace: "prod", Query: query, Context: "c"}
+	if replaced, err := service.ReplaceCurrent(first, second); err != nil || !replaced {
+		t.Fatalf("ReplaceCurrent(own entry) = %v, %v; want replaced", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "api,web" {
+		t.Fatalf("current = %v, want api,web", got.Names())
+	}
+
+	services := State{Resources: NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
+		Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"}
+	save(t, service, services)
+	third := State{Resources: pods("api", "web", "worker"), Namespace: "prod", Query: query, Context: "c"}
+	if replaced, err := service.ReplaceCurrent(second, third); err != nil || replaced {
+		t.Fatalf("ReplaceCurrent over another listing = %v, %v; want refused", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "db" {
+		t.Errorf("current = %v, want the svc listing left alone", got.Names())
+	}
+
+	relisted := State{Resources: pods("web", "api"), Namespace: "prod", Query: query, Context: "c"}
+	save(t, service, relisted)
+	if replaced, err := service.ReplaceCurrent(second, third); err != nil || replaced {
+		t.Fatalf("ReplaceCurrent over a re-run of its query = %v, %v; want refused", replaced, err)
+	}
+	if got, _ := service.Load(); strings.Join(got.Names(), ",") != "web,api" {
+		t.Errorf("current = %v, want the re-run's rows left alone", got.Names())
+	}
+}
+
+// SaveIfCurrent saves only while the cursor's entry is the one Baseline read.
+// The first two saves are the controls — no file and an unchanged entry must
+// both save, or the refusals after them would pass for a SaveIfCurrent that
+// never saves. Then a listing pushed after the baseline (a second terminal's
+// kx get svc), a file removed after it (kx state drop --all), and a file that
+// appeared where the baseline found none, are each refused and left alone.
+func TestSaveIfCurrentSavesOnlyOverItsBaseline(t *testing.T) {
+	service := newTestService(t, 10)
+	query := &Query{Resource: "pods", Args: []string{}}
+	watch := State{Resources: pods("api"), Namespace: "prod", Query: query, Context: "c"}
+	services := State{Resources: NewResources([]string{"db"}, kinds.Service), Namespace: "prod",
+		Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"}
+	saveIfCurrent := func(base []byte, next State) bool {
+		t.Helper()
+		saved, err := service.SaveIfCurrent(base, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	current := func() string {
+		t.Helper()
+		got, err := service.Load()
+		if err != nil {
+			return err.Error()
+		}
+		return strings.Join(got.Names(), ",")
+	}
+
+	if !saveIfCurrent(service.Baseline(), watch) || current() != "api" {
+		t.Fatalf("over no file: current %s, want the save to land", current())
+	}
+	save(t, service, services)
+	if base := service.Baseline(); !saveIfCurrent(base, watch) || current() != "api" {
+		t.Fatalf("over an unchanged baseline: current %s, want the save to land", current())
+	}
+
+	base := service.Baseline()
+	save(t, service, services)
+	if saveIfCurrent(base, watch) || current() != "db" {
+		t.Errorf("over a listing pushed after the baseline: current %s, want db left alone", current())
+	}
+
+	base = service.Baseline()
+	if err := os.Remove(service.Path); err != nil {
+		t.Fatal(err)
+	}
+	if saveIfCurrent(base, watch) {
+		t.Errorf("over a file removed after the baseline: saved, want refused")
+	}
+
+	save(t, service, services)
+	if saveIfCurrent(nil, watch) || current() != "db" {
+		t.Errorf("with no baseline over a file that appeared: current %s, want db left alone", current())
+	}
+}
+
+// IsCurrent compares the cursor's entry as it was written, not as Load
+// returns it: Load backfills an empty namespace with "default", and compared
+// that way an entry saved with none never matched itself, so a watch would
+// have dropped its numbers on its first quiet tick. The listing pushed after
+// is the control: IsCurrent must turn false.
+func TestIsCurrentComparesTheEntryAsWritten(t *testing.T) {
+	service := newTestService(t, 10)
+	entry := State{Resources: pods("api"), Query: &Query{Resource: "pods", Args: []string{}}, Context: "c"}
+	save(t, service, entry)
+	if current, err := service.IsCurrent(entry); err != nil || !current {
+		t.Fatalf("IsCurrent(own entry) = %v, %v; want true", current, err)
+	}
+	save(t, service, State{Resources: pods("web"), Query: &Query{Resource: "svc", Args: []string{}}, Context: "c"})
+	if current, err := service.IsCurrent(entry); err != nil || current {
+		t.Errorf("IsCurrent after another listing = %v, %v; want false", current, err)
+	}
+}

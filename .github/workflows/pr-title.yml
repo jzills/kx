@@ -1,0 +1,46 @@
+name: PR Title
+
+# A pull request's title becomes a release-note bullet (tools/internal/relnotes),
+# so it is checked when it is written, not found in the release preview after
+# it has merged. "edited" reruns the check when only the title changes.
+on:
+  pull_request:
+    branches: [ "develop" ]
+    types: [ opened, edited, reopened, synchronize ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: Title is release copy
+    # A release branch's merge-back is the pipeline's own, and is never a
+    # bullet (relnotes drops it).
+    if: ${{ !startsWith(github.head_ref, 'release/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Passed through env, never interpolated into the script: a title is
+      # whatever its author typed.
+      #
+      # Only the title is checked. The repository squash-merges with the PR
+      # title (its PR_TITLE setting) whatever the commits say, and the
+      # develop-required-checks ruleset makes this check required.
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: go run ./tools/check-pr-title "$TITLE"

@@ -3,6 +3,7 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // restartsOutput is a Pod listing whose RESTARTS order is not its name
@@ -111,6 +112,12 @@ func TestSortRefusalsNameTheArgument(t *testing.T) {
 			"Invalid value for 'sort': 'restarts'. Accepted values: name, cpu, memory, cpu%, mem%.",
 		},
 		{
+			"events, unknown column", "events",
+			map[string]any{"target": map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}, "sort": "name"},
+			&recordingKubectl{namespace: "prod"},
+			"Invalid value for 'sort': 'name'. Accepted values: type, reason, kind, age, message.",
+		},
+		{
 			"diagnose, unknown column", "diagnose",
 			map[string]any{"sort": "age"},
 			&recordingKubectl{},
@@ -202,5 +209,40 @@ func TestDiagnoseRefusesASortBesideATarget(t *testing.T) {
 		"Drop it, or drop the target to sweep."
 	if !result.IsError || toolText(result) != want {
 		t.Errorf("result = %q (error %v), want the refusal %q", toolText(result), result.IsError, want)
+	}
+}
+
+// events orders a target's events by their columns, as kx events --sort
+// does, before the limit cuts them, and whatever the keys tie on stays
+// newest first. The unsorted call is the control: the fixture's newest
+// event is Normal, so newest first and Warnings first disagree.
+func TestEventsToolSortsBeforeTheLimit(t *testing.T) {
+	now := time.Now()
+	scaled := newFakeEvent("api", "Deployment", "ScalingReplicaSet", now.Add(-time.Minute))
+	scaled.Type = "Normal"
+	failed := newFakeEvent("api", "Deployment", "FailedCreate", now.Add(-time.Hour))
+	evicted := newFakeEvent("api", "Deployment", "Evicted", now.Add(-2*time.Hour))
+	session := connectMCP(t, mcpDiagDeps(t, &recordingKubectl{namespace: "prod"},
+		brokenDeployment("api", "prod"), scaled, failed, evicted))
+	target := map[string]any{"kind": "deploy", "name": "api", "namespace": "prod"}
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"target": target}, "ScalingReplicaSet,FailedCreate,Evicted"},
+		{map[string]any{"target": target, "sort": "-type"}, "FailedCreate,Evicted,ScalingReplicaSet"},
+		{map[string]any{"target": target, "sort": "-type", "limit": 1}, "FailedCreate"},
+		{map[string]any{"target": target, "sort": "reason"}, "Evicted,FailedCreate,ScalingReplicaSet"},
+		{map[string]any{"target": target, "sort": "-age"}, "Evicted,FailedCreate,ScalingReplicaSet"},
+	} {
+		var out eventsOutput
+		decodeStructured(t, callTool(t, session, "events", tc.args), &out)
+		var reasons []string
+		for _, event := range out.Events {
+			reasons = append(reasons, event.Reason)
+		}
+		if got := strings.Join(reasons, ","); got != tc.want {
+			t.Errorf("%v: events %s, want %s", tc.args, got, tc.want)
+		}
 	}
 }

@@ -1,6 +1,6 @@
 ---
 name: kx-voice
-description: Use when writing or rewording any text kx shows or ships — an error, success line, caption, empty state, spinner, notice, cobra Short/Long/Example, README or site docs prose, a Go comment, a commit message, a PR description, or release notes.
+description: Use when writing or rewording any text kx shows or ships — an error, success line, caption, empty state, spinner, notice, cobra Short/Long/Example, README or site docs prose, a Go comment, a commit message, a PR description, or release notes (with kx-release-notes for their shape).
 ---
 
 # kx voice
