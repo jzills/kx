@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -37,6 +38,16 @@ type releaseOptions struct {
 	// noexec ships a kx that cannot start from anywhere under this directory,
 	// as a binary can't on a filesystem mounted noexec.
 	noexec string
+	// staleSumsOnce answers the first SHA256SUMS request with sums that match
+	// no archive, as a release published between the script's two requests
+	// to latest/download would.
+	staleSumsOnce bool
+	// decoy lists each archive's true hash under a longer name that contains
+	// the archive's, after a wrong hash under the exact name.
+	decoy bool
+	// hold, when set, keeps every request waiting until it is closed, and
+	// arrived is closed when the first request comes in.
+	hold, arrived chan struct{}
 }
 
 var platforms = []string{"linux_amd64", "linux_arm64", "darwin_amd64", "darwin_arm64"}
@@ -44,12 +55,17 @@ var platforms = []string{"linux_amd64", "linux_arm64", "darwin_amd64", "darwin_a
 func newRelease(t *testing.T, version string, opts releaseOptions) *release {
 	t.Helper()
 	files := map[string][]byte{}
-	var sums strings.Builder
+	var sums, stale strings.Builder
 	for _, p := range platforms {
 		archive := stubArchive(t, version, opts)
 		sum := sha256.Sum256(archive)
 		for _, name := range []string{"kx_" + p + ".tar.gz", "kx_" + version + "_" + p + ".tar.gz"} {
-			if !opts.unlisted {
+			fmt.Fprintf(&stale, "%064d  %s\n", 0, name)
+			switch {
+			case opts.decoy:
+				fmt.Fprintf(&sums, "%064d  %s\n", 0, name)
+				fmt.Fprintf(&sums, "%s  old/%s\n", hex.EncodeToString(sum[:]), name)
+			case !opts.unlisted:
 				fmt.Fprintf(&sums, "%s  %s\n", hex.EncodeToString(sum[:]), name)
 			}
 			served := archive
@@ -62,10 +78,25 @@ func newRelease(t *testing.T, version string, opts releaseOptions) *release {
 	files["SHA256SUMS"] = []byte(sums.String())
 
 	r := &release{}
+	var arrivedOnce sync.Once
 	r.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		r.requests = append(r.requests, req.URL.Path)
+		sumsRequests := 0
+		for _, path := range r.requests {
+			if strings.HasSuffix(path, "/SHA256SUMS") {
+				sumsRequests++
+			}
+		}
 		r.mu.Unlock()
+		if opts.hold != nil {
+			arrivedOnce.Do(func() { close(opts.arrived) })
+			<-opts.hold
+		}
+		if opts.staleSumsOnce && sumsRequests == 1 && strings.HasSuffix(req.URL.Path, "/SHA256SUMS") {
+			w.Write([]byte(stale.String()))
+			return
+		}
 		name := ""
 		switch {
 		case strings.HasPrefix(req.URL.Path, "/latest/download/"):
@@ -338,7 +369,11 @@ func TestUnwritableInstallDir(t *testing.T) {
 	if res.code == 0 || !strings.Contains(res.stderr, "KX_INSTALL_DIR") {
 		t.Fatalf("exit %d, stderr %q: want a refusal suggesting KX_INSTALL_DIR", res.code, res.stderr)
 	}
-	mustNotExist(t, filepath.Join(dir, "kx"))
+	mustNotExist(t, filepath.Join(dir, "kx")) // Checked before the download, so a directory that cannot be used fails
+	// at once rather than after fetching an archive it can't install.
+	if len(r.paths()) != 0 {
+		t.Errorf("requests = %v, want none for an unusable install dir", r.paths())
+	}
 }
 
 func TestReplacesAnExistingInstall(t *testing.T) {
@@ -638,5 +673,236 @@ func TestTruncatedScriptRunsNothing(t *testing.T) {
 			t.Fatalf("first %d lines made requests %v", n, r.paths())
 		}
 		mustNotExist(t, filepath.Join(res.home, ".local"))
+	}
+}
+
+// The staged copy used to be .kx.<PID>, a name anyone sharing the install
+// directory can guess and plant a link at before the script copies over it.
+// mktemp chooses it now; this records mktemp's arguments to see it asked.
+func TestStagesUnderANameMktempChooses(t *testing.T) {
+	hostPlatform(t)
+	real, err := exec.LookPath("mktemp")
+	if err != nil {
+		t.Skip("mktemp not installed")
+	}
+	fakes := t.TempDir()
+	log := filepath.Join(t.TempDir(), "mktemp.log")
+	fakeCommand(t, fakes, "mktemp", `printf '%s\n' "$*" >>'`+log+`'; exec '`+real+`' "$@"`)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, fakes, toolbox(t, "mktemp"))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := dir + "/.kx.XXXXXX"; !contains(strings.Split(string(calls), "\n"), want) {
+		t.Errorf("mktemp calls = %q, want one for %s", calls, want)
+	}
+	assertNothingStaged(t, dir)
+}
+
+// A closed terminal or a dropped ssh session sends SIGHUP. With no trap for
+// it, sh died without running its EXIT trap, and the download's temporary
+// directory was left behind.
+func TestHangupCleansUp(t *testing.T) {
+	hostPlatform(t)
+	hold, arrived := make(chan struct{}), make(chan struct{})
+	r := newRelease(t, "v0.7.0", releaseOptions{hold: hold, arrived: arrived})
+	tmpdir := t.TempDir()
+	abs, err := filepath.Abs(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", abs)
+	cmd.Env = []string{
+		"HOME=" + t.TempDir(), "PATH=" + toolbox(t),
+		"KX_INSTALL_BASE_URL=" + r.URL, "TMPDIR=" + tmpdir,
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	<-arrived
+	// The control: the download really did create its directory, so an empty
+	// TMPDIR afterwards means it was removed, not that it never existed.
+	if entries, _ := os.ReadDir(tmpdir); len(entries) == 0 {
+		close(hold)
+		cmd.Wait()
+		t.Fatal("no temporary directory while the download was in flight")
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	close(hold)
+	err = cmd.Wait()
+	if err == nil {
+		t.Error("the script exited 0 after SIGHUP")
+	}
+	if entries, _ := os.ReadDir(tmpdir); len(entries) != 0 {
+		t.Errorf("TMPDIR holds %v after SIGHUP, want the download's directory removed", entries)
+	}
+}
+
+// A release published between the script's two requests to latest/download
+// pairs one release's archive with the other's sums. That is fetched again
+// once instead of being reported as tampering; a second mismatch is still
+// refused, which TestRefusesTamperedArchive pins.
+func TestNewestRetriesAChecksumRace(t *testing.T) {
+	p := hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{staleSumsOnce: true})
+	res := runScript(t, scriptPath, r, nil, toolbox(t))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	archives := 0
+	for _, path := range r.paths() {
+		if path == "/latest/download/kx_"+p+".tar.gz" {
+			archives++
+		}
+	}
+	if archives != 2 {
+		t.Errorf("archive requested %d times, want 2: %v", archives, r.paths())
+	}
+}
+
+// A pinned release cannot race, so its mismatch is refused at once.
+func TestPinnedVersionDoesNotRetryAMismatch(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{staleSumsOnce: true})
+	res := runScript(t, scriptPath, r, map[string]string{"KX_VERSION": "v0.7.0"}, toolbox(t))
+	if res.code == 0 || !strings.Contains(res.stderr, "checksum mismatch") {
+		t.Fatalf("exit %d, stderr %q: want a checksum refusal", res.code, res.stderr)
+	}
+}
+
+// SHA256SUMS is matched by the archive's exact name. A line whose name only
+// contains it (old/kx_linux_amd64.tar.gz) carries the true hash here, and the
+// exact line a wrong one, so a substring match would install.
+func TestChecksumMatchesTheExactName(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{decoy: true})
+	res := runScript(t, scriptPath, r, map[string]string{"KX_VERSION": "v0.7.0"}, toolbox(t))
+	if res.code == 0 || !strings.Contains(res.stderr, "checksum mismatch") {
+		t.Fatalf("exit %d, stderr %q: want a checksum refusal", res.code, res.stderr)
+	}
+	mustNotExist(t, filepath.Join(res.home, ".local", "bin", "kx"))
+}
+
+// macOS has shasum and no sha256sum. CI's macOS job runs the real one; this
+// runs the branch everywhere, through a shasum that insists on -a 256.
+func TestVerifiesWithShasum(t *testing.T) {
+	hostPlatform(t)
+	real, err := exec.LookPath("sha256sum")
+	if err != nil {
+		t.Skip("sha256sum not installed to stand behind the fake shasum")
+	}
+	fakes := t.TempDir()
+	log := filepath.Join(t.TempDir(), "shasum.log")
+	fakeCommand(t, fakes, "shasum", `[ "$1" = -a ] && [ "$2" = 256 ] || exit 2
+shift 2
+echo called >>'`+log+`'
+exec '`+real+`' "$@"`)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	res := runScript(t, scriptPath, r, nil, fakes, toolbox(t, "sha256sum", "shasum"))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if _, err := os.Stat(log); err != nil {
+		t.Error("shasum was never called")
+	}
+}
+
+// macOS Terminal opens login shells, which read .bash_profile; the hint named
+// .bashrc, which they don't.
+func TestBashHintNamesTheProfileItsShellReads(t *testing.T) {
+	for _, tc := range []struct{ kernel, want string }{
+		{"Darwin", "/.bash_profile:"}, {"Linux", "/.bashrc:"},
+	} {
+		t.Run(tc.kernel, func(t *testing.T) {
+			fakes := t.TempDir()
+			fakeCommand(t, fakes, "uname", `case "$1" in -s) echo `+tc.kernel+`;; -m) echo x86_64;; esac`)
+			fakeCommand(t, fakes, "sysctl", "echo 0")
+			r := newRelease(t, "v0.7.0", releaseOptions{})
+			res := runScript(t, scriptPath, r, map[string]string{
+				"SHELL": "/bin/bash", "KX_INSTALL_DIR": t.TempDir(),
+			}, fakes, toolbox(t, "uname", "sysctl"))
+			if res.code != 0 {
+				t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+			}
+			if !strings.Contains(res.stdout, tc.want) {
+				t.Errorf("stdout = %q, want the hint to name %s", res.stdout, tc.want)
+			}
+		})
+	}
+}
+
+// fish reads fish_add_path's argument as words, so a directory with a space
+// in it has to reach it quoted.
+func TestFishHintQuotesTheDirectory(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := filepath.Join(t.TempDir(), "my tools")
+	res := runScript(t, scriptPath, r, map[string]string{
+		"SHELL": "/usr/bin/fish", "KX_INSTALL_DIR": dir,
+	}, toolbox(t))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if want := `fish_add_path "` + dir + `"`; !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want %q", res.stdout, want)
+	}
+}
+
+// A kx earlier on PATH is the one 'kx' runs, so a successful install there
+// still leaves the user on the old one. The script says which. The control is
+// TestPathHint's on-PATH run, where the only kx is the new one.
+func TestNamesAnEarlierKxOnPath(t *testing.T) {
+	hostPlatform(t)
+	earlier := t.TempDir()
+	fakeCommand(t, earlier, "kx", "echo kx v0.1.0")
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, earlier, toolbox(t), dir)
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if want := filepath.Join(earlier, "kx") + " comes first on your PATH"; !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want %q", res.stdout, want)
+	}
+
+	alone := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t), dir)
+	if strings.Contains(alone.stdout, "comes first") {
+		t.Errorf("stdout = %q with no other kx on PATH, want no warning", alone.stdout)
+	}
+}
+
+// uv tool install puts kx in ~/.local/bin as a link, the script's default
+// directory. Replacing it is what the user asked for, but uv still thinks it
+// owns kx, so the script says so — and only for a link.
+func TestSaysWhenItReplacedALink(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "uv-kx")
+	fakeCommand(t, filepath.Dir(target), "uv-kx", "echo kx v0.1.0")
+	if err := os.Symlink(target, filepath.Join(dir, "kx")); err != nil {
+		t.Fatal(err)
+	}
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t), dir)
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if want := dir + "/kx was a link"; !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want %q", res.stdout, want)
+	}
+	if info, err := os.Lstat(filepath.Join(dir, "kx")); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("%s/kx is still a link (%v)", dir, err)
+	}
+
+	again := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t), dir)
+	if strings.Contains(again.stdout, "was a link") {
+		t.Errorf("stdout = %q replacing a plain file, want no link notice", again.stdout)
 	}
 }

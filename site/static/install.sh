@@ -111,7 +111,24 @@ verify() {
 	[ -n "$expected" ] || fail "$ARCHIVE is not listed in the release's SHA256SUMS; refusing to install it"
 	# shellcheck disable=SC2086 # SHA is a command and its flags, split on purpose
 	actual=$($SHA "$1/$ARCHIVE")
-	[ "${actual%% *}" = "$expected" ] || fail "checksum mismatch for $ARCHIVE; refusing to install it"
+	[ "${actual%% *}" = "$expected" ]
+}
+
+# Fetches the archive and its SHA256SUMS and checks one against the other.
+# The newest release is two requests to latest/download, and a release
+# published between them pairs one release's archive with the other's sums.
+# So a mismatch there is fetched once more before it is called tampering; a
+# pinned version cannot race, and a second mismatch is refused either way.
+download() {
+	fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
+	fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
+	verify "$1" && return
+	if [ -z "${KX_VERSION:-}" ]; then
+		fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
+		fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
+		verify "$1" && return
+	fi
+	fail "checksum mismatch for $ARCHIVE; refusing to install it"
 }
 
 # Prints the first line of "kx --version" for the kx in directory $1 — named
@@ -133,7 +150,9 @@ kx_version() {
 	}
 }
 
-install_kx() {
+# Settles the install directory before anything is downloaded, so a directory
+# that cannot be used fails at once instead of after the download.
+prepare_dir() {
 	DIR=${KX_INSTALL_DIR:-$HOME/.local/bin}
 	hint="set KX_INSTALL_DIR to a directory you can write, or rerun with sudo for a system directory"
 	mkdir -p "$DIR" 2>/dev/null || fail "cannot create $DIR; $hint"
@@ -141,11 +160,16 @@ install_kx() {
 	# and a trailing slash must not hide a directory that is already on PATH.
 	DIR=$(cd "$DIR" && pwd) || fail "cannot use $DIR; $hint"
 	[ -w "$DIR" ] || fail "cannot write to $DIR; $hint"
+}
+
+install_kx() {
 	tar -xzf "$1/$ARCHIVE" -C "$1" kx/kx || fail "could not unpack $ARCHIVE"
 	# Staged beside the kx it replaces and renamed over it: overwriting a kx
 	# that is running fails with "text file busy" on Linux, and a rename does
 	# not. The exit trap removes the staged copy if the rename never happens.
-	STAGED="$DIR/.kx.$$"
+	# mktemp names it: a name built from the PID is one another user of a
+	# shared directory can guess and plant a link at first.
+	STAGED=$(mktemp "$DIR/.kx.XXXXXX") || fail "cannot write to $DIR; $hint"
 	cp "$1/kx/kx" "$STAGED" || fail "cannot write to $DIR; $hint"
 	chmod 0755 "$STAGED"
 	# Before anything is replaced: a kx that cannot start here — a pre-Go
@@ -153,7 +177,12 @@ install_kx() {
 	# that can. Checked on the staged copy, in the directory it will run from:
 	# the download's temporary directory may be mounted noexec, and nothing
 	# can run from there however good the binary.
-	NEW=$(kx_version "$DIR" ".kx.$$") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
+	NEW=$(kx_version "$DIR" "${STAGED##*/}") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
+	# A link here is most likely uv's (uv tool install puts kx in the same
+	# directory); replacing it is what the user asked for, but uv still thinks
+	# it owns kx, so say so.
+	REPLACED_LINK=""
+	[ ! -L "$DIR/kx" ] || REPLACED_LINK=1
 	mv -f "$STAGED" "$DIR/kx"
 	STAGED=""
 }
@@ -163,11 +192,18 @@ path_hint() {
 	*/fish)
 		say ""
 		say "$DIR is not on your PATH. To add it, run:"
-		say "  fish_add_path $DIR"
+		say "  fish_add_path \"$DIR\""
 		return
 		;;
 	*/zsh) profile="$HOME/.zshrc" ;;
-	*/bash) profile="$HOME/.bashrc" ;;
+	# macOS Terminal opens login shells, which read .bash_profile, not .bashrc.
+	*/bash)
+		if [ "$OS" = darwin ]; then
+			profile="$HOME/.bash_profile"
+		else
+			profile="$HOME/.bashrc"
+		fi
+		;;
 	*) profile="your shell's profile" ;;
 	esac
 	say ""
@@ -178,10 +214,20 @@ path_hint() {
 report() {
 	line=$(kx_version "$DIR") || fail "installed $DIR/kx, but it did not run: $line"
 	say "✓ Installed $line to $DIR/kx"
+	if [ -n "$REPLACED_LINK" ]; then
+		say ""
+		say "$DIR/kx was a link, as uv tool install makes; it is now this kx. If uv installed kx, run 'uv tool uninstall kx-cli' so the two don't fight over it."
+	fi
 	case ":$PATH:" in
 	*":$DIR:"*) ;;
 	*) path_hint ;;
 	esac
+	# A kx earlier on PATH is the one 'kx' runs, whatever was installed here.
+	first=$(command -v kx 2>/dev/null || true)
+	if [ -n "$first" ] && [ "$first" != "$DIR/kx" ]; then
+		say ""
+		say "$first comes first on your PATH, so 'kx' still runs that one. Remove it, or put $DIR ahead of it."
+	fi
 }
 
 main() {
@@ -191,11 +237,13 @@ main() {
 	tmp=$(mktemp -d) || fail "could not create a temporary directory"
 	STAGED=""
 	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"' EXIT
-	trap 'exit 1' INT TERM
+	# HUP too: a closed terminal or a dropped ssh session is the likeliest
+	# way an install is cut off, and without a trap sh dies without running
+	# the EXIT one.
+	trap 'exit 1' HUP INT TERM
+	prepare_dir
 	say "Downloading $LABEL for $OS/$ARCH…"
-	fetch "$URL_DIR/$ARCHIVE" "$tmp/$ARCHIVE"
-	fetch "$URL_DIR/SHA256SUMS" "$tmp/SHA256SUMS"
-	verify "$tmp"
+	download "$tmp"
 	install_kx "$tmp"
 	report
 }
