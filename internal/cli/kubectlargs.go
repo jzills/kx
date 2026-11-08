@@ -199,6 +199,11 @@ func registerKubectlFlag(flags *pflag.FlagSet, args *kubectlArgs, flag kubectlfl
 		if existing.Shorthand == flag.Shorthand {
 			existing.ShorthandDeprecated = flag.ShorthandDeprecated
 		}
+		// kubectl's deprecation carries over as its shape does: a flag kx
+		// reads still parses as kubectl's, so it warns as kubectl's would.
+		if flag.Deprecated != "" {
+			existing.Deprecated = flag.Deprecated
+		}
 		return
 	}
 	shorthand := flag.Shorthand

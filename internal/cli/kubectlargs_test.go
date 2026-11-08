@@ -344,3 +344,78 @@ func TestConvertedCommandsParseTheirFlags(t *testing.T) {
 		t.Fatal("found no converted command; the walk checked nothing")
 	}
 }
+
+// A flag kx registers itself and kubectl deprecates must still warn, as
+// kubectl's does. The shared path copied ShorthandDeprecated and dropped
+// Deprecated, so the day kubectl deprecated --dry-run or -o, kx would have
+// gone on accepting it silently. No shared flag is deprecated in today's
+// table, so this builds one.
+func TestSharedFlagKeepsKubectlsDeprecation(t *testing.T) {
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.String("output", "", "kx's own usage")
+	args := &kubectlArgs{definedBy: map[string][]string{}}
+
+	registerKubectlFlag(flags, args, kubectlflags.Flag{
+		Name: "output", Type: "string", Deprecated: "use --format instead",
+	}, kubectlFlagCommand)
+
+	got := flags.Lookup("output")
+	if got.Deprecated != "use --format instead" {
+		t.Errorf("Deprecated = %q, want kubectl's message", got.Deprecated)
+	}
+	// The control: sharing still keeps kx's usage, so the copy is the
+	// deprecation alone and not the whole of kubectl's flag.
+	if got.Usage != "kx's own usage" {
+		t.Errorf("Usage = %q, want kx's own", got.Usage)
+	}
+}
+
+// A command that registers several kubectl subcommands (kx top, kx rollout)
+// registers each shared flag once, from the first subcommand that defines it,
+// and parses every subcommand's value with that one definition. That is only
+// right while the definitions agree on how the flag parses. They all agree
+// today; this fails the day a regenerated table makes one subcommand's
+// --revision a string and another's an int, instead of letting kx parse one
+// of them wrong.
+func TestSubcommandsSharingAFlagAgreeOnHowItParses(t *testing.T) {
+	checked := 0
+	var walk func(*cobra.Command)
+	walk = func(cmd *cobra.Command) {
+		for _, child := range cmd.Commands() {
+			walk(child)
+		}
+		subcommands := strings.Split(cmd.Annotations[kubectlCommandAnnotation], ",")
+		if len(subcommands) < 2 {
+			return
+		}
+		checked++
+		first := map[string]kubectlflags.Flag{}
+		from := map[string]string{}
+		for _, subcommand := range subcommands {
+			own, ok := kubectlflags.Command(subcommand)
+			if !ok {
+				t.Fatalf("kubectlflags has no table for kubectl %s", subcommand)
+			}
+			for _, flag := range own {
+				prev, seen := first[flag.Name]
+				if !seen {
+					first[flag.Name], from[flag.Name] = flag, subcommand
+					continue
+				}
+				if prev.Type != flag.Type || prev.NoOptDefVal != flag.NoOptDefVal ||
+					prev.Shorthand != flag.Shorthand {
+					t.Errorf("%s --%s: kubectl %s defines it as %s/%q/-%s, kubectl %s as %s/%q/-%s",
+						cmd.CommandPath(), flag.Name,
+						from[flag.Name], prev.Type, prev.NoOptDefVal, prev.Shorthand,
+						subcommand, flag.Type, flag.NoOptDefVal, flag.Shorthand)
+				}
+			}
+		}
+	}
+	walk(NewRoot(argvServices(t), "test"))
+	// Prove the walk found the commands it is about: an annotation renamed
+	// out from under it would otherwise pass this with nothing checked.
+	if checked < 2 {
+		t.Errorf("checked %d multi-subcommand commands, want kx top and kx rollout at least", checked)
+	}
+}
