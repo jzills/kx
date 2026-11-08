@@ -3,7 +3,7 @@
 title: "kx port-forward"
 linkTitle: "port-forward"
 description: "Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service)."
-weight: 20
+weight: 21
 ---
 
 Forwards a local port to an indexed resource. Given a workload rather than a Pod, kubectl picks which of its Pods to forward to — the same choice kx exec leaves to kubectl.

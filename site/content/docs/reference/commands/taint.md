@@ -3,7 +3,7 @@
 title: "kx taint"
 linkTitle: "taint"
 description: "Set or remove taints on an indexed Node."
-weight: 27
+weight: 28
 ---
 
 Sets or removes taints on one indexed Node — key=value:Effect or key:Effect to set, --remove to drop one. The effect is NoSchedule, PreferNoSchedule or NoExecute.

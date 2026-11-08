@@ -203,6 +203,39 @@ func (c ScaleCommand) Execute(
 	return message, output, nil
 }
 
+// PatchCommand patches one resource of any kind.
+type PatchCommand struct {
+	Kubectl kubectl.Service
+	State   IndexResolver
+}
+
+// Execute patches the resource, returning kx's line for it and kubectl's own
+// output, which reportChange prints in its place when an output format was
+// asked for.
+func (c PatchCommand) Execute(ref state.Ref, extraArgs []string) (message, output string, err error) {
+	name, namespace, kind, err := c.State.Resolve(ref)
+	if err != nil {
+		return "", "", err
+	}
+	output, err = c.Kubectl.Run(append([]string{
+		"patch", string(kind) + "/" + name, "-n", namespace,
+	}, extraArgs...))
+	if err != nil {
+		return "", "", err
+	}
+	message = fmt.Sprintf("Patched %s/%s", kind, name)
+	// kx replaces kubectl's output with this line, so it has to carry what
+	// kubectl's said: that a patch matching what was there changed nothing,
+	// and that a dry run changed nothing either.
+	switch {
+	case isDryRun(extraArgs):
+		message += " (dry run — nothing was changed)"
+	case strings.Contains(output, "(no change)"):
+		message += " (no change — it already matched)"
+	}
+	return message, output, nil
+}
+
 var rolloutKinds = kinds.Set{kinds.Deployment, kinds.StatefulSet, kinds.DaemonSet}
 
 // rolloutActions are the kubectl rollout subcommands kx exposes, in the order

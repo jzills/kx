@@ -3,7 +3,7 @@
 title: "kx docs"
 linkTitle: "docs"
 description: "Read kx's documentation in the terminal: a topic, or the list of them."
-weight: 38
+weight: 39
 ---
 
 Prints a documentation page from the copy built into this binary.

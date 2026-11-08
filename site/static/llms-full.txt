@@ -1927,6 +1927,7 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 | [`kx logs <index>... [--since str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | [`kx mark [<name>] [<index>] [--context str] [--namespace/-n str]`](https://jzills.github.io/kx/docs/reference/commands/mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | [`kx namespace [<index>]`](https://jzills.github.io/kx/docs/reference/commands/namespace/) | List Namespaces, or switch to an indexed one; alias: kx ns. |
+| [`kx patch <index> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/patch/) | Patch an indexed resource with a strategic merge, JSON merge, or JSON patch. |
 | [`kx port-forward <index> <port> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | [`kx ref <index>... [--kind] [--name] [--namespace]`](https://jzills.github.io/kx/docs/reference/commands/ref/) | Print what an index refers to, for commands kx doesn't wrap. |
 | [`kx rollout <action> <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
@@ -3158,6 +3159,73 @@ kx namespace [OPTIONS] [index]
 ```bash
 kx namespace
 kx namespace 2
+```
+
+---
+
+# kx patch
+
+Source: https://jzills.github.io/kx/docs/reference/commands/patch/
+
+Patch an indexed resource with a strategic merge, JSON merge, or JSON patch.
+
+Patches one indexed resource via kubectl patch. The patch itself is kubectl's: -p gives it inline, --patch-file reads it from a file, and --type picks strategic (the default), merge or json.
+
+kubectl's other flags pass through too — --dry-run to preview the change, -o to print the patched object, --subresource to patch status or scale.
+
+A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
+
+## Usage
+
+```text
+kx patch [OPTIONS] <index> [kubectl flags]
+```
+
+## Arguments
+
+| Argument | Description |
+|---|---|
+| `<index>` | Row number from the current listing, @name for a mark, or kind/name such as deploy/api |
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--dry-run[=string]` | client or server to preview the change without making it, as kubectl takes it; kx's line says nothing was changed |
+| `-o, --output string` | Output format, as kubectl takes it; kubectl's output is printed, and kx's own lines go to stderr |
+
+## Passthrough options
+
+| Option | Description |
+|---|---|
+| `--allow-missing-template-keys` | If true, ignore any errors in templates when a field or map key is missing in the template. Only applies to golang and jsonpath output formats. |
+| `--field-manager string` | Name of the manager used to track field ownership. |
+| `-f, --filename strings` | Filename, directory, or URL to files identifying the resource to update |
+| `-k, --kustomize string` | Process the kustomization directory. This flag can't be used together with -f or -R. |
+| `--local` | If true, patch will operate on the content of the file, not the server-side resource. |
+| `-p, --patch string` | The patch to be applied to the resource JSON file. |
+| `--patch-file string` | A file containing a patch to be applied to the resource. |
+| `-R, --recursive` | Process the directory used in -f, --filename recursively. Useful when you want to manage related manifests organized within the same directory. |
+| `--show-managed-fields` | If true, keep the managedFields when printing objects in JSON or YAML format. |
+| `--subresource string` | If specified, patch will operate on the subresource of the requested object. |
+| `--template string` | Template string or path to template file to use when -o=go-template, -o=go-template-file. The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]. |
+| `--type string` | The type of patch being provided; one of [json merge strategic] |
+| `…` | kubectl's global flags too: `--context`, `--kubeconfig`, `--as` and the rest; `kubectl options` lists them |
+
+## Global options
+
+| Option | Description |
+|---|---|
+| `--no-color` | Disable styled output |
+| `-h, --help` | Show this message and exit |
+
+## Examples
+
+```bash
+kx patch 1 -p '{"spec":{"replicas":2}}'
+kx patch 1 --type merge -p '{"metadata":{"labels":{"tier":"web"}}}'
+kx patch 1 --type json -p '[{"op":"remove","path":"/spec/paused"}]'
+kx patch deploy/api --patch-file fix.yaml -n prod --dry-run=server
 ```
 
 ---

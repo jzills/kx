@@ -3,7 +3,7 @@
 title: "kx ref"
 linkTitle: "ref"
 description: "Print what an index refers to, for commands kx doesn't wrap."
-weight: 21
+weight: 22
 ---
 
 Prints the resource an index refers to as a kubectl argument fragment, one line per index, so an index can be spent on anything — a kubectl verb kx doesn't wrap, or another tool entirely.

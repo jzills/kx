@@ -312,6 +312,7 @@ The [command reference](https://jzills.github.io/kx/docs/reference/commands/) co
 | `kx logs <index>...` | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
 | `kx mark [<name>] [<index>]` | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
 | `kx namespace [<index>]` | List Namespaces, or switch to an indexed one; alias: kx ns. |
+| `kx patch <index>` | Patch an indexed resource with a strategic merge, JSON merge, or JSON patch. |
 | `kx port-forward <index> <port>` | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
 | `kx ref <index>...` | Print what an index refers to, for commands kx doesn't wrap. |
 | `kx rollout <action> <index>` | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
