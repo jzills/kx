@@ -174,7 +174,7 @@ func stubArchive(t *testing.T, version string, opts releaseOptions) []byte {
 // holds only these, so a script that quietly starts depending on another tool
 // fails here rather than on a machine without it. gzip is on the list because
 // GNU tar execs it for -z.
-var declaredTools = []string{"curl", "wget", "tar", "gzip", "uname", "mktemp", "mkdir", "cp", "chmod", "mv", "rm",
+var declaredTools = []string{"curl", "wget", "tar", "gzip", "uname", "mktemp", "mkdir", "cp", "chmod", "mv", "rm", "rmdir",
 	"env", "sha256sum", "shasum", "sysctl"}
 
 // toolbox returns a directory of symlinks to the declared tools that exist on
@@ -369,7 +369,8 @@ func TestUnwritableInstallDir(t *testing.T) {
 	if res.code == 0 || !strings.Contains(res.stderr, "KX_INSTALL_DIR") {
 		t.Fatalf("exit %d, stderr %q: want a refusal suggesting KX_INSTALL_DIR", res.code, res.stderr)
 	}
-	mustNotExist(t, filepath.Join(dir, "kx")) // Checked before the download, so a directory that cannot be used fails
+	mustNotExist(t, filepath.Join(dir, "kx"))
+	// Checked before the download, so a directory that cannot be used fails
 	// at once rather than after fetching an archive it can't install.
 	if len(r.paths()) != 0 {
 		t.Errorf("requests = %v, want none for an unusable install dir", r.paths())
@@ -873,6 +874,9 @@ func TestNamesAnEarlierKxOnPath(t *testing.T) {
 	}
 
 	alone := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t), dir)
+	if alone.code != 0 {
+		t.Fatalf("control run: exit %d, stderr: %s", alone.code, alone.stderr)
+	}
 	if strings.Contains(alone.stdout, "comes first") {
 		t.Errorf("stdout = %q with no other kx on PATH, want no warning", alone.stdout)
 	}
@@ -894,8 +898,13 @@ func TestSaysWhenItReplacedALink(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
 	}
-	if want := dir + "/kx was a link"; !strings.Contains(res.stdout, want) {
+	if want := dir + "/kx was a link, as uv and Homebrew make"; !strings.Contains(res.stdout, want) {
 		t.Errorf("stdout = %q, want %q", res.stdout, want)
+	}
+	// Homebrew's link gets the same notice, so it names no one tool's
+	// uninstall command; uv's used to be advised to everyone.
+	if strings.Contains(res.stdout, "uv tool uninstall") {
+		t.Errorf("stdout = %q, want no uv-specific advice for a link of unknown origin", res.stdout)
 	}
 	if info, err := os.Lstat(filepath.Join(dir, "kx")); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		t.Errorf("%s/kx is still a link (%v)", dir, err)
@@ -904,5 +913,88 @@ func TestSaysWhenItReplacedALink(t *testing.T) {
 	again := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, toolbox(t), dir)
 	if strings.Contains(again.stdout, "was a link") {
 		t.Errorf("stdout = %q replacing a plain file, want no link notice", again.stdout)
+	}
+}
+
+// A checksum tool that fails is a broken tool, not a tampered release. verify
+// runs as a condition, which turns set -e off inside it, so the failure read
+// as an empty checksum, was fetched again, and was reported as a mismatch.
+func TestBrokenChecksumToolIsNamedNotCalledTampering(t *testing.T) {
+	p := hostPlatform(t)
+	fakes := t.TempDir()
+	fakeCommand(t, fakes, "sha256sum", `echo "sha256sum: read error" >&2; exit 1`)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	res := runScript(t, scriptPath, r, nil, fakes, toolbox(t, "sha256sum"))
+	if res.code == 0 || !strings.Contains(res.stderr, "could not compute the checksum of kx_"+p+".tar.gz") {
+		t.Fatalf("exit %d, stderr %q: want the checksum tool named as the failure", res.code, res.stderr)
+	}
+	if strings.Contains(res.stderr, "mismatch") {
+		t.Errorf("stderr = %q, want no talk of a mismatch", res.stderr)
+	}
+}
+
+// A PATH that reaches the install directory twice, once through a link,
+// finds the new kx first under the link's spelling. That is the same file,
+// and it used to be named as an older kx to remove.
+func TestTheNewKxReachedThroughALinkIsNotAnEarlierOne(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "bin")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, link, toolbox(t), dir)
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if strings.Contains(res.stdout, "comes first") {
+		t.Errorf("stdout = %q, want the new kx recognized under its link", res.stdout)
+	}
+}
+
+// When the install directory isn't on PATH, the hint's export line already
+// puts it first, so an earlier kx gets no second line saying it "comes
+// first" — which, with the directory absent, it doesn't.
+func TestNoEarlierKxLineWhenTheDirIsOffPath(t *testing.T) {
+	hostPlatform(t)
+	earlier := t.TempDir()
+	fakeCommand(t, earlier, "kx", "echo kx v0.1.0")
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, earlier, toolbox(t))
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "is not on your PATH") {
+		t.Errorf("stdout = %q, want the PATH hint", res.stdout)
+	}
+	if strings.Contains(res.stdout, "comes first") {
+		t.Errorf("stdout = %q, want no earlier-kx line beside the PATH hint", res.stdout)
+	}
+}
+
+// The install directory is made before the download now, so a failed
+// download must not leave it behind, empty. One that already existed is
+// the user's and stays.
+func TestAFailedInstallRemovesTheDirItMade(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	made := filepath.Join(t.TempDir(), "bin")
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": made, "KX_VERSION": "v9.9.9"}, toolbox(t))
+	if res.code == 0 {
+		t.Fatal("a missing release installed")
+	}
+	if _, err := os.Stat(made); err == nil {
+		t.Errorf("%s was left behind after a failed install", made)
+	}
+
+	existing := t.TempDir()
+	res = runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": existing, "KX_VERSION": "v9.9.9"}, toolbox(t))
+	if res.code == 0 {
+		t.Fatal("a missing release installed")
+	}
+	if _, err := os.Stat(existing); err != nil {
+		t.Errorf("%s, which existed before, was removed: %v", existing, err)
 	}
 }

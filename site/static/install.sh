@@ -8,7 +8,8 @@
 # runs sudo.
 #
 #   KX_INSTALL_DIR  where to install (default: $HOME/.local/bin)
-#   KX_VERSION      install this release instead of the newest, e.g. v0.7.0
+#   KX_VERSION      install this release instead of the newest: a tag from
+#                   https://github.com/jzills/kx/releases
 #
 # Everything below is a function until the last line, so a download cut off
 # partway through defines functions and runs nothing.
@@ -45,7 +46,7 @@ need_tools() {
 	else
 		fail "needs sha256sum or shasum to verify the download; install one and rerun"
 	fi
-	for tool in tar uname mktemp mkdir cp chmod mv rm env; do
+	for tool in tar uname mktemp mkdir cp chmod mv rm rmdir env; do
 		has "$tool" || fail "needs $tool; install it and rerun"
 	done
 }
@@ -110,7 +111,10 @@ verify() {
 	done <"$1/SHA256SUMS"
 	[ -n "$expected" ] || fail "$ARCHIVE is not listed in the release's SHA256SUMS; refusing to install it"
 	# shellcheck disable=SC2086 # SHA is a command and its flags, split on purpose
-	actual=$($SHA "$1/$ARCHIVE")
+	# Checked here, not left to set -e: download calls verify as a condition,
+	# which switches set -e off inside it, and a checksum tool that fails
+	# would otherwise read as a mismatch, which reads as tampering.
+	actual=$($SHA "$1/$ARCHIVE") || fail "could not compute the checksum of $ARCHIVE with $SHA"
 	[ "${actual%% *}" = "$expected" ]
 }
 
@@ -123,7 +127,7 @@ download() {
 	fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
 	fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
 	verify "$1" && return
-	if [ -z "${KX_VERSION:-}" ]; then
+	if [ -z "$version" ]; then
 		fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
 		fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
 		verify "$1" && return
@@ -152,13 +156,20 @@ kx_version() {
 
 # Settles the install directory before anything is downloaded, so a directory
 # that cannot be used fails at once instead of after the download.
+#
+# A directory it creates is removed again by the exit trap if the install
+# then fails, so a failed download leaves no empty ~/.local/bin behind. Only
+# the directory itself: parents mkdir -p made along the way stay.
 prepare_dir() {
 	DIR=${KX_INSTALL_DIR:-$HOME/.local/bin}
 	hint="set KX_INSTALL_DIR to a directory you can write, or rerun with sudo for a system directory"
+	created=""
+	[ -d "$DIR" ] || created=1
 	mkdir -p "$DIR" 2>/dev/null || fail "cannot create $DIR; $hint"
 	# Absolute from here on: the PATH hint must never suggest a relative entry,
 	# and a trailing slash must not hide a directory that is already on PATH.
 	DIR=$(cd "$DIR" && pwd) || fail "cannot use $DIR; $hint"
+	[ -z "$created" ] || CREATED_DIR=$DIR
 	[ -w "$DIR" ] || fail "cannot write to $DIR; $hint"
 }
 
@@ -178,13 +189,14 @@ install_kx() {
 	# the download's temporary directory may be mounted noexec, and nothing
 	# can run from there however good the binary.
 	NEW=$(kx_version "$DIR" "${STAGED##*/}") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
-	# A link here is most likely uv's (uv tool install puts kx in the same
-	# directory); replacing it is what the user asked for, but uv still thinks
-	# it owns kx, so say so.
+	# A link here is a tool manager's: uv tool install puts one in
+	# ~/.local/bin, Homebrew in /usr/local/bin. Replacing it is what the user
+	# asked for, but that tool still thinks it owns kx, so say so.
 	REPLACED_LINK=""
 	[ ! -L "$DIR/kx" ] || REPLACED_LINK=1
 	mv -f "$STAGED" "$DIR/kx"
 	STAGED=""
+	CREATED_DIR=""
 }
 
 path_hint() {
@@ -216,18 +228,30 @@ report() {
 	say "✓ Installed $line to $DIR/kx"
 	if [ -n "$REPLACED_LINK" ]; then
 		say ""
-		say "$DIR/kx was a link, as uv tool install makes; it is now this kx. If uv installed kx, run 'uv tool uninstall kx-cli' so the two don't fight over it."
+		say "$DIR/kx was a link, as uv and Homebrew make; it is now this kx. Uninstall kx from the tool that made the link, or it may put its own back."
 	fi
 	case ":$PATH:" in
-	*":$DIR:"*) ;;
+	*":$DIR:"*) shadow_hint ;;
 	*) path_hint ;;
 	esac
-	# A kx earlier on PATH is the one 'kx' runs, whatever was installed here.
-	first=$(command -v kx 2>/dev/null || true)
-	if [ -n "$first" ] && [ "$first" != "$DIR/kx" ]; then
-		say ""
-		say "$first comes first on your PATH, so 'kx' still runs that one. Remove it, or put $DIR ahead of it."
-	fi
+}
+
+# Names a kx earlier on PATH than $DIR, which is the one 'kx' runs whatever
+# was installed here. Asked only when $DIR is on PATH: when it isn't,
+# path_hint's line already puts it first. The two are compared as
+# directories, physically, so a PATH entry that reaches $DIR through a link
+# is not mistaken for another kx.
+shadow_hint() {
+	first=$(command -v kx 2>/dev/null) || return 0
+	case "$first" in
+	*/*) ;;
+	*) return 0 ;;
+	esac
+	there=$(cd "${first%/*}" 2>/dev/null && pwd -P) || return 0
+	here=$(cd "$DIR" && pwd -P) || return 0
+	[ "$there" != "$here" ] || return 0
+	say ""
+	say "$first comes first on your PATH, so 'kx' still runs that one. Remove it, or put $DIR ahead of it."
 }
 
 main() {
@@ -236,7 +260,8 @@ main() {
 	choose_release
 	tmp=$(mktemp -d) || fail "could not create a temporary directory"
 	STAGED=""
-	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"' EXIT
+	CREATED_DIR=""
+	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"; [ -z "$CREATED_DIR" ] || rmdir "$CREATED_DIR" 2>/dev/null || true' EXIT
 	# HUP too: a closed terminal or a dropped ssh session is the likeliest
 	# way an install is cut off, and without a trap sh dies without running
 	# the EXIT one.
