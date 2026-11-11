@@ -54,7 +54,7 @@ func registerMCPResources(server *mcp.Server, deps mcpDeps) {
 		Name:        "listing",
 		Title:       "The user's current kx listing",
 		MIMEType:    resourceJSON,
-		Description: listingResourceDescription(deps.WriteListings),
+		Description: listingResourceDescription,
 	}, deps.serializedResource(deps.listingResource))
 
 	// Not serialized, as the docs tool is not: the pages are embedded at build
@@ -76,19 +76,16 @@ func registerMCPResources(server *mcp.Server, deps mcpDeps) {
 	}
 }
 
-// listingResourceDescription says what a row carries. Indexes only with
-// --write-listings, for the same reason the tools return none without it: a
-// client can read this resource on the agent's behalf as well as the user's,
-// and with the flag off no index appears in anything the server returns.
-func listingResourceDescription(writeListings bool) string {
-	description := "The listing the user's kx commands resolve against now — what the last kx get, " +
-		"kx diag, kx tree or kx top saved, or the one kx state moved to: the command that made it, " +
-		"its context and namespace, and its rows in order, each with kind, name and namespace. "
-	if writeListings {
-		return description + "Each row carries its index, the number the user types in kx."
-	}
-	return description + "Rows carry no index; name a row to the user by kind and name."
-}
+// listingResourceDescription says what a row carries. Its index is there
+// with --write-listings off too: the rule that keeps indexes out of tool
+// output guards numbers from a listing the agent made and never saved,
+// which mean nothing in the user's terminal. This is the user's own listing,
+// so each index is the one kx describe 3 resolves.
+const listingResourceDescription = "The listing the user's kx commands resolve against now — " +
+	"what the last kx get, kx diag, kx tree or kx top saved, or the one kx state moved to: the " +
+	"command that made it, its context and namespace, and its rows in order, each with its index, " +
+	"kind, name and namespace. The index is the number the user types in kx, read live: if the " +
+	"user lists again, it can name a different row."
 
 // serializedResource is serialized for a resource handler.
 func (d mcpDeps) serializedResource(handler mcp.ResourceHandler) mcp.ResourceHandler {
@@ -149,24 +146,15 @@ type listingDocument struct {
 }
 
 // listingEntryJSON is kx state --json's entry without its position in the
-// stack, which is a number the user types (kx state 2) and so is left out
-// with the indexes.
+// stack: kx state 2 is a step through the user's history, not a resource to
+// name, and nothing here takes it.
 type listingEntryJSON struct {
 	Context       string          `json:"context,omitempty"`
 	Namespace     string          `json:"namespace,omitempty"`
 	AllNamespaces bool            `json:"allNamespaces,omitempty"`
 	Query         *stateQueryJSON `json:"query"`
 	ByAgent       bool            `json:"byAgent,omitempty"`
-	Resources     []listingRow    `json:"resources"`
-}
-
-// listingRow is stateRowJSON with the index optional: present only with
-// --write-listings.
-type listingRow struct {
-	Index     int    `json:"index,omitempty"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace,omitempty"`
+	Resources     []stateRowJSON  `json:"resources"`
 }
 
 func (d mcpDeps) listingResource(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -185,14 +173,7 @@ func (d mcpDeps) listingResource(context.Context, *mcp.ReadResourceRequest) (*mc
 	full := stateJSONOf(entry, 0, 0)
 	listing := &listingEntryJSON{
 		Context: full.Context, Namespace: full.Namespace, AllNamespaces: full.AllNamespaces,
-		Query: full.Query, ByAgent: full.ByAgent, Resources: make([]listingRow, 0, len(full.Resources)),
-	}
-	for _, row := range full.Resources {
-		out := listingRow{Kind: string(row.Kind), Name: row.Name, Namespace: row.Namespace}
-		if d.WriteListings {
-			out.Index = row.Index
-		}
-		listing.Resources = append(listing.Resources, out)
+		Query: full.Query, ByAgent: full.ByAgent, Resources: full.Resources,
 	}
 	document.Listing = listing
 	return jsonResource(resourceListingURI, document)

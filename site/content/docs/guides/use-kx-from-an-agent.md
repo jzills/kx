@@ -56,13 +56,14 @@ In Claude Code, type `@` and pick one; it lands in your message as `@kx:` follow
 
 | Resource | Holds |
 | --- | --- |
-| `kx://listing` | Your current kx listing: the command that made it, its context and namespace, and its rows in order. |
+| `kx://listing` | Your current kx listing: the command that made it, its context and namespace, and its rows in order, each with its index. |
 | `kx://context` | The context and namespace the next tool call reaches, and the kx version serving it. |
 | `kx://marks` | Every mark, as `list_marks` returns them. |
 | `kx://docs/…` | One page of these docs per resource, such as `kx://docs/concepts/marks`. |
 
-So "what's wrong with the third row in @kx:kx://listing?" works without pasting the table.
-The listing's rows carry no index unless the server runs with `--write-listings`, since the agent can read a resource on its own as well as when you attach it.
+So "what's wrong with 3 in @kx:kx://listing?" works without pasting the table.
+Its indexes are yours, the ones `kx describe 3` resolves, so they are there whether or not the server runs with `--write-listings`.
+Like any index, they are read live: list again before the agent acts and 3 can name a different row, which is why the agent says which resource it resolved before it acts.
 Every resource is read-only, and none reaches the cluster.
 
 ## Running an investigation
