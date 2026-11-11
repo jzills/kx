@@ -233,3 +233,53 @@ func TestInitContainerThatSucceededAfterCrashingKeepsItsFindings(t *testing.T) {
 		t.Errorf("findings = %q, want %q", got, want)
 	}
 }
+
+// A rebuilt sandbox runs every init container again, so one OOMKilled before
+// the rebuild can be queued behind the first, waiting on PodInitializing.
+// It used to be dropped with every other queued container, and the kill
+// with it. Kept, it reports the kill and nothing about waiting its turn,
+// and the pod is still pending on the step that is running.
+func TestQueuedInitContainerKeepsAFailedPreviousRun(t *testing.T) {
+	inProgress := running("migrate")
+	inProgress.Ready = false
+	pod := twoInitPod(inProgress)
+	seed := &pod.Status.InitContainerStatuses[1]
+	seed.RestartCount = 1
+	seed.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{
+		Reason: "OOMKilled", ExitCode: 137, FinishedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+	}
+
+	got := summaries(podFindings(podDiagnostic(pod), unbounded))
+	want := []string{
+		"OOMKilled in init container seed of Pod api-1",
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A node reboot runs every init container again, each to a clean exit, and
+// the restart count climbs. It used to keep the container's row on any
+// count above zero, and past five, inside the window, warned that it
+// restarted with no failure behind it. TestInitContainerThatSucceededAfter-
+// CrashingKeepsItsFindings is the control: a failed previous run keeps it.
+func TestCleanReRunsOfAnInitContainerAreQuiet(t *testing.T) {
+	status := terminated("migrate", "Completed", 0)
+	status.RestartCount = 6
+	status.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{
+		Reason: "Completed", ExitCode: 0, FinishedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+	}
+	pod := initPod(status)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{running("app")}
+
+	diagnostic := podDiagnostic(pod)
+	if len(diagnostic.Containers) != 1 || diagnostic.Containers[0].Name != "app" {
+		t.Errorf("containers = %+v, want app alone", diagnostic.Containers)
+	}
+	if got := summaries(podFindings(diagnostic, unbounded)); len(got) != 0 {
+		t.Errorf("findings = %q, want none", got)
+	}
+}

@@ -263,17 +263,30 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	}
 }
 
+// podInitializing is the reason the kubelet gives a container held back
+// until the init containers ahead of it finish: an app container, or an init
+// container queued behind another.
+const podInitializing = "PodInitializing"
+
 // quietInit reports whether an init container has nothing to report, and
 // so gets no row: it is queued behind another (the kubelet holds it in
 // Waiting with PodInitializing, and it has no logs to fetch), or it ran to a
-// clean exit first time. One that exited 0 only after restarting keeps its
-// row, since the crashes before it are findings the window may still show.
+// clean exit. Either way it keeps its row when the run before this one
+// failed, since that failure is a finding the window may still show.
+//
+// The previous run decides, not the restart count: a node reboot or a
+// rebuilt sandbox runs every init container again, so a count above zero
+// can be clean re-runs, and a queued container can carry a crash from
+// before the rebuild.
 func quietInit(status *corev1.ContainerStatus) bool {
-	if waiting := status.State.Waiting; waiting != nil && waiting.Reason == "PodInitializing" {
+	if last := status.LastTerminationState.Terminated; last != nil && last.ExitCode != 0 {
+		return false
+	}
+	if waiting := status.State.Waiting; waiting != nil && waiting.Reason == podInitializing {
 		return true
 	}
 	terminated := status.State.Terminated
-	return terminated != nil && terminated.ExitCode == 0 && status.RestartCount == 0
+	return terminated != nil && terminated.ExitCode == 0
 }
 
 // unhealthySince is how long a pod has been failing: since it stopped being
