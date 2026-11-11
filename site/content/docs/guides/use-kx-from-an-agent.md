@@ -49,6 +49,23 @@ The server reads the same kubeconfig your shell does, so whatever `kubectl confi
 
 Your MCP client lists each tool's arguments itself, from the server's `tools/list` reply, with a description of every one.
 
+## Attaching what you see
+
+The server also offers resources: things you attach to a message instead of describing them.
+In Claude Code, type `@` and pick one; it lands in your message as `@kx:` followed by its URI, where `kx` is the name you registered the server under.
+
+| Resource | Holds |
+| --- | --- |
+| `kx://listing` | Your current kx listing: the command that made it, its context and namespace, and its rows in order, each with its index. |
+| `kx://context` | The context and namespace the next tool call reaches, and the kx version serving it. |
+| `kx://marks` | Every mark, as `list_marks` returns them. |
+| `kx://docs/…` | One page of these docs per resource, such as `kx://docs/concepts/marks`. |
+
+So "what's wrong with 3 in @kx:kx://listing?" works without pasting the table.
+Its indexes are yours, the ones `kx describe 3` resolves, so they are there whether or not the server runs with `--write-listings`.
+Like any index, they are read live: list again before the agent acts and 3 can name a different row, which is why the agent says which resource it resolved before it acts.
+Every resource is read-only, and none reaches the cluster.
+
 ## What it will never do
 
 Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs`, `top` and `rollout history`; client-go only ever `get`s, `list`s and `watch`es.

@@ -220,7 +220,9 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"earlier one of theirs. Every tool is " +
 	"read-only against the cluster; anything written goes only to kx's local state. " +
 	"docs answers questions about kx itself — commands, flags, concepts — from the " +
-	"documentation built into this binary, so look there rather than guessing a flag."
+	"documentation built into this binary, so look there rather than guessing a flag. " +
+	"The kx://listing resource is the user's current kx listing, so 'the third one' can be " +
+	"read off it; kx://context is where the next call reaches."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	deps.Version = version
@@ -229,6 +231,7 @@ func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 		&mcp.ServerOptions{Instructions: mcpInstructions},
 	)
 	registerMCPTools(server, deps)
+	registerMCPResources(server, deps)
 	return server
 }
 
@@ -244,6 +247,9 @@ func newMCPCommand(services Services, version string) *cobra.Command {
 			"get_yaml for its manifest (Secrets redacted); rollout_history for a workload's " +
 			"revisions; scan for image CVEs; and docs for " +
 			"kx's own documentation, built into the binary.\n\n" +
+			"Resources to attach, in a client that offers them with @: kx://listing, your " +
+			"current kx listing; kx://context, where the next call reaches; kx://marks; and " +
+			"one kx://docs/ page per documentation topic.\n\n" +
 			"Every tool is read-only against the cluster. Resources are named by kind and name, " +
 			"by a mark, or by an index — a row number from your terminal's current listing, read " +
 			"live. By default the one thing it writes is a new mark, and " +

@@ -220,16 +220,23 @@ type listMarksOutput struct {
 }
 
 func (d mcpDeps) listMarks(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, listMarksOutput, error) {
+	out, err := d.marksDocument()
+	return nil, out, err
+}
+
+// marksDocument is every mark by name, which list_marks returns and the
+// kx://marks resource holds.
+func (d mcpDeps) marksDocument() (listMarksOutput, error) {
 	marks, err := d.State.Marks()
 	if err != nil {
-		return nil, listMarksOutput{}, err
+		return listMarksOutput{}, err
 	}
 	out := listMarksOutput{Context: d.Kubectl.CurrentContext(), Marks: make([]mcpMark, 0, len(marks))}
 	for name, mark := range marks {
 		out.Marks = append(out.Marks, mcpMarkOf(name, mark))
 	}
 	sort.Slice(out.Marks, func(i, j int) bool { return out.Marks[i].Name < out.Marks[j].Name })
-	return nil, out, nil
+	return out, nil
 }
 
 type markInput struct {
