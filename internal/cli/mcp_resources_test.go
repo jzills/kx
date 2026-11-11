@@ -42,12 +42,11 @@ func seedListing(t *testing.T, deps mcpDeps) {
 	}
 }
 
-// With --write-listings off, no index appears in anything the server
-// returns, and kx://listing is no exception: a client can read it for the
-// agent as well as attach it for the user. The rows are there, in order, by
-// kind and name. The flag-on read below is the control, so a fixture that
-// could never produce an index cannot pass this.
-func TestListingResourceCarriesIndexesOnlyWithWriteListings(t *testing.T) {
+// kx://listing is the user's own listing, so its rows carry the indexes kx
+// describe 3 resolves whether or not --write-listings is on. It used to drop
+// them with the flag off, extending a rule meant for listings the agent made
+// and never saved, so "the third one" had to be counted off the rows.
+func TestListingResourceCarriesIndexes(t *testing.T) {
 	for _, write := range []bool{false, true} {
 		deps := mcpTestDeps(t, &recordingKubectl{})
 		deps.WriteListings = write
@@ -64,12 +63,10 @@ func TestListingResourceCarriesIndexesOnlyWithWriteListings(t *testing.T) {
 		if first := document.Listing.Resources[0]; first.Kind != "Deployment" || first.Name != "api" {
 			t.Errorf("write=%v: first row = %+v, want Deployment api", write, first)
 		}
-		hasIndex := strings.Contains(text, `"index":`)
-		if hasIndex != write {
-			t.Errorf("write=%v: index present = %v in\n%s", write, hasIndex, text)
-		}
-		if write && document.Listing.Resources[1].Index != 2 {
-			t.Errorf("second row's index = %d, want 2", document.Listing.Resources[1].Index)
+		for i, row := range document.Listing.Resources {
+			if row.Index != i+1 {
+				t.Errorf("write=%v: row %d index = %d, want %d", write, i, row.Index, i+1)
+			}
 		}
 		if q := document.Listing.Query; q == nil || q.Command != "get" || q.Resource != "deploy" {
 			t.Errorf("write=%v: query = %+v, want kx get deploy", write, q)

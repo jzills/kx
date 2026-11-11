@@ -1395,7 +1395,7 @@
       "uri": "kx://context"
     },
     {
-      "description": "The listing the user's kx commands resolve against now — what the last kx get, kx diag, kx tree or kx top saved, or the one kx state moved to: the command that made it, its context and namespace, and its rows in order, each with kind, name and namespace. Rows carry no index; name a row to the user by kind and name.",
+      "description": "The listing the user's kx commands resolve against now — what the last kx get, kx diag, kx tree or kx top saved, or the one kx state moved to: the command that made it, its context and namespace, and its rows in order, each with its index, kind, name and namespace. The index is the number the user types in kx, read live: if the user lists again, it can name a different row.",
       "mimeType": "application/json",
       "name": "listing",
       "title": "The user's current kx listing",
