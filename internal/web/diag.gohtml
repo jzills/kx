@@ -33,7 +33,7 @@
             <td class="{{statusClass $pod.Phase}}">{{if eq $i 0}}{{$pod.Phase}}{{end}}</td>
             <td>{{if eq $i 0}}{{ready $pod}}{{end}}</td>
             <td class="num">{{$c.RestartCount}}{{if $c.RestartCount}}{{with age $c.LastTerminatedAt}} <span class="dim">({{.}})</span>{{end}}{{end}}</td>
-            <td>{{$c.Name}}</td>
+            <td>{{$c.Name}}{{if $c.Init}} <span class="dim">(init)</span>{{end}}</td>
             <td class="{{statusClass $c.State}}">{{$c.State}}{{with age $c.TerminatedAt}} <span class="dim">({{.}})</span>{{end}}</td>
             <td class="{{statusClass (reason $c)}}">{{reason $c}}</td>
             {{template "meter" cpuUsage $c}}
@@ -65,7 +65,7 @@
     {{range $c := $pod.Containers}}
       {{if $c.LogLines}}
       <div>
-        <p class="subhead">Pod/{{$pod.Name}} · container {{$c.Name}}{{if eq $c.LogSource "previous"}}{{with age $c.LastTerminatedAt}} · previous instance, {{.}}{{end}}{{end}}{{if not $c.LogFiltered}} · recent output{{end}}</p>
+        <p class="subhead">Pod/{{$pod.Name}} · {{if $c.Init}}init {{end}}container {{$c.Name}}{{if eq $c.LogSource "previous"}}{{with age $c.LastTerminatedAt}} · previous instance, {{.}}{{end}}{{end}}{{if not $c.LogFiltered}} · recent output{{end}}</p>
         <pre class="logblock">{{range $c.LogLines}}{{.}}
 {{end}}</pre>
       </div>

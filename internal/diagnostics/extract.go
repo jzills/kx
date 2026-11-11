@@ -207,11 +207,40 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	for i := range pod.Spec.Containers {
 		specContainers[pod.Spec.Containers[i].Name] = &pod.Spec.Containers[i]
 	}
+	specInit := map[string]*corev1.Container{}
+	for i := range pod.Spec.InitContainers {
+		specInit[pod.Spec.InitContainers[i].Name] = &pod.Spec.InitContainers[i]
+	}
 
-	ready := 0
-	containers := make([]ContainerDiagnostic, 0, len(pod.Status.ContainerStatuses))
+	ready, total := 0, 0
+	containers := make([]ContainerDiagnostic, 0,
+		len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses))
+	// Init containers first, the order the kubelet runs them in. A native
+	// sidecar (restartPolicy Always) runs beside the app for the pod's whole
+	// life, so it counts toward READY as kubectl counts it. Any other init
+	// container is left out when it has nothing to say (see quietInit); one
+	// that is running, failing, or got through only after failing is why the
+	// pod is stuck, or was.
+	for i := range pod.Status.InitContainerStatuses {
+		status := &pod.Status.InitContainerStatuses[i]
+		spec := specInit[status.Name]
+		sidecar := spec != nil && spec.RestartPolicy != nil &&
+			*spec.RestartPolicy == corev1.ContainerRestartPolicyAlways
+		if sidecar {
+			total++
+			if status.Ready {
+				ready++
+			}
+		} else if quietInit(status) {
+			continue
+		}
+		diagnostic := containerDiagnostic(status, spec)
+		diagnostic.Init = !sidecar
+		containers = append(containers, diagnostic)
+	}
 	for i := range pod.Status.ContainerStatuses {
 		status := &pod.Status.ContainerStatuses[i]
+		total++
 		if status.Ready {
 			ready++
 		}
@@ -228,10 +257,23 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		Phase:           phase,
 		Node:            pod.Spec.NodeName,
 		ReadyContainers: ready,
-		TotalContainers: len(pod.Status.ContainerStatuses),
+		TotalContainers: total,
 		Containers:      containers,
 		Scheduling:      schedulingInfo(pod.Status),
 	}
+}
+
+// quietInit reports whether an init container has nothing to report, and
+// so gets no row: it is queued behind another (the kubelet holds it in
+// Waiting with PodInitializing, and it has no logs to fetch), or it ran to a
+// clean exit first time. One that exited 0 only after restarting keeps its
+// row, since the crashes before it are findings the window may still show.
+func quietInit(status *corev1.ContainerStatus) bool {
+	if waiting := status.State.Waiting; waiting != nil && waiting.Reason == "PodInitializing" {
+		return true
+	}
+	terminated := status.State.Terminated
+	return terminated != nil && terminated.ExitCode == 0 && status.RestartCount == 0
 }
 
 // unhealthySince is how long a pod has been failing: since it stopped being

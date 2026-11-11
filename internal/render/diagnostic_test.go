@@ -883,3 +883,40 @@ func TestWarningEventsSectionWithoutASpanIsUnchanged(t *testing.T) {
 		t.Errorf("a single-occurrence event grew a span segment:\n%s", out)
 	}
 }
+
+// An init container's row and its log excerpt say it is one. Without the
+// mark, a pod stuck in Init:CrashLoopBackOff showed a crashing "migrate"
+// beside a waiting "app", and nothing said which runs first.
+func TestInitContainerIsMarkedInTheTableAndLogs(t *testing.T) {
+	report := diagnostics.BuildReport(diagnostics.Data{
+		Kind: kinds.Deployment, Name: "api", Namespace: "prod",
+		Replicas: &diagnostics.ReplicaHealth{Desired: 1},
+		Pods: []diagnostics.PodDiagnostic{{
+			Name: "api-abc", Phase: "Pending", TotalContainers: 1,
+			Scheduling: diagnostics.SchedulingInfo{Schedulable: true},
+			Containers: []diagnostics.ContainerDiagnostic{
+				{
+					Name: "migrate", Init: true, WaitingReason: "CrashLoopBackOff",
+					LogLines: []string{"ERROR no database"}, LogSource: "current", LogFiltered: true,
+				},
+				{
+					Name: "app", WaitingReason: "PodInitializing",
+					LogLines: []string{"ERROR not started"}, LogSource: "current", LogFiltered: true,
+				},
+			},
+		}},
+	})
+	out := capture(func(r *Renderer) { r.Diagnostic(report) })
+	for _, want := range []string{
+		"migrate (init)", "Pod/api-abc · init container migrate",
+		// The control: the app container is named as it always was.
+		"Pod/api-abc · container app",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "app (init)") {
+		t.Errorf("the app container is marked init:\n%s", out)
+	}
+}
