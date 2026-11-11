@@ -597,6 +597,97 @@ func newScaleCommand(services Services) *cobra.Command {
 	return cmd
 }
 
+// patchSourceFlags are kubectl patch's flags that take the resource from a
+// file or a kustomization instead of a name. Beside the Kind/name kx builds
+// from an index kubectl refuses every one ("cannot specify --local and server
+// resources", "resource/name arguments cannot be provided when a path is
+// specified"), so kx refuses them first, in its own words.
+var patchSourceFlags = []string{"filename", "kustomize", "recursive", "local"}
+
+// refusePatchSourceFlag refuses a patchSourceFlags flag. -R and --local are
+// booleans and are read as kubectl reads them, so --local=false, their own
+// default, selects nothing and passes.
+func refusePatchSourceFlag(extra []string) error {
+	spelling := ""
+	switch {
+	case hasFlag(extra, "--filename", "-f"):
+		spelling = firstSpelling(extra, "--filename", "-f")
+	case hasFlag(extra, "--kustomize", "-k"):
+		spelling = firstSpelling(extra, "--kustomize", "-k")
+	default:
+		if local, _ := extractBool(extra, "--local"); local {
+			spelling = "--local"
+		} else if recursive, _ := extractBool(extra, "--recursive"); recursive {
+			spelling = "--recursive"
+		} else {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"'%s' cannot be combined with an index — it names the resource to patch, "+
+			"which the index already does.", spelling)
+}
+
+func newPatchCommand(services Services) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "patch <index> [kubectl flags]",
+		Short: "Patch an indexed resource with a strategic merge, JSON merge, or JSON patch.",
+		Long: "Patches one indexed resource via kubectl patch. The patch itself is kubectl's: " +
+			"-p gives it inline, --patch-file reads it from a file, and --type picks " +
+			"strategic (the default), merge or json.\n\n" +
+			"kubectl's other flags pass through too — --dry-run to preview the change, " +
+			"-o to print the patched object, --subresource to patch status or scale. " +
+			"-f, -k and --local are refused, since each names the resource to patch, " +
+			"which the index already does.",
+		Example: "  kx patch 1 -p '{\"spec\":{\"replicas\":2}}'\n" +
+			"  kx patch 1 --type merge -p '{\"metadata\":{\"labels\":{\"tier\":\"web\"}}}'\n" +
+			"  kx patch 1 --type json -p '[{\"op\":\"remove\",\"path\":\"/spec/paused\"}]'\n" +
+			"  kx patch deploy/api --patch-file fix.yaml -n prod --dry-run=server",
+		Args:        minArgs(1),
+		Annotations: mutatingAnnotations,
+	}
+	registerChangeFlags(cmd)
+	kubectlFlags := registerKubectlFlags(cmd, "patch")
+	// Still parsed, so refusePatchSourceFlag can name them, but not offered:
+	// each names the resource to patch, which the index already does.
+	for _, name := range patchSourceFlags {
+		_ = cmd.Flags().MarkHidden(name)
+	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// Every kubectl call this makes goes where its cluster flags point —
+		// beside kind/name, the only place those flags are allowed.
+		services := services.forCluster(kubectlFlags.tokens)
+		positional, extra := kubectlArgv(cmd, args, kubectlFlags)
+		if len(positional) == 0 {
+			return requiredArgsError(cmd)
+		}
+		installAgentIndexNotice(services)
+		ref, err := parseTargetRef("index", positional[0])
+		if err != nil {
+			return err
+		}
+		// kubectl patch takes one resource, so a second index is refused
+		// here rather than reaching kubectl as a name it would look up.
+		if err := refuseStray(cmd, kubectlFlags, positional[1:]); err != nil {
+			return err
+		}
+		if err := refusePatchSourceFlag(extra); err != nil {
+			return err
+		}
+		if ref, err = settleRef(services, ref, extra); err != nil {
+			return err
+		}
+		message, output, err := PatchCommand{Kubectl: services.Kubectl, State: services.State}.
+			Execute(ref, extra)
+		if err != nil {
+			return err
+		}
+		reportChange(extra, output, message)
+		return nil
+	}
+	return cmd
+}
+
 func newRolloutCommand(services Services) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "rollout <action> <index> [kubectl flags]",

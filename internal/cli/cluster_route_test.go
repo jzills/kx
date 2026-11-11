@@ -31,6 +31,7 @@ var clusterRouteArgv = map[string][]string{
 	"drain":        {"drain", "node/worker", "--yes"},
 	"taint":        {"taint", "node/worker", "k=v:NoSchedule"},
 	"scale":        {"scale", "deploy/api", "3"},
+	"patch":        {"patch", "deploy/api", "-p", "{}"},
 	"wait":         {"wait", "deploy/api", "--for=condition=Available", "--timeout=0"},
 	"set image":    {"set", "image", "deploy/api", "api=nginx:2"},
 	"rollout":      {"rollout", "restart", "deploy/api"},

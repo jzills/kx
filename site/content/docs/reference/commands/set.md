@@ -3,7 +3,7 @@
 title: "kx set"
 linkTitle: "set"
 description: "Change an indexed workload's container images with kx set image, printing each one before and after."
-weight: 26
+weight: 27
 ---
 
 Changes a field of an indexed workload in place, the way kubectl set does. Only image is wrapped: 'kubectl set env' and the rest can take an index through kx ref.

@@ -197,6 +197,7 @@ func NewRoot(services Services, version string) *cobra.Command {
 		acceptsTyped(newDrainCommand(services)),
 		acceptsTyped(newTaintCommand(services)),
 		acceptsTyped(newScaleCommand(services)),
+		acceptsTyped(newPatchCommand(services)),
 		acceptsTyped(newWaitCommand(services)),
 		acceptsTyped(newRolloutCommand(services)),
 		acceptsTyped(newPortForwardCommand(services)),
