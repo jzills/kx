@@ -1408,5 +1408,61 @@
       "title": "kx marks",
       "uri": "kx://marks"
     }
+  ],
+  "prompts": [
+    {
+      "arguments": [
+        {
+          "name": "namespace",
+          "description": "The namespace to look in; defaults to the kubeconfig's current one."
+        }
+      ],
+      "description": "Scan a namespace's container images and summarize what is fixable, worst image first.",
+      "name": "cves",
+      "title": "Summarize image CVEs"
+    },
+    {
+      "arguments": [
+        {
+          "name": "target",
+          "description": "The resource: kind/name such as deploy/api, a mark such as @api, or an index from your current kx listing.",
+          "required": true
+        },
+        {
+          "name": "namespace",
+          "description": "The namespace of a kind/name target; defaults to the kubeconfig's current one."
+        }
+      ],
+      "description": "Find out why one resource is unhealthy, from its findings, ownership, events and logs.",
+      "name": "explain",
+      "title": "Explain one resource"
+    },
+    {
+      "arguments": [
+        {
+          "name": "target",
+          "description": "The resource: kind/name such as deploy/api, a mark such as @api, or an index from your current kx listing.",
+          "required": true
+        },
+        {
+          "name": "namespace",
+          "description": "The namespace of a kind/name target; defaults to the kubeconfig's current one."
+        }
+      ],
+      "description": "Find out whether a workload's latest rollout broke it, by comparing its last two revisions against what has gone wrong since.",
+      "name": "rollout",
+      "title": "Check the latest rollout"
+    },
+    {
+      "arguments": [
+        {
+          "name": "namespace",
+          "description": "The namespace to look in; defaults to the kubeconfig's current one."
+        }
+      ],
+      "description": "Find what is unhealthy in a namespace, follow the worst of it to a cause, and mark the resource at fault.",
+      "name": "triage",
+      "title": "Triage a namespace"
+    }
   ]
 }

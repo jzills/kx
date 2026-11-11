@@ -431,13 +431,22 @@ func TestMCPToolSchemas(t *testing.T) {
 		}
 	}
 	sort.Slice(resources, func(i, j int) bool { return resources[i].URI < resources[j].URI })
+	var prompts []*mcp.Prompt
+	for prompt, err := range session.Prompts(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		prompts = append(prompts, prompt)
+	}
+	sort.Slice(prompts, func(i, j int) bool { return prompts[i].Name < prompts[j].Name })
 	// Read from the handshake, as a client sees them, rather than from the
 	// constant.
 	golden := struct {
 		Instructions string          `json:"instructions"`
 		Tools        []schema        `json:"tools"`
 		Resources    []*mcp.Resource `json:"resources"`
-	}{session.InitializeResult().Instructions, tools, resources}
+		Prompts      []*mcp.Prompt   `json:"prompts"`
+	}{session.InitializeResult().Instructions, tools, resources, prompts}
 	got, err := json.MarshalIndent(golden, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -458,7 +467,7 @@ func TestMCPToolSchemas(t *testing.T) {
 		t.Fatalf("%v — regenerate with KX_UPDATE_GOLDEN=1", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("tool and resource schemas differ from %s — if the change is intended, regenerate with "+
+		t.Errorf("tool, resource and prompt schemas differ from %s — if the change is intended, regenerate with "+
 			"KX_UPDATE_GOLDEN=1 go test ./internal/cli -run TestMCPToolSchemas\ngot:\n%s", path, got)
 	}
 }

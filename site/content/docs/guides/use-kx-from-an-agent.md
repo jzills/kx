@@ -65,6 +65,22 @@ So "what's wrong with the third row in @kx:kx://listing?" works without pasting 
 The listing's rows carry no index unless the server runs with `--write-listings`, since the agent can read a resource on its own as well as when you attach it.
 Every resource is read-only, and none reaches the cluster.
 
+## Running an investigation
+
+The server's prompts are investigations written out once, which you run as commands.
+Claude Code lists each as `/kx:` and its name; typing `/mcp__kx__triage` runs it too.
+
+| Prompt | Arguments | Asks the agent to |
+| --- | --- | --- |
+| `triage` | `namespace`, optional | Sweep the namespace, follow the worst finding to a cause, and mark the resource at fault. |
+| `explain` | `target`, then `namespace` for a kind/name | Find out why one resource is unhealthy, from its findings, tree, events and logs. |
+| `rollout` | `target`, then `namespace` for a kind/name | Compare a workload's last two revisions against what has gone wrong since. |
+| `cves` | `namespace`, optional | Scan the namespace's images and rank what is fixable. |
+
+A target is one word, spelled as kx takes it: `deploy/api`, `@api`, or an index such as `3`.
+So `/kx:explain 3` explains the third row of your current listing, and the agent names the resource it resolved to before going further.
+A prompt is only instructions: the agent does the work with the same read-only tools.
+
 ## What it will never do
 
 Every tool, `mark` included, is read-only against the cluster: kubectl only ever runs `get`, `describe`, `logs`, `top` and `rollout history`; client-go only ever `get`s, `list`s and `watch`es.
