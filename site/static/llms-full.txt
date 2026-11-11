@@ -69,12 +69,12 @@ It never uses `sudo`, and it tells you if the install directory isn't on your `P
 Two environment variables change what it does:
 
 ```bash
-curl -fsSL https://jzills.github.io/kx/install.sh | KX_VERSION=v0.7.0 sh
+curl -fsSL https://jzills.github.io/kx/install.sh | KX_VERSION=vX.Y.Z sh
 curl -fsSL https://jzills.github.io/kx/install.sh \
   | sudo KX_INSTALL_DIR=/usr/local/bin sh
 ```
 
-The first installs a specific release, and the second installs system-wide.
+The first installs the release whose tag stands in for `vX.Y.Z`, as listed on the [releases page](https://github.com/jzills/kx/releases), and the second installs system-wide.
 Rerunning the script upgrades kx in place.
 Piping to a shell is a trust decision, so [read the script](https://jzills.github.io/kx/install.sh) first if you'd rather.
 

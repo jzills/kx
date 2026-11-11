@@ -8,7 +8,8 @@
 # runs sudo.
 #
 #   KX_INSTALL_DIR  where to install (default: $HOME/.local/bin)
-#   KX_VERSION      install this release instead of the newest, e.g. v0.7.0
+#   KX_VERSION      install this release instead of the newest: a tag from
+#                   https://github.com/jzills/kx/releases
 #
 # Everything below is a function until the last line, so a download cut off
 # partway through defines functions and runs nothing.
@@ -45,7 +46,7 @@ need_tools() {
 	else
 		fail "needs sha256sum or shasum to verify the download; install one and rerun"
 	fi
-	for tool in tar uname mktemp mkdir cp chmod mv rm env; do
+	for tool in tar uname mktemp mkdir cp chmod mv rm rmdir env; do
 		has "$tool" || fail "needs $tool; install it and rerun"
 	done
 }
@@ -110,8 +111,28 @@ verify() {
 	done <"$1/SHA256SUMS"
 	[ -n "$expected" ] || fail "$ARCHIVE is not listed in the release's SHA256SUMS; refusing to install it"
 	# shellcheck disable=SC2086 # SHA is a command and its flags, split on purpose
-	actual=$($SHA "$1/$ARCHIVE")
-	[ "${actual%% *}" = "$expected" ] || fail "checksum mismatch for $ARCHIVE; refusing to install it"
+	# Checked here, not left to set -e: download calls verify as a condition,
+	# which switches set -e off inside it, and a checksum tool that fails
+	# would otherwise read as a mismatch, which reads as tampering.
+	actual=$($SHA "$1/$ARCHIVE") || fail "could not compute the checksum of $ARCHIVE with $SHA"
+	[ "${actual%% *}" = "$expected" ]
+}
+
+# Fetches the archive and its SHA256SUMS and checks one against the other.
+# The newest release is two requests to latest/download, and a release
+# published between them pairs one release's archive with the other's sums.
+# So a mismatch there is fetched once more before it is called tampering; a
+# pinned version cannot race, and a second mismatch is refused either way.
+download() {
+	fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
+	fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
+	verify "$1" && return
+	if [ -z "$version" ]; then
+		fetch "$URL_DIR/$ARCHIVE" "$1/$ARCHIVE"
+		fetch "$URL_DIR/SHA256SUMS" "$1/SHA256SUMS"
+		verify "$1" && return
+	fi
+	fail "checksum mismatch for $ARCHIVE; refusing to install it"
 }
 
 # Prints the first line of "kx --version" for the kx in directory $1 — named
@@ -133,19 +154,33 @@ kx_version() {
 	}
 }
 
-install_kx() {
+# Settles the install directory before anything is downloaded, so a directory
+# that cannot be used fails at once instead of after the download.
+#
+# A directory it creates is removed again by the exit trap if the install
+# then fails, so a failed download leaves no empty ~/.local/bin behind. Only
+# the directory itself: parents mkdir -p made along the way stay.
+prepare_dir() {
 	DIR=${KX_INSTALL_DIR:-$HOME/.local/bin}
 	hint="set KX_INSTALL_DIR to a directory you can write, or rerun with sudo for a system directory"
+	created=""
+	[ -d "$DIR" ] || created=1
 	mkdir -p "$DIR" 2>/dev/null || fail "cannot create $DIR; $hint"
 	# Absolute from here on: the PATH hint must never suggest a relative entry,
 	# and a trailing slash must not hide a directory that is already on PATH.
 	DIR=$(cd "$DIR" && pwd) || fail "cannot use $DIR; $hint"
+	[ -z "$created" ] || CREATED_DIR=$DIR
 	[ -w "$DIR" ] || fail "cannot write to $DIR; $hint"
+}
+
+install_kx() {
 	tar -xzf "$1/$ARCHIVE" -C "$1" kx/kx || fail "could not unpack $ARCHIVE"
 	# Staged beside the kx it replaces and renamed over it: overwriting a kx
 	# that is running fails with "text file busy" on Linux, and a rename does
 	# not. The exit trap removes the staged copy if the rename never happens.
-	STAGED="$DIR/.kx.$$"
+	# mktemp names it: a name built from the PID is one another user of a
+	# shared directory can guess and plant a link at first.
+	STAGED=$(mktemp "$DIR/.kx.XXXXXX") || fail "cannot write to $DIR; $hint"
 	cp "$1/kx/kx" "$STAGED" || fail "cannot write to $DIR; $hint"
 	chmod 0755 "$STAGED"
 	# Before anything is replaced: a kx that cannot start here — a pre-Go
@@ -153,9 +188,15 @@ install_kx() {
 	# that can. Checked on the staged copy, in the directory it will run from:
 	# the download's temporary directory may be mounted noexec, and nothing
 	# can run from there however good the binary.
-	NEW=$(kx_version "$DIR" ".kx.$$") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
+	NEW=$(kx_version "$DIR" "${STAGED##*/}") || fail "the downloaded kx did not run here, so nothing was installed: $NEW"
+	# A link here is a tool manager's: uv tool install puts one in
+	# ~/.local/bin, Homebrew in /usr/local/bin. Replacing it is what the user
+	# asked for, but that tool still thinks it owns kx, so say so.
+	REPLACED_LINK=""
+	[ ! -L "$DIR/kx" ] || REPLACED_LINK=1
 	mv -f "$STAGED" "$DIR/kx"
 	STAGED=""
+	CREATED_DIR=""
 }
 
 path_hint() {
@@ -163,11 +204,18 @@ path_hint() {
 	*/fish)
 		say ""
 		say "$DIR is not on your PATH. To add it, run:"
-		say "  fish_add_path $DIR"
+		say "  fish_add_path \"$DIR\""
 		return
 		;;
 	*/zsh) profile="$HOME/.zshrc" ;;
-	*/bash) profile="$HOME/.bashrc" ;;
+	# macOS Terminal opens login shells, which read .bash_profile, not .bashrc.
+	*/bash)
+		if [ "$OS" = darwin ]; then
+			profile="$HOME/.bash_profile"
+		else
+			profile="$HOME/.bashrc"
+		fi
+		;;
 	*) profile="your shell's profile" ;;
 	esac
 	say ""
@@ -178,24 +226,51 @@ path_hint() {
 report() {
 	line=$(kx_version "$DIR") || fail "installed $DIR/kx, but it did not run: $line"
 	say "✓ Installed $line to $DIR/kx"
+	if [ -n "$REPLACED_LINK" ]; then
+		say ""
+		say "$DIR/kx was a link, as uv and Homebrew make; it is now this kx. Uninstall kx from the tool that made the link, or it may put its own back."
+	fi
 	case ":$PATH:" in
-	*":$DIR:"*) ;;
+	*":$DIR:"*) shadow_hint ;;
 	*) path_hint ;;
 	esac
+}
+
+# Names a kx earlier on PATH than $DIR, which is the one 'kx' runs whatever
+# was installed here. Asked only when $DIR is on PATH: when it isn't,
+# path_hint's line already puts it first. The two are compared as
+# directories, physically, so a PATH entry that reaches $DIR through a link
+# is not mistaken for another kx.
+shadow_hint() {
+	first=$(command -v kx 2>/dev/null) || return 0
+	case "$first" in
+	*/*) ;;
+	*) return 0 ;;
+	esac
+	there=$(cd "${first%/*}" 2>/dev/null && pwd -P) || return 0
+	here=$(cd "$DIR" && pwd -P) || return 0
+	[ "$there" != "$here" ] || return 0
+	say ""
+	say "$first comes first on your PATH, so 'kx' still runs that one. Remove it, or put $DIR ahead of it."
 }
 
 main() {
 	need_tools
 	detect_platform
 	choose_release
-	tmp=$(mktemp -d) || fail "could not create a temporary directory"
+	# The template is spelled out because macOS's mktemp -d, given none,
+	# picks its own per-user directory and ignores TMPDIR.
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/kx.XXXXXX") || fail "could not create a temporary directory"
 	STAGED=""
-	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"' EXIT
-	trap 'exit 1' INT TERM
+	CREATED_DIR=""
+	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"; [ -z "$CREATED_DIR" ] || rmdir "$CREATED_DIR" 2>/dev/null || true' EXIT
+	# HUP too: a closed terminal or a dropped ssh session is the likeliest
+	# way an install is cut off, and without a trap sh dies without running
+	# the EXIT one.
+	trap 'exit 1' HUP INT TERM
+	prepare_dir
 	say "Downloading $LABEL for $OS/$ARCH…"
-	fetch "$URL_DIR/$ARCHIVE" "$tmp/$ARCHIVE"
-	fetch "$URL_DIR/SHA256SUMS" "$tmp/SHA256SUMS"
-	verify "$tmp"
+	download "$tmp"
 	install_kx "$tmp"
 	report
 }
