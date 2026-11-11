@@ -2,7 +2,7 @@ module github.com/jzills/kx/tools/gen-kubectl-flags
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/spf13/cobra v1.10.2
