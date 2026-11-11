@@ -1,5 +1,5 @@
 {
-  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, describe, get_yaml, rollout_history or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag.",
+  "instructions": "kx reads a Kubernetes cluster through the caller's kubeconfig. Start with diagnose (no target) to find what is unhealthy, then diagnose, tree, events, logs, top, describe, get_yaml, rollout_history or scan a specific resource for more evidence. list_resources lists a kind by name. Resources are named by kind/name/namespace, by a kx mark — a name the user pinned to a resource (list_marks shows them) — or by an index: a row number from the user's current kx listing, e.g. the 3 in 'diagnose 3'. Confirm the resolved name back to the user before acting on an index. mark pins one. If results carry an index, that is the row's number in the user's kx history, and the user can spend it in kx: that listing is now the user's current one, so an index given to you after it refers to your listing, not an earlier one of theirs. Every tool is read-only against the cluster; anything written goes only to kx's local state. docs answers questions about kx itself — commands, flags, concepts — from the documentation built into this binary, so look there rather than guessing a flag. The kx://listing resource is the user's current kx listing, so 'the third one' can be read off it; kx://context is where the next call reaches.",
   "tools": [
     {
       "name": "describe",
@@ -1384,6 +1384,29 @@
         "type": "object"
       },
       "outputSchema": null
+    }
+  ],
+  "resources": [
+    {
+      "description": "The kubeconfig context and namespace kx reads right now, and the kx version serving them. The server follows kubeconfig live, so this is the cluster the next tool call reaches.",
+      "mimeType": "application/json",
+      "name": "context",
+      "title": "Current kubeconfig context",
+      "uri": "kx://context"
+    },
+    {
+      "description": "The listing the user's kx commands resolve against now — what the last kx get, kx diag, kx tree or kx top saved, or the one kx state moved to: the command that made it, its context and namespace, and its rows in order, each with kind, name and namespace. Rows carry no index; name a row to the user by kind and name.",
+      "mimeType": "application/json",
+      "name": "listing",
+      "title": "The user's current kx listing",
+      "uri": "kx://listing"
+    },
+    {
+      "description": "The marks: names the user pinned to resources with kx mark, or an agent with the mark tool. Each is usable as a tool target's mark.",
+      "mimeType": "application/json",
+      "name": "marks",
+      "title": "kx marks",
+      "uri": "kx://marks"
     }
   ]
 }

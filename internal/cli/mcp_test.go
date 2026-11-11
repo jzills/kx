@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jzills/kx/internal/index"
@@ -418,12 +419,25 @@ func TestMCPToolSchemas(t *testing.T) {
 		tools = append(tools, schema{tool.Name, tool.Description, tool.Annotations, tool.InputSchema, tool.OutputSchema})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	// The fixed resources, not the kx://docs/ pages: those follow the site's
+	// documentation, and TestEveryDocsTopicIsAResource pins that they do.
+	var resources []*mcp.Resource
+	for resource, err := range session.Resources(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(resource.URI, resourceDocsPrefix) {
+			resources = append(resources, resource)
+		}
+	}
+	sort.Slice(resources, func(i, j int) bool { return resources[i].URI < resources[j].URI })
 	// Read from the handshake, as a client sees them, rather than from the
 	// constant.
 	golden := struct {
-		Instructions string   `json:"instructions"`
-		Tools        []schema `json:"tools"`
-	}{session.InitializeResult().Instructions, tools}
+		Instructions string          `json:"instructions"`
+		Tools        []schema        `json:"tools"`
+		Resources    []*mcp.Resource `json:"resources"`
+	}{session.InitializeResult().Instructions, tools, resources}
 	got, err := json.MarshalIndent(golden, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -444,7 +458,7 @@ func TestMCPToolSchemas(t *testing.T) {
 		t.Fatalf("%v — regenerate with KX_UPDATE_GOLDEN=1", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Errorf("tool schemas differ from %s — if the change is intended, regenerate with "+
+		t.Errorf("tool and resource schemas differ from %s — if the change is intended, regenerate with "+
 			"KX_UPDATE_GOLDEN=1 go test ./internal/cli -run TestMCPToolSchemas\ngot:\n%s", path, got)
 	}
 }
