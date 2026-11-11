@@ -12,6 +12,8 @@ Thirteen tools: list_marks and mark for kx's marks; list_resources to list a kin
 
 Resources to attach, in a client that offers them with @: kx://listing, your current kx listing; kx://context, where the next call reaches; kx://marks; and one kx://docs/ page per documentation topic.
 
+Prompts to run, in a client that offers them as commands: triage a namespace, explain one resource, check a workload's latest rollout, and summarize a namespace's image CVEs. Each is instructions for the agent, which then uses the tools above.
+
 Every tool is read-only against the cluster. Resources are named by kind and name, by a mark, or by an index — a row number from your terminal's current listing, read live. By default the one thing it writes is a new mark, and it refuses to move one you already set.
 
 The server follows your kubeconfig live: switch context and the next call reads the new cluster, and says so in its result.
