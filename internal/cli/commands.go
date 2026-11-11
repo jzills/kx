@@ -637,7 +637,7 @@ func newPatchCommand(services Services) *cobra.Command {
 			"strategic (the default), merge or json.\n\n" +
 			"kubectl's other flags pass through too — --dry-run to preview the change, " +
 			"-o to print the patched object, --subresource to patch status or scale. " +
-			"-f, -k and --local are refused, since each names the resource to patch, " +
+			"-f, -k, -R and --local are refused, since each names the resource to patch, " +
 			"which the index already does.",
 		Example: "  kx patch 1 -p '{\"spec\":{\"replicas\":2}}'\n" +
 			"  kx patch 1 --type merge -p '{\"metadata\":{\"labels\":{\"tier\":\"web\"}}}'\n" +
