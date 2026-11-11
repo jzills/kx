@@ -231,6 +231,9 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 			if status.Ready {
 				ready++
 			}
+			if stoppedWithPod(pod, status) {
+				continue
+			}
 		} else if quietInit(status) {
 			continue
 		}
@@ -261,6 +264,17 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		Containers:      containers,
 		Scheduling:      schedulingInfo(pod.Status),
 	}
+}
+
+// stoppedWithPod reports whether a native sidecar was stopped because its
+// pod finished. The kubelet stops a sidecar once the app containers exit,
+// and one that doesn't handle SIGTERM is killed, reason Error, exit 137 or
+// 143 — on a Job pod that succeeded. A sidecar is restarted whenever it
+// exits while the pod runs, so in a finished pod its stop is the shutdown,
+// never a failure, and reporting it put a critical on a Job that worked.
+func stoppedWithPod(pod *corev1.Pod, status *corev1.ContainerStatus) bool {
+	finished := pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
+	return finished && status.State.Terminated != nil
 }
 
 // podInitializing is the reason the kubelet gives a container held back
