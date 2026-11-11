@@ -258,7 +258,9 @@ main() {
 	need_tools
 	detect_platform
 	choose_release
-	tmp=$(mktemp -d) || fail "could not create a temporary directory"
+	# The template is spelled out because macOS's mktemp -d, given none,
+	# picks its own per-user directory and ignores TMPDIR.
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/kx.XXXXXX") || fail "could not create a temporary directory"
 	STAGED=""
 	CREATED_DIR=""
 	trap 'rm -rf "$tmp"; [ -z "$STAGED" ] || rm -f "$STAGED"; [ -z "$CREATED_DIR" ] || rmdir "$CREATED_DIR" 2>/dev/null || true' EXIT
