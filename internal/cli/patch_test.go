@@ -41,7 +41,15 @@ func TestPatchRefusesBeforeKubectlRuns(t *testing.T) {
 			"'--filename' cannot be combined with an index — it names the resource to patch, which the index already does."},
 		{[]string{"1", "-k", "overlay", "-p", "{}"}, "'--kustomize' cannot be combined with an index"},
 		{[]string{"1", "--local", "-p", "{}"}, "'--local' cannot be combined with an index"},
-		{[]string{"1", "-R", "-p", "{}"}, "'--recursive' cannot be combined with an index"},
+		// -R names no resource; it only qualifies -f, so that is its reason.
+		{[]string{"1", "-R", "-p", "{}"},
+			"'--recursive' cannot be combined with an index — it only applies to the directory '-f' names, and '-f' cannot be combined with an index either."},
+		// The unparsed tail is the one place a shorthand reaches the refusal
+		// unnormalized, so each source flag is matched by both spellings there.
+		{[]string{"1", "-p", "{}", "--", "-R"},
+			"'-R' cannot be combined with an index — it only applies to the directory '-f' names, and '-f' cannot be combined with an index either."},
+		{[]string{"1", "-p", "{}", "--", "-f", "cm.yaml"},
+			"'-f' cannot be combined with an index — it names the resource to patch, which the index already does."},
 	} {
 		kube, err := indexCommandOn(t, kinds.Deployment, newPatchCommand, tc.args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

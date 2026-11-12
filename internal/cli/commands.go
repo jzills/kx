@@ -598,15 +598,21 @@ func newScaleCommand(services Services) *cobra.Command {
 }
 
 // patchSourceFlags are kubectl patch's flags that take the resource from a
-// file or a kustomization instead of a name. Beside the Kind/name kx builds
-// from an index kubectl refuses every one ("cannot specify --local and server
-// resources", "resource/name arguments cannot be provided when a path is
-// specified"), so kx refuses them first, in its own words.
+// file or a kustomization instead of a name, plus -R, which only qualifies
+// -f. Beside the Kind/name kx builds from an index kubectl refuses the first
+// three ("cannot specify --local and server resources", "resource/name
+// arguments cannot be provided when a path is specified") and ignores -R, so
+// kx refuses them all first, in its own words.
 var patchSourceFlags = []string{"filename", "kustomize", "recursive", "local"}
 
 // refusePatchSourceFlag refuses a patchSourceFlags flag. -R and --local are
 // booleans and are read as kubectl reads them, so --local=false, their own
 // default, selects nothing and passes.
+//
+// -R gets its own sentence, because it is the one flag here that names no
+// resource: it only makes -f read a directory, so what rules it out is that -f
+// is ruled out. Both spellings are matched, since a flag in the unparsed tail
+// after -- is still spelled the way it was typed.
 func refusePatchSourceFlag(extra []string) error {
 	spelling := ""
 	switch {
@@ -617,8 +623,11 @@ func refusePatchSourceFlag(extra []string) error {
 	default:
 		if local, _ := extractBool(extra, "--local"); local {
 			spelling = "--local"
-		} else if recursive, _ := extractBool(extra, "--recursive"); recursive {
-			spelling = "--recursive"
+		} else if recursive, _ := extractBool(extra, "--recursive", "-R"); recursive {
+			return fmt.Errorf(
+				"'%s' cannot be combined with an index — it only applies to the "+
+					"directory '-f' names, and '-f' cannot be combined with an "+
+					"index either.", firstSpelling(extra, "--recursive", "-R"))
 		} else {
 			return nil
 		}
@@ -637,8 +646,8 @@ func newPatchCommand(services Services) *cobra.Command {
 			"strategic (the default), merge or json.\n\n" +
 			"kubectl's other flags pass through too — --dry-run to preview the change, " +
 			"-o to print the patched object, --subresource to patch status or scale. " +
-			"-f, -k, -R and --local are refused, since each names the resource to patch, " +
-			"which the index already does.",
+			"-f, -k and --local are refused, since each names the resource to patch, " +
+			"which the index already does, and -R with them, since it only applies to -f.",
 		Example: "  kx patch 1 -p '{\"spec\":{\"replicas\":2}}'\n" +
 			"  kx patch 1 --type merge -p '{\"metadata\":{\"labels\":{\"tier\":\"web\"}}}'\n" +
 			"  kx patch 1 --type json -p '[{\"op\":\"remove\",\"path\":\"/spec/paused\"}]'\n" +
@@ -649,7 +658,8 @@ func newPatchCommand(services Services) *cobra.Command {
 	registerChangeFlags(cmd)
 	kubectlFlags := registerKubectlFlags(cmd, "patch")
 	// Still parsed, so refusePatchSourceFlag can name them, but not offered:
-	// each names the resource to patch, which the index already does.
+	// each names the resource to patch, which the index already does, or, for
+	// -R, qualifies one of those.
 	for _, name := range patchSourceFlags {
 		_ = cmd.Flags().MarkHidden(name)
 	}
