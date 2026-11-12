@@ -175,7 +175,7 @@ func stubArchive(t *testing.T, version string, opts releaseOptions) []byte {
 // fails here rather than on a machine without it. gzip is on the list because
 // GNU tar execs it for -z.
 var declaredTools = []string{"curl", "wget", "tar", "gzip", "uname", "mktemp", "mkdir", "cp", "chmod", "mv", "rm", "rmdir",
-	"env", "sha256sum", "shasum", "sysctl"}
+	"env", "sha256sum", "shasum", "sysctl", "cmp"}
 
 // toolbox returns a directory of symlinks to the declared tools that exist on
 // this machine, minus any named in omit.
@@ -950,6 +950,27 @@ func TestTheNewKxReachedThroughALinkIsNotAnEarlierOne(t *testing.T) {
 	}
 	if strings.Contains(res.stdout, "comes first") {
 		t.Errorf("stdout = %q, want the new kx recognized under its link", res.stdout)
+	}
+}
+
+// A kx earlier on PATH that is a link to the install, as /usr/local/bin/kx
+// pointing at ~/.local/bin/kx, runs the new kx. Its directory differs, and
+// it used to be named as an older kx to remove. TestNamesAnEarlierKxOnPath
+// is the control: a different kx there is still named.
+func TestALinkToTheNewKxIsNotAnEarlierOne(t *testing.T) {
+	hostPlatform(t)
+	r := newRelease(t, "v0.7.0", releaseOptions{})
+	dir := t.TempDir()
+	earlier := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "kx"), filepath.Join(earlier, "kx")); err != nil {
+		t.Fatal(err)
+	}
+	res := runScript(t, scriptPath, r, map[string]string{"KX_INSTALL_DIR": dir}, earlier, toolbox(t), dir)
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if strings.Contains(res.stdout, "comes first") {
+		t.Errorf("stdout = %q, want a link to the new kx recognized as it", res.stdout)
 	}
 }
 
