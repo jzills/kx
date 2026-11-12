@@ -382,6 +382,7 @@ func TestKubectlFlagValuesOfferNoFilenames(t *testing.T) {
 		{[]string{"get", "pods", "--kubeconfig", ""}, cobra.ShellCompDirectiveDefault},
 		{[]string{"get", "pods", "--client-key", ""}, cobra.ShellCompDirectiveDefault},
 		{[]string{"debug", "1", "--custom", ""}, cobra.ShellCompDirectiveDefault},
+		{[]string{"patch", "1", "--patch-file", ""}, cobra.ShellCompDirectiveDefault},
 		{[]string{"delete", "-k", ""}, cobra.ShellCompDirectiveFilterDirs},
 		{[]string{"get", "pods", "--cache-dir", ""}, cobra.ShellCompDirectiveFilterDirs},
 	} {

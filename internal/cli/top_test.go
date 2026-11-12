@@ -1205,15 +1205,7 @@ func TestSharedSubcommandFlagsDescribeEverySubcommand(t *testing.T) {
 // notice help describing only one of them. Every such flag must carry usage
 // of kx's own, which is to say none of its definers' wording verbatim.
 func TestEverySharedFlagWordedPerSubcommandIsReworded(t *testing.T) {
-	var walk func(*cobra.Command)
-	walk = func(cmd *cobra.Command) {
-		for _, child := range cmd.Commands() {
-			walk(child)
-		}
-		subcommands := strings.Split(cmd.Annotations[kubectlCommandAnnotation], ",")
-		if len(subcommands) < 2 {
-			return
-		}
+	for cmd, subcommands := range multiSubcommandCommands(t) {
 		usages := map[string]map[string]bool{}
 		for _, subcommand := range subcommands {
 			own, _ := kubectlflags.Command(subcommand)
@@ -1234,7 +1226,6 @@ func TestEverySharedFlagWordedPerSubcommandIsReworded(t *testing.T) {
 			}
 		}
 	}
-	walk(NewRoot(argvServices(t), "test"))
 }
 
 func TestTopRefusesAnUnknownFlag(t *testing.T) {

@@ -50,6 +50,7 @@ var subcommands = []string{
 	"get",
 	"label",
 	"logs",
+	"patch",
 	"port-forward",
 	"rollout history",
 	"rollout pause",

@@ -69,6 +69,7 @@ type mutatingCase struct {
 func mutatingCommandCases() []mutatingCase {
 	return []mutatingCase{
 		{"scale", kinds.Deployment, newScaleCommand, []string{"1", "3"}, ""},
+		{"patch", kinds.Deployment, newPatchCommand, []string{"1", "-p", "{}"}, ""},
 		{"rollout", kinds.Deployment, newRolloutCommand, []string{"restart", "1"}, ""},
 		{"cordon", kinds.Node, func(s Services) *cobra.Command { return newCordonCommand(s, "cordon") }, []string{"1"}, ""},
 		{"uncordon", kinds.Node, func(s Services) *cobra.Command { return newCordonCommand(s, "uncordon") }, []string{"1"}, ""},
@@ -360,7 +361,7 @@ func TestAgentIndexNoticeDeleteAndDrainOnlyWithYes(t *testing.T) {
 // on either side.
 func TestAgentIndexNoticeCommandAllowlistIsPinned(t *testing.T) {
 	mutating := map[string]bool{
-		"scale": true, "rollout": true, "cordon": true, "uncordon": true,
+		"scale": true, "patch": true, "rollout": true, "cordon": true, "uncordon": true,
 		"debug": true, "edit": true, "exec": true, "label": true,
 		"annotate": true, "cp": true, "delete": true, "drain": true,
 		"set": true, "taint": true,

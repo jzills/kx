@@ -52,7 +52,16 @@ func (s Severity) Token() string {
 
 // ContainerDiagnostic is one container's flattened status.
 type ContainerDiagnostic struct {
-	Name             string
+	Name string
+	// Init marks an init container: one the pod is still waiting on, one
+	// that failed, or one whose previous run failed (see quietInit). A
+	// native sidecar is not marked: it runs beside the app, and reads like
+	// any other container.
+	Init bool
+	// Sidecar marks a native sidecar: an init container with restartPolicy
+	// Always. The app containers wait on it until it starts, so a failing
+	// one holds the pod in PodInitializing as a failing init step does.
+	Sidecar          bool
 	Ready            bool
 	Started          *bool
 	RestartCount     int32
@@ -135,12 +144,10 @@ func (p PodDiagnostic) FinishedAt() time.Time {
 // carries a date.
 //
 // The fallback is what keeps such a failure datable at all. FinishedAt reads
-// the container statuses, which a pod that failed in an init container never
-// fills in — podDiagnostic flattens pod.Status.ContainerStatuses alone — and
-// which an eviction can drop entirely. An undated failure falls outside no
-// window, so without this one Job that failed to initialize last month holds
-// its workload critical, and a --fail-on gate red, forever: the case the
-// window exists to end.
+// the container statuses, which an eviction can drop entirely. An undated
+// failure falls outside no window, so without this one Job evicted last month
+// holds its workload critical, and a --fail-on gate red, forever: the case
+// the window exists to end.
 //
 // Zero remains possible, for a pod carrying neither. That one stays reported
 // under every window, by the same rule an undated event does.

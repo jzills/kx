@@ -1612,6 +1612,7 @@ func TestMutatingCommandsRefuseAStrayPositional(t *testing.T) {
 		{"delete", kinds.Pod, newDeleteCommand, []string{"1", "--cascade", "orphan", "-y"},
 			"attach it: '--cascade=orphan'"},
 		{"scale", kinds.Deployment, newScaleCommand, []string{"1", "3", "web"}, "'web' isn't an argument of scale"},
+		{"patch", kinds.Deployment, newPatchCommand, []string{"1", "2", "-p", "{}"}, "'2' isn't an argument of patch"},
 		{"drain", kinds.Node, newDrainCommand, []string{"1", "node-b", "-y"}, "'node-b' isn't an argument of drain"},
 		{"rollout", kinds.Deployment, newRolloutCommand, []string{"restart", "1", "web"},
 			"'web' isn't an argument of rollout"},

@@ -58,6 +58,7 @@ Every page below is also published as Markdown in one file at https://jzills.git
 - [logs](https://jzills.github.io/kx/docs/reference/commands/logs/): Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.
 - [mark](https://jzills.github.io/kx/docs/reference/commands/mark/): Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.
 - [namespace](https://jzills.github.io/kx/docs/reference/commands/namespace/): List Namespaces, or switch to an indexed one; alias: kx ns.
+- [patch](https://jzills.github.io/kx/docs/reference/commands/patch/): Patch an indexed resource with a strategic merge, JSON merge, or JSON patch.
 - [port-forward](https://jzills.github.io/kx/docs/reference/commands/port-forward/): Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).
 - [ref](https://jzills.github.io/kx/docs/reference/commands/ref/): Print what an index refers to, for commands kx doesn't wrap.
 - [rollout](https://jzills.github.io/kx/docs/reference/commands/rollout/): Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.

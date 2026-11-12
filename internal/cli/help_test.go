@@ -232,6 +232,7 @@ func TestEveryCommandNamesItsMissingArgumentsTheSameWay(t *testing.T) {
 		{"delete", []string{"delete", "--yes"}},
 		{"drain", []string{"drain", "--yes"}},
 		{"scale", []string{"scale", "--no-color"}},
+		{"patch", []string{"patch", "--no-color"}},
 		{"wait", []string{"wait", "--no-color"}},
 		{"rollout", []string{"rollout", "--no-color"}},
 		{"port-forward", []string{"port-forward", "--no-color"}},
