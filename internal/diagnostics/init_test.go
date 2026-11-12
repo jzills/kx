@@ -102,8 +102,8 @@ func TestSidecarCountsTowardReady(t *testing.T) {
 	if got.ReadyContainers != 2 || got.TotalContainers != 2 {
 		t.Errorf("ready/total = %d/%d, want 2/2", got.ReadyContainers, got.TotalContainers)
 	}
-	if len(got.Containers) != 2 || got.Containers[0].Init {
-		t.Errorf("containers = %+v, want proxy unmarked beside app", got.Containers)
+	if len(got.Containers) != 2 || got.Containers[0].Init || !got.Containers[0].Sidecar {
+		t.Errorf("containers = %+v, want proxy marked Sidecar, not Init, beside app", got.Containers)
 	}
 }
 
@@ -328,5 +328,47 @@ func TestCleanReRunsOfAnInitContainerAreQuiet(t *testing.T) {
 	}
 	if got := summaries(podFindings(diagnostic, unbounded)); len(got) != 0 {
 		t.Errorf("findings = %q, want none", got)
+	}
+}
+
+// sidecarPod is a pod with a native sidecar, proxy, beside its app.
+func sidecarPod(phase corev1.PodPhase, proxy, app corev1.ContainerStatus) *corev1.Pod {
+	always := corev1.ContainerRestartPolicyAlways
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-1"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "proxy", RestartPolicy: &always}},
+			Containers:     []corev1.Container{{Name: "main"}},
+		},
+		Status: corev1.PodStatus{
+			Phase:                 phase,
+			InitContainerStatuses: []corev1.ContainerStatus{proxy},
+			ContainerStatuses:     []corev1.ContainerStatus{app},
+		},
+	}
+}
+
+// A Job pod that succeeded has its sidecar killed at shutdown, which reads
+// as terminated: Error (exit 137). That put a critical on a Job that worked.
+// The running pod is the control: there the same stop is a crash, since the
+// kubelet would have restarted the sidecar.
+func TestSidecarStoppedWithItsPodIsNotAFailure(t *testing.T) {
+	killed := terminated("proxy", "Error", 137)
+	done := terminated("main", "Completed", 0)
+	finished := podDiagnostic(sidecarPod(corev1.PodSucceeded, killed, done))
+	if got := summaries(podFindings(finished, unbounded)); len(got) != 0 {
+		t.Errorf("succeeded pod findings = %q, want none", got)
+	}
+	if finished.TotalContainers != 2 {
+		t.Errorf("total = %d, want 2: the sidecar still counts toward READY", finished.TotalContainers)
+	}
+
+	crashed := podDiagnostic(sidecarPod(corev1.PodRunning, killed, running("main")))
+	want := []string{
+		"Container proxy in Pod job-1 terminated: Error (exit 137)",
+		"Pod job-1: 1/2 containers ready",
+	}
+	if got := summaries(podFindings(crashed, unbounded)); !reflect.DeepEqual(got, want) {
+		t.Errorf("running pod findings = %q, want %q", got, want)
 	}
 }
