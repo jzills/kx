@@ -239,6 +239,7 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 		}
 		diagnostic := containerDiagnostic(status, spec)
 		diagnostic.Init = !sidecar
+		diagnostic.Sidecar = sidecar
 		containers = append(containers, diagnostic)
 	}
 	for i := range pod.Status.ContainerStatuses {
