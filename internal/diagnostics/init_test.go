@@ -174,6 +174,53 @@ func TestQueuedInitContainerBehindAFailureSaysNothing(t *testing.T) {
 	}
 }
 
+// The kubelet reports PodInitializing for the init step that is blocked
+// before it starts, a missing ConfigMap mount or a slow pull, as it does
+// for the ones queued behind it. The blocked one used to lose its row with
+// them, so the pod table named only the app. It keeps its row and adds no
+// finding: what blocks it is in the events, not its status.
+func TestBlockedInitStepKeepsItsRow(t *testing.T) {
+	diagnostic := podDiagnostic(twoInitPod(waiting("migrate", "PodInitializing", "")))
+
+	var names []string
+	for _, c := range diagnostic.Containers {
+		names = append(names, c.Name)
+	}
+	if want := []string{"migrate", "app"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("rows = %q, want %q: the blocked step, not the one queued behind it", names, want)
+	}
+	if !diagnostic.Containers[0].Init {
+		t.Errorf("migrate = %+v, want it marked Init", diagnostic.Containers[0])
+	}
+	got := summaries(podFindings(diagnostic, unbounded))
+	want := []string{
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A sidecar that has not started holds back the steps after it, so one
+// waiting behind it is queued, not blocked.
+func TestStepBehindAnUnstartedSidecarIsQueued(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	proxy := running("proxy")
+	proxy.Started = b(false)
+	pod := initPod(waiting("migrate", "PodInitializing", ""))
+	pod.Spec.InitContainers = append([]corev1.Container{{Name: "proxy", RestartPolicy: &always}},
+		pod.Spec.InitContainers...)
+	pod.Status.InitContainerStatuses = append([]corev1.ContainerStatus{proxy},
+		pod.Status.InitContainerStatuses...)
+
+	for _, c := range podDiagnostic(pod).Containers {
+		if c.Name == "migrate" {
+			t.Errorf("step queued behind an unstarted sidecar has a row: %+v", c)
+		}
+	}
+}
+
 // A running init container near its memory limit has a finding and has
 // failed nothing, so the pod is still reported pending on it. Keying the
 // suppression on "produced a finding" hid both.

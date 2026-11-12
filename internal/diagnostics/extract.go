@@ -221,17 +221,24 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	// container is left out when it has nothing to say (see quietInit); one
 	// that is running, failing, or got through only after failing is why the
 	// pod is stuck, or was.
+	//
+	// ahead is whether a step before this one has yet to finish. The kubelet
+	// runs init containers in order, so only the first unfinished one is
+	// running or blocked; the ones after it are queued.
+	ahead := false
 	for i := range pod.Status.InitContainerStatuses {
 		status := &pod.Status.InitContainerStatuses[i]
 		spec := specInit[status.Name]
 		sidecar := spec != nil && spec.RestartPolicy != nil &&
 			*spec.RestartPolicy == corev1.ContainerRestartPolicyAlways
+		queued := ahead
+		ahead = ahead || initUnfinished(status, sidecar)
 		if sidecar {
 			total++
 			if status.Ready {
 				ready++
 			}
-		} else if quietInit(status) {
+		} else if quietInit(status, queued) {
 			continue
 		}
 		diagnostic := containerDiagnostic(status, spec)
@@ -263,27 +270,43 @@ func podDiagnostic(pod *corev1.Pod) PodDiagnostic {
 	}
 }
 
-// podInitializing is the reason the kubelet gives a container held back
-// until the init containers ahead of it finish: an app container, or an init
-// container queued behind another.
+// podInitializing is the reason the kubelet gives every container that has
+// not started yet in a pod with init containers: an app container, an init
+// container queued behind another, and the init step itself while it is
+// blocked before starting, on a volume mount or an image pull.
 const podInitializing = "PodInitializing"
 
+// initUnfinished reports whether an init step still holds back the ones
+// after it: a sidecar until it has started, any other init container until
+// it exits 0.
+func initUnfinished(status *corev1.ContainerStatus, sidecar bool) bool {
+	if sidecar {
+		return status.Started == nil || !*status.Started
+	}
+	terminated := status.State.Terminated
+	return terminated == nil || terminated.ExitCode != 0
+}
+
 // quietInit reports whether an init container has nothing to report, and
-// so gets no row: it is queued behind another (the kubelet holds it in
+// so gets no row: it is queued behind another step (the kubelet holds it in
 // Waiting with PodInitializing, and it has no logs to fetch), or it ran to a
 // clean exit. Either way it keeps its row when the run before this one
 // failed, since that failure is a finding the window may still show.
+//
+// The first unfinished step waits on PodInitializing too while it is
+// blocked before starting, and it keeps its row: it is the step the pod is
+// stuck on, and without it the pod table named only the app.
 //
 // The previous run decides, not the restart count: a node reboot or a
 // rebuilt sandbox runs every init container again, so a count above zero
 // can be clean re-runs, and a queued container can carry a crash from
 // before the rebuild.
-func quietInit(status *corev1.ContainerStatus) bool {
+func quietInit(status *corev1.ContainerStatus, queued bool) bool {
 	if last := status.LastTerminationState.Terminated; last != nil && last.ExitCode != 0 {
 		return false
 	}
 	if waiting := status.State.Waiting; waiting != nil && waiting.Reason == podInitializing {
-		return true
+		return queued
 	}
 	terminated := status.State.Terminated
 	return terminated != nil && terminated.ExitCode == 0
