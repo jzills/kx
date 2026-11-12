@@ -102,8 +102,8 @@ func TestSidecarCountsTowardReady(t *testing.T) {
 	if got.ReadyContainers != 2 || got.TotalContainers != 2 {
 		t.Errorf("ready/total = %d/%d, want 2/2", got.ReadyContainers, got.TotalContainers)
 	}
-	if len(got.Containers) != 2 || got.Containers[0].Init {
-		t.Errorf("containers = %+v, want proxy unmarked beside app", got.Containers)
+	if len(got.Containers) != 2 || got.Containers[0].Init || !got.Containers[0].Sidecar {
+		t.Errorf("containers = %+v, want proxy marked Sidecar, not Init, beside app", got.Containers)
 	}
 }
 

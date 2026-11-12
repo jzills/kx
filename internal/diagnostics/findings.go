@@ -330,13 +330,21 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	// a running init container near its memory limit has a finding and has
 	// failed nothing, and one that failed a month ago has none under a 24h
 	// window and still holds the app in PodInitializing.
+	//
+	// A native sidecar counts too: the app waits until it has started, so
+	// one crashlooping holds the pod there just the same. Once the app runs,
+	// nothing waits on PodInitializing and the pod is not Pending, so a
+	// sidecar failing later suppresses nothing.
 	initFailing := false
 	for _, container := range pod.Containers {
-		if !container.Init {
-			continue
+		if container.Init || container.Sidecar {
+			initFailing = initFailing || initFailed(container)
 		}
-		initFailing = initFailing || initFailed(container)
-		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
+	}
+	for _, container := range pod.Containers {
+		if container.Init {
+			findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
+		}
 	}
 	for _, container := range pod.Containers {
 		if container.Init || (initFailing && container.WaitingReason == podInitializing) {
@@ -390,7 +398,7 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	return findings
 }
 
-// initFailed reports whether an init container is stuck: waiting for a
+// initFailed reports whether an init container or a sidecar is stuck: waiting for a
 // reason other than its turn, or stopped with a non-zero exit. One queued
 // behind another, waiting on PodInitializing, has failed nothing now; it
 // has a row only when its previous run failed (see quietInit).

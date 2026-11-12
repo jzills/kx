@@ -57,7 +57,11 @@ type ContainerDiagnostic struct {
 	// that failed, or one whose previous run failed (see quietInit). A
 	// native sidecar is not marked: it runs beside the app, and reads like
 	// any other container.
-	Init             bool
+	Init bool
+	// Sidecar marks a native sidecar: an init container with restartPolicy
+	// Always. The app containers wait on it until it starts, so a failing
+	// one holds the pod in PodInitializing as a failing init step does.
+	Sidecar          bool
 	Ready            bool
 	Started          *bool
 	RestartCount     int32
