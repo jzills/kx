@@ -100,15 +100,22 @@ disableKinds = ["taxonomy", "term"]
       # theme's scripts/search.html; base is only for a different CDN.
       js = "vendor/flexsearch/flexsearch.bundle.min.js"
 
-  # displayToggle is on, but the control it shows is layouts/_partials/
-  # theme-toggle.html: a light/dark button that switches between kx palettes,
-  # not Hextra's own switch, which knows nothing of them. The full palette
-  # list is on the landing page. With nothing stored, the reader's system
-  # setting picks light or dark; "default" is only Hextra's first guess, which
-  # assets/js/kx-theme.js corrects before the page paints.
+  # The light/dark button is the one in the navbar, a menu entry of type
+  # theme-toggle below. It renders layouts/_partials/theme-toggle.html: a
+  # button that switches between kx palettes, not Hextra's own switch, which
+  # knows nothing of them. The full palette list is on the landing page. With
+  # nothing stored, the reader's system setting picks light or dark;
+  # "default" is only Hextra's first guess, which assets/js/kx-theme.js
+  # corrects before the page paints.
+  #
+  # displayToggle is off because it governs a second copy of that button, in
+  # a sticky bar at the foot of the sidebar — on a docs page a lone moon in
+  # an otherwise empty column, under a divider the width of the sidebar,
+  # doing what the one in the navbar overhead already does. The navbar's is
+  # a menu entry and is not affected by this.
   [params.theme]
     default = "dark"
-    displayToggle = true
+    displayToggle = false
 
 # The bar holds a first visitor's top tasks, the same on each of the project
 # sites: Documentation, Quickstart, Releases, Search, GitHub and the
