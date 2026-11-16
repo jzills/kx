@@ -331,25 +331,14 @@ html.dark {
   box-shadow: var(--kx-lift), var(--kx-lift-glow);
 }
 
-.kx-window__bar {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid var(--kx-border);
-}
-
-.kx-window__bar span {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 999px;
-  background-color: var(--kx-border);
-}
-
-/* The capture inside a window drops its own frame: the window is the frame. */
+/* The capture inside a window drops its own frame: the window is the frame.
+   The radius is inherited rather than dropped, because the capture is the
+   element that scrolls: clipped square inside a rounded window, its corners
+   showed as a straight edge cutting across the curve. */
 .kx-window .kx-terminal {
   max-width: none;
   border: 0;
-  border-radius: 0;
+  border-radius: inherit;
 }
 
 /* What kx does: six cards, three to a row at desktop width. Each card is
@@ -779,17 +768,77 @@ html.dark .kx-shot--wide .kx-media {
   overflow-x: auto;
   font-family: var(--kx-font-mono);
   font-size: 0.88rem;
-  line-height: 1.55;
+  /* A terminal's leading, not a paragraph's. The site's prose setting put
+     half a line of air between rows, which is what a docs page gives a code
+     block — and kx's output is a table, whose columns stop reading as rows
+     at that distance. The same capture in a real terminal is 1.125; this
+     keeps a little more than that, because the page is read further away
+     than a terminal is. */
+  line-height: 1.3;
 }
 
-.kx-terminal pre {
+.kx-terminal pre,
+.content .kx-terminal pre {
   margin: 0;
+  border: 0;
+  border-radius: 0;
   /* Hextra styles pre with vertical padding only, so the capture's first
      line sat flush against the left edge. Inline padding only: the vertical
      is the theme's and is fine. */
   padding-inline: 0.85rem;
   color: var(--kx-body);
   background: none;
+}
+
+/* The row the swap line under the capture spends. Tinted rather than boxed:
+   the capture is a table, and a border inside one reads as a column rule. */
+.kx-row--spent {
+  background-color: color-mix(in srgb, var(--kx-accent) 12%, transparent);
+}
+
+/* The swap: what the listing above is for. The old command is struck
+   through rather than labelled, so the two lines need no heading between
+   them, and the name in it is long on purpose — it is the thing the index
+   replaces. Generated with the capture (tools/gen-site-terminal), which is
+   what keeps that name the one the highlighted row carries. */
+.kx-swap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+  margin: 0 1.15rem 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--kx-border);
+  font-family: var(--kx-font-mono);
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.kx-swap__was {
+  color: var(--kx-muted);
+  text-decoration: line-through;
+  /* The name is the point, so it may scroll rather than wrap: broken across
+     two lines it stops reading as one unwieldy argument. */
+  white-space: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.kx-swap__now {
+  color: var(--kx-body);
+  white-space: nowrap;
+}
+
+.kx-swap__sign {
+  color: var(--kx-accent);
+}
+
+.kx-swap__index {
+  color: var(--kx-accent);
+  font-weight: 700;
+  background-color: color-mix(in srgb, var(--kx-accent) 16%, transparent);
+  border-radius: 0.2rem;
+  padding: 0.05em 0.3em;
 }
 
 .kx-terminal .c-accent { color: var(--kx-accent); }
