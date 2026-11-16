@@ -31,8 +31,8 @@ toc: false
   </div>
   <p class="kx-hero__alt">
     It runs on Linux, macOS and Windows, beside the <code>kubectl</code> you already have.
-    <a href="#install">Other ways to install</a>
   </p>
+  <a class="kx-hero__more" href="#install">Other ways to install</a>
 </section>
 
 <figure class="kx-window kx-window--hero">

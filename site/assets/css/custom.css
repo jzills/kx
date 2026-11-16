@@ -220,7 +220,16 @@ html.kx-motion [data-kx-reveal].is-revealed {
   margin: 0.85rem 0 0;
 }
 
-.kx-hero__alt a::after {
+/* The link out of the hero sits on its own line, as every other section's
+   does: those are an element after their paragraph rather than a phrase
+   inside one, and this reads as part of the sentence above it otherwise. */
+.kx-hero__more {
+  display: inline-block;
+  margin-top: 0.55rem;
+  font-size: 0.9rem;
+}
+
+.kx-hero__more::after {
   content: " →";
 }
 
