@@ -36,7 +36,6 @@ toc: false
 </section>
 
 <figure class="kx-window kx-window--hero">
-  <div class="kx-window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
 {{< kx-hero-terminal >}}
 </figure>
 
@@ -95,7 +94,6 @@ toc: false
     <a href="docs/concepts/indexes/">How indexes work</a>
   </div>
   <figure class="kx-window">
-    <div class="kx-window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
 {{< kx-terminal >}}
   </figure>
 </section>

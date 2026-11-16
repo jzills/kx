@@ -331,25 +331,15 @@ html.dark {
   box-shadow: var(--kx-lift), var(--kx-lift-glow);
 }
 
-.kx-window__bar {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid var(--kx-border);
-}
-
-.kx-window__bar span {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 999px;
-  background-color: var(--kx-border);
-}
-
-/* The capture inside a window drops its own frame: the window is the frame. */
+/* The capture inside a window drops its own frame: the window is the frame.
+   The radius is inherited rather than dropped, because the capture is the
+   element that scrolls: clipped square inside a rounded window, its corners
+   showed as a straight edge cutting across the curve. */
 .kx-window .kx-terminal {
   max-width: none;
   border: 0;
-  border-radius: 0;
+  border-radius: inherit;
+  background-color: var(--kx-surface);
 }
 
 /* What kx does: six cards, three to a row at desktop width. Each card is
@@ -782,8 +772,31 @@ html.dark .kx-shot--wide .kx-media {
   line-height: 1.55;
 }
 
-.kx-terminal pre {
+/* The prompt the session came back to, and the block cursor sitting in it.
+   Both are drawn here rather than captured: kx has exited by the last line,
+   so the shell drew them, not kx. Set in CSS for the reason the install
+   command's "$ " is — it belongs to the page, and nothing that copies the
+   capture should take it along. The escape is a newline, which renders as
+   one because the pseudo-element inherits the pre's white-space.
+
+   The hero only. It is the capture that shows commands being typed, so a
+   prompt waiting for the next one finishes it; the sweep below is a figure
+   of one listing, where a cursor would imply a session that isn't shown. */
+.kx-window--hero .kx-terminal pre::after {
+  content: "\A> \2588";
+  color: var(--kx-accent);
+}
+
+/* The second selector carries no more meaning than the first; it is there to
+   outweigh the .content pre rule further down, which frames a fenced block
+   on a docs page. Inside a capture the capture is the frame, and the two
+   drew as a box inside a box — invisible while both resolved to the same
+   light grey, plain once the capture went dark. */
+.kx-terminal pre,
+.content .kx-terminal pre {
   margin: 0;
+  border: 0;
+  border-radius: 0;
   /* Hextra styles pre with vertical padding only, so the capture's first
      line sat flush against the left edge. Inline padding only: the vertical
      is the theme's and is fine. */
