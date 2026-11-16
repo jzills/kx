@@ -1252,6 +1252,23 @@ html.dark .kx-mode__icon--moon {
   border-color: var(--kx-border);
 }
 
+/* A docs section index has no headings of its own, so the theme's table of
+   contents renders as an empty 16rem column held open to the right of the
+   page. :has() is what asks whether anything was put in it; a browser
+   without :has() matches neither rule and keeps the column, which is what
+   the page does today.
+
+   The reading width is pinned as the column goes, because the content is
+   free to grow into the space otherwise — 64rem of prose is a line too long
+   to read comfortably. At its own width it centers in what is left. */
+.hextra-toc:not(:has(ul)) {
+  display: none;
+}
+
+.hextra-toc:not(:has(ul)) ~ article #content {
+  max-width: 48rem;
+}
+
 /* Section index cards; see layouts/shortcodes/kx-children.html. */
 
 .kx-children {
