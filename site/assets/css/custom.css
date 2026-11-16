@@ -287,15 +287,17 @@ html.dark {
   box-shadow: var(--kx-command-glow);
 }
 
+/* One line, scrolling sideways on a phone, as the footer's copy does. It
+   wrapped here once, so that none of it would be out of sight; but the wrap
+   broke the URL mid-word and grew the box to three lines, which pushed the
+   hero's buttons under the fold. */
 .kx-command .kx-install__command {
   flex: 1;
   min-width: 0;
   text-align: left;
   font-size: 0.95rem;
-  /* On a phone the command wraps rather than scrolling inside its box,
-     which hid the half that matters. */
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 /* Windows: a terminal capture in a frame, so it reads as the product rather
@@ -854,12 +856,12 @@ html.dark .kx-shot--wide .kx-media {
   margin-top: 1.25rem;
 }
 
-/* One line, scrolling if it must, where the hero's copy wraps: in a column
-   this narrow, wrapping broke the URL mid-word. */
+/* Smaller than the hero's copy, which it otherwise matches. The footer's
+   brand column is narrower than the command set at the hero's size, so at
+   that size it would scroll on a desktop too; at this one it scrolls only on
+   a phone. */
 .kx-footer__command .kx-install__command {
   font-size: 0.78rem;
-  white-space: nowrap;
-  overflow-x: auto;
 }
 
 .kx-footer__cols {
