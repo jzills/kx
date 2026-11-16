@@ -18,7 +18,7 @@ toc: false
   <p class="kx-hero__lede">
     Run <code>kx get &lt;resource&gt;</code> once and every row gets a number.
     From then on you name resources by that number instead of typing them out:
-    <code>kx logs 2</code>, <code>kx delete 2 5</code>, <code>kx exec 1</code>.
+    <code>kx describe 1</code>, <code>kx delete 2 5</code>, <code>kx exec 1</code>.
   </p>
   <div class="kx-hero__actions">
     <a class="kx-button kx-button--primary" href="docs/getting-started/quickstart/">Get started</a>
