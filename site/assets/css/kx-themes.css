@@ -255,6 +255,8 @@
 [data-kx-theme="rose-pine"] [data-kx-terminal="rose-pine"] { display: block; }
 [data-kx-theme="mono"] [data-kx-terminal="github-dark"] { display: none; }
 [data-kx-theme="mono"] [data-kx-terminal="mono"] { display: block; }
+[data-kx-theme="light"] [data-kx-terminal="github-dark"] { display: none; }
+[data-kx-theme="light"] [data-kx-terminal="light"] { display: block; }
 [data-kx-shot] { display: none; }
 [data-kx-shot="github-dark"] { display: block; }
 [data-kx-theme="dracula"] [data-kx-shot="github-dark"] { display: none; }
@@ -275,22 +277,5 @@
 [data-kx-theme="mono"] [data-kx-shot="mono"] { display: block; }
 [data-kx-theme="light"] [data-kx-shot="github-dark"] { display: none; }
 [data-kx-theme="light"] [data-kx-shot="light"] { display: block; }
-
-/* The capture under the light palette is the github-dark one, and takes its colors. */
-[data-kx-theme="light"] .kx-terminal {
-  --kx-accent: #3fb950;
-  --kx-background: #0d1117;
-  --kx-body: #e6edf3;
-  --kx-border: #30363d;
-  --kx-error: #f85149;
-  --kx-muted: #7d8590;
-  --kx-status-bad: #f85149;
-  --kx-status-neutral: #e6edf3;
-  --kx-status-ok: #3fb950;
-  --kx-status-warn: #e3b341;
-  --kx-success: #3fb950;
-  --kx-surface: #161b22;
-  --kx-warn: #e3b341;
-}
 
 /* Palettes: github-dark, dracula, nord, gruvbox, solarized-dark, catppuccin-mocha, tokyo-night, rose-pine, mono, light */

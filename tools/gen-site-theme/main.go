@@ -196,46 +196,11 @@ func render() (string, error) {
 			if name == defaultDark {
 				continue
 			}
-			light, err := isLight(name)
-			if err != nil {
-				return "", err
-			}
-			// A light palette keeps the default dark capture, which is the
-			// terminal-is-dark exception below. Its report screenshot still
-			// follows the palette: a report is a browser page, and a light
-			// one is what that palette renders.
-			if light && attribute == "data-kx-terminal" {
-				continue
-			}
 			fmt.Fprintf(&out,
 				"[data-kx-theme=%q] [%s=%q] { display: none; }\n"+
 					"[data-kx-theme=%q] [%s=%q] { display: block; }\n",
 				name, attribute, defaultDark, name, attribute, name)
 		}
-	}
-
-	// A terminal stays a terminal on a light page. Nearly every reader's own
-	// is dark, so a capture drawn in light-palette colors on a white page
-	// read as a styled code block rather than as the program running. The
-	// capture shown there is the default dark one (above), and these
-	// properties are that palette's, scoped to the capture, so the frame and
-	// every color the markup names resolve to the palette the pixels are in.
-	for _, name := range names() {
-		light, err := isLight(name)
-		if err != nil {
-			return "", err
-		}
-		if !light {
-			continue
-		}
-		declarations, err := properties(defaultDark)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&out,
-			"\n/* The capture under the %s palette is the %s one, and takes its colors. */\n"+
-				"[data-kx-theme=%q] .kx-terminal {\n%s}\n",
-			name, defaultDark, name, declarations)
 	}
 
 	// The picker needs the list, and duplicating it in a template is how it
@@ -244,23 +209,8 @@ func render() (string, error) {
 	return out.String(), nil
 }
 
-// isLight reports whether a palette renders on a light background.
-func isLight(name string) (bool, error) {
-	styles, err := theme.WebStyles(name)
-	if err != nil {
-		return false, err
-	}
-	mode, err := backgroundMode(styles[theme.Background])
-	if err != nil {
-		return false, fmt.Errorf("%s: background %q: %w", name, styles[theme.Background], err)
-	}
-	return mode == "light", nil
-}
-
-// properties renders one palette's --kx-* declarations, without the three
-// Hextra derives its own ramp from: those belong to a whole page, and this is
-// also used to recolor one element.
-func properties(name string) (string, error) {
+// block renders one palette's declarations.
+func block(name string) (string, error) {
 	styles, err := theme.WebStyles(name)
 	if err != nil {
 		return "", err
@@ -277,22 +227,6 @@ func properties(name string) (string, error) {
 	for _, key := range keys {
 		fmt.Fprintf(&out, "  --kx-%s: %s;\n", strings.ReplaceAll(key, ".", "-"), styles[key])
 	}
-	return out.String(), nil
-}
-
-// block renders one palette's declarations for a page.
-func block(name string) (string, error) {
-	styles, err := theme.WebStyles(name)
-	if err != nil {
-		return "", err
-	}
-
-	var out strings.Builder
-	declarations, err := properties(name)
-	if err != nil {
-		return "", err
-	}
-	out.WriteString(declarations)
 
 	// Hextra builds --color-primary-50 through -900 from these three, so the
 	// accent has to reach it as HSL components rather than as a hex color.

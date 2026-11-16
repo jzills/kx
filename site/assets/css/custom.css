@@ -339,7 +339,6 @@ html.dark {
   max-width: none;
   border: 0;
   border-radius: inherit;
-  background-color: var(--kx-surface);
 }
 
 /* What kx does: six cards, three to a row at desktop width. Each card is

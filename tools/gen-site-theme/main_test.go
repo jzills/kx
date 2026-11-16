@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/jzills/kx/internal/theme"
 )
 
 func stylesheet(t *testing.T) string {
@@ -17,98 +15,81 @@ func stylesheet(t *testing.T) string {
 	return rendered
 }
 
-// lightPalettes is the set the terminal exception below applies to. A test
-// that found none would pass every assertion about them vacuously.
-func lightPalettes(t *testing.T) []string {
-	t.Helper()
-	var light []string
-	for _, name := range names() {
-		isLight, err := isLight(name)
-		if err != nil {
-			t.Fatalf("isLight(%q) returned an error: %v", name, err)
-		}
-		if isLight {
-			light = append(light, name)
-		}
-	}
-	if len(light) == 0 {
-		t.Fatal("no light palette in the registry: the rest of this test would assert nothing")
-	}
-	return light
-}
-
-// A light palette shows the default dark capture, because a capture drawn in
-// light-palette colors on a white page reads as a code block rather than as a
-// terminal. The rule that would override it back to the palette's own capture
-// is the regression this guards.
-func TestLightPaletteKeepsTheDarkCapture(t *testing.T) {
+// Every palette shows its own terminal capture and its own report
+// screenshot. A palette the stylesheet has no rule pair for silently shows
+// the default dark one instead: the page recolors, the capture in the middle
+// of it does not.
+func TestEveryPaletteSwitchesItsOwnMedia(t *testing.T) {
 	rendered := stylesheet(t)
-	for _, name := range lightPalettes(t) {
-		override := fmt.Sprintf("[data-kx-theme=%q] [data-kx-terminal=%q] { display: block; }\n", name, name)
-		if strings.Contains(rendered, override) {
-			t.Errorf("stylesheet shows the %s palette its own terminal capture:\n%s", name, override)
-		}
-		hide := fmt.Sprintf("[data-kx-theme=%q] [data-kx-terminal=%q] { display: none; }\n", name, defaultDark)
-		if strings.Contains(rendered, hide) {
-			t.Errorf("stylesheet hides the %s capture under the %s palette:\n%s", defaultDark, name, hide)
-		}
+
+	if len(names()) < 2 {
+		t.Fatal("fewer than two palettes in the registry: the loop below would assert nothing")
 	}
 
-	// The control for both assertions: a dark palette is still switched to
-	// its own capture, so the two above cannot pass because no palette gets
-	// a rule at all.
-	control := fmt.Sprintf("[data-kx-theme=%q] [data-kx-terminal=%q] { display: block; }\n", "dracula", "dracula")
-	if !strings.Contains(rendered, control) {
-		t.Errorf("stylesheet does not switch the dracula palette to its own capture:\n%s", control)
-	}
-}
-
-// The report screenshots are browser pages, not terminals, so a light palette
-// keeps showing its own: the terminal exception must not spread to them.
-func TestLightPaletteKeepsItsOwnReportShot(t *testing.T) {
-	rendered := stylesheet(t)
-	for _, name := range lightPalettes(t) {
-		want := fmt.Sprintf("[data-kx-theme=%q] [data-kx-shot=%q] { display: block; }\n", name, name)
-		if !strings.Contains(rendered, want) {
-			t.Errorf("stylesheet does not show the %s palette its own report screenshot:\n%s", name, want)
+	for _, attribute := range []string{"data-kx-terminal", "data-kx-shot"} {
+		fallback := fmt.Sprintf("[%s=%q] { display: block; }\n", attribute, defaultDark)
+		if !strings.Contains(rendered, fallback) {
+			t.Errorf("stylesheet has no default for %s:\n%s", attribute, fallback)
 		}
-	}
-}
 
-// Under a light palette the capture shown is the dark one, so the properties
-// its markup names — the body color the output inherits, the accent the
-// prompt is drawn in — have to resolve to that palette's values. Left to the
-// page's, the output rendered in near-black on the capture's near-black
-// background.
-func TestLightPaletteRecolorsTheTerminal(t *testing.T) {
-	rendered := stylesheet(t)
-	dark, err := theme.WebStyles(defaultDark)
-	if err != nil {
-		t.Fatalf("WebStyles(%q) returned an error: %v", defaultDark, err)
-	}
-
-	for _, name := range lightPalettes(t) {
-		scope := fmt.Sprintf("[data-kx-theme=%q] .kx-terminal {", name)
-		start := strings.Index(rendered, scope)
-		if start < 0 {
-			t.Fatalf("stylesheet has no %s block", scope)
-		}
-		block := rendered[start:]
-		block = block[:strings.Index(block, "}")]
-
-		for _, key := range []string{theme.Accent, theme.Body, theme.Surface, theme.Border} {
-			want := fmt.Sprintf("  --kx-%s: %s;", strings.ReplaceAll(key, ".", "-"), dark[key])
-			if !strings.Contains(block, want) {
-				t.Errorf("%s block does not set %s to the %s palette's value:\n%s\nblock:\n%s",
-					scope, key, defaultDark, want, block)
+		for _, name := range names() {
+			if name == defaultDark {
+				continue
+			}
+			hide := fmt.Sprintf("[data-kx-theme=%q] [%s=%q] { display: none; }\n", name, attribute, defaultDark)
+			show := fmt.Sprintf("[data-kx-theme=%q] [%s=%q] { display: block; }\n", name, attribute, name)
+			if !strings.Contains(rendered, hide) {
+				t.Errorf("the %s palette does not hide the %s %s:\n%s", name, defaultDark, attribute, hide)
+			}
+			if !strings.Contains(rendered, show) {
+				t.Errorf("the %s palette does not show its own %s:\n%s", name, attribute, show)
 			}
 		}
+	}
+}
 
-		// Hextra derives its own color ramp from these, and the ramp belongs
-		// to a page: scoped to one element they would recolor the chrome of
-		// whatever the capture contains.
-		if strings.Contains(block, "--primary-") {
-			t.Errorf("%s block carries Hextra's primary ramp:\n%s", scope, block)
+// The light palette is the one whose media could plausibly be left on the
+// dark default — it is the only palette whose page is light, and the
+// captures were briefly made an exception to exactly this rule. Named apart
+// from the loop above so a regression says which palette broke.
+func TestLightPaletteShowsItsOwnCapture(t *testing.T) {
+	rendered := stylesheet(t)
+
+	if defaultLight == defaultDark {
+		t.Fatalf("defaultLight and defaultDark are both %q", defaultDark)
+	}
+
+	show := fmt.Sprintf("[data-kx-theme=%q] [data-kx-terminal=%q] { display: block; }\n", defaultLight, defaultLight)
+	if !strings.Contains(rendered, show) {
+		t.Errorf("the %s palette does not show its own capture:\n%s", defaultLight, show)
+	}
+	hide := fmt.Sprintf("[data-kx-theme=%q] [data-kx-terminal=%q] { display: none; }\n", defaultLight, defaultDark)
+	if !strings.Contains(rendered, hide) {
+		t.Errorf("the %s palette does not hide the %s capture:\n%s", defaultLight, defaultDark, hide)
+	}
+}
+
+// A palette's colors reach the page as a block of custom properties. The
+// rule the picker switches on is data-kx-theme, so a block keyed any other
+// way leaves the palette selectable and inert.
+func TestEveryPaletteHasAPropertyBlock(t *testing.T) {
+	rendered := stylesheet(t)
+	for _, name := range names() {
+		scope := fmt.Sprintf("[data-kx-theme=%q] {\n", name)
+		start := strings.Index(rendered, scope)
+		if start < 0 {
+			t.Errorf("stylesheet has no %s block", scope)
+			continue
+		}
+		block := rendered[start+len(scope):]
+		block = block[:strings.Index(block, "}")]
+
+		// Hextra derives its own ramp from the accent, so a block without
+		// these recolors the page's own components and not the theme's.
+		for _, property := range []string{"--kx-accent:", "--kx-background:", "--kx-body:", "--primary-hue:"} {
+			if !strings.Contains(block, property) {
+				t.Errorf("the %s block does not set %s:\n%s", name, property, block)
+			}
 		}
 	}
 }
