@@ -114,8 +114,21 @@ body {
   padding-bottom: 5rem;
 }
 
-.kx-band + * {
-  margin-top: 5rem;
+/* The air between two sections is 7rem, and a band's padding is part of it:
+   given the same margin as an unbanded section, a band sat nearly twice as
+   far from its neighbors as they sit from each other. Its margin is what is
+   left of the 7rem after the padding, on both sides.
+
+   The .kx-home prefix is what carries these past the per-section margins
+   further down the file. Those are as specific as a bare .kx-band and come
+   later, which is why the rule this replaces — .kx-band + *, written for
+   the same purpose — never applied to a single one of them. */
+.kx-home .kx-band {
+  margin-top: 2rem;
+}
+
+.kx-home .kx-band + * {
+  margin-top: 2rem;
 }
 
 html.kx-motion [data-kx-reveal] {
@@ -359,7 +372,10 @@ html.dark {
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 1rem;
   max-width: 66rem;
-  margin: 5rem auto 0;
+  /* 7rem, as between every other pair of sections. The hero's capture above
+     keeps its own 1rem, because it belongs to the hero rather than standing
+     between the two. */
+  margin: 7rem auto 0;
 }
 
 .kx-home a.kx-feature {
