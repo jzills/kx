@@ -238,8 +238,11 @@ html.kx-motion [data-kx-reveal].is-revealed {
    inside one, and this reads as part of the sentence above it otherwise. */
 .kx-hero__more {
   display: inline-block;
-  margin-top: 0.55rem;
-  font-size: 0.9rem;
+  /* The size and the gap a section's link carries further down the page.
+     The paragraph above this one is set smaller than theirs, and the link
+     had been matching that instead of the links it sits in a row with. */
+  margin-top: 1.125rem;
+  font-size: 1rem;
 }
 
 .kx-hero__more::after {
@@ -527,7 +530,13 @@ html.dark .kx-shot--wide .kx-media {
   padding: 0.75rem;
 }
 
-/* Words beside what they describe; stacked on narrow screens. */
+/* Words beside what they describe; stacked on narrow screens. The words are
+   centered as every other section's are: left-ranged, this was the one green
+   link on the page hanging off a margin of its own. */
+
+.kx-split__text {
+  text-align: center;
+}
 
 .kx-split {
   display: grid;
@@ -539,7 +548,7 @@ html.dark .kx-shot--wide .kx-media {
 }
 
 .kx-split .kx-themes {
-  justify-content: flex-start;
+  justify-content: center;
   margin: 0;
 }
 
