@@ -57,13 +57,12 @@ func TestRedrawTableNoopOffTerminal(t *testing.T) {
 	}
 }
 
-// RedrawTable's \x1b[NA cursor-up math assumes exactly one physical
-// terminal line per printed row. A row wider than the terminal wraps onto a
-// second physical line, and the next frame's cursor-up then lands short,
-// leaving stale fragments of the previous frame interleaved with the new
-// one — the NAME column must flex (shrink and ellipsize) instead of letting
-// that happen, the same mechanism fitFlexColumn already provides for any
-// other table.
+// A listing reads best as one line per resource, so the NAME column must
+// flex — shrink and ellipsize — rather than let a row wider than the terminal
+// wrap, the same mechanism fitFlexColumn already provides for any other
+// table. What keeps the cursor-up math right is the count of lines the table
+// took, not this: flexing gives up at minFlexWidth and the table overflows
+// anyway. See TestRedrawTableCountsTheLinesAWrappedRowTakes.
 func TestRedrawTableFlexesNameColumn(t *testing.T) {
 	columns, _ := styledColumnsAndCells([]string{"NAME", "STATUS"}, [][]string{{"a", "Running"}})
 	enableNameFlex([]string{"NAME", "STATUS"}, columns)
@@ -136,5 +135,46 @@ func TestRedrawTableCountsTheLinesAWrappedFooterTakes(t *testing.T) {
 	}
 	if lines := r.redrawTable([]string{"NAME"}, [][]string{{"a"}}, 0, true, 80, footer, "Pods"); lines != 5 {
 		t.Errorf("at 80 columns: lines = %d, want 5, the footer taking two", lines)
+	}
+}
+
+// A row wider than the terminal wraps onto a second physical line, and the
+// next redraw moves the cursor up by the count returned, so the count
+// includes each line the header and the rows wrap onto. Counted as one line
+// each, every frame left the un-erased top of the last one on screen — a
+// `kx get pods -A -w` in a terminal under about 95 columns accumulated one
+// stale copy of the table per watch event (#731).
+//
+// NAME flexes, so a row only overflows once that has shrunk as far as it
+// goes: at minFlexWidth the two columns below take 25 display columns, which
+// wraps at a width of 20. The same table at a width it fits is the control.
+func TestRedrawTableCountsTheLinesAWrappedRowTakes(t *testing.T) {
+	var out bytes.Buffer
+	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
+	headers := []string{"NAME", "STATUS"}
+	rows := [][]string{{strings.Repeat("n", 40), "Running"}}
+
+	if lines := r.redrawTable(headers, rows, 0, true, 120, "", "Pods"); lines != 3 {
+		t.Errorf("at 120 columns: lines = %d, want 3 (caption, header, row)", lines)
+	}
+	if lines := r.redrawTable(headers, rows, 0, true, 20, "", "Pods"); lines != 5 {
+		t.Errorf("at 20 columns: lines = %d, want 5, the header and the row taking two each", lines)
+	}
+}
+
+// A line of exactly the terminal's width takes one line, not two: a terminal
+// defers the wrap until one more cell is written. Counted as two, the
+// cursor-up would overshoot the frame and eat the line above it.
+func TestRedrawTableCountsAFullWidthRowAsOneLine(t *testing.T) {
+	var out bytes.Buffer
+	r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
+	headers := []string{"NAME", "STATUS"}
+	rows := [][]string{{strings.Repeat("n", 40), "Running"}}
+
+	if lines := r.redrawTable(headers, rows, 0, true, 25, "", "Pods"); lines != 3 {
+		t.Errorf("at 25 columns, the width the table fills exactly: lines = %d, want 3", lines)
+	}
+	if lines := r.redrawTable(headers, rows, 0, true, 24, "", "Pods"); lines != 5 {
+		t.Errorf("at 24 columns, one short: lines = %d, want 5", lines)
 	}
 }

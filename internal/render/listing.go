@@ -390,11 +390,14 @@ func styledColumnsAndCells(headers []string, rows [][]string) ([]Column, [][]Cel
 }
 
 // enableNameFlex marks the NAME column to shrink and ellipsize rather than
-// let a row wider than the terminal wrap onto a second physical line.
-// RedrawTable's \x1b[NA cursor-up math assumes exactly one physical line
-// per printed row; a wrapped row breaks that assumption, so the next
-// frame's clear lands short and leaves stale fragments of the previous
-// frame interleaved with the new one. No-op if there is no NAME column.
+// let a row wider than the terminal wrap onto a second physical line, which
+// costs a listing the one row per resource it reads best as.
+//
+// It is not what keeps RedrawTable's \x1b[NA cursor-up math right: flexing
+// gives up at minFlexWidth and lets the table overflow anyway — an -A watch
+// cannot go below about 95 columns — so the count measures the lines the
+// table actually took (Renderer.table) instead of assuming one each. No-op
+// if there is no NAME column.
 func enableNameFlex(headers []string, columns []Column) {
 	if idx := indexOf(headers, "NAME"); idx >= 0 && idx < len(columns) {
 		columns[idx].Flex = true
@@ -435,13 +438,15 @@ func (r *Renderer) redrawTable(
 	columns, cells := styledColumnsAndCells(headers, rows)
 	enableNameFlex(headers, columns)
 	r.Caption(caption...)
-	r.Table(columns, cells)
-	// The header and each row fit the width (enableNameFlex). The caption
-	// and the footer are prose and wrap, and the next redraw moves the
-	// cursor up by this count, so each counts the lines it takes: counted as
-	// one, a footer wider than the terminal left a line of every frame on
-	// screen.
-	lines := wrappedLines(strings.Join(captionParts(caption...), " · "), termWidth) + 1 + len(cells)
+	// Fitted to the width this was handed rather than to r.width(): the two
+	// agree on a terminal, and off one r.width() answers pipeWidth, so no
+	// test could make a row wrap and none caught #731.
+	drawn := r.table(columns, cells, termWidth)
+	// The next redraw moves the cursor up by this count, so every part of the
+	// frame counts the physical lines it takes rather than the one line it is:
+	// counted as one each, a footer wider than the terminal left a line of
+	// every frame on screen, and a table wider than it left most of one.
+	lines := wrappedLines(strings.Join(captionParts(caption...), " · "), termWidth) + drawn
 	if footer != "" {
 		r.Caption(footer)
 		lines += wrappedLines(footer, termWidth)
@@ -452,11 +457,7 @@ func (r *Renderer) redrawTable(
 // wrappedLines is how many terminal lines text takes at width columns: at
 // least one, since an empty line is still a line.
 func wrappedLines(text string, columns int) int {
-	cells := width(text)
-	if columns <= 0 || cells <= columns {
-		return 1
-	}
-	return (cells + columns - 1) / columns
+	return lineSpan(width(text), columns)
 }
 
 // RedrawTable is the package-level wrapper, matching every other render entry point.

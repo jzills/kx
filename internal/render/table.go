@@ -71,6 +71,16 @@ func width(s string) int {
 	return runewidth.StringWidth(s)
 }
 
+// lineSpan is how many physical terminal lines cells display columns take at
+// a width of columns. A line of exactly the terminal's width takes one, not
+// two: a terminal defers the wrap until one more cell is written.
+func lineSpan(cells, columns int) int {
+	if columns <= 0 || cells <= columns {
+		return 1
+	}
+	return (cells + columns - 1) / columns
+}
+
 // pad aligns text to n display columns.
 func pad(text string, n int, right bool) string {
 	gap := n - width(text)
@@ -93,10 +103,12 @@ func (r *Renderer) Table(columns []Column, rows [][]Cell) {
 
 // table is Table with the available width injected, so a test can exercise
 // the flex fitting against a buffer — which is not a terminal, and would
-// otherwise always report pipeWidth.
-func (r *Renderer) table(columns []Column, rows [][]Cell, available int) {
+// otherwise always report pipeWidth. It reports the physical terminal lines
+// it wrote, which is what RedrawTable moves the cursor up by to clear the
+// frame again; the printing callers ignore it.
+func (r *Renderer) table(columns []Column, rows [][]Cell, available int) int {
 	if len(columns) == 0 {
-		return
+		return 0
 	}
 
 	widths := make([]int, len(columns))
@@ -143,6 +155,23 @@ func (r *Renderer) table(columns []Column, rows [][]Cell, available int) {
 	}
 
 	r.write(out.String())
+
+	// Every cell is padded to its column's width, so the header and every row
+	// are one line of the same width: the lines one of them wraps onto is the
+	// lines all of them take. A row wider than the terminal is what
+	// fitFlexColumn could not shrink away (minFlexWidth), not a rarity to
+	// leave uncounted — see enableNameFlex.
+	return (1 + len(rows)) * lineSpan(tableWidth(widths), available)
+}
+
+// tableWidth is the display columns one printed line takes, every column
+// padded cellPad on each side.
+func tableWidth(widths []int) int {
+	total := 0
+	for _, w := range widths {
+		total += w + 2*len(cellPad)
+	}
+	return total
 }
 
 // fitFlexColumn shrinks the flexed column until the table fits in available,
@@ -157,10 +186,7 @@ func fitFlexColumn(columns []Column, rows [][]Cell, widths []int, available int)
 	if flex < 0 {
 		return rows
 	}
-	total := 0
-	for _, w := range widths {
-		total += w + 2*len(cellPad)
-	}
+	total := tableWidth(widths)
 	if total <= available {
 		return rows
 	}
