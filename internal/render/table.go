@@ -38,8 +38,13 @@ func ellipsize(text string, n int) string {
 	if n <= 0 || width(text) <= n {
 		return text
 	}
+	// The ellipsis's own width, not 1: it is East Asian ambiguous, so in a
+	// CJK locale it takes two columns, and a cell cut to leave one was a
+	// column wider than its column. Every row is counted at the column's
+	// width, so that column wrapped onto a line no redraw cleared.
+	mark := width("…")
 	runes := []rune(text)
-	for len(runes) > 0 && width(string(runes))+1 > n {
+	for len(runes) > 0 && width(string(runes))+mark > n {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
@@ -110,7 +115,13 @@ func (r *Renderer) table(columns []Column, rows [][]Cell, available int) int {
 	if len(columns) == 0 {
 		return 0
 	}
+	widths, fitted := layoutTable(columns, rows, available)
+	return r.writeTable(columns, widths, fitted, available)
+}
 
+// layoutTable is each column's width, fitted to available, and the rows as
+// they print at those widths: the flex column's cells cut to fit.
+func layoutTable(columns []Column, rows [][]Cell, available int) ([]int, [][]Cell) {
 	widths := make([]int, len(columns))
 	for i, column := range columns {
 		widths[i] = width(column.Header)
@@ -122,9 +133,12 @@ func (r *Renderer) table(columns []Column, rows [][]Cell, available int) int {
 			}
 		}
 	}
+	return widths, fitFlexColumn(columns, rows, widths, available)
+}
 
-	rows = fitFlexColumn(columns, rows, widths, available)
-
+// writeTable prints the header and rows at widths laid out by layoutTable,
+// and reports the physical terminal lines they took at available columns.
+func (r *Renderer) writeTable(columns []Column, widths []int, rows [][]Cell, available int) int {
 	var out strings.Builder
 
 	// The header is styled as a whole, so a bold header stays bold across the

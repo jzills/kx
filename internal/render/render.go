@@ -347,13 +347,20 @@ const pipeWidth = 1000
 
 // width reports the width layout that has to fit should target.
 func (r *Renderer) width() int {
+	width, _ := r.size()
+	return width
+}
+
+// size is the terminal's width and height. Off a terminal it is pipeWidth
+// and a height of 0, which means no limit.
+func (r *Renderer) size() (width, height int) {
 	file, ok := r.out.(*os.File)
 	if !ok {
-		return pipeWidth
+		return pipeWidth, 0
 	}
-	width, _, err := term.GetSize(int(file.Fd()))
+	width, height, err := term.GetSize(int(file.Fd()))
 	if err != nil || width <= 0 {
-		return pipeWidth
+		return pipeWidth, 0
 	}
-	return width
+	return width, max(height, 0)
 }

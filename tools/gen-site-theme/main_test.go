@@ -82,7 +82,12 @@ func TestEveryPaletteHasAPropertyBlock(t *testing.T) {
 			continue
 		}
 		block := rendered[start+len(scope):]
-		block = block[:strings.Index(block, "}")]
+		end := strings.Index(block, "}")
+		if end < 0 {
+			t.Errorf("the %s block is never closed", name)
+			continue
+		}
+		block = block[:end]
 
 		// Hextra derives its own ramp from the accent, so a block without
 		// these recolors the page's own components and not the theme's.
