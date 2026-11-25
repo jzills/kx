@@ -11,7 +11,6 @@
  *   --oss-muted    body text and links
  *   --oss-accent   the brand mark, the z.//s dot, the top hairline
  *   --oss-border   the divider in the z.//s row
- *   --oss-surface  the install command's background
  *   --oss-page     the footer band's background
  *
  * and may set --oss-brand-mark-height when the mark sits beside the name
@@ -123,99 +122,6 @@
 .oss-footer__tagline {
   margin-top: 1rem;
   line-height: 1.6;
-}
-
-/* The install command: one line in a box framed like kx's hero command,
-   with the prompt drawn in the accent and a copy button at the end
-   (assets/js/oss-copy.js). The same box on every site, so the footer is the
-   same height on every site too. */
-.oss-command {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 1.25rem;
-  padding: 0.7rem 0.7rem 0.7rem 1.1rem;
-  border: 1px solid color-mix(in srgb, var(--oss-accent) 22%, var(--oss-border));
-  border-radius: 0.6rem;
-  background-color: var(--oss-surface);
-  box-shadow: 0 12px 32px -18px color-mix(in srgb, var(--oss-accent) 18%, transparent);
-}
-
-/* One line, never wrapped mid-URL. On a phone it is wider than the box and
-   scrolls sideways, but with no scrollbar: a bar under one line of text read
-   as a fault, and the copy button copies the whole command anyway. The
-   height is fixed so the box is the same height whether or not the copy
-   button has been revealed. */
-.oss-command__text {
-  flex: 1;
-  min-width: 0;
-  height: 1.75rem;
-  line-height: 1.75rem;
-  font-family: var(--oss-font-mono);
-  font-size: 0.78rem;
-  color: var(--oss-text);
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  background: none;
-  border: 0;
-  padding: 0;
-}
-
-.oss-command__text::-webkit-scrollbar {
-  display: none;
-}
-
-/* The prompt is drawn here, so it never lands in the clipboard. */
-.oss-command__text::before {
-  content: "$ ";
-  color: var(--oss-accent);
-}
-
-.oss-command__copy {
-  display: inline-flex;
-  flex: none;
-  padding: 0.3rem;
-  border: 1px solid transparent;
-  border-radius: 0.35rem;
-  background: none;
-  color: var(--oss-muted);
-  cursor: pointer;
-}
-
-.oss-command__copy:hover,
-.oss-command__copy:focus-visible {
-  color: var(--oss-text);
-  border-color: var(--oss-border);
-}
-
-.oss-command__icon {
-  width: 1rem;
-  height: 1rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.oss-command__icon--done,
-.oss-command__copy.is-done .oss-command__icon--copy {
-  display: none;
-}
-
-.oss-command__copy.is-done .oss-command__icon--done {
-  display: block;
-}
-
-/* Announced to screen readers, never shown. */
-.oss-command__status {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 .oss-footer__cols {

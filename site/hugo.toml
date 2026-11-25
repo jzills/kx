@@ -142,9 +142,8 @@ disableKinds = ["taxonomy", "term"]
 # as a table of contents, and "Themes" left too; its palettes are a scroll
 # away on the landing page, and the bar keeps only a light/dark button.
 # The footer, shared by every project docs site: the markup is
-# layouts/_partials/custom/footer.html and the install command is
-# layouts/_partials/oss/footer-command.html. Keys are lowercase, as Hugo
-# stores them. A link is a site `path`, an absolute `url`, or kind = "bug",
+# layouts/_partials/custom/footer.html. Keys are lowercase, as Hugo stores
+# them. A link is a site `path`, an absolute `url`, or kind = "bug",
 # which opens a new issue with `bug` as its body; the body asks for
 # kx --version's output, because the site can't know which binary the reader
 # runs.
@@ -153,7 +152,6 @@ disableKinds = ["taxonomy", "term"]
   mark = "kx-mark.svg"
   showname = false
   tagline = "kubectl, indexed. Every row of a listing gets a number, and every other command takes it."
-  command = "curl -fsSL https://jzills.github.io/kx/install.sh | sh"
   repo = "https://github.com/jzills/kx"
   bug = """**What happened**
 

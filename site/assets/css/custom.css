@@ -271,8 +271,8 @@ html.kx-motion [data-kx-reveal].is-revealed {
 
 /* The install command under the buttons, with its copy button. */
 
-/* A command a reader is meant to copy: the hero's, the install panel's and
-   the footer's. An edge tinted with the accent and a soft glow of it set
+/* A command a reader is meant to copy: the hero's and the install panel's.
+   An edge tinted with the accent and a soft glow of it set
    them apart from the inline code around them, which shares their surface
    and border and so, untinted, read as more of the same. color-mix keeps it
    per palette, light ones included. On a white page the glow at the dark
@@ -300,8 +300,7 @@ html.dark {
   box-shadow: var(--kx-command-glow);
 }
 
-/* One line, scrolling sideways on a phone, as the footer's copy does. It
-   wrapped here once, so that none of it would be out of sight; but the wrap
+/* One line, scrolling sideways on a phone. It wrapped here once, so that none of it would be out of sight; but the wrap
    broke the URL mid-word and grew the box to three lines, which pushed the
    hero's buttons under the fold. */
 .kx-command .kx-install__command {
@@ -882,7 +881,6 @@ html.dark .kx-shot--wide .kx-media {
   --oss-muted: var(--kx-muted);
   --oss-accent: var(--kx-accent);
   --oss-border: var(--kx-border);
-  --oss-surface: var(--kx-surface);
   --oss-page: var(--kx-background);
 }
 
