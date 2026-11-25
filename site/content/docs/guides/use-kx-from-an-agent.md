@@ -80,7 +80,8 @@ Claude Code lists each as `/kx:` and its name; typing `/mcp__kx__triage` runs it
 | `cves` | `namespace`, optional | Scan the namespace's images and rank what is fixable. |
 
 A target is one word, spelled as kx takes it: `deploy/api`, `@api`, or an index such as `3`.
-So `/kx:explain 3` explains the third row of your current listing, and the agent names the resource it resolved to before going further.
+So `/kx:explain 3` explains the third row of your current listing, and the agent names the resource it resolved to.
+It spends the index on its first call only and names the resource from then on, so a listing saved partway through, by you or by the agent's own `tree` call, can't send it to another row.
 A prompt is only instructions: the agent does the work with the same read-only tools.
 
 ## What it will never do
