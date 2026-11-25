@@ -45,17 +45,18 @@ func TestPromptTargetSpellings(t *testing.T) {
 			t.Errorf("%v: %v", tc.arguments, err)
 			continue
 		}
-		if !strings.Contains(text, "the target "+tc.want+".") {
+		if !strings.Contains(text, "as the target "+tc.want) {
 			t.Errorf("%v: text does not pass the target %s:\n%s", tc.arguments, tc.want, text)
 		}
 	}
 }
 
 // An index is a row the user sees and the agent does not, so the prompt asks
-// for the resolved name first, as the server's instructions do. A kind/name
-// target is the control: it needs no confirming, and asking would only add a
-// step.
-func TestIndexTargetAsksForTheResolvedName(t *testing.T) {
+// for the resolved name, as the server's instructions do. And it is spent on
+// the first call only: under --write-listings the tree step saves a new
+// listing, after which the same index names one of the tree's rows. A
+// kind/name target is the control: it stays put, so every call takes it.
+func TestIndexTargetIsSpentOnTheFirstCall(t *testing.T) {
 	session := connectMCP(t, mcpTestDeps(t, &recordingKubectl{}))
 	for _, name := range []string{"explain", "rollout"} {
 		indexed, err := getPrompt(t, session, name, map[string]string{"target": "3"})
@@ -66,11 +67,21 @@ func TestIndexTargetAsksForTheResolvedName(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		const ask = "tell me which resource it resolved to"
-		if !strings.Contains(indexed, ask) {
-			t.Errorf("%s with an index does not ask for the resolved name:\n%s", name, indexed)
+		for _, want := range []string{
+			`as the target {"index":3} for your first call only.`,
+			"Tell me which resource that is, then pass those three, not the index, to every later call",
+		} {
+			if !strings.Contains(indexed, want) {
+				t.Errorf("%s with an index does not say %q:\n%s", name, want, indexed)
+			}
 		}
-		if strings.Contains(named, ask) {
+		if strings.Contains(indexed, "to each tool") {
+			t.Errorf("%s with an index passes it to each tool:\n%s", name, indexed)
+		}
+		if !strings.Contains(named, `Pass it to each tool as the target {"kind":"deploy","name":"api"}.`) {
+			t.Errorf("%s with kind/name does not pass it to each tool:\n%s", name, named)
+		}
+		if strings.Contains(named, "first call only") || strings.Contains(named, "Tell me which resource") {
 			t.Errorf("%s with kind/name asks for the resolved name:\n%s", name, named)
 		}
 	}
