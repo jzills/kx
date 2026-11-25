@@ -330,16 +330,24 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	// a running init container near its memory limit has a finding and has
 	// failed nothing, and one that failed a month ago has none under a 24h
 	// window and still holds the app in PodInitializing.
+	//
+	// A native sidecar counts too: the app waits until it has started, so
+	// one crashlooping holds the pod there just the same. Once the app runs,
+	// nothing waits on PodInitializing and the pod is not Pending, so a
+	// sidecar failing later suppresses nothing.
 	initFailing := false
 	for _, container := range pod.Containers {
-		if !container.Init {
-			continue
+		if container.Init || container.Sidecar {
+			initFailing = initFailing || initFailed(container)
 		}
-		initFailing = initFailing || initFailed(container)
-		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
 	}
 	for _, container := range pod.Containers {
-		if container.Init || (initFailing && container.WaitingReason == "PodInitializing") {
+		if container.Init {
+			findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
+		}
+	}
+	for _, container := range pod.Containers {
+		if container.Init || (initFailing && container.WaitingReason == podInitializing) {
 			continue
 		}
 		findings = append(findings, containerFindings(pod.Name, container, since, pod.UnhealthySince)...)
@@ -390,10 +398,14 @@ func podFindings(pod PodDiagnostic, since time.Time) []Finding {
 	return findings
 }
 
-// initFailed reports whether an init container is stuck: waiting for a
-// reason (a queued one, waiting on PodInitializing, never gets a row), or
-// stopped with a non-zero exit.
+// initFailed reports whether an init container or a sidecar is stuck: waiting for a
+// reason other than its turn, or stopped with a non-zero exit. One queued
+// behind another, waiting on PodInitializing, has failed nothing now; it
+// has a row only when its previous run failed (see quietInit).
 func initFailed(container ContainerDiagnostic) bool {
+	if container.WaitingReason == podInitializing {
+		return false
+	}
 	if container.WaitingReason != "" {
 		return true
 	}
@@ -439,7 +451,9 @@ func containerFindings(
 		}
 		findings = append(findings, ongoing(Critical, Cause, unhealthySince, fmt.Sprintf(
 			"Container config error in %s: %s", place, detail)))
-	case reason != "":
+	// An init container waiting its turn is not a problem of its own: the
+	// one ahead of it, or the pod pending on that one, says why it waits.
+	case reason != "" && !(container.Init && reason == podInitializing):
 		findings = append(findings, ongoing(Warning, Cause, unhealthySince, fmt.Sprintf(
 			"%s in Pod %s waiting: %s", subject, podName, reason)))
 	}

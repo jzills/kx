@@ -21,7 +21,7 @@ Homebrew, krew, uv, pipx and a standalone binary are on the [install page](../in
 kx get pods
 ```
 
-{{< kx-terminal >}}
+{{< kx-listing >}}
 
 That is kubectl's own table with a column in front of it.
 The numbers are the whole idea: they are what every other command takes.
@@ -35,7 +35,7 @@ kx yaml 1
 kx exec 2
 ```
 
-The index is resolved against the listing you just ran, so `3` means the third row of it — `cache-oom-cc849dbdb-2qdkw` above — until you list something else.
+The index is resolved against the listing you just ran, so `3` means the third row of it — the `cache-oom` Pod above — until you list something else.
 
 Several at once, and ranges:
 

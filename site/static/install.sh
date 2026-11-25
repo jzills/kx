@@ -240,7 +240,9 @@ report() {
 # was installed here. Asked only when $DIR is on PATH: when it isn't,
 # path_hint's line already puts it first. The two are compared as
 # directories, physically, so a PATH entry that reaches $DIR through a link
-# is not mistaken for another kx.
+# is not mistaken for another kx; then as files, so neither is a kx that is
+# a link to this one, or a copy of it. cmp follows links, and a system
+# without it gets the hint, as it did before.
 shadow_hint() {
 	first=$(command -v kx 2>/dev/null) || return 0
 	case "$first" in
@@ -250,6 +252,7 @@ shadow_hint() {
 	there=$(cd "${first%/*}" 2>/dev/null && pwd -P) || return 0
 	here=$(cd "$DIR" && pwd -P) || return 0
 	[ "$there" != "$here" ] || return 0
+	! cmp -s "$first" "$DIR/kx" 2>/dev/null || return 0
 	say ""
 	say "$first comes first on your PATH, so 'kx' still runs that one. Remove it, or put $DIR ahead of it."
 }

@@ -102,8 +102,8 @@ func TestSidecarCountsTowardReady(t *testing.T) {
 	if got.ReadyContainers != 2 || got.TotalContainers != 2 {
 		t.Errorf("ready/total = %d/%d, want 2/2", got.ReadyContainers, got.TotalContainers)
 	}
-	if len(got.Containers) != 2 || got.Containers[0].Init {
-		t.Errorf("containers = %+v, want proxy unmarked beside app", got.Containers)
+	if len(got.Containers) != 2 || got.Containers[0].Init || !got.Containers[0].Sidecar {
+		t.Errorf("containers = %+v, want proxy marked Sidecar, not Init, beside app", got.Containers)
 	}
 }
 
@@ -174,6 +174,53 @@ func TestQueuedInitContainerBehindAFailureSaysNothing(t *testing.T) {
 	}
 }
 
+// The kubelet reports PodInitializing for the init step that is blocked
+// before it starts, a missing ConfigMap mount or a slow pull, as it does
+// for the ones queued behind it. The blocked one used to lose its row with
+// them, so the pod table named only the app. It keeps its row and adds no
+// finding: what blocks it is in the events, not its status.
+func TestBlockedInitStepKeepsItsRow(t *testing.T) {
+	diagnostic := podDiagnostic(twoInitPod(waiting("migrate", "PodInitializing", "")))
+
+	var names []string
+	for _, c := range diagnostic.Containers {
+		names = append(names, c.Name)
+	}
+	if want := []string{"migrate", "app"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("rows = %q, want %q: the blocked step, not the one queued behind it", names, want)
+	}
+	if !diagnostic.Containers[0].Init {
+		t.Errorf("migrate = %+v, want it marked Init", diagnostic.Containers[0])
+	}
+	got := summaries(podFindings(diagnostic, unbounded))
+	want := []string{
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A sidecar that has not started holds back the steps after it, so one
+// waiting behind it is queued, not blocked.
+func TestStepBehindAnUnstartedSidecarIsQueued(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	proxy := running("proxy")
+	proxy.Started = b(false)
+	pod := initPod(waiting("migrate", "PodInitializing", ""))
+	pod.Spec.InitContainers = append([]corev1.Container{{Name: "proxy", RestartPolicy: &always}},
+		pod.Spec.InitContainers...)
+	pod.Status.InitContainerStatuses = append([]corev1.ContainerStatus{proxy},
+		pod.Status.InitContainerStatuses...)
+
+	for _, c := range podDiagnostic(pod).Containers {
+		if c.Name == "migrate" {
+			t.Errorf("step queued behind an unstarted sidecar has a row: %+v", c)
+		}
+	}
+}
+
 // A running init container near its memory limit has a finding and has
 // failed nothing, so the pod is still reported pending on it. Keying the
 // suppression on "produced a finding" hid both.
@@ -231,5 +278,97 @@ func TestInitContainerThatSucceededAfterCrashingKeepsItsFindings(t *testing.T) {
 	want := []string{"OOMKilled in init container migrate of Pod api-1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A rebuilt sandbox runs every init container again, so one OOMKilled before
+// the rebuild can be queued behind the first, waiting on PodInitializing.
+// It used to be dropped with every other queued container, and the kill
+// with it. Kept, it reports the kill and nothing about waiting its turn,
+// and the pod is still pending on the step that is running.
+func TestQueuedInitContainerKeepsAFailedPreviousRun(t *testing.T) {
+	inProgress := running("migrate")
+	inProgress.Ready = false
+	pod := twoInitPod(inProgress)
+	seed := &pod.Status.InitContainerStatuses[1]
+	seed.RestartCount = 1
+	seed.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{
+		Reason: "OOMKilled", ExitCode: 137, FinishedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+	}
+
+	got := summaries(podFindings(podDiagnostic(pod), unbounded))
+	want := []string{
+		"OOMKilled in init container seed of Pod api-1",
+		"Container app in Pod api-1 waiting: PodInitializing",
+		"Pod api-1 pending",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+}
+
+// A node reboot runs every init container again, each to a clean exit, and
+// the restart count climbs. It used to keep the container's row on any
+// count above zero, and past five, inside the window, warned that it
+// restarted with no failure behind it. TestInitContainerThatSucceededAfter-
+// CrashingKeepsItsFindings is the control: a failed previous run keeps it.
+func TestCleanReRunsOfAnInitContainerAreQuiet(t *testing.T) {
+	status := terminated("migrate", "Completed", 0)
+	status.RestartCount = 6
+	status.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{
+		Reason: "Completed", ExitCode: 0, FinishedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+	}
+	pod := initPod(status)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{running("app")}
+
+	diagnostic := podDiagnostic(pod)
+	if len(diagnostic.Containers) != 1 || diagnostic.Containers[0].Name != "app" {
+		t.Errorf("containers = %+v, want app alone", diagnostic.Containers)
+	}
+	if got := summaries(podFindings(diagnostic, unbounded)); len(got) != 0 {
+		t.Errorf("findings = %q, want none", got)
+	}
+}
+
+// sidecarPod is a pod with a native sidecar, proxy, beside its app.
+func sidecarPod(phase corev1.PodPhase, proxy, app corev1.ContainerStatus) *corev1.Pod {
+	always := corev1.ContainerRestartPolicyAlways
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-1"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "proxy", RestartPolicy: &always}},
+			Containers:     []corev1.Container{{Name: "main"}},
+		},
+		Status: corev1.PodStatus{
+			Phase:                 phase,
+			InitContainerStatuses: []corev1.ContainerStatus{proxy},
+			ContainerStatuses:     []corev1.ContainerStatus{app},
+		},
+	}
+}
+
+// A Job pod that succeeded has its sidecar killed at shutdown, which reads
+// as terminated: Error (exit 137). That put a critical on a Job that worked.
+// The running pod is the control: there the same stop is a crash, since the
+// kubelet would have restarted the sidecar.
+func TestSidecarStoppedWithItsPodIsNotAFailure(t *testing.T) {
+	killed := terminated("proxy", "Error", 137)
+	done := terminated("main", "Completed", 0)
+	finished := podDiagnostic(sidecarPod(corev1.PodSucceeded, killed, done))
+	if got := summaries(podFindings(finished, unbounded)); len(got) != 0 {
+		t.Errorf("succeeded pod findings = %q, want none", got)
+	}
+	if finished.TotalContainers != 2 {
+		t.Errorf("total = %d, want 2: the sidecar still counts toward READY", finished.TotalContainers)
+	}
+
+	crashed := podDiagnostic(sidecarPod(corev1.PodRunning, killed, running("main")))
+	want := []string{
+		"Container proxy in Pod job-1 terminated: Error (exit 137)",
+		"Pod job-1: 1/2 containers ready",
+	}
+	if got := summaries(podFindings(crashed, unbounded)); !reflect.DeepEqual(got, want) {
+		t.Errorf("running pod findings = %q, want %q", got, want)
 	}
 }

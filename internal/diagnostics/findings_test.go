@@ -1419,3 +1419,32 @@ func TestEventFindingWithoutASpanIsUnchanged(t *testing.T) {
 		t.Errorf("Summary = %q, want no span segment", got)
 	}
 }
+
+// A crashlooping native sidecar holds the app in PodInitializing and the pod
+// Pending, as a failing init container does, and #703's suppression missed
+// it: the sidecar is not marked Init, so the critical came with the app's
+// "waiting" and the pod's "pending" restating it. The running sidecar is the
+// control, so the suppression cannot be dropping those two for every pod.
+func TestFailingSidecarIsTheCause(t *testing.T) {
+	pod := func(sidecar ContainerDiagnostic) PodDiagnostic {
+		return PodDiagnostic{
+			Name: "api-1", Phase: "Pending", Scheduling: SchedulingInfo{Schedulable: true},
+			Containers: []ContainerDiagnostic{
+				sidecar,
+				{Name: "app", State: "Waiting", WaitingReason: "PodInitializing"},
+			},
+		}
+	}
+	crashing := ContainerDiagnostic{Name: "proxy", Sidecar: true, State: "Waiting",
+		WaitingReason: "CrashLoopBackOff", RestartCount: 4}
+	got := fmt.Sprint(summaries(podFindings(pod(crashing), unbounded)))
+	if want := "[CrashLoopBackOff in Pod api-1 (4 restarts)]"; got != want {
+		t.Errorf("findings = %s, want %s", got, want)
+	}
+
+	starting := ContainerDiagnostic{Name: "proxy", Sidecar: true, State: "Running"}
+	got = fmt.Sprint(summaries(podFindings(pod(starting), unbounded)))
+	if want := "[Container app in Pod api-1 waiting: PodInitializing Pod api-1 pending]"; got != want {
+		t.Errorf("findings = %s, want %s", got, want)
+	}
+}

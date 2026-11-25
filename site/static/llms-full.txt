@@ -199,7 +199,7 @@ kx yaml 1
 kx exec 2
 ```
 
-The index is resolved against the listing you just ran, so `3` means the third row of it — `cache-oom-cc849dbdb-2qdkw` above — until you list something else.
+The index is resolved against the listing you just ran, so `3` means the third row of it — the `cache-oom` Pod above — until you list something else.
 
 Several at once, and ranges:
 
@@ -3208,7 +3208,7 @@ Patch an indexed resource with a strategic merge, JSON merge, or JSON patch.
 
 Patches one indexed resource via kubectl patch. The patch itself is kubectl's: -p gives it inline, --patch-file reads it from a file, and --type picks strategic (the default), merge or json.
 
-kubectl's other flags pass through too — --dry-run to preview the change, -o to print the patched object, --subresource to patch status or scale. -f, -k and --local are refused, since each names the resource to patch, which the index already does.
+kubectl's other flags pass through too — --dry-run to preview the change, -o to print the patched object, --subresource to patch status or scale. -f, -k and --local are refused, since each names the resource to patch, which the index already does, and -R with them, since it only applies to -f.
 
 A flag kx doesn't know is refused; put it after `--` to pass it through to kubectl.
 

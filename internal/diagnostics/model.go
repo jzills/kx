@@ -53,10 +53,15 @@ func (s Severity) Token() string {
 // ContainerDiagnostic is one container's flattened status.
 type ContainerDiagnostic struct {
 	Name string
-	// Init marks an init container the pod is still waiting on, or one that
-	// failed. A native sidecar is not marked: it runs beside the app, and
-	// reads like any other container.
-	Init             bool
+	// Init marks an init container: one the pod is still waiting on, one
+	// that failed, or one whose previous run failed (see quietInit). A
+	// native sidecar is not marked: it runs beside the app, and reads like
+	// any other container.
+	Init bool
+	// Sidecar marks a native sidecar: an init container with restartPolicy
+	// Always. The app containers wait on it until it starts, so a failing
+	// one holds the pod in PodInitializing as a failing init step does.
+	Sidecar          bool
 	Ready            bool
 	Started          *bool
 	RestartCount     int32

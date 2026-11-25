@@ -225,6 +225,29 @@ func TestRegisterKubectlFlagPreservesDeprecatedShorthand(t *testing.T) {
 	}
 }
 
+// A flag kubectl deprecates is hidden from its help, and one kx registers
+// first must be hidden from kx's too. Only the warning was copied, and
+// pflag hides a Hidden flag, not a Deprecated one, so help would have
+// listed it. The kx-only flag beside it is the control: help lists it.
+func TestSharedDeprecatedFlagIsHiddenFromHelp(t *testing.T) {
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.Bool("record", false, "kx option")
+	flags.Bool("match", false, "kx's own")
+	args := &kubectlArgs{definedBy: map[string][]string{}}
+	registerKubectlFlag(flags, args, kubectlflags.Flag{
+		Name: "record", Type: "bool", NoOptDefVal: "true", Usage: "record the command",
+		Hidden: true, Deprecated: "--record will be removed in the future",
+	}, kubectlFlagCommand)
+
+	usage := flags.FlagUsages()
+	if strings.Contains(usage, "--record") {
+		t.Errorf("help lists kubectl's deprecated --record:\n%s", usage)
+	}
+	if !strings.Contains(usage, "--match") {
+		t.Errorf("help = %q, want kx's --match listed", usage)
+	}
+}
+
 func TestRegisterKubectlFlagDoesNotDeprecateDifferentKxShorthand(t *testing.T) {
 	const warning = "use --filename instead"
 	source := kubectlflags.Flag{
