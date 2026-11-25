@@ -38,8 +38,13 @@ func ellipsize(text string, n int) string {
 	if n <= 0 || width(text) <= n {
 		return text
 	}
+	// The ellipsis's own width, not 1: it is East Asian ambiguous, so in a
+	// CJK locale it takes two columns, and a cell cut to leave one was a
+	// column wider than its column. Every row is counted at the column's
+	// width, so that column wrapped onto a line no redraw cleared.
+	mark := width("…")
 	runes := []rune(text)
-	for len(runes) > 0 && width(string(runes))+1 > n {
+	for len(runes) > 0 && width(string(runes))+mark > n {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
