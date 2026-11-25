@@ -3,10 +3,12 @@
 
   Hextra's navbar has no extension point for a control of our own — it
   switches on a fixed set of menu item types — but "theme-toggle" is one of
-  them, and the sidebar footer renders the same partial. Overriding the
-  partial therefore puts this button in the navbar, in the sidebar and in the
-  mobile menu at once, without copying navbar.html and inheriting the job of
-  keeping that copy in step with upstream.
+  them. Overriding the partial therefore puts this button in the navbar,
+  which shows it at every width, phones included, without copying
+  navbar.html and inheriting the job of keeping that copy in step with
+  upstream. The navbar's is the only copy: the sidebar footer renders this
+  partial too, but displayToggle turns that off (see hugo.toml), and
+  Hextra's mobile menu leaves theme-toggle entries out.
 
   One button, light or dark, rather than a menu of all ten palettes: a reader
   reaching for the navbar wants the page brighter or darker, and a ten-item
