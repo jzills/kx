@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/jzills/kx/internal/docs"
 	"github.com/jzills/kx/internal/state"
@@ -87,7 +88,10 @@ const listingResourceDescription = "The listing the user's kx commands resolve a
 	"what the last kx get, kx diag, kx tree or kx top saved, or the one kx state moved to: the " +
 	"command that made it, its context and namespace, and its rows in order, each with its index, " +
 	"kind, name and namespace. The index is the number the user types in kx, read live: if the " +
-	"user lists again, it can name a different row."
+	"user lists again, it can name a different row. To act on a row, pass its index as the " +
+	"target, not its kind and name: kx refuses an index from a listing made in another context, " +
+	"and a name copied from it would reach a resource of the same name on this cluster. " +
+	"otherContext is set when that is the case."
 
 // serializedResource is serialized for a resource handler.
 func (d mcpDeps) serializedResource(handler mcp.ResourceHandler) mcp.ResourceHandler {
@@ -145,6 +149,11 @@ func (d mcpDeps) marksResource(context.Context, *mcp.ReadResourceRequest) (*mcp.
 type listingDocument struct {
 	Context string            `json:"context"`
 	Listing *listingEntryJSON `json:"listing"`
+	// OtherContext says the listing was made in another context, in the
+	// words kx uses to refuse an index into it. Its rows name resources on
+	// that cluster, and the same names here may be other resources, so an
+	// agent comparing two context strings is not left to notice.
+	OtherContext string `json:"otherContext,omitempty"`
 }
 
 // listingEntryJSON is kx state --json's entry without its position in the
@@ -178,6 +187,12 @@ func (d mcpDeps) listingResource(context.Context, *mcp.ReadResourceRequest) (*mc
 		Query: full.Query, ByAgent: full.ByAgent, Resources: full.Resources,
 	}
 	document.Listing = listing
+	if entry.Context != "" && document.Context != "" && entry.Context != document.Context {
+		document.OtherContext = fmt.Sprintf(
+			"This listing was made in context '%s'; the current context is '%s'. Its rows name "+
+				"resources there, and kx refuses their indexes until the user lists again here.",
+			entry.Context, document.Context)
+	}
 	return jsonResource(resourceListingURI, document)
 }
 

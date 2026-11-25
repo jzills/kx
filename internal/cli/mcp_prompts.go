@@ -82,8 +82,13 @@ func promptResult(description, text string) *mcp.GetPromptResult {
 // start an instruction the user never typed.
 func promptWord(req *mcp.GetPromptRequest, name string) (string, error) {
 	value := strings.TrimSpace(req.Params.Arguments[name])
-	if strings.IndexFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+	if strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return "", fmt.Errorf("The %s argument is one word — %q has spaces in it.", name, value)
+	}
+	// Not a space, but no more welcome: an escape sequence would reach a
+	// terminal that shows the prompt.
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("The %s argument is one word — %q has a control character in it.", name, value)
 	}
 	return value, nil
 }
@@ -150,14 +155,22 @@ func promptLabel(req *mcp.GetPromptRequest) string {
 	return strings.TrimSpace(req.Params.Arguments["target"])
 }
 
-// confirmIndex is the step an index target adds: say which resource it
-// resolved to before going further, as the server's instructions ask.
-func confirmIndex(index bool) string {
+// targetSteps is the sentence that says how to pass the target, and for an
+// index the steps that go with it. An index is used for the first call only:
+// it names a row of the user's current listing, and that listing can change
+// while the agent works — under --write-listings, the tree step alone saves
+// a new one — so a later call with the same index could reach another
+// resource. Every tool's output names the resource it resolved to, by kind,
+// name and namespace, and those stay put.
+func targetSteps(target string, index bool) string {
 	if !index {
-		return ""
+		return fmt.Sprintf("Pass it to each tool as the target %s.\n\n", target)
 	}
-	return "The target is a row of my current kx listing. Before anything else, tell me which " +
-		"resource it resolved to, by kind and name.\n\n"
+	return fmt.Sprintf("It is a row of my current kx listing: pass it as the target %s for your "+
+		"first call only. That call's output names the resource by kind, name and namespace. "+
+		"Tell me which resource that is, then pass those three, not the index, to every later "+
+		"call: my listing can change while you work, and the same index would then name "+
+		"another row.\n\n", target)
 }
 
 func (d mcpDeps) triagePrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -186,8 +199,7 @@ func (d mcpDeps) explainPrompt(_ context.Context, req *mcp.GetPromptRequest) (*m
 		return nil, err
 	}
 	return promptResult("Explain "+promptLabel(req), fmt.Sprintf(
-		"Find out why this resource is unhealthy, with the kx tools. Pass it to each tool as the "+
-			"target %s.\n\n%s"+
+		"Find out why this resource is unhealthy, with the kx tools. %s"+
 			"1. Call diagnose on it. If it is healthy, say so and stop.\n"+
 			"2. Call tree on it to see what it owns, and follow the findings down to the Pod or "+
 			"container they come from.\n"+
@@ -196,7 +208,7 @@ func (d mcpDeps) explainPrompt(_ context.Context, req *mcp.GetPromptRequest) (*m
 			"4. Report the cause in a sentence or two and the evidence for it, quoting the event "+
 			"or log line that shows it. Suggest a fix, but change nothing: the kx tools are "+
 			"read-only.",
-		target, confirmIndex(index))), nil
+		targetSteps(target, index))), nil
 }
 
 func (d mcpDeps) rolloutPrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -205,8 +217,7 @@ func (d mcpDeps) rolloutPrompt(_ context.Context, req *mcp.GetPromptRequest) (*m
 		return nil, err
 	}
 	return promptResult("Check the latest rollout of "+promptLabel(req), fmt.Sprintf(
-		"Find out whether this workload's latest rollout broke it, with the kx tools. Pass it to "+
-			"each tool as the target %s.\n\n%s"+
+		"Find out whether this workload's latest rollout broke it, with the kx tools. %s"+
 			"1. Call rollout_history on it to list its revisions. If it has only one, say there is "+
 			"nothing to compare and go on to step 3.\n"+
 			"2. Call rollout_history again with the latest revision, and with the one before it, "+
@@ -216,7 +227,7 @@ func (d mcpDeps) rolloutPrompt(_ context.Context, req *mcp.GetPromptRequest) (*m
 			"4. Say whether the rollout looks like the cause: which change, and the evidence that "+
 			"ties it to the failure, or why the timing rules it out. If rolling back looks right, "+
 			"say so, but change nothing: the kx tools are read-only.",
-		target, confirmIndex(index))), nil
+		targetSteps(target, index))), nil
 }
 
 func (d mcpDeps) cvesPrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
