@@ -406,7 +406,7 @@ type watchSession struct {
 	caption  []string
 	// footer is the note when nothing is numbered.
 	footer string
-	lines  int
+	frame  render.Frame
 }
 
 // numbering reports whether the screen shows indexes kx resolves.
@@ -453,7 +453,7 @@ func (s *watchSession) redraw() error {
 	if s.numbering() {
 		sorted = numberFirst(sorted)
 	}
-	s.lines = render.RedrawTable(headers, sorted, s.lines, s.note(), s.caption...)
+	s.frame = render.RedrawTable(headers, sorted, s.frame, s.note(), s.caption...)
 	return nil
 }
 
@@ -492,7 +492,9 @@ func (s *watchSession) tick() {
 	if s.listing == nil || s.headers == nil {
 		return
 	}
-	if s.listing.tick(s.numbered, s.rows.Entries()) {
+	// Evaluated apart, so a resize cannot skip the save.
+	saved := s.listing.tick(s.numbered, s.rows.Entries())
+	if saved || render.Resized(s.frame) {
 		_ = s.redraw()
 	}
 }

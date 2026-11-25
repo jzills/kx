@@ -433,6 +433,7 @@ If you list something else in the meantime, that listing stays current: within a
 Using the index of a row that has since been deleted does the same, since kx refreshes the listing with the plain `kx get`, without `--watch`, and the footer says a rerun renumbered the rows.
 So does `kx state drop --all`, whose footer says the saved listings were cleared.
 A watch numbers at most 1,000 rows; after that, new rows are drawn without a number, and no number already given changes.
+A watch with more rows than the terminal has lines draws the first ones that fit and counts the rest under them; the rows it leaves out are still numbered and saved, so their indexes work as usual.
 The numbers are also only drawn on a terminal: piped, a watch prints nothing to number.
 If kx can't read or write its state file, the watch keeps running without numbers.
 
