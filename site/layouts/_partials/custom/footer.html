@@ -1,83 +1,62 @@
 {{- /*
-  Fills Hextra's footer, which the theme renders on every page but leaves
-  empty: copyright and "Powered by" are both off in hugo.toml, so without this
-  the footer was a blank band under every page.
+  The footer on every page of every project docs site. Shared, byte for byte,
+  by kx, snoop, action-cache and hmac-manager: change it in one, copy it to
+  all four. What differs per site lives elsewhere:
 
-  The kx mark, tagline and install command beside three short link columns,
-  then a wordmark over the copyright line with the author's profiles across
-  from it. The brand column is what fills the footer's width; without it the
-  links sat in the left half and the right half was empty. The wordmark is set in text rather than
-  shipped as an image so it takes the active palette's muted color, as the
-  navbar mark does.
+    - [params.oss] in hugo.toml: the mark, name, tagline, repository, the bug
+      report's body, and the three link columns.
+    - _partials/oss/footer-command.html: the install command, which on some
+      sites carries a copy button wired to that site's own script.
+    - the --oss-* properties in custom.css, which map this footer onto the
+      site's palette.
 
-  Site links go through relURL, which adds the /kx/ the site is served under;
-  a bare "/docs/" would point at the root of jzills.github.io.
+  Top: the project's mark, tagline and install command beside three short
+  link columns. Bottom: the z.//s mark and a link to zills.io, the row that
+  closes every zills site, so a reader on any docs page has the way back to
+  the rest of the work.
+
+  Column links are either a site path (`path`, through relURL, which adds the
+  /<project>/ the site is served under), an absolute `url`, or `kind = "bug"`,
+  which opens GitHub's new-issue form with the label set and the body laid
+  out from [params.oss] bug.
 */ -}}
-{{- $repo := "https://github.com/jzills/kx" -}}
-{{- /*
-  The bug link opens GitHub's new-issue form with the label set and the body
-  laid out. A query string rather than an issue template under .github/,
-  since this link is the only place that asks for a bug report. The body asks
-  for kx --version's output, because the site can't know which binary the
-  reader runs.
-*/ -}}
-{{- $bugBody := "**What happened**\n\n\n**What you expected**\n\n\n**Steps to reproduce**\n\n```\nkx ...\n```\n\n**Version**\n\nPaste the output of `kx --version`.\n" -}}
-{{- $bugURL := printf "%s/issues/new?%s" $repo (querify "labels" "bug" "body" $bugBody) -}}
-<div class="kx-footer">
-  <div class="kx-footer__top">
-    <div class="kx-footer__about">
-      <a class="kx-footer__mark" href="{{ site.Home.RelPermalink }}" aria-label="kx">
-        {{- with resources.Get "kx-mark.svg" }}{{ .Content | safeHTML }}{{ end -}}
+{{- $oss := site.Params.oss -}}
+{{- $repo := $oss.repo -}}
+{{- $bugURL := printf "%s/issues/new?%s" $repo (querify "labels" "bug" "body" ($oss.bug | default "")) -}}
+<div class="oss-footer">
+  <div class="oss-footer__top">
+    <div class="oss-footer__about">
+      <a class="oss-footer__brand" href="{{ site.Home.RelPermalink }}" aria-label="{{ $oss.name }}">
+        {{- with resources.Get $oss.mark }}{{ .Content | safeHTML }}{{ end -}}
+        {{- if $oss.showname }}<span class="oss-footer__name" aria-hidden="true">{{ $oss.name }}</span>{{ end -}}
       </a>
-      <p class="kx-footer__tagline">kubectl, indexed. Every row of a listing gets a number, and every other command takes it.</p>
-      <div class="kx-command kx-footer__command" data-kx-copy>
-        <code class="kx-install__command">curl -fsSL https://jzills.github.io/kx/install.sh | sh</code>
-        <button type="button" class="kx-install__copy" aria-label="Copy the install script command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="kx-install__icon kx-install__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
-        <span class="kx-install__status" role="status"></span>
+      <p class="oss-footer__tagline">{{ $oss.tagline }}</p>
+      <div class="oss-footer__command">
+        {{- partial "oss/footer-command.html" . -}}
       </div>
     </div>
-    <nav class="kx-footer__cols" aria-label="Footer">
-      <div class="kx-footer__col">
-        <h2 class="kx-footer__heading">Get started</h2>
+    <nav class="oss-footer__cols" aria-label="Footer">
+      {{- range $oss.columns }}
+      <div class="oss-footer__col">
+        <h2 class="oss-footer__heading">{{ .heading }}</h2>
         <ul>
-          <li><a href="{{ "docs/getting-started/install/" | relURL }}">Install</a></li>
-          <li><a href="{{ "docs/getting-started/quickstart/" | relURL }}">Quickstart</a></li>
-          <li><a href="{{ "docs/reference/commands/" | relURL }}">Command reference</a></li>
+          {{- range .links }}
+            {{- $href := "" }}
+            {{- if eq .kind "bug" }}{{ $href = $bugURL }}
+            {{- else if .url }}{{ $href = .url }}
+            {{- else }}{{ $href = .path | relURL }}{{ end }}
+          <li><a href="{{ $href }}">{{ .label }}</a></li>
+          {{- end }}
         </ul>
       </div>
-      <div class="kx-footer__col">
-        <h2 class="kx-footer__heading">Learn</h2>
-        <ul>
-          <li><a href="{{ "docs/concepts/" | relURL }}">Concepts</a></li>
-          <li><a href="{{ "docs/guides/" | relURL }}">Guides</a></li>
-          <li><a href="{{ "docs/guides/use-kx-from-an-agent/" | relURL }}">Use kx from an agent</a></li>
-          <li><a href="{{ "llms.txt" | relURL }}">Docs for agents</a></li>
-        </ul>
-      </div>
-      <div class="kx-footer__col">
-        <h2 class="kx-footer__heading">Project</h2>
-        <ul>
-          <li><a href="{{ $repo }}">GitHub</a></li>
-          <li><a href="{{ "releases/" | relURL }}">Release notes</a></li>
-          <li><a href="{{ $bugURL }}">Report a bug</a></li>
-          <li><a href="{{ $repo }}/blob/main/CONTRIBUTING.md">Contributing</a></li>
-          <li><a href="{{ $repo }}/blob/main/LICENSE">MIT license</a></li>
-        </ul>
-      </div>
+      {{- end }}
     </nav>
   </div>
 
-  <div class="kx-footer__wordmark" aria-hidden="true">ZILLS</div>
-  <div class="kx-footer__bottom">
-    <p class="kx-footer__copyright">© {{ now.Year }} Joshua Zillwood</p>
-    <div class="kx-footer__connect">
-      <span>Let's connect</span>
-      <a href="https://github.com/jzills" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-        {{- partial "utils/icon.html" (dict "name" "github" "attributes" `height=22 aria-hidden="true"`) -}}
-      </a>
-      <a href="https://www.linkedin.com/in/jzillss/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
-        {{- partial "utils/icon.html" (dict "name" "linkedin" "attributes" `height=20 aria-hidden="true"`) -}}
-      </a>
-    </div>
+  <div class="oss-footer__zills">
+    {{- /* The mark goes to zills.io too; the text link beside it is the one keyboards and screen readers get. */ -}}
+    <a class="oss-zmark" href="https://zills.io/" tabindex="-1" aria-hidden="true">z<span class="oss-zmark__dot"></span><span class="oss-zmark__slashes">//</span>s</a>
+    <span class="oss-footer__divider" aria-hidden="true"></span>
+    <a class="oss-footer__hub" href="https://zills.io/">zills.io <span aria-hidden="true">↗</span></a>
   </div>
 </div>

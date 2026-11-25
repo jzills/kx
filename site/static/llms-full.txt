@@ -2,13 +2,13 @@
 
 > Select Kubernetes resources by index instead of typing names.
 
-The whole of https://jzills.github.io/kx/docs/, as Markdown. Generated from the site's own sources by tools/gen-docs-context; the map of it, with one link per page, is at https://jzills.github.io/kx/llms.txt.
+The whole of https://j.zills.io/kx/docs/, as Markdown. Generated from the site's own sources by tools/gen-docs-context; the map of it, with one link per page, is at https://j.zills.io/kx/llms.txt.
 
 ---
 
 # Welcome to kx
 
-Source: https://jzills.github.io/kx/docs/
+Source: https://j.zills.io/kx/docs/
 
 Install kx, learn the index workflow, and look up any command.
 
@@ -28,7 +28,7 @@ Nothing else changes: flags you already know pass through to kubectl, the output
 
 # Getting started
 
-Source: https://jzills.github.io/kx/docs/getting-started/
+Source: https://j.zills.io/kx/docs/getting-started/
 
 Install kx and run your first indexed listing.
 
@@ -38,7 +38,7 @@ Install kx and run your first indexed listing.
 
 # Install
 
-Source: https://jzills.github.io/kx/docs/getting-started/install/
+Source: https://j.zills.io/kx/docs/getting-started/install/
 
 Homebrew, the install script, krew, uv, pipx, pip, or a standalone binary — all the same build.
 
@@ -156,17 +156,17 @@ It also names the kubectl on your PATH, which is the one kx runs, so a `not foun
 ## Shell completion
 
 Tab completion shows the resource behind each index, so `kx describe <TAB>` offers `1  api-7d8f (Pod)` rather than a bare number.
-See [completion](https://jzills.github.io/kx/docs/concepts/completion/) for the per-shell setup.
+See [completion](https://j.zills.io/kx/docs/concepts/completion/) for the per-shell setup.
 
 ## Next
 
-[Quickstart](https://jzills.github.io/kx/docs/getting-started/quickstart/) walks through the first listing and what you can do with it.
+[Quickstart](https://j.zills.io/kx/docs/getting-started/quickstart/) walks through the first listing and what you can do with it.
 
 ---
 
 # Quickstart
 
-Source: https://jzills.github.io/kx/docs/getting-started/quickstart/
+Source: https://j.zills.io/kx/docs/getting-started/quickstart/
 
 Install kx, list something, then five minutes of doing things to it by number.
 
@@ -179,7 +179,7 @@ The install script fetches the newest build, checks it against the release's che
 curl -fsSL https://jzills.github.io/kx/install.sh | sh
 ```
 
-Homebrew, krew, uv, pipx and a standalone binary are on the [install page](https://jzills.github.io/kx/docs/getting-started/install/).
+Homebrew, krew, uv, pipx and a standalone binary are on the [install page](https://j.zills.io/kx/docs/getting-started/install/).
 
 ## List something
 
@@ -242,20 +242,20 @@ kx state
 ```
 
 That prints the listing your indexes currently resolve against, and the namespace and context it was read in.
-Recent listings are kept as a history, ten by default — see [state and history](https://jzills.github.io/kx/docs/concepts/state/) for moving between them.
+Recent listings are kept as a history, ten by default — see [state and history](https://j.zills.io/kx/docs/concepts/state/) for moving between them.
 
 ## Where next
 
-- [Indexes and selection](https://jzills.github.io/kx/docs/concepts/indexes/) — everything the numbers can do
-- [State and history](https://jzills.github.io/kx/docs/concepts/state/) — what an index resolves against, and when it stops
-- [Configuration](https://jzills.github.io/kx/docs/concepts/configuration/) — `~/.kx/config.toml` and the environment overrides
-- [Themes](https://jzills.github.io/kx/docs/concepts/themes/) — including the one this page is drawn in
+- [Indexes and selection](https://j.zills.io/kx/docs/concepts/indexes/) — everything the numbers can do
+- [State and history](https://j.zills.io/kx/docs/concepts/state/) — what an index resolves against, and when it stops
+- [Configuration](https://j.zills.io/kx/docs/concepts/configuration/) — `~/.kx/config.toml` and the environment overrides
+- [Themes](https://j.zills.io/kx/docs/concepts/themes/) — including the one this page is drawn in
 
 ---
 
 # Concepts
 
-Source: https://jzills.github.io/kx/docs/concepts/
+Source: https://j.zills.io/kx/docs/concepts/
 
 How indexes resolve, where they are kept, and how to configure the rest.
 
@@ -265,7 +265,7 @@ How indexes resolve, where they are kept, and how to configure the rest.
 
 # Indexes and selection
 
-Source: https://jzills.github.io/kx/docs/concepts/indexes/
+Source: https://j.zills.io/kx/docs/concepts/indexes/
 
 Numbering, ranges, kind shorthand, matching, and -A listings.
 
@@ -279,7 +279,7 @@ kx describe 2
 
 The numbering is not a naming scheme and it is not stable across listings — it is a handle on *the listing on your screen*.
 List something else and the numbers mean something else.
-[State and history](https://jzills.github.io/kx/docs/concepts/state/) covers exactly what "the listing on your screen" resolves to.
+[State and history](https://j.zills.io/kx/docs/concepts/state/) covers exactly what "the listing on your screen" resolves to.
 
 ## Several at once
 
@@ -342,7 +342,7 @@ A mark taken with `--context` is recorded against that context, so spending it f
 On a line that also holds an index or a mark, they are refused for the same reason.
 
 Nothing is saved and no listing is needed, so a name from an alert, a teammate or another tool goes straight to `kx diag`.
-The [k9s plugin pack](https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/) is built on it, handing the row under k9s's cursor to kx this way.
+The [k9s plugin pack](https://j.zills.io/kx/docs/guides/use-kx-from-k9s/) is built on it, handing the row under k9s's cursor to kx this way.
 Pinning it with `kx mark` checks the cluster first, so a typo fails there rather than at every command that spends the mark.
 The one exception is `kx cp`, where kubectl already reads `ns/pod:path` as a namespace and a Pod, so its paths take an index or a mark.
 
@@ -458,7 +458,7 @@ Under `--json`, or a kubectl `-o` format other than a table, kx reports the fail
 
 # State and history
 
-Source: https://jzills.github.io/kx/docs/concepts/state/
+Source: https://j.zills.io/kx/docs/concepts/state/
 
 The stack an index resolves against, the namespace and context slots, and what a context switch retires.
 
@@ -473,7 +473,7 @@ That prints the listing indexes currently resolve against, along with the namesp
 
 ## The history stack
 
-Each `kx get` pushes its result onto a stack — ten entries by default, set by [`max_history`](https://jzills.github.io/kx/docs/concepts/configuration/) — with a cursor marking the current one.
+Each `kx get` pushes its result onto a stack — ten entries by default, set by [`max_history`](https://j.zills.io/kx/docs/concepts/configuration/) — with a cursor marking the current one.
 
 ```bash
 kx state --all       # the whole stack, with positions
@@ -488,7 +488,7 @@ kx state drop --empty  # drop the entries whose listing found nothing
 Jumping does not re-run anything: the entry already holds the listing, so the indexes it carries resolve immediately.
 
 The `--all` flag only clears what accumulates on its own, one `kx get` at a time.
-[A mark](https://jzills.github.io/kx/docs/concepts/marks/) is named on purpose, not accumulated, so it takes a command that says so: `kx unmark --all`.
+[A mark](https://j.zills.io/kx/docs/concepts/marks/) is named on purpose, not accumulated, so it takes a command that says so: `kx unmark --all`.
 
 Re-running the listing you are already on refreshes that entry instead of pushing another copy of it, whether it came from `kx get`, `kx top`, a `kx diag` sweep or a `kx tree`.
 Re-running `kx get` is how you see what changed, so without that the stack filled with one listing — five runs of `kx get pods` around a single `kx get deploy` left nine entries, eight of them the same, and `kx state back` could not reach the Deployments listing.
@@ -616,13 +616,13 @@ kx get deploy
 ```
 
 Each terminal now resolves indexes against its own listing — `kx delete 1` in B never touches what A listed.
-[`KX_CONFIG`](https://jzills.github.io/kx/docs/concepts/configuration/) does the same for `~/.kx/config.toml`.
+[`KX_CONFIG`](https://j.zills.io/kx/docs/concepts/configuration/) does the same for `~/.kx/config.toml`.
 
 ---
 
 # Marks
 
-Source: https://jzills.github.io/kx/docs/concepts/marks/
+Source: https://j.zills.io/kx/docs/concepts/marks/
 
 Naming a resource so it survives the re-listing that moves every index.
 
@@ -670,7 +670,7 @@ Marking under a name that's already taken replaces it in place; a mark is a poin
 
 ## A mark is pinned to its cluster
 
-Every mark records the kubeconfig context it was made in, for the same reason [a listing does](https://jzills.github.io/kx/docs/concepts/state/): a name means nothing without the cluster it was read from, and `web` in staging is not `web` in production.
+Every mark records the kubeconfig context it was made in, for the same reason [a listing does](https://j.zills.io/kx/docs/concepts/state/): a name means nothing without the cluster it was read from, and `web` in staging is not `web` in production.
 Spending a mark from another context is refused, naming both:
 
 ```
@@ -712,7 +712,7 @@ It is worth saying only because `KX_STATE` invites pointing kx at a file somethi
 
 # Configuration
 
-Source: https://jzills.github.io/kx/docs/concepts/configuration/
+Source: https://j.zills.io/kx/docs/concepts/configuration/
 
 ~/.kx/config.toml, the KX_* overrides, and when output is styled.
 
@@ -735,13 +735,13 @@ Running `kx --version` prints the path it resolved, which is the quickest way to
 
 | Key | Environment | Default | What it does |
 | --- | --- | --- | --- |
-| `theme` | `KX_THEME` | `github-dark` | Color palette for all output; see [themes](https://jzills.github.io/kx/docs/concepts/themes/). |
+| `theme` | `KX_THEME` | `github-dark` | Color palette for all output; see [themes](https://j.zills.io/kx/docs/concepts/themes/). |
 | `engine` | `KX_ENGINE` | `scout` | Default scanner for `kx scan` — `scout`, `trivy` or `grype`. |
-| `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](https://jzills.github.io/kx/docs/concepts/state/) keeps. |
+| `max_history` | `KX_MAX_HISTORY` | `10` | How many `kx get` results the [history stack](https://j.zills.io/kx/docs/concepts/state/) keeps. |
 | `shells` | `KX_SHELLS` | `bash, sh` | Shell candidates `kx exec` tries, in order. |
 | `debug_image` | `KX_DEBUG_IMAGE` | `busybox` | Image `kx debug` attaches to a Pod; `--image` overrides it per run. |
-| `diag_max_age` | `KX_DIAG_MAX_AGE` | unset | How far back [`kx diag`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) looks for evidence; unset reports everything, `--since` overrides it per run. |
-| `events_max_age` | `KX_EVENTS_MAX_AGE` | unset | How far back [`kx events`](https://jzills.github.io/kx/docs/reference/commands/events/) lists events; unset lists everything the cluster still holds, `--since` overrides it per run. |
+| `diag_max_age` | `KX_DIAG_MAX_AGE` | unset | How far back [`kx diag`](https://j.zills.io/kx/docs/reference/commands/diagnostic/) looks for evidence; unset reports everything, `--since` overrides it per run. |
+| `events_max_age` | `KX_EVENTS_MAX_AGE` | unset | How far back [`kx events`](https://j.zills.io/kx/docs/reference/commands/events/) lists events; unset lists everything the cluster still holds, `--since` overrides it per run. |
 | `theme_disable` | `KX_THEME_DISABLE` | `false` | Turn off styling entirely — the same as `--no-color`. |
 
 The `shells` key is a list in the file and a comma-separated string in the environment: `KX_SHELLS=zsh,bash,sh`.
@@ -777,7 +777,7 @@ It is a terminal-wide convention rather than a kx setting, which is why it isn't
 | Path | Environment | Contents |
 | --- | --- | --- |
 | `~/.kx/config.toml` | `KX_CONFIG` | The settings above. |
-| `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor, plus the marks that outlive them; see [state](https://jzills.github.io/kx/docs/concepts/state/) and [marks](https://jzills.github.io/kx/docs/concepts/marks/). |
+| `~/.kx/state.json` | `KX_STATE` | Saved listings and the cursor, plus the marks that outlive them; see [state](https://j.zills.io/kx/docs/concepts/state/) and [marks](https://j.zills.io/kx/docs/concepts/marks/). |
 
 The `KX_CONFIG` and `KX_STATE` variables point kx at a different file entirely, for a terminal or CI job that wants its own config or history rather than sharing the one in `~/.kx` — unlike the settings table above, neither can be set from inside the file it names.
 
@@ -788,7 +788,7 @@ Neither is required to exist — kx runs on defaults without them.
 
 # Themes
 
-Source: https://jzills.github.io/kx/docs/concepts/themes/
+Source: https://j.zills.io/kx/docs/concepts/themes/
 
 Eleven palettes for the terminal, the HTML reports, and this page.
 
@@ -798,7 +798,7 @@ kx theme dracula      # persist a choice
 kx theme 3            # ...or pick it by number, like anything else
 ```
 
-The choice is written to [`~/.kx/config.toml`](https://jzills.github.io/kx/docs/concepts/configuration/), and `KX_THEME` overrides it for a single shell.
+The choice is written to [`~/.kx/config.toml`](https://j.zills.io/kx/docs/concepts/configuration/), and `KX_THEME` overrides it for a single shell.
 
 ## The palettes
 
@@ -830,7 +830,7 @@ Pick one and the page follows, tab icon included.
 
 # Shell completion
 
-Source: https://jzills.github.io/kx/docs/concepts/completion/
+Source: https://j.zills.io/kx/docs/concepts/completion/
 
 Tab-completion that names the resource behind each index, without calling the cluster.
 
@@ -855,7 +855,7 @@ Which is the difference between remembering a number and reading one.
 | Position | Candidates |
 | --- | --- |
 | The first word | Commands, plus every kind the shorthand accepts |
-| `<index>` | Indexes from the current listing, with names and kinds, plus every [mark](https://jzills.github.io/kx/docs/concepts/marks/) as `@name` |
+| `<index>` | Indexes from the current listing, with names and kinds, plus every [mark](https://j.zills.io/kx/docs/concepts/marks/) as `@name` |
 | `<index>` for `kx ns` / `kx context` | The namespace and context slots, not the history stack |
 | `<position>` for `kx state` | History positions |
 | `<action>` for `kx rollout` | `status`, `restart`, `pause`, `resume`, `history`, `undo` |
@@ -907,7 +907,7 @@ Append that to your profile to keep it.
 
 > **Note**
 >
-> Installed as a krew plugin, the command is `kubectl idx`, and kubectl completes it by running `kubectl_complete-idx` — the link the [install page](https://jzills.github.io/kx/docs/getting-started/install/) adds beside the plugin.
+> Installed as a krew plugin, the command is `kubectl idx`, and kubectl completes it by running `kubectl_complete-idx` — the link the [install page](https://j.zills.io/kx/docs/getting-started/install/) adds beside the plugin.
 > That covers `kubectl idx <TAB>` in every shell, and the `alias kx="kubectl idx"` in zsh, which completes an alias as what it stands for and so never consults a `_kx` script.
 > In bash, the script above completes the alias as well.
 
@@ -915,18 +915,18 @@ Append that to your profile to keep it.
 
 # Guides
 
-Source: https://jzills.github.io/kx/docs/guides/
+Source: https://j.zills.io/kx/docs/guides/
 
 Things kx does that kubectl makes you assemble by hand.
 
 Each of these is a job rather than a command: find what's broken, see what a workload owns, get a credential out, check images for CVEs, get a shell, take a Node out of service, run any of it in a pipeline.
-The [command reference](https://jzills.github.io/kx/docs/reference/commands/) has the flags; these pages have the shape of the work.
+The [command reference](https://j.zills.io/kx/docs/reference/commands/) has the flags; these pages have the shape of the work.
 
 ---
 
 # Triage a namespace
 
-Source: https://jzills.github.io/kx/docs/guides/triage-a-namespace/
+Source: https://j.zills.io/kx/docs/guides/triage-a-namespace/
 
 kx diag ranks what is unhealthy, and the rows are indexed so you can drill in.
 
@@ -990,7 +990,7 @@ A `· for 25d` is how long something has been true — no `--since` will hide it
 A `· 1m ago` is when something happened, and a narrow enough window will.
 A Pod that flaps counts from its current episode, not its whole history: a crashlooping container is briefly ready on each restart, so `· for 46s` beside 4675 restarts is the last crash, not the first.
 
-That line matters because a finding drives the verdict and the verdict drives [`--fail-on`](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
+That line matters because a finding drives the verdict and the verdict drives [`--fail-on`](https://j.zills.io/kx/docs/guides/use-kx-in-ci/).
 Without it, one `FailedScheduling` from three weeks ago holds a healthy workload at `warnings` forever.
 
 ```bash
@@ -1000,11 +1000,11 @@ kx diag               # everything, however old
 ```
 
 A schedule longer than the window wants `--since` widened: a weekly CronJob whose last run failed six days ago needs `--since 7d` to see it.
-Set the window once with `diag_max_age` in [config.toml](https://jzills.github.io/kx/docs/reference/configuration/), or `KX_DIAG_MAX_AGE` in the environment.
+Set the window once with `diag_max_age` in [config.toml](https://j.zills.io/kx/docs/reference/configuration/), or `KX_DIAG_MAX_AGE` in the environment.
 
 ## Usage as a signal, not just state
 
-Findings also draw on live resource usage, the same data [`kx top`](https://jzills.github.io/kx/docs/reference/commands/top/) reports.
+Findings also draw on live resource usage, the same data [`kx top`](https://j.zills.io/kx/docs/reference/commands/top/) reports.
 A Pod running hot against its memory limit is flagged as an OOMKill risk *before* it gets killed, which is the one finding you cannot get from `describe`.
 
 ## Nodes
@@ -1016,7 +1016,7 @@ kx get nodes
 kx diag 1
 ```
 
-See [taking a node out of service](https://jzills.github.io/kx/docs/guides/take-a-node-out-of-service/).
+See [taking a node out of service](https://j.zills.io/kx/docs/guides/take-a-node-out-of-service/).
 
 ## Wider than one namespace
 
@@ -1039,7 +1039,7 @@ kx diag -A --fail-on critical
 ```
 
 The `--json` flag prints the same sweep as a document, and `--fail-on` exits 2 when any resource reaches that verdict.
-See [using kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
+See [using kx in CI](https://j.zills.io/kx/docs/guides/use-kx-in-ci/).
 
 ## In a browser
 
@@ -1048,13 +1048,13 @@ kx diag --html
 ```
 
 renders the same sweep as a filterable, sortable page and opens it — with a group-by for larger sweeps, and each row expanding into that resource's full report.
-See [browser reports](https://jzills.github.io/kx/docs/guides/browser-reports/).
+See [browser reports](https://j.zills.io/kx/docs/guides/browser-reports/).
 
 ---
 
 # Scan images for CVEs
 
-Source: https://jzills.github.io/kx/docs/guides/scan-images/
+Source: https://j.zills.io/kx/docs/guides/scan-images/
 
 kx scan resolves a workload's unique images and scans each one, with Docker Scout, Trivy or Grype.
 
@@ -1108,7 +1108,7 @@ kx engine          # list engines and show the current default
 kx engine trivy    # persist a new default
 ```
 
-The default is stored in [`~/.kx/config.toml`](https://jzills.github.io/kx/docs/concepts/configuration/); `--engine` overrides it for one run.
+The default is stored in [`~/.kx/config.toml`](https://j.zills.io/kx/docs/concepts/configuration/); `--engine` overrides it for one run.
 
 ## Wider than one namespace
 
@@ -1132,7 +1132,7 @@ kx scan -n prod --fail-on high
 ```
 
 The `--json` flag prints the severity counts and every finding as a document, and `--fail-on` exits 2 when any image carries a vulnerability at that severity or worse.
-See [using kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
+See [using kx in CI](https://j.zills.io/kx/docs/guides/use-kx-in-ci/).
 
 ## In a browser
 
@@ -1146,7 +1146,7 @@ Per-image severity counts up top, and a CVE table below grouped by image, each r
 
 # Read a Secret in plaintext
 
-Source: https://jzills.github.io/kx/docs/guides/read-a-secret/
+Source: https://j.zills.io/kx/docs/guides/read-a-secret/
 
 kx secret --decode, and -k for a single value that drops straight into a shell.
 
@@ -1198,13 +1198,13 @@ kx secret -n prod
 kx secret -A
 ```
 
-The `kx secrets` alias works too, and `kx get secrets --decode` is the same thing spelled the long way — `--decode` lives on [`kx get`](https://jzills.github.io/kx/docs/reference/commands/get/) too.
+The `kx secrets` alias works too, and `kx get secrets --decode` is the same thing spelled the long way — `--decode` lives on [`kx get`](https://j.zills.io/kx/docs/reference/commands/get/) too.
 
 ---
 
 # See what owns what
 
-Source: https://jzills.github.io/kx/docs/guides/ownership-tree/
+Source: https://j.zills.io/kx/docs/guides/ownership-tree/
 
 kx tree walks ownership references from controllers down to containers.
 
@@ -1256,7 +1256,7 @@ renders the graph as a collapsible tree, indexed like the terminal version.
 
 # Reports in the browser
 
-Source: https://jzills.github.io/kx/docs/guides/browser-reports/
+Source: https://j.zills.io/kx/docs/guides/browser-reports/
 
 --html renders the same analysis as a page, served from memory on localhost.
 
@@ -1295,7 +1295,7 @@ kx diag --out diag.html   # write the page instead of serving it
 
 The `--out` flag already says "HTML" in its own name, so it implies `--html` on its own — `kx diag --html --out diag.html` still works, but the `--html` there is redundant.
 It replaces the server rather than configuring it: the page is written, the command returns, and no browser opens.
-That is what you want in CI, where nothing is there to press Ctrl-C — see [Use kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
+That is what you want in CI, where nothing is there to press Ctrl-C — see [Use kx in CI](https://j.zills.io/kx/docs/guides/use-kx-in-ci/).
 Because there is then no server, `--port` and `--no-open` are refused alongside it.
 
 The `--no-open` flag is what you want over SSH with a forwarded port, or in a terminal that would open the wrong browser.
@@ -1310,7 +1310,7 @@ kx diag -A --fail-on critical --html --no-open
 ```
 
 The exit code lands once the server stops.
-See [using kx in CI](https://jzills.github.io/kx/docs/guides/use-kx-in-ci/).
+See [using kx in CI](https://j.zills.io/kx/docs/guides/use-kx-in-ci/).
 
 ## What the page adds
 
@@ -1325,13 +1325,13 @@ Detail the terminal has no room for:
 ## It follows your theme
 
 The page is drawn in your active palette, so `kx theme dracula` restyles the reports along with everything else.
-Same registry, same ten palettes — see [themes](https://jzills.github.io/kx/docs/concepts/themes/).
+Same registry, same ten palettes — see [themes](https://j.zills.io/kx/docs/concepts/themes/).
 
 ---
 
 # Get a shell in a workload
 
-Source: https://jzills.github.io/kx/docs/guides/get-a-shell/
+Source: https://j.zills.io/kx/docs/guides/get-a-shell/
 
 kx exec takes a Deployment as readily as a Pod, so you don't have to list pods first.
 
@@ -1344,7 +1344,7 @@ kx exec 1              # a shell in one of that Deployment's pods
 kx exec 1 -- ps aux    # a command instead
 ```
 
-With no command it tries each configured shell in turn — `bash`, then `sh`, unless the [`shells`](https://jzills.github.io/kx/docs/concepts/configuration/) key says otherwise.
+With no command it tries each configured shell in turn — `bash`, then `sh`, unless the [`shells`](https://j.zills.io/kx/docs/concepts/configuration/) key says otherwise.
 That matters for distroless and Alpine images, where the shell you assume is not the one that's there.
 
 ## What it accepts
@@ -1356,7 +1356,7 @@ Since `kubectl exec` does not accept one, kx says so itself rather than letting 
 
 > **Note**
 >
-> The Pod is not kx's choice — `kubectl exec` resolves the workload, the same way [`kx port-forward`](https://jzills.github.io/kx/docs/reference/commands/port-forward/) leaves that choice to kubectl.
+> The Pod is not kx's choice — `kubectl exec` resolves the workload, the same way [`kx port-forward`](https://j.zills.io/kx/docs/reference/commands/port-forward/) leaves that choice to kubectl.
 > Which Pod you get is therefore not guaranteed to be the same one across the shell probe and the session that follows.
 > For a Deployment whose replicas are interchangeable that is what you want; when it isn't, address a Pod directly.
 
@@ -1374,12 +1374,12 @@ kubectl's own stderr is suppressed here, because a failing command inside a cont
 
 # Take a node out of service
 
-Source: https://jzills.github.io/kx/docs/guides/take-a-node-out-of-service/
+Source: https://j.zills.io/kx/docs/guides/take-a-node-out-of-service/
 
 Diagnose a node, stop the scheduler using it, and evict what is already there.
 
 Between listing Nodes and reaching for kubectl there used to be nothing.
-These work off the same index [`kx get nodes`](https://jzills.github.io/kx/docs/reference/commands/get/) and [`kx top nodes`](https://jzills.github.io/kx/docs/reference/commands/top/) hand out.
+These work off the same index [`kx get nodes`](https://j.zills.io/kx/docs/reference/commands/get/) and [`kx top nodes`](https://j.zills.io/kx/docs/reference/commands/top/) hand out.
 
 ```bash
 kx get nodes
@@ -1415,7 +1415,7 @@ kx cordon 1..3
 kx uncordon 1..3
 ```
 
-Cordon and uncordon take several indexes and ranges, like [`kx delete`](https://jzills.github.io/kx/docs/reference/commands/delete/), and validate the whole batch before acting on any of it — if one index in the range is not a Node, nothing is cordoned.
+Cordon and uncordon take several indexes and ranges, like [`kx delete`](https://j.zills.io/kx/docs/reference/commands/delete/), and validate the whole batch before acting on any of it — if one index in the range is not a Node, nothing is cordoned.
 
 The `kx drain` command takes one index, deliberately.
 It evicts running workloads and blocks until they are gone, so applying it to a range in one command is a way to take a cluster down by typo.
@@ -1466,7 +1466,7 @@ The debug Pod outlives the shell — kubectl names it on exit, and it is yours t
 
 # Use kx in CI
 
-Source: https://jzills.github.io/kx/docs/guides/use-kx-in-ci/
+Source: https://j.zills.io/kx/docs/guides/use-kx-in-ci/
 
 --json prints the analysis as a document, --fail-on turns it into a gate that exits 2.
 
@@ -1565,7 +1565,7 @@ A gate is the place this matters most: without `--since`, a job that went red on
 
 A schedule longer than the window wants `--since` widened: a weekly CronJob whose last run failed six days ago needs `--since 7d` to fail the gate on it.
 
-Set it once with `diag_max_age` in [`config.toml`](https://jzills.github.io/kx/docs/reference/configuration/), or `KX_DIAG_MAX_AGE` in the job's environment.
+Set it once with `diag_max_age` in [`config.toml`](https://j.zills.io/kx/docs/reference/configuration/), or `KX_DIAG_MAX_AGE` in the job's environment.
 Events are the least of it — most clusters discard those after an hour anyway; what a window really reaches is a container's own history, which the kubelet keeps for as long as the Pod lives.
 
 ## The exit code is 2
@@ -1583,7 +1583,7 @@ A pipeline that treated any non-zero as "unhealthy" could not tell a sick cluste
 ## Publishing a report and failing on it
 
 The `--fail-on` flag is independent of how the findings are presented.
-It applies alongside `--json` and [`--html`](https://jzills.github.io/kx/docs/guides/browser-reports/) alike, so a job can publish a report and still fail on what is in it:
+It applies alongside `--json` and [`--html`](https://j.zills.io/kx/docs/guides/browser-reports/) alike, so a job can publish a report and still fail on what is in it:
 
 ```bash
 kx diag -A --fail-on critical --out diag.html
@@ -1626,7 +1626,7 @@ For a Deployment, StatefulSet or DaemonSet, `kx rollout status` is the wait.
 
 # Use kx from an agent
 
-Source: https://jzills.github.io/kx/docs/guides/use-kx-from-an-agent/
+Source: https://j.zills.io/kx/docs/guides/use-kx-from-an-agent/
 
 kx mcp serves diagnostics, ownership, evidence and marks to an AI agent over MCP — read-only against the cluster; it reads your indexes always, and saves its own listings only if you opt in.
 
@@ -1802,7 +1802,7 @@ A real MCP client keeps its stdin pipe open for the life of the session, so this
 
 # Use kx from k9s
 
-Source: https://jzills.github.io/kx/docs/guides/use-kx-from-k9s/
+Source: https://j.zills.io/kx/docs/guides/use-kx-from-k9s/
 
 Five k9s plugins that run kx diag, tree, scan, events and mark on the row under the cursor, and wait for Enter before handing the screen back.
 
@@ -1839,7 +1839,7 @@ Each runs in the foreground, then waits for Enter so the report stays on screen 
 ## From k9s back to the terminal
 
 The one key that outlives the k9s session is Shift-K.
-It asks for a name and pins the row as a [mark](https://jzills.github.io/kx/docs/concepts/marks/), so the same resource is one word away in a plain terminal:
+It asks for a name and pins the row as a [mark](https://j.zills.io/kx/docs/concepts/marks/), so the same resource is one word away in a plain terminal:
 
 ```bash
 kx logs @api -f
@@ -1853,11 +1853,11 @@ A `kx tree` run from k9s is numbered and saved as usual when k9s's context is yo
 
 # Reference
 
-Source: https://jzills.github.io/kx/docs/reference/
+Source: https://j.zills.io/kx/docs/reference/
 
 Every command, argument and flag, generated from the CLI itself.
 
-The pages under [Commands](https://jzills.github.io/kx/docs/reference/commands/) are generated from the kx command tree by `tools/gen-site-docs`, so the flags documented here are the flags the binary accepts — a check in CI fails if they fall out of step.
+The pages under [Commands](https://j.zills.io/kx/docs/reference/commands/) are generated from the kx command tree by `tools/gen-site-docs`, so the flags documented here are the flags the binary accepts — a check in CI fails if they fall out of step.
 
 Running `kx <command> --help` prints the same reference in the terminal.
 
@@ -1865,12 +1865,12 @@ Running `kx <command> --help` prints the same reference in the terminal.
 
 # Configuration keys
 
-Source: https://jzills.github.io/kx/docs/reference/configuration/
+Source: https://j.zills.io/kx/docs/reference/configuration/
 
 Every key in ~/.kx/config.toml and the environment variable that overrides it.
 
 The reference table.
-[Configuration](https://jzills.github.io/kx/docs/concepts/configuration/) explains what the settings do and when styling applies.
+[Configuration](https://j.zills.io/kx/docs/concepts/configuration/) explains what the settings do and when styling applies.
 
 | Key | Environment | Type | Default |
 | --- | --- | --- | --- |
@@ -1905,9 +1905,9 @@ theme_disable = false
 
 The `diag_max_age` key is a duration in `s`, `m`, `h` or `d`: `90s`, `30m`, `12h`, `7d`.
 A fraction or a mixture works too — `1.5h`, `1h30m` — except with `d`, which takes a fraction but not a mixture: `1.5d`, never `1d12h`.
-It bounds how far back [`kx diag`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) looks for evidence; unset — or `"0"` — reports everything however old.
+It bounds how far back [`kx diag`](https://j.zills.io/kx/docs/reference/commands/diagnostic/) looks for evidence; unset — or `"0"` — reports everything however old.
 
-The `events_max_age` key is the same for [`kx events`](https://jzills.github.io/kx/docs/reference/commands/events/), and separate from `diag_max_age`: neither falls back to the other.
+The `events_max_age` key is the same for [`kx events`](https://j.zills.io/kx/docs/reference/commands/events/), and separate from `diag_max_age`: neither falls back to the other.
 Both are overridden per run by `--since`.
 
 Nothing here is required — kx runs on the defaults with no config file at all.
@@ -1917,7 +1917,7 @@ Nothing here is required — kx runs on the defaults with no config file at all.
 | Path | Environment | Contents |
 | --- | --- | --- |
 | `~/.kx/config.toml` | `KX_CONFIG` | The keys above. |
-| `~/.kx/state.json` | `KX_STATE` | Saved listings and the history cursor; see [state](https://jzills.github.io/kx/docs/concepts/state/). |
+| `~/.kx/state.json` | `KX_STATE` | Saved listings and the history cursor; see [state](https://j.zills.io/kx/docs/concepts/state/). |
 
 The `KX_CONFIG` and `KX_STATE` variables point kx at a different file entirely, rather than overriding one key the way the settings table above does — useful for a terminal or CI job that wants its own config or history instead of sharing the one in `~/.kx`.
 Neither can be set from inside the file it names, so there's no `config.toml` equivalent for them.
@@ -1936,7 +1936,7 @@ Running `kx --version` prints both paths, resolved, along with the version and b
 
 # Commands
 
-Source: https://jzills.github.io/kx/docs/reference/commands/
+Source: https://j.zills.io/kx/docs/reference/commands/
 
 Every kx command, its arguments and its flags.
 
@@ -1946,77 +1946,77 @@ Every command below takes indexes from the listing `kx get` last produced. Run `
 
 | Command | Description |
 |---|---|
-| [`kx annotate <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/annotate/) | Set or remove annotations on an indexed resource. |
-| [`kx annotations <index>... [--context str] [--namespace/-n str]`](https://jzills.github.io/kx/docs/reference/commands/annotations/) | Show annotations for one or more indexed resources. |
-| [`kx context [<index>]`](https://jzills.github.io/kx/docs/reference/commands/context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
-| [`kx cordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/cordon/) | Mark one or more indexed Nodes unschedulable. |
-| [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/cp/) | Copy files to or from an indexed Pod via kubectl cp. |
-| [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host). |
-| [`kx delete <index>... [--dry-run[=str]] [--output/-o str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
-| [`kx describe <index>... [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/describe/) | Show full kubectl describe output for one or more indexed resources. |
-| [`kx diagnostic [<index>] [--all-namespaces/-A] [--context str] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
-| [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/drain/) | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
-| [`kx edit <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/edit/) | Open an indexed resource in your editor via kubectl edit. |
-| [`kx events <index>... [--context str] [--namespace/-n str] [--since str] [--sort str]`](https://jzills.github.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
-| [`kx exec <index> [<command>...] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
-| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--last-run] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
-| [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/label/) | Set or remove labels on an indexed resource. |
-| [`kx labels <index>... [--context str] [--namespace/-n str] [--selector/-s]`](https://jzills.github.io/kx/docs/reference/commands/labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
-| [`kx logs <index>... [--since str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
-| [`kx mark [<name>] [<index>] [--context str] [--namespace/-n str]`](https://jzills.github.io/kx/docs/reference/commands/mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
-| [`kx namespace [<index>]`](https://jzills.github.io/kx/docs/reference/commands/namespace/) | List Namespaces, or switch to an indexed one; alias: kx ns. |
-| [`kx patch <index> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/patch/) | Patch an indexed resource with a strategic merge, JSON merge, or JSON patch. |
-| [`kx port-forward <index> <port> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
-| [`kx ref <index>... [--kind] [--name] [--namespace]`](https://jzills.github.io/kx/docs/reference/commands/ref/) | Print what an index refers to, for commands kx doesn't wrap. |
-| [`kx rollout <action> <index> [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
-| [`kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
-| [`kx scan [<index>] [--all-namespaces/-A] [--context str] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://jzills.github.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
-| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
-| [`kx set`](https://jzills.github.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
-| [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [--yes/-y] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
-| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
-| [`kx tree [<index>] [--all-namespaces/-A] [--context str] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://jzills.github.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
-| [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
-| [`kx unmark [<name>...] [--all]`](https://jzills.github.io/kx/docs/reference/commands/unmark/) | Remove marks by name; --all removes every mark. |
-| [`kx wait <index>... [--for str] [--output/-o str] [--timeout duration] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/wait/) | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
-| [`kx yaml <index>... [--show str] [kubectl flags...]`](https://jzills.github.io/kx/docs/reference/commands/yaml/) | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
+| [`kx annotate <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/annotate/) | Set or remove annotations on an indexed resource. |
+| [`kx annotations <index>... [--context str] [--namespace/-n str]`](https://j.zills.io/kx/docs/reference/commands/annotations/) | Show annotations for one or more indexed resources. |
+| [`kx context [<index>]`](https://j.zills.io/kx/docs/reference/commands/context/) | List kubeconfig contexts, or switch to an indexed one; alias: kx contexts. |
+| [`kx cordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/cordon/) | Mark one or more indexed Nodes unschedulable. |
+| [`kx cp <src> <dest> [--container/-c str] [--no-preserve] [--retries int] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/cp/) | Copy files to or from an indexed Pod via kubectl cp. |
+| [`kx debug <index> [<command>...] [--image str] [--target str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/debug/) | Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host). |
+| [`kx delete <index>... [--dry-run[=str]] [--output/-o str] [--yes/-y] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/delete/) | Delete one or more indexed resources (prompts for confirmation unless --yes). |
+| [`kx describe <index>... [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/describe/) | Show full kubectl describe output for one or more indexed resources. |
+| [`kx diagnostic [<index>] [--all-namespaces/-A] [--context str] [--fail-on str] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--show-healthy] [--since str] [--sort str]`](https://j.zills.io/kx/docs/reference/commands/diagnostic/) | Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag. |
+| [`kx drain <index> [--delete-emptydir-data] [--force] [--grace-period int] [--ignore-daemonsets] [--timeout duration] [--yes/-y] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/drain/) | Evict the Pods from an indexed Node (prompts for confirmation unless --yes). |
+| [`kx edit <index> [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/edit/) | Open an indexed resource in your editor via kubectl edit. |
+| [`kx events <index>... [--context str] [--namespace/-n str] [--since str] [--sort str]`](https://j.zills.io/kx/docs/reference/commands/events/) | Show Kubernetes events for one or more indexed resources. |
+| [`kx exec <index> [<command>...] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/exec/) | Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh). |
+| [`kx get <resource> [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--last-run] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/get/) | List resources and assign index numbers for use with other commands; shorthand: kx &lt;kind&gt; (e.g. kx pods, kx po 3). |
+| [`kx label <index> [<key=value>...] [--dry-run[=str]] [--output/-o str] [--overwrite] [--remove str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/label/) | Set or remove labels on an indexed resource. |
+| [`kx labels <index>... [--context str] [--namespace/-n str] [--selector/-s]`](https://j.zills.io/kx/docs/reference/commands/labels/) | Show labels for one or more indexed resources; --selector formats output as a label selector. |
+| [`kx logs <index>... [--since str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/logs/) | Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services. |
+| [`kx mark [<name>] [<index>] [--context str] [--namespace/-n str]`](https://j.zills.io/kx/docs/reference/commands/mark/) | Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks. |
+| [`kx namespace [<index>]`](https://j.zills.io/kx/docs/reference/commands/namespace/) | List Namespaces, or switch to an indexed one; alias: kx ns. |
+| [`kx patch <index> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/patch/) | Patch an indexed resource with a strategic merge, JSON merge, or JSON patch. |
+| [`kx port-forward <index> <port> [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/port-forward/) | Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service). |
+| [`kx ref <index>... [--kind] [--name] [--namespace]`](https://j.zills.io/kx/docs/reference/commands/ref/) | Print what an index refers to, for commands kx doesn't wrap. |
+| [`kx rollout <action> <index> [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/rollout/) | Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet. |
+| [`kx scale <index> <replicas> [--dry-run[=str]] [--output/-o str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/scale/) | Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count. |
+| [`kx scan [<index>] [--all-namespaces/-A] [--context str] [--engine str] [--fail-on str] [--full] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-open] [--out str] [--port int] [--sort str] [scanner flags...]`](https://j.zills.io/kx/docs/reference/commands/scan/) | Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine). |
+| [`kx secret [<index>...] [--all-namespaces/-A] [--decode] [--key/-k str] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--output/-o str] [--sort str] [--watch/-w] [--yes/-y] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/secret/) | List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets. |
+| [`kx set`](https://j.zills.io/kx/docs/reference/commands/set/) | Change an indexed workload's container images with kx set image, printing each one before and after. |
+| [`kx taint <index> [<taint>...] [--dry-run[=str]] [--output/-o str] [--remove str] [--yes/-y] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/taint/) | Set or remove taints on an indexed Node. |
+| [`kx top [<resource>] [--all-namespaces/-A] [--html] [--json] [--limit int] [--match/-m str] [--namespace/-n str] [--no-headers] [--no-limits] [--no-open] [--out str] [--port int] [--sort str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/top/) | List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits. |
+| [`kx tree [<index>] [--all-namespaces/-A] [--context str] [--html] [--json] [--match/-m str] [--namespace/-n str] [--no-index] [--no-open] [--out str] [--port int]`](https://j.zills.io/kx/docs/reference/commands/tree/) | Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default. |
+| [`kx uncordon <index>... [--dry-run[=str]] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/uncordon/) | Mark one or more indexed Nodes schedulable again. |
+| [`kx unmark [<name>...] [--all]`](https://j.zills.io/kx/docs/reference/commands/unmark/) | Remove marks by name; --all removes every mark. |
+| [`kx wait <index>... [--for str] [--output/-o str] [--timeout duration] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/wait/) | Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address. |
+| [`kx yaml <index>... [--show str] [kubectl flags...]`](https://j.zills.io/kx/docs/reference/commands/yaml/) | Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields. |
 
 ## History
 
 | Command | Description |
 |---|---|
-| [`kx state [<position>] [--all/-a] [--json] [--targets/-t]`](https://jzills.github.io/kx/docs/reference/commands/state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
+| [`kx state [<position>] [--all/-a] [--json] [--targets/-t]`](https://j.zills.io/kx/docs/reference/commands/state/) | Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets. |
 
 ## Configuration
 
 | Command | Description |
 |---|---|
-| [`kx engine [<name>]`](https://jzills.github.io/kx/docs/reference/commands/engine/) | List available scan engines or persist a default choice by name or index. |
-| [`kx theme [<name>]`](https://jzills.github.io/kx/docs/reference/commands/theme/) | List available color themes or persist a choice by name or index. |
+| [`kx engine [<name>]`](https://j.zills.io/kx/docs/reference/commands/engine/) | List available scan engines or persist a default choice by name or index. |
+| [`kx theme [<name>]`](https://j.zills.io/kx/docs/reference/commands/theme/) | List available color themes or persist a choice by name or index. |
 
 ## Integrations
 
 | Command | Description |
 |---|---|
-| [`kx mcp [--write-listings]`](https://jzills.github.io/kx/docs/reference/commands/mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
+| [`kx mcp [--write-listings]`](https://j.zills.io/kx/docs/reference/commands/mcp/) | Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio). |
 
 ## Documentation
 
 | Command | Description |
 |---|---|
-| [`kx docs [<topic>]`](https://jzills.github.io/kx/docs/reference/commands/docs/) | Read kx's documentation in the terminal: a topic, or the list of them. |
+| [`kx docs [<topic>]`](https://j.zills.io/kx/docs/reference/commands/docs/) | Read kx's documentation in the terminal: a topic, or the list of them. |
 
 ## Shell
 
 | Command | Description |
 |---|---|
-| [`kx completion`](https://jzills.github.io/kx/docs/reference/commands/completion/) | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
+| [`kx completion`](https://j.zills.io/kx/docs/reference/commands/completion/) | Generate a shell completion script for kx (bash, zsh, fish, powershell). |
 
 ---
 
 # kx annotate
 
-Source: https://jzills.github.io/kx/docs/reference/commands/annotate/
+Source: https://j.zills.io/kx/docs/reference/commands/annotate/
 
 Set or remove annotations on an indexed resource.
 
@@ -2085,7 +2085,7 @@ kx annotate 1 env=prod --dry-run=server
 
 # kx annotations
 
-Source: https://jzills.github.io/kx/docs/reference/commands/annotations/
+Source: https://j.zills.io/kx/docs/reference/commands/annotations/
 
 Show annotations for one or more indexed resources.
 
@@ -2131,7 +2131,7 @@ kx annotations deploy/api -n prod
 
 # kx context
 
-Source: https://jzills.github.io/kx/docs/reference/commands/context/
+Source: https://j.zills.io/kx/docs/reference/commands/context/
 
 List kubeconfig contexts, or switch to an indexed one; alias: kx contexts.
 
@@ -2173,7 +2173,7 @@ kx context 2
 
 # kx cordon
 
-Source: https://jzills.github.io/kx/docs/reference/commands/cordon/
+Source: https://j.zills.io/kx/docs/reference/commands/cordon/
 
 Mark one or more indexed Nodes unschedulable.
 
@@ -2230,7 +2230,7 @@ kx cordon 1 --dry-run=server
 
 # kx cp
 
-Source: https://jzills.github.io/kx/docs/reference/commands/cp/
+Source: https://j.zills.io/kx/docs/reference/commands/cp/
 
 Copy files to or from an indexed Pod via kubectl cp.
 
@@ -2284,7 +2284,7 @@ kx cp @api:/var/log/app.log ./app.log
 
 # kx debug
 
-Source: https://jzills.github.io/kx/docs/reference/commands/debug/
+Source: https://j.zills.io/kx/docs/reference/commands/debug/
 
 Open a debug shell on an indexed Pod (an ephemeral container, for images with no shell) or Node (a privileged Pod on the host).
 
@@ -2367,7 +2367,7 @@ kx debug 1 --profile=sysadmin
 
 # kx delete
 
-Source: https://jzills.github.io/kx/docs/reference/commands/delete/
+Source: https://j.zills.io/kx/docs/reference/commands/delete/
 
 Delete one or more indexed resources (prompts for confirmation unless --yes).
 
@@ -2441,7 +2441,7 @@ kx delete 3 --force --grace-period=0
 
 # kx describe
 
-Source: https://jzills.github.io/kx/docs/reference/commands/describe/
+Source: https://j.zills.io/kx/docs/reference/commands/describe/
 
 Show full kubectl describe output for one or more indexed resources.
 
@@ -2497,7 +2497,7 @@ kx describe 1 --show-events=false
 
 # kx diagnostic
 
-Source: https://jzills.github.io/kx/docs/reference/commands/diagnostic/
+Source: https://j.zills.io/kx/docs/reference/commands/diagnostic/
 
 Diagnose an indexed Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, PersistentVolumeClaim, Ingress, Pod, or Node, or triage a whole namespace when no index is given (-n to pick one, -A for every namespace); alias: kx diag.
 
@@ -2584,7 +2584,7 @@ kx diagnostic -A --fail-on critical --out report.html
 
 # kx drain
 
-Source: https://jzills.github.io/kx/docs/reference/commands/drain/
+Source: https://j.zills.io/kx/docs/reference/commands/drain/
 
 Evict the Pods from an indexed Node (prompts for confirmation unless --yes).
 
@@ -2650,7 +2650,7 @@ kx drain 1 -y --ignore-daemonsets --delete-emptydir-data
 
 # kx edit
 
-Source: https://jzills.github.io/kx/docs/reference/commands/edit/
+Source: https://j.zills.io/kx/docs/reference/commands/edit/
 
 Open an indexed resource in your editor via kubectl edit.
 
@@ -2707,7 +2707,7 @@ kx edit 2 -o json
 
 # kx events
 
-Source: https://jzills.github.io/kx/docs/reference/commands/events/
+Source: https://j.zills.io/kx/docs/reference/commands/events/
 
 Show Kubernetes events for one or more indexed resources.
 
@@ -2761,7 +2761,7 @@ kx events 3..
 
 # kx exec
 
-Source: https://jzills.github.io/kx/docs/reference/commands/exec/
+Source: https://j.zills.io/kx/docs/reference/commands/exec/
 
 Open an interactive shell in an indexed Pod, Deployment, ReplicaSet, StatefulSet or DaemonSet (bash, falling back to sh).
 
@@ -2817,7 +2817,7 @@ kx exec deploy/api -n prod
 
 # kx get
 
-Source: https://jzills.github.io/kx/docs/reference/commands/get/
+Source: https://j.zills.io/kx/docs/reference/commands/get/
 
 List resources and assign index numbers for use with other commands; shorthand: kx <kind> (e.g. kx pods, kx po 3).
 
@@ -2920,7 +2920,7 @@ kx get pods --sort-by=.metadata.creationTimestamp
 
 # kx label
 
-Source: https://jzills.github.io/kx/docs/reference/commands/label/
+Source: https://j.zills.io/kx/docs/reference/commands/label/
 
 Set or remove labels on an indexed resource.
 
@@ -2989,7 +2989,7 @@ kx label 1 env=prod --dry-run=server
 
 # kx labels
 
-Source: https://jzills.github.io/kx/docs/reference/commands/labels/
+Source: https://j.zills.io/kx/docs/reference/commands/labels/
 
 Show labels for one or more indexed resources; --selector formats output as a label selector.
 
@@ -3036,7 +3036,7 @@ kx labels deploy/api -n prod
 
 # kx logs
 
-Source: https://jzills.github.io/kx/docs/reference/commands/logs/
+Source: https://j.zills.io/kx/docs/reference/commands/logs/
 
 Stream logs for an indexed resource; aggregates across Pods for Deployments, StatefulSets, DaemonSets, Jobs, and Services.
 
@@ -3110,7 +3110,7 @@ kx logs deploy/api -n prod --context staging
 
 # kx mark
 
-Source: https://jzills.github.io/kx/docs/reference/commands/mark/
+Source: https://j.zills.io/kx/docs/reference/commands/mark/
 
 Pin an indexed resource to a name that survives re-listing; with no arguments, lists marks.
 
@@ -3159,7 +3159,7 @@ kx mark api deploy/api -n prod
 
 # kx namespace
 
-Source: https://jzills.github.io/kx/docs/reference/commands/namespace/
+Source: https://j.zills.io/kx/docs/reference/commands/namespace/
 
 List Namespaces, or switch to an indexed one; alias: kx ns.
 
@@ -3203,7 +3203,7 @@ kx namespace 2
 
 # kx patch
 
-Source: https://jzills.github.io/kx/docs/reference/commands/patch/
+Source: https://j.zills.io/kx/docs/reference/commands/patch/
 
 Patch an indexed resource with a strategic merge, JSON merge, or JSON patch.
 
@@ -3266,7 +3266,7 @@ kx patch deploy/api --patch-file fix.yaml -n prod --dry-run=server
 
 # kx port-forward
 
-Source: https://jzills.github.io/kx/docs/reference/commands/port-forward/
+Source: https://j.zills.io/kx/docs/reference/commands/port-forward/
 
 Forward a local port to an indexed resource (Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Service).
 
@@ -3313,7 +3313,7 @@ kx port-forward 1 8080:80 --address=0.0.0.0
 
 # kx ref
 
-Source: https://jzills.github.io/kx/docs/reference/commands/ref/
+Source: https://j.zills.io/kx/docs/reference/commands/ref/
 
 Print what an index refers to, for commands kx doesn't wrap.
 
@@ -3363,7 +3363,7 @@ stern $(kx ref 3 --name) -n $(kx ref 3 --namespace)
 
 # kx rollout
 
-Source: https://jzills.github.io/kx/docs/reference/commands/rollout/
+Source: https://j.zills.io/kx/docs/reference/commands/rollout/
 
 Run a rollout action (status, restart, pause, resume, history, undo) on a Deployment, StatefulSet, or DaemonSet.
 
@@ -3428,7 +3428,7 @@ kx rollout status 1 --timeout=2m
 
 # kx scale
 
-Source: https://jzills.github.io/kx/docs/reference/commands/scale/
+Source: https://j.zills.io/kx/docs/reference/commands/scale/
 
 Scale an indexed Deployment, StatefulSet, or ReplicaSet to a given replica count.
 
@@ -3496,7 +3496,7 @@ kx scale deploy/api 3 -n prod
 
 # kx scan
 
-Source: https://jzills.github.io/kx/docs/reference/commands/scan/
+Source: https://j.zills.io/kx/docs/reference/commands/scan/
 
 Scan the unique container images of an indexed workload for vulnerabilities, or a whole namespace when no index is given (-n to pick one, -A for every namespace); prints a severity summary table by default, or the raw scanner output with --full. Requires the CLI for the selected scan engine (Docker Scout by default; Trivy or Grype via --engine — see kx engine).
 
@@ -3573,7 +3573,7 @@ kx scan -A --fail-on high --out report.html
 
 # kx secret
 
-Source: https://jzills.github.io/kx/docs/reference/commands/secret/
+Source: https://j.zills.io/kx/docs/reference/commands/secret/
 
 List Secrets like kx get, or show an indexed Secret's data with --decode; alias: kx secrets.
 
@@ -3666,7 +3666,7 @@ kx secret --sort -age --limit 3
 
 # kx set
 
-Source: https://jzills.github.io/kx/docs/reference/commands/set/
+Source: https://j.zills.io/kx/docs/reference/commands/set/
 
 Change an indexed workload's container images with kx set image, printing each one before and after.
 
@@ -3705,7 +3705,7 @@ kx set image @api api:v2 --dry-run=server
 
 # kx taint
 
-Source: https://jzills.github.io/kx/docs/reference/commands/taint/
+Source: https://j.zills.io/kx/docs/reference/commands/taint/
 
 Set or remove taints on an indexed Node.
 
@@ -3772,7 +3772,7 @@ kx taint 1 maintenance:NoExecute --dry-run=server
 
 # kx top
 
-Source: https://jzills.github.io/kx/docs/reference/commands/top/
+Source: https://j.zills.io/kx/docs/reference/commands/top/
 
 List CPU/memory usage for Pods (default) or Nodes and assign index numbers, like kx get; shows usage as a percent of limits (Pods) or capacity (Nodes) unless --no-limits.
 
@@ -3854,7 +3854,7 @@ kx top --sort-by=memory
 
 # kx tree
 
-Source: https://jzills.github.io/kx/docs/reference/commands/tree/
+Source: https://j.zills.io/kx/docs/reference/commands/tree/
 
 Show the ownership graph for an indexed resource or Namespace, or for the whole current namespace when no index is given (-n to pick one, -A for every namespace); assigns indexes to tree nodes by default.
 
@@ -3912,7 +3912,7 @@ kx tree --out tree.html
 
 # kx uncordon
 
-Source: https://jzills.github.io/kx/docs/reference/commands/uncordon/
+Source: https://j.zills.io/kx/docs/reference/commands/uncordon/
 
 Mark one or more indexed Nodes schedulable again.
 
@@ -3967,7 +3967,7 @@ kx uncordon 1 --dry-run=server
 
 # kx unmark
 
-Source: https://jzills.github.io/kx/docs/reference/commands/unmark/
+Source: https://j.zills.io/kx/docs/reference/commands/unmark/
 
 Remove marks by name; --all removes every mark.
 
@@ -4012,7 +4012,7 @@ kx unmark --all
 
 # kx wait
 
-Source: https://jzills.github.io/kx/docs/reference/commands/wait/
+Source: https://j.zills.io/kx/docs/reference/commands/wait/
 
 Wait until indexed resources are ready: a Pod or Node Ready, a PVC Bound, a Job Complete, a LoadBalancer Service given an address.
 
@@ -4083,7 +4083,7 @@ kx wait 5 --for=condition=Ready=false
 
 # kx yaml
 
-Source: https://jzills.github.io/kx/docs/reference/commands/yaml/
+Source: https://j.zills.io/kx/docs/reference/commands/yaml/
 
 Print the raw YAML manifest for one or more indexed resources; --show filters to specific top-level fields.
 
@@ -4165,7 +4165,7 @@ kx yaml 1 --show-managed-fields
 
 # kx state
 
-Source: https://jzills.github.io/kx/docs/reference/commands/state/
+Source: https://j.zills.io/kx/docs/reference/commands/state/
 
 Show current state, jump to a history position, list all entries with --all, or expand the switch targets with --targets.
 
@@ -4230,7 +4230,7 @@ kx state --all --json
 
 # kx engine
 
-Source: https://jzills.github.io/kx/docs/reference/commands/engine/
+Source: https://j.zills.io/kx/docs/reference/commands/engine/
 
 List available scan engines or persist a default choice by name or index.
 
@@ -4266,7 +4266,7 @@ kx engine trivy
 
 # kx theme
 
-Source: https://jzills.github.io/kx/docs/reference/commands/theme/
+Source: https://j.zills.io/kx/docs/reference/commands/theme/
 
 List available color themes or persist a choice by name or index.
 
@@ -4302,7 +4302,7 @@ kx theme dracula
 
 # kx mcp
 
-Source: https://jzills.github.io/kx/docs/reference/commands/mcp/
+Source: https://j.zills.io/kx/docs/reference/commands/mcp/
 
 Serve kx's diagnostics, ownership trees, evidence and marks to AI agents over MCP (stdio).
 
@@ -4350,7 +4350,7 @@ claude mcp add kx -- kx mcp --write-listings
 
 # kx docs
 
-Source: https://jzills.github.io/kx/docs/reference/commands/docs/
+Source: https://j.zills.io/kx/docs/reference/commands/docs/
 
 Read kx's documentation in the terminal: a topic, or the list of them.
 
@@ -4394,7 +4394,7 @@ kx docs marks
 
 # kx completion
 
-Source: https://jzills.github.io/kx/docs/reference/commands/completion/
+Source: https://j.zills.io/kx/docs/reference/commands/completion/
 
 Generate a shell completion script for kx (bash, zsh, fish, powershell).
 
