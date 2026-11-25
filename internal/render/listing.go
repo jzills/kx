@@ -404,12 +404,19 @@ func enableNameFlex(headers []string, columns []Column) {
 	}
 }
 
-// RedrawTable clears the previous frame (previousLines, if any) and reprints
-// a caption plus a themed table built from headers/rows the same way
-// IndexedTable renders a snapshot listing, returning the new line count for
-// the next call. A no-op off-terminal — nothing is written and 0 is
-// returned — the same way Status's spinner never runs off a terminal, so
-// piped output and tests never receive cursor codes.
+// Frame is what one redraw drew: the physical lines it took, and the
+// terminal size it was fitted to. The next redraw clears it by moving the
+// cursor up Lines, which only holds while the terminal is still that size.
+type Frame struct {
+	Lines, Width, Height int
+}
+
+// RedrawTable clears the previous frame, if any, and reprints a caption plus
+// a themed table built from headers/rows the same way IndexedTable renders a
+// snapshot listing, returning the new frame for the next call. A no-op
+// off-terminal — nothing is written and a zero Frame is returned — the same
+// way Status's spinner never runs off a terminal, so piped output and tests
+// never receive cursor codes.
 //
 // footer, when set, is drawn under the table and redrawn with it. It is where
 // the standing note about the live view goes: the redraw clears its whole
@@ -417,41 +424,106 @@ func enableNameFlex(headers []string, columns []Column) {
 // the next event, and anything printed above it before the loop drifts away
 // from the thing it describes.
 func (r *Renderer) RedrawTable(
-	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
-) int {
-	return r.redrawTable(headers, rows, previousLines, isTerminal(r.out), r.width(), footer, captionParts...)
+	headers []string, rows [][]string, previous Frame, footer string, captionParts ...string,
+) Frame {
+	width, height := r.size()
+	return r.redrawTable(headers, rows, previous, isTerminal(r.out), width, height, footer, captionParts...)
 }
 
-// redrawTable is RedrawTable with the terminal check injected, the same seam
-// status() uses (internal/render/status.go:45) so this is testable without a
-// real terminal.
+// redrawTable is RedrawTable with the terminal check and size injected, the
+// same seam status() uses (internal/render/status.go:45) so this is testable
+// without a real terminal. A height of 0 is no limit.
 func (r *Renderer) redrawTable(
-	headers []string, rows [][]string, previousLines int, enabled bool, termWidth int,
+	headers []string, rows [][]string, previous Frame, enabled bool, termWidth, termHeight int,
 	footer string, caption ...string,
-) int {
+) Frame {
 	if !enabled {
-		return 0
+		return Frame{}
 	}
-	if previousLines > 0 {
-		fmt.Fprintf(r.out, "\x1b[%dA\x1b[J", previousLines)
+	switch {
+	case previous.Lines == 0:
+	case previous.Width != termWidth || previous.Height != termHeight:
+		// Resized since the last frame. Most terminals rewrap what is on
+		// screen to the new width, so that frame no longer takes the lines
+		// it was counted at: moving up the old count overshot into the
+		// output above the watch and erased it on widening, and fell short
+		// on narrowing. Nothing says where the frame now starts, so the
+		// screen is cleared and the frame drawn from its top.
+		fmt.Fprint(r.out, "\x1b[H\x1b[J")
+	default:
+		fmt.Fprintf(r.out, "\x1b[%dA\x1b[J", previous.Lines)
 	}
 	columns, cells := styledColumnsAndCells(headers, rows)
 	enableNameFlex(headers, columns)
-	r.Caption(caption...)
+	// Laid out from every row, shown or not, so a row scrolling into view
+	// does not change the columns' widths.
+	//
 	// Fitted to the width this was handed rather than to r.width(): the two
 	// agree on a terminal, and off one r.width() answers pipeWidth, so no
 	// test could make a row wrap and none caught #731.
-	drawn := r.table(columns, cells, termWidth)
-	// The next redraw moves the cursor up by this count, so every part of the
+	widths, fitted := layoutTable(columns, cells, termWidth)
+
+	// The next redraw moves the cursor up by the count, so every part of the
 	// frame counts the physical lines it takes rather than the one line it is:
 	// counted as one each, a footer wider than the terminal left a line of
 	// every frame on screen, and a table wider than it left most of one.
-	lines := wrappedLines(strings.Join(captionParts(caption...), " · "), termWidth) + drawn
+	lines := wrappedLines(strings.Join(captionParts(caption...), " · "), termWidth)
+	footerLines := 0
+	if footer != "" {
+		footerLines = wrappedLines(footer, termWidth)
+	}
+	shown := fitRows(len(fitted), lineSpan(tableWidth(widths), termWidth),
+		termHeight, lines+footerLines, termWidth)
+
+	r.Caption(caption...)
+	lines += r.writeTable(columns, widths, fitted[:shown], termWidth)
+	if hidden := len(fitted) - shown; hidden > 0 {
+		r.Caption(hiddenRowsNote(hidden))
+		lines += wrappedLines(hiddenRowsNote(hidden), termWidth)
+	}
 	if footer != "" {
 		r.Caption(footer)
-		lines += wrappedLines(footer, termWidth)
+		lines += footerLines
 	}
-	return lines
+	return Frame{Lines: lines, Width: termWidth, Height: termHeight}
+}
+
+// fitRows is how many of rows table rows, each span lines tall, fit in a
+// terminal height lines tall beside the fixed lines (caption and footer),
+// the header and, when some are left out, the note that counts them. A
+// height of 0 is no limit.
+//
+// A frame taller than the terminal can't be cleared: the cursor-up stops at
+// the top of the screen, and every redraw pushed the part above it into
+// scrollback as another copy of the table (#732). The first rows are the ones
+// kept, since they carry the lowest indexes and the sort's head.
+//
+// One line is held back from the height: the frame's last line ends in a
+// newline, and on the bottom line of the screen that scrolls the whole frame
+// up one, its caption off the top.
+func fitRows(rows, span, height, fixed, termWidth int) int {
+	if height <= 0 {
+		return rows
+	}
+	room := height - 1 - fixed - span
+	if rows*span <= room {
+		return rows
+	}
+	// Counted for every row hidden, a number at least as long as the one
+	// the note will carry.
+	room -= wrappedLines(hiddenRowsNote(rows), termWidth)
+	if room < span {
+		return 0
+	}
+	return room / span
+}
+
+// hiddenRowsNote is the line under a table cut to fit the terminal.
+func hiddenRowsNote(hidden int) string {
+	if hidden == 1 {
+		return "1 more row doesn't fit — make the terminal taller to see it"
+	}
+	return fmt.Sprintf("%d more rows don't fit — make the terminal taller to see them", hidden)
 }
 
 // wrappedLines is how many terminal lines text takes at width columns: at
@@ -462,9 +534,9 @@ func wrappedLines(text string, columns int) int {
 
 // RedrawTable is the package-level wrapper, matching every other render entry point.
 func RedrawTable(
-	headers []string, rows [][]string, previousLines int, footer string, captionParts ...string,
-) int {
-	return current.RedrawTable(headers, rows, previousLines, footer, captionParts...)
+	headers []string, rows [][]string, previous Frame, footer string, captionParts ...string,
+) Frame {
+	return current.RedrawTable(headers, rows, previous, footer, captionParts...)
 }
 
 // Redrawing reports whether an in-place redraw actually draws, which it only
@@ -474,6 +546,20 @@ func RedrawTable(
 // RedrawTable writes nothing at all, so a note that would have sat under the
 // table has to be printed on its own or the piped output explains nothing.
 func Redrawing() bool { return isTerminal(current.out) }
+
+// Resized reports whether the terminal is no longer the size frame was drawn
+// at, so a watch can redraw for the new size without waiting for an event:
+// until it does, the terminal shows the last frame rewrapped to a width it
+// was not laid out for.
+func Resized(frame Frame) bool { return current.resized(frame) }
+
+func (r *Renderer) resized(frame Frame) bool {
+	if frame.Lines == 0 {
+		return false
+	}
+	width, height := r.size()
+	return width != frame.Width || height != frame.Height
+}
 
 // KeyValueTable renders a two-column listing, used for labels and annotations.
 func (r *Renderer) KeyValueTable(header string, keys []string, values map[string]string) {

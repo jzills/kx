@@ -110,7 +110,13 @@ func (r *Renderer) table(columns []Column, rows [][]Cell, available int) int {
 	if len(columns) == 0 {
 		return 0
 	}
+	widths, fitted := layoutTable(columns, rows, available)
+	return r.writeTable(columns, widths, fitted, available)
+}
 
+// layoutTable is each column's width, fitted to available, and the rows as
+// they print at those widths: the flex column's cells cut to fit.
+func layoutTable(columns []Column, rows [][]Cell, available int) ([]int, [][]Cell) {
 	widths := make([]int, len(columns))
 	for i, column := range columns {
 		widths[i] = width(column.Header)
@@ -122,9 +128,12 @@ func (r *Renderer) table(columns []Column, rows [][]Cell, available int) int {
 			}
 		}
 	}
+	return widths, fitFlexColumn(columns, rows, widths, available)
+}
 
-	rows = fitFlexColumn(columns, rows, widths, available)
-
+// writeTable prints the header and rows at widths laid out by layoutTable,
+// and reports the physical terminal lines they took at available columns.
+func (r *Renderer) writeTable(columns []Column, widths []int, rows [][]Cell, available int) int {
 	var out strings.Builder
 
 	// The header is styled as a whole, so a bold header stays bold across the
