@@ -3,10 +3,8 @@
   by kx, snoop, action-cache and hmac-manager: change it in one, copy it to
   all four. What differs per site lives elsewhere:
 
-    - [params.oss] in hugo.toml: the mark, name, tagline, repository, the bug
-      report's body, and the three link columns.
-    - _partials/oss/footer-command.html: the install command, which on some
-      sites carries a copy button wired to that site's own script.
+    - [params.oss] in hugo.toml: the mark, name, tagline, install command,
+      repository, the bug report's body, and the three link columns.
     - the --oss-* properties in custom.css, which map this footer onto the
       site's palette.
     - _partials/oss/footer-brand.html, optional: a site whose brand is more
@@ -39,8 +37,11 @@
         {{- end -}}
       </a>
       <p class="oss-footer__tagline">{{ $oss.tagline }}</p>
-      <div class="oss-footer__command">
-        {{- partial "oss/footer-command.html" . -}}
+      {{- /* Copied by assets/js/oss-copy.js, which reveals the button. */}}
+      <div class="oss-footer__command oss-command" data-oss-copy>
+        <code class="oss-command__text">{{ $oss.command }}</code>
+        <button type="button" class="oss-command__copy" aria-label="Copy the install command" hidden><svg viewBox="0 0 16 16" aria-hidden="true" class="oss-command__icon oss-command__icon--copy"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg><svg viewBox="0 0 16 16" aria-hidden="true" class="oss-command__icon oss-command__icon--done"><path d="M3 8.5 6.5 12 13 4.5"/></svg></button>
+        <span class="oss-command__status" role="status"></span>
       </div>
     </div>
     <nav class="oss-footer__cols" aria-label="Footer">
