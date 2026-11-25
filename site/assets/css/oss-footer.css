@@ -34,6 +34,24 @@
   opacity: 0.35;
 }
 
+/* The footer's width and side padding are zills.io's (max-w-[1200px] px-5
+   sm:px-7), not this page's: every zills site's footer starts at the same
+   x, so the z.//s row stays put as a reader moves between them. The safe
+   area still wins on a phone with a notch. */
+.oss-footer__frame {
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-left: max(env(safe-area-inset-left), 1.25rem);
+  padding-right: max(env(safe-area-inset-right), 1.25rem);
+}
+
+@media (min-width: 640px) {
+  .oss-footer__frame {
+    padding-left: max(env(safe-area-inset-left), 1.75rem);
+    padding-right: max(env(safe-area-inset-right), 1.75rem);
+  }
+}
+
 .oss-footer {
   padding: 3rem 0 2.5rem;
   color: var(--oss-muted);
