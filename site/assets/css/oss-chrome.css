@@ -1,0 +1,58 @@
+/* The chrome every project docs site shares: the typefaces and the
+ * light/dark button in the navbar.
+ *
+ * Shared, byte for byte, by kx, snoop, action-cache and hmac-manager: change
+ * it in one, copy it to all four. Linked from custom/head-end.html rather
+ * than @import-ed from custom.css, which Hextra's Tailwind build would leave
+ * as a literal @import of a URL nothing publishes.
+ *
+ * Colors come from the --oss-* properties each site's custom.css maps onto
+ * its own palette (see oss-footer.css for the list).
+ */
+
+/* Inter and JetBrains Mono, declared in _partials/oss/fonts.html. Hextra
+   reads the two --hx-default-* properties for everything it draws, prose and
+   code blocks included. The system stacks stay behind each one for a reader
+   whose browser blocks web fonts. */
+:root {
+  --oss-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --oss-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --hx-default-font-family: var(--oss-font-sans);
+  --hx-default-mono-font-family: var(--oss-font-mono);
+}
+
+/* Inter is drawn for screens at text sizes and runs loose at display sizes;
+   a slight negative tracking on headings is what its own specimen sets. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+
+/* The light/dark button; see layouts/_partials/theme-toggle.html. It shows
+   what a click switches to: the sun on a dark page, the moon on a light one. */
+.oss-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--oss-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.oss-mode:hover {
+  color: var(--oss-accent);
+}
+
+.oss-mode__icon--moon,
+html.dark .oss-mode__icon--sun {
+  display: block;
+}
+
+.oss-mode__icon--sun,
+html.dark .oss-mode__icon--moon {
+  display: none;
+}

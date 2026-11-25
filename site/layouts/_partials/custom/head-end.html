@@ -13,13 +13,15 @@
 {{- end }}
 
 {{- /*
-  The footer's stylesheet, shared by every project docs site and linked the
-  same way for the same reason. custom.css maps its --oss-* colors onto the
-  palette.
+  The chrome and footer stylesheets every project docs site shares, linked
+  the same way for the same reason: the typefaces, the light/dark button and
+  the footer. custom.css maps their --oss-* colors onto the palette.
 */ -}}
-{{- with resources.Get "css/oss-footer.css" }}
-  {{- $footer := . | minify | fingerprint }}
-  <link rel="stylesheet" href="{{ $footer.RelPermalink }}" integrity="{{ $footer.Data.Integrity }}" />
+{{- range slice "css/oss-chrome.css" "css/oss-footer.css" }}
+  {{- with resources.Get . }}
+    {{- $css := . | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}" />
+  {{- end }}
 {{- end }}
 
 {{- /*
@@ -64,48 +66,5 @@
   {{- end }}
 {{- end }}
 
-{{- /*
-  The site's two typefaces, Inter and JetBrains Mono, vendored under
-  assets/vendor/ (see THIRD_PARTY_NOTICES.md) rather than fetched from Google
-  Fonts, for the reason the search bundle is: a page that renders from its
-  own origin, and a build that needs no CDN. Variable fonts, Latin subset,
-  so each face is one file of about 45 KB for every weight.
-
-  Declared here rather than in custom.css because the URLs come from Hugo's
-  pipeline, fingerprinted, and custom.css is compiled by the theme's Tailwind
-  build, which can't call resources.Get. Preloaded, since the hero headline
-  is set in Inter and would otherwise paint once in the fallback first.
-
-  The faces reach the page through custom.css: Hextra's own stylesheet reads
-  --hx-default-font-family and --hx-default-mono-font-family, and the kx
-  rules read --kx-font-mono.
-*/ -}}
-{{- $fonts := slice
-  (dict "family" "Inter" "path" "vendor/inter/inter-latin-wght-normal.woff2" "weight" "100 900")
-  (dict "family" "JetBrains Mono" "path" "vendor/jetbrains-mono/jetbrains-mono-latin-wght-normal.woff2" "weight" "100 800")
--}}
-{{- range $fonts }}
-  {{- with resources.Get .path }}
-    {{- $font := . | fingerprint }}
-<link rel="preload" href="{{ $font.RelPermalink }}" as="font" type="font/woff2" crossorigin>
-  {{- end }}
-{{- end }}
-<style>
-{{- range $fonts }}
-  {{- $family := .family }}
-  {{- $weight := .weight }}
-  {{- with resources.Get .path }}
-    {{- $font := . | fingerprint }}
-  @font-face {
-    font-family: "{{ $family }}";
-    font-style: normal;
-    font-weight: {{ $weight }};
-    font-display: swap;
-    src: url("{{ $font.RelPermalink }}") format("woff2");
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-  }
-  {{- else }}
-    {{- errorf "head-end: no font at assets/%s" .path }}
-  {{- end }}
-{{- end }}
-</style>
+{{- /* The site's typefaces; see the partial. */ -}}
+{{- partial "oss/fonts.html" . -}}

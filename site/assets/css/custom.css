@@ -6,23 +6,11 @@
  * without anyone editing it.
  */
 
-/* The site's typefaces, declared in custom/head-end.html. Hextra reads the
-   two --hx-default-* properties for everything it draws, prose and code
-   blocks included, and the kx rules below read --kx-font-mono. The system
-   stacks stay behind each one for a reader whose browser blocks web fonts. */
+/* The typefaces are the ones every project docs site shares: see
+   assets/css/oss-chrome.css and _partials/oss/fonts.html. The kx rules below
+   read --kx-font-mono. */
 :root {
-  --kx-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --kx-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --hx-default-font-family: var(--kx-font-sans);
-  --hx-default-mono-font-family: var(--kx-font-mono);
-}
-
-/* Inter is drawn for screens at text sizes and runs loose at display sizes;
-   a slight negative tracking on headings is what its own specimen sets. */
-h1,
-h2,
-h3 {
-  letter-spacing: -0.02em;
+  --kx-font-mono: var(--oss-font-mono);
 }
 
 html {
@@ -883,13 +871,13 @@ html.dark .kx-shot--wide .kx-media {
 
 /* Footer
  * ------------------------------------------------------------------
- * The footer is shared by every project docs site: its markup is
- * layouts/_partials/custom/footer.html, its styles assets/css/oss-footer.css.
- * These map it onto the active palette, so it follows all ten. Set on the
- * footer rather than :root so each var() resolves where it is used, under
- * whichever palette <html> carries. */
+ * The footer and the light/dark button are shared by every project docs
+ * site: their styles are assets/css/oss-footer.css and oss-chrome.css. These
+ * map them onto the active palette, so they follow all ten. Every palette
+ * sets its --kx-* properties on <html>, which is :root, so each var() here
+ * resolves under whichever palette is active. */
 
-.hextra-footer {
+:root {
   --oss-text: var(--kx-body);
   --oss-muted: var(--kx-muted);
   --oss-accent: var(--kx-accent);
@@ -959,38 +947,6 @@ html.dark .kx-shot--wide .kx-media {
   height: 2.1rem;
   width: auto;
   display: block;
-}
-
-/* Light/dark toggle
- * ------------------------------------------------------------------
- * The navbar and sidebar control; see layouts/_partials/theme-toggle.html.
- * It shows what a click switches to: the sun on a dark page, the moon on a
- * light one. */
-
-.kx-mode {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--kx-muted);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.kx-mode:hover {
-  color: var(--kx-accent);
-}
-
-.kx-mode__icon--moon,
-html.dark .kx-mode__icon--sun {
-  display: block;
-}
-
-.kx-mode__icon--sun,
-html.dark .kx-mode__icon--moon {
-  display: none;
 }
 
 /* Hextra chrome

@@ -30,9 +30,9 @@
 {{- $params := . | default dict -}}
 {{- $class := $params.class | default "hx:p-2" -}}
 
-<button type="button" class="kx-mode {{ $class }}" aria-label="Switch to the light theme">
-  {{- partial "utils/icon.html" (dict "name" "sun" "attributes" `height=18 class="kx-mode__icon kx-mode__icon--sun"`) -}}
-  {{- partial "utils/icon.html" (dict "name" "moon" "attributes" `height=18 class="kx-mode__icon kx-mode__icon--moon"`) -}}
+<button type="button" class="oss-mode kx-mode {{ $class }}" aria-label="Switch to the light theme">
+  {{- partial "utils/icon.html" (dict "name" "sun" "attributes" `height=18 class="oss-mode__icon oss-mode__icon--sun"`) -}}
+  {{- partial "utils/icon.html" (dict "name" "moon" "attributes" `height=18 class="oss-mode__icon oss-mode__icon--moon"`) -}}
 </button>
 
 <script>
