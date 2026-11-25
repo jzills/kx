@@ -65,7 +65,9 @@ So "what's wrong with 3 in @kx:kx://listing?" works without pasting the table.
 Its indexes are yours, the ones `kx describe 3` resolves, so they are there whether or not the server runs with `--write-listings`.
 Like any index, they are read live: list again before the agent acts and 3 can name a different row, which is why the agent says which resource it resolved before it acts.
 The agent acts on a row by passing its index, not the name it reads, so a listing you made in another context is refused as `kx describe 3` would refuse it, rather than sending the agent to a resource of the same name on the cluster you've since switched to.
-Every resource is read-only, and none reaches the cluster.
+No resource reaches the cluster.
+Nor does one write to kx's state, with the one exception every kx command shares: a state file in a format this kx does not write is reset when it is read.
+So when an upgrade changes that format, a server left running from before it clears the new kx's history and marks the first time it reads them; restart `kx mcp` after you upgrade kx.
 
 ## Running an investigation
 

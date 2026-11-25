@@ -18,8 +18,9 @@ import (
 )
 
 // registerMCPTools adds every tool the server offers. One function, so the
-// public surface can be read in one place — and every handler but scan's goes
-// through serialized, so no two calls ever run at once (see mcpDeps.mu).
+// public surface can be read in one place — and every handler but docs's and
+// scan's goes through serialized, so no two calls ever run at once (see
+// mcpDeps.mu).
 func registerMCPTools(server *mcp.Server, deps mcpDeps) {
 	// Not wrapped in serialized, alone among the tools: it reads documentation
 	// embedded at build time, so there is no cluster call, no state file and

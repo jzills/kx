@@ -16,10 +16,12 @@ import (
 // template, because a client's @ menu lists fixed resources and may not list
 // templates.
 //
-// Like the tools, they are read-only: each reads kx's own state, kubeconfig
-// or embedded documentation, and none reaches the cluster. The ones that read
-// state or kubeconfig run under locked, as every tool but docs and scan does,
-// so a read never interleaves with a mark write or a discovery refresh.
+// Like the tools, none reaches the cluster: each reads kx's own state,
+// kubeconfig or embedded documentation. And like every kx read, a read of a
+// state file in a format this kx does not write resets that file (see
+// state.ErrSchemaChanged), the only write a resource can make. The ones that
+// read state or kubeconfig run under locked, as every tool but docs and scan
+// does, so a read never interleaves with a mark write or a discovery refresh.
 
 const (
 	resourceContextURI = "kx://context"
