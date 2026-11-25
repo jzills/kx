@@ -11,7 +11,7 @@
  *   --oss-muted    body text and links
  *   --oss-accent   the brand mark, the z.//s dot, the top hairline
  *   --oss-border   the divider in the z.//s row
- *   --oss-surface  the background of a plain install command
+ *   --oss-surface  the install command's background
  *   --oss-page     the footer band's background
  *
  * and may set --oss-brand-mark-height when the mark sits beside the name
@@ -67,15 +67,18 @@
   color: var(--oss-text);
 }
 
-/* The brand column and the links stack on a phone and sit side by side from
-   a tablet up, the links pushed to the right edge. */
+/* The brand column and the links sit side by side, the links pushed to the
+   right edge, only once both fit at full width: about 1100px of content,
+   which is where the footer's frame stops growing. Below that they stack.
+   Side by side any narrower, the links' columns were squeezed until their
+   labels wrapped or overlapped. */
 .oss-footer__top {
   display: flex;
   flex-direction: column;
   gap: 2.5rem;
 }
 
-@media (min-width: 900px) {
+@media (min-width: 1200px) {
   .oss-footer__top {
     flex-direction: row;
     justify-content: space-between;
@@ -91,8 +94,11 @@
 /* The brand is a 2rem slot on every site, whatever the mark's shape, so the
    tagline under it starts at the same height everywhere. Two classes, to
    outrank the muted ".oss-footer a". */
+/* A block, not inline: an inline brand sat on a line of text, which added a
+   descender's gap beneath it on some sites and not others. */
 .oss-footer .oss-footer__brand {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   align-items: center;
   gap: 0.6rem;
   height: 2rem;
@@ -119,36 +125,97 @@
   line-height: 1.6;
 }
 
-/* Smaller than a hero's command: the brand column is narrower than a command
-   set at that size, so it would scroll on a desktop too; at this one it
-   scrolls only on a phone. */
-.oss-footer__command {
+/* The install command: one line in a box framed like kx's hero command,
+   with the prompt drawn in the accent and a copy button at the end
+   (assets/js/oss-copy.js). The same box on every site, so the footer is the
+   same height on every site too. */
+.oss-command {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-top: 1.25rem;
-}
-
-/* The command's box fills the column on every site, whatever width the
-   site's own command component takes elsewhere. Classes before the element,
-   to outrank a site's own rule for its command's code. */
-.oss-footer .oss-footer__command > * {
-  width: 100%;
-  max-width: 100%;
-}
-
-.oss-footer .oss-footer__command code {
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-/* A command with no copy button: one line in a box, scrolling sideways on a
-   phone rather than wrapping mid-command. */
-.oss-footer__code {
-  display: block;
-  overflow-x: auto;
-  padding: 0.9rem 1rem;
-  color: var(--oss-text);
+  padding: 0.7rem 0.7rem 0.7rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--oss-accent) 22%, var(--oss-border));
+  border-radius: 0.6rem;
   background-color: var(--oss-surface);
-  border: 1px solid var(--oss-border);
-  border-radius: 0.5rem;
+  box-shadow: 0 12px 32px -18px color-mix(in srgb, var(--oss-accent) 18%, transparent);
+}
+
+/* One line, never wrapped mid-URL. On a phone it is wider than the box and
+   scrolls sideways, but with no scrollbar: a bar under one line of text read
+   as a fault, and the copy button copies the whole command anyway. The
+   height is fixed so the box is the same height whether or not the copy
+   button has been revealed. */
+.oss-command__text {
+  flex: 1;
+  min-width: 0;
+  height: 1.75rem;
+  line-height: 1.75rem;
+  font-family: var(--oss-font-mono);
+  font-size: 0.78rem;
+  color: var(--oss-text);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.oss-command__text::-webkit-scrollbar {
+  display: none;
+}
+
+/* The prompt is drawn here, so it never lands in the clipboard. */
+.oss-command__text::before {
+  content: "$ ";
+  color: var(--oss-accent);
+}
+
+.oss-command__copy {
+  display: inline-flex;
+  flex: none;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: none;
+  color: var(--oss-muted);
+  cursor: pointer;
+}
+
+.oss-command__copy:hover,
+.oss-command__copy:focus-visible {
+  color: var(--oss-text);
+  border-color: var(--oss-border);
+}
+
+.oss-command__icon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.oss-command__icon--done,
+.oss-command__copy.is-done .oss-command__icon--copy {
+  display: none;
+}
+
+.oss-command__copy.is-done .oss-command__icon--done {
+  display: block;
+}
+
+/* Announced to screen readers, never shown. */
+.oss-command__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .oss-footer__cols {
@@ -164,11 +231,26 @@
   }
 }
 
+/* Line heights are stated, not inherited, for the tagline, headings and
+   links: each site's prose styles set their own, and a few pixels of
+   difference there made the footers different heights. */
 .oss-footer__heading {
   margin-bottom: 0.75rem;
   color: var(--oss-text);
   font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.5rem;
+}
+
+.oss-footer__col li {
+  line-height: 1.5rem;
+}
+
+/* A label never wraps: one that did grew its column by a line, and with it
+   the footer, on some sites at some widths and not others. Labels are kept
+   short enough (about 19 characters) to fit a phone's two columns. */
+.oss-footer__col a {
+  white-space: nowrap;
 }
 
 .oss-footer__col li + li {
@@ -185,8 +267,16 @@
   margin-top: 3rem;
 }
 
+/* Inter, as on the zills.io sites. Its lowercase sits low in the line box:
+   at 14px the x-height's middle is about 1.2px below the box's, so centered
+   on the divider the mark read as sitting under it. Lifted 1px, the middle
+   of "z" and "s" meets the middle of the divider. A whole pixel, not an em:
+   every offset in the row is then whole, so the browser rounds it the same
+   way on every site. Measured from screenshots of the row. */
 .oss-footer .oss-zmark {
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  position: relative;
+  top: -1px;
+  font-family: var(--oss-font-sans);
   font-size: 0.875rem;
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -222,7 +312,14 @@
   background-color: var(--oss-border);
 }
 
+/* Lifted 1px for the same reason as the mark: JetBrains Mono's lowercase
+   sits about 0.9px below the middle of its 16px line, so "zills.io" read
+   low against the divider. The line height is stated so the lift is the
+   same on every site. */
 .oss-footer .oss-footer__hub {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  position: relative;
+  top: -1px;
+  font-family: var(--oss-font-mono);
   font-size: 11px;
+  line-height: 1rem;
 }

@@ -1,5 +1,6 @@
-// A copy button on each install command, the landing page's cards and the
-// footer's one-liner, and the tabs that turn the cards into one panel.
+// A copy button on each of the landing page's install commands, and the tabs
+// that turn the cards into one panel. The footer's command has its own,
+// shared with the other docs sites: assets/js/oss-copy.js.
 //
 // An enhancement over markup that already works without it. The buttons ship
 // `hidden` and are revealed only once this runs, so a reader without
