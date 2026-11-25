@@ -24,13 +24,6 @@
   {{- end }}
 {{- end }}
 
-{{- /* The copy button on the footer's install command, shared by every
-       project docs site. Deferred: the button ships hidden, and the
-       command reads correctly without it. */ -}}
-{{- with resources.Get "js/oss-copy.js" }}
-  {{- $copy := . | minify | fingerprint }}
-  <script defer src="{{ $copy.RelPermalink }}" integrity="{{ $copy.Data.Integrity }}"></script>
-{{- end }}
 
 {{- /*
   The palette runtime, inlined so the stored palette lands before first paint.
@@ -56,8 +49,8 @@
 {{- end }}
 
 {{- /*
-  The copy buttons on the landing page's install commands (the footer's is
-  oss-copy.js, above). Deferred: unlike the palette runtime above,
+  The copy buttons on the landing page's install commands. Deferred:
+  unlike the palette runtime above,
   nothing here has to beat the first paint, because the controls it reveals
   ship hidden and the commands read correctly without them.
 */ -}}
