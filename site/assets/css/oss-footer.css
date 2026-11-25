@@ -1,0 +1,210 @@
+/* The footer of every project docs site.
+ *
+ * Shared, byte for byte, by kx, snoop, action-cache and hmac-manager: change
+ * it in one, copy it to all four. Linked from custom/head-end.html rather than
+ * @import-ed from custom.css, which Hextra's Tailwind build would leave as a
+ * literal @import of a URL nothing publishes.
+ *
+ * No colors here. Each site's custom.css maps these onto its own palette:
+ *
+ *   --oss-text     headings, the project name, the z.//s mark
+ *   --oss-muted    body text and links
+ *   --oss-accent   the brand mark, the z.//s dot, the top hairline
+ *   --oss-border   the divider in the z.//s row
+ *   --oss-surface  the background of a plain install command
+ *   --oss-page     the footer band's background
+ *
+ * and may set --oss-brand-mark-height when the mark sits beside the name
+ * rather than standing alone (default: the whole 2rem slot).
+ */
+
+/* The band takes the page's background, and its top edge is a line of the
+   accent fading out at both ends, which marks it as a section of its own. */
+.hextra-footer {
+  position: relative;
+  background-color: var(--oss-page);
+}
+
+.hextra-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--oss-accent), transparent);
+  opacity: 0.35;
+}
+
+.oss-footer {
+  padding: 3rem 0 2.5rem;
+  color: var(--oss-muted);
+  font-size: 0.9rem;
+}
+
+.oss-footer a {
+  color: var(--oss-muted);
+  transition: color 0.15s;
+}
+
+.oss-footer a:hover {
+  color: var(--oss-text);
+}
+
+/* The brand column and the links stack on a phone and sit side by side from
+   a tablet up, the links pushed to the right edge. */
+.oss-footer__top {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+@media (min-width: 900px) {
+  .oss-footer__top {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 4rem;
+  }
+}
+
+.oss-footer__about {
+  max-width: 31rem;
+  min-width: 0;
+}
+
+/* The brand is a 2rem slot on every site, whatever the mark's shape, so the
+   tagline under it starts at the same height everywhere. Two classes, to
+   outrank the muted ".oss-footer a". */
+.oss-footer .oss-footer__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 2rem;
+  color: var(--oss-accent);
+}
+
+.oss-footer__brand svg {
+  display: block;
+  flex: none;
+  height: var(--oss-brand-mark-height, 100%);
+  width: auto;
+}
+
+.oss-footer__name {
+  color: var(--oss-text);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.oss-footer__tagline {
+  margin-top: 1rem;
+  line-height: 1.6;
+}
+
+/* Smaller than a hero's command: the brand column is narrower than a command
+   set at that size, so it would scroll on a desktop too; at this one it
+   scrolls only on a phone. */
+.oss-footer__command {
+  margin-top: 1.25rem;
+}
+
+/* The command's box fills the column on every site, whatever width the
+   site's own command component takes elsewhere. Classes before the element,
+   to outrank a site's own rule for its command's code. */
+.oss-footer .oss-footer__command > * {
+  width: 100%;
+  max-width: 100%;
+}
+
+.oss-footer .oss-footer__command code {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* A command with no copy button: one line in a box, scrolling sideways on a
+   phone rather than wrapping mid-command. */
+.oss-footer__code {
+  display: block;
+  overflow-x: auto;
+  padding: 0.9rem 1rem;
+  color: var(--oss-text);
+  background-color: var(--oss-surface);
+  border: 1px solid var(--oss-border);
+  border-radius: 0.5rem;
+}
+
+.oss-footer__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .oss-footer__cols {
+    grid-template-columns: repeat(3, minmax(0, auto));
+    gap: 2rem 4rem;
+  }
+}
+
+.oss-footer__heading {
+  margin-bottom: 0.75rem;
+  color: var(--oss-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.oss-footer__col li + li {
+  margin-top: 0.5rem;
+}
+
+/* The row that closes every zills site: the z.//s mark, a hairline, and the
+   way back to zills.io. Sizes follow the zills.io sites' own footer
+   (text-sm mark, 11px mono link) so it reads as the same row there and here. */
+.oss-footer__zills {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-top: 3rem;
+}
+
+.oss-footer .oss-zmark {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.25rem;
+  color: var(--oss-text);
+  transition: opacity 0.15s;
+}
+
+.oss-footer .oss-zmark:hover {
+  color: var(--oss-text);
+  opacity: 0.8;
+}
+
+.oss-zmark__dot {
+  display: inline-block;
+  width: 0.17em;
+  height: 0.17em;
+  margin: 0 0.05em;
+  border-radius: 9999px;
+  background-color: var(--oss-accent);
+}
+
+.oss-zmark__slashes {
+  margin-right: 0.08em;
+  font-weight: 700;
+  letter-spacing: -0.12em;
+  opacity: 0.55;
+}
+
+.oss-footer__divider {
+  width: 1px;
+  height: 0.875rem;
+  background-color: var(--oss-border);
+}
+
+.oss-footer .oss-footer__hub {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}

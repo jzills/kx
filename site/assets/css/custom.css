@@ -882,127 +882,20 @@ html.dark .kx-shot--wide .kx-media {
 .kx-terminal .c-bad    { color: var(--kx-status-bad); }
 
 /* Footer
- * ------------------------------------------------------------------ */
+ * ------------------------------------------------------------------
+ * The footer is shared by every project docs site: its markup is
+ * layouts/_partials/custom/footer.html, its styles assets/css/oss-footer.css.
+ * These map it onto the active palette, so it follows all ten. Set on the
+ * footer rather than :root so each var() resolves where it is used, under
+ * whichever palette <html> carries. */
 
-.kx-footer {
-  padding: 3rem 0 2.5rem;
-  color: var(--kx-muted);
-  font-size: 0.9rem;
-}
-
-.kx-footer a {
-  color: var(--kx-muted);
-  transition: color 0.15s;
-}
-
-.kx-footer a:hover {
-  color: var(--kx-body);
-}
-
-/* The brand column and the links stack on a phone and sit side by side from
-   a tablet up, the links pushed to the right edge. */
-.kx-footer__top {
-  display: flex;
-  flex-direction: column;
-  gap: 2.5rem;
-}
-
-@media (min-width: 900px) {
-  .kx-footer__top {
-    flex-direction: row;
-    justify-content: space-between;
-    gap: 4rem;
-  }
-}
-
-.kx-footer__about {
-  max-width: 31rem;
-}
-
-/* Two classes, to outrank the muted ".kx-footer a" the links take. */
-.kx-footer .kx-footer__mark {
-  display: inline-block;
-  color: var(--kx-accent);
-}
-
-.kx-footer__mark svg {
-  height: 2rem;
-  width: auto;
-}
-
-.kx-footer__tagline {
-  margin-top: 1rem;
-  line-height: 1.6;
-}
-
-.kx-footer__command {
-  margin-top: 1.25rem;
-}
-
-/* Smaller than the hero's copy, which it otherwise matches. The footer's
-   brand column is narrower than the command set at the hero's size, so at
-   that size it would scroll on a desktop too; at this one it scrolls only on
-   a phone. */
-.kx-footer__command .kx-install__command {
-  font-size: 0.78rem;
-}
-
-.kx-footer__cols {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2rem 1.5rem;
-}
-
-@media (min-width: 640px) {
-  .kx-footer__cols {
-    grid-template-columns: repeat(3, minmax(0, auto));
-    gap: 2rem 4rem;
-  }
-}
-
-.kx-footer__heading {
-  margin-bottom: 0.75rem;
-  color: var(--kx-body);
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.kx-footer__col li + li {
-  margin-top: 0.5rem;
-}
-
-.kx-footer__wordmark {
-  margin-top: 3.5rem;
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  user-select: none;
-}
-
-/* The copyright line and the profiles share a row, pushed to opposite ends,
-   and stack on a phone, where the two don't fit side by side. */
-.kx-footer__bottom {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem 2rem;
-  margin-top: 0.85rem;
-}
-
-.kx-footer__connect {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-}
-
-.kx-footer__connect span {
-  font-weight: 600;
-}
-
-.kx-footer__connect a {
-  display: inline-flex;
+.hextra-footer {
+  --oss-text: var(--kx-body);
+  --oss-muted: var(--kx-muted);
+  --oss-accent: var(--kx-accent);
+  --oss-border: var(--kx-border);
+  --oss-surface: var(--kx-surface);
+  --oss-page: var(--kx-background);
 }
 
 /* Theme picker
@@ -1135,24 +1028,6 @@ html.dark .kx-mode__icon--moon {
   border-color: var(--kx-border);
 }
 
-/* The footer band takes the palette's background, and its top edge is a line
-   of the accent fading out at both ends, which marks the footer as a section
-   of its own rather than more of the page. */
-.hextra-footer {
-  position: relative;
-  background-color: var(--kx-background);
-}
-
-.hextra-footer::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--kx-accent), transparent);
-  opacity: 0.35;
-}
-
-.hextra-search-results {
   background-color: var(--kx-surface);
   border-color: var(--kx-border);
   color: var(--kx-body);

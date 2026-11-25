@@ -13,6 +13,16 @@
 {{- end }}
 
 {{- /*
+  The footer's stylesheet, shared by every project docs site and linked the
+  same way for the same reason. custom.css maps its --oss-* colors onto the
+  palette.
+*/ -}}
+{{- with resources.Get "css/oss-footer.css" }}
+  {{- $footer := . | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $footer.RelPermalink }}" integrity="{{ $footer.Data.Integrity }}" />
+{{- end }}
+
+{{- /*
   The palette runtime, inlined so the stored palette lands before first paint.
 
   Hextra's own theme.js is a <head> script that runs just before this one; it
