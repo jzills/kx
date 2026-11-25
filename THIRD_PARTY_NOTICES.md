@@ -39,7 +39,7 @@ deploy depend on a CDN being up. `site/hugo.toml` points
 - **Vendored at:** `site/assets/vendor/inter/` (`inter-latin-wght-normal.woff2`, `LICENSE`)
 
 The documentation site's text face. The file is the unmodified variable
-font, Latin subset, from Fontsource's npm package; `site/layouts/_partials/custom/head-end.html`
+font, Latin subset, from Fontsource's npm package; `site/layouts/_partials/oss/fonts.html`
 declares it.
 
 ## JetBrains Mono
