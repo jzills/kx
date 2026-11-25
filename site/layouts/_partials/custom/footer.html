@@ -9,6 +9,10 @@
       sites carries a copy button wired to that site's own script.
     - the --oss-* properties in custom.css, which map this footer onto the
       site's palette.
+    - _partials/oss/footer-brand.html, optional: a site whose brand is more
+      than a mark and a name draws it there, inside the 2rem brand slot.
+      Without it, the brand is [params.oss] mark, and its name when showname
+      is set.
 
   Top: the project's mark, tagline and install command beside three short
   link columns. Bottom: the z.//s mark and a link to zills.io, the row that
@@ -27,8 +31,12 @@
   <div class="oss-footer__top">
     <div class="oss-footer__about">
       <a class="oss-footer__brand" href="{{ site.Home.RelPermalink }}" aria-label="{{ $oss.name }}">
-        {{- with resources.Get $oss.mark }}{{ .Content | safeHTML }}{{ end -}}
-        {{- if $oss.showname }}<span class="oss-footer__name" aria-hidden="true">{{ $oss.name }}</span>{{ end -}}
+        {{- if templates.Exists "_partials/oss/footer-brand.html" }}
+          {{- partial "oss/footer-brand.html" . -}}
+        {{- else }}
+          {{- with resources.Get $oss.mark }}{{ .Content | safeHTML }}{{ end -}}
+          {{- if $oss.showname }}<span class="oss-footer__name" aria-hidden="true">{{ $oss.name }}</span>{{ end -}}
+        {{- end -}}
       </a>
       <p class="oss-footer__tagline">{{ $oss.tagline }}</p>
       <div class="oss-footer__command">
