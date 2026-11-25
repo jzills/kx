@@ -74,6 +74,45 @@ func TestListingResourceCarriesIndexes(t *testing.T) {
 	}
 }
 
+// A listing made in another context names resources on that cluster, and
+// the same names here may be other resources. kx refuses an index into it,
+// but a row's kind and name copied out of the document would not be, so the
+// document says so in a field of its own. A listing made here is the
+// control: it carries no such field.
+func TestListingResourceFlagsAnotherContext(t *testing.T) {
+	for _, tc := range []struct {
+		listed string
+		want   string
+	}{
+		{"staging", "This listing was made in context 'staging'; the current context is 'test'. " +
+			"Its rows name resources there, and kx refuses their indexes until the user lists again here."},
+		{"test", ""},
+	} {
+		deps := mcpTestDeps(t, &recordingKubectl{})
+		if err := deps.State.Save(state.State{
+			Resources: state.NewOrderedResources([]state.Resource{
+				{Name: "api", Kind: kinds.Pod, Namespace: "default"},
+			}),
+			Namespace: "default",
+			Context:   tc.listed,
+			Query:     &state.Query{Resource: "pods", Args: []string{}},
+		}); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		var document listingDocument
+		text := readResource(t, connectMCP(t, deps), resourceListingURI)
+		if err := json.Unmarshal([]byte(text), &document); err != nil {
+			t.Fatalf("%s: %v\n%s", tc.listed, err, text)
+		}
+		if document.Listing == nil || document.Listing.Context != tc.listed {
+			t.Fatalf("%s: listing = %+v, want one listed in %s", tc.listed, document.Listing, tc.listed)
+		}
+		if document.OtherContext != tc.want {
+			t.Errorf("listed in %s: otherContext = %q, want %q", tc.listed, document.OtherContext, tc.want)
+		}
+	}
+}
+
 // Before any kx get there is no listing, which is an answer rather than an
 // error: a client attaching @kx:kx://listing on a fresh install should see
 // that there is nothing listed, not a failed read.

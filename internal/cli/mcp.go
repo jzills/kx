@@ -222,7 +222,8 @@ const mcpInstructions = "kx reads a Kubernetes cluster through the caller's kube
 	"docs answers questions about kx itself — commands, flags, concepts — from the " +
 	"documentation built into this binary, so look there rather than guessing a flag. " +
 	"The kx://listing resource is the user's current kx listing, so 'the third one' can be " +
-	"read off it; kx://context is where the next call reaches."
+	"read off it; pass that row's index as the target, not its kind and name, so kx can refuse " +
+	"a listing made on another cluster. kx://context is where the next call reaches."
 
 func newMCPServer(deps mcpDeps, version string) *mcp.Server {
 	deps.Version = version

@@ -1689,6 +1689,7 @@ In Claude Code, type `@` and pick one; it lands in your message as `@kx:` follow
 So "what's wrong with 3 in @kx:kx://listing?" works without pasting the table.
 Its indexes are yours, the ones `kx describe 3` resolves, so they are there whether or not the server runs with `--write-listings`.
 Like any index, they are read live: list again before the agent acts and 3 can name a different row, which is why the agent says which resource it resolved before it acts.
+The agent acts on a row by passing its index, not the name it reads, so a listing you made in another context is refused as `kx describe 3` would refuse it, rather than sending the agent to a resource of the same name on the cluster you've since switched to.
 Every resource is read-only, and none reaches the cluster.
 
 ## Running an investigation
