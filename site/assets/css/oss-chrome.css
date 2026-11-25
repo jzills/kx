@@ -56,3 +56,12 @@ html.dark .oss-mode__icon--sun {
 html.dark .oss-mode__icon--moon {
   display: none;
 }
+
+/* The navbar link for the section you're in keeps the others' weight.
+   Hextra sets it in font-medium, which widens the word by a pixel and, since
+   the links are pushed to the right, moves every link to its left: moving
+   between a landing page and a docs page, "Documentation" jumped. Its color,
+   the page's text color against the others' gray, still marks it. */
+.hextra-nav-container nav a.hx\:font-medium {
+  font-weight: 400;
+}
