@@ -82,8 +82,13 @@ func promptResult(description, text string) *mcp.GetPromptResult {
 // start an instruction the user never typed.
 func promptWord(req *mcp.GetPromptRequest, name string) (string, error) {
 	value := strings.TrimSpace(req.Params.Arguments[name])
-	if strings.IndexFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+	if strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return "", fmt.Errorf("The %s argument is one word — %q has spaces in it.", name, value)
+	}
+	// Not a space, but no more welcome: an escape sequence would reach a
+	// terminal that shows the prompt.
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("The %s argument is one word — %q has a control character in it.", name, value)
 	}
 	return value, nil
 }
