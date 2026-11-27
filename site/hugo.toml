@@ -3,7 +3,12 @@
 # A landing page at / and the documentation under /docs/. The docs layout is
 # Hextra's own — adding content/docs/ is what turned on the sidebar, the
 # right-hand table of contents and the search below.
-baseURL = "https://jzills.github.io/kx/"
+# j.zills.io is the custom domain on the owner's user site, which GitHub Pages
+# applies to this project site too; jzills.github.io/kx/ answers with a 301 to
+# it, so it is not the canonical URL. The install script keeps its
+# jzills.github.io address, which curl -L follows and which is printed in
+# READMEs and release notes already out there.
+baseURL = "https://j.zills.io/kx/"
 # The tagline rather than the name, because this is the browser tab's text and
 # the tab already carries the mark as its favicon: "kx" beside a kx logo says
 # the same thing twice, where the tagline says what kx is. Hextra titles the
@@ -78,11 +83,20 @@ disableKinds = ["taxonomy", "term"]
   [params.navbar]
     displayTitle = false
     displayLogo = false
+    width = "normal"
 
   [params.footer]
     enable = true
     displayCopyright = false
     displayPoweredBy = false
+    width = "normal"
+
+  # The page, navbar and footer widths, stated on every project docs site so
+  # their columns line up when you move from one to the next. Hextra's
+  # default is "normal" (80rem); a site left on "wide" drew its footer 10rem
+  # wider than its siblings'.
+  [params.page]
+    width = "normal"
 
   [params.search]
     enable = true
@@ -100,15 +114,22 @@ disableKinds = ["taxonomy", "term"]
       # theme's scripts/search.html; base is only for a different CDN.
       js = "vendor/flexsearch/flexsearch.bundle.min.js"
 
-  # displayToggle is on, but the control it shows is layouts/_partials/
-  # theme-toggle.html: a light/dark button that switches between kx palettes,
-  # not Hextra's own switch, which knows nothing of them. The full palette
-  # list is on the landing page. With nothing stored, the reader's system
-  # setting picks light or dark; "default" is only Hextra's first guess, which
-  # assets/js/kx-theme.js corrects before the page paints.
+  # The light/dark button is the one in the navbar, a menu entry of type
+  # theme-toggle below. It renders layouts/_partials/theme-toggle.html: a
+  # button that switches between kx palettes, not Hextra's own switch, which
+  # knows nothing of them. The full palette list is on the landing page. With
+  # nothing stored, the reader's system setting picks light or dark;
+  # "default" is only Hextra's first guess, which assets/js/kx-theme.js
+  # corrects before the page paints.
+  #
+  # displayToggle is off because it governs a second copy of that button, in
+  # a sticky bar at the foot of the sidebar — on a docs page a lone moon in
+  # an otherwise empty column, under a divider the width of the sidebar,
+  # doing what the one in the navbar overhead already does. The navbar's is
+  # a menu entry and is not affected by this.
   [params.theme]
     default = "dark"
-    displayToggle = true
+    displayToggle = false
 
 # The bar holds a first visitor's top tasks, the same on each of the project
 # sites: Documentation, Quickstart, Releases, Search, GitHub and the
@@ -120,6 +141,63 @@ disableKinds = ["taxonomy", "term"]
 # linked only from the footer. A menu of the landing page's own sections read
 # as a table of contents, and "Themes" left too; its palettes are a scroll
 # away on the landing page, and the bar keeps only a light/dark button.
+# The footer, shared by every project docs site: the markup is
+# layouts/_partials/custom/footer.html. Keys are lowercase, as Hugo stores
+# them. A link is a site `path`, an absolute `url`, or kind = "bug",
+# which opens a new issue with `bug` as its body; the body asks for
+# kx --version's output, because the site can't know which binary the reader
+# runs.
+[params.oss]
+  name = "kx"
+  mark = "kx-mark.svg"
+  showname = false
+  tagline = "kubectl, indexed. Every row of a listing gets a number, and every other command takes it."
+  repo = "https://github.com/jzills/kx"
+  bug = """**What happened**
+
+
+**What you expected**
+
+
+**Steps to reproduce**
+
+```
+kx ...
+```
+
+**Version**
+
+Paste the output of `kx --version`.
+"""
+
+  # Four links per column, labels of 19 characters or fewer, and a tagline
+  # of two lines on every project docs site, so the footers are the same
+  # height wherever a reader is.
+  [[params.oss.columns]]
+    heading = "Get started"
+    links = [
+      { label = "Install", path = "docs/getting-started/install/" },
+      { label = "Quickstart", path = "docs/getting-started/quickstart/" },
+      { label = "Command reference", path = "docs/reference/commands/" },
+      { label = "Configuration", path = "docs/concepts/configuration/" },
+    ]
+  [[params.oss.columns]]
+    heading = "Learn"
+    links = [
+      { label = "Concepts", path = "docs/concepts/" },
+      { label = "Guides", path = "docs/guides/" },
+      { label = "Agents and MCP", path = "docs/guides/use-kx-from-an-agent/" },
+      { label = "Docs for agents", path = "llms.txt" },
+    ]
+  [[params.oss.columns]]
+    heading = "Project"
+    links = [
+      { label = "GitHub", url = "https://github.com/jzills/kx" },
+      { label = "Release notes", path = "releases/" },
+      { label = "Report a bug", kind = "bug" },
+      { label = "MIT license", url = "https://github.com/jzills/kx/blob/main/LICENSE" },
+    ]
+
 [menu]
   [[menu.main]]
     name = "Documentation"

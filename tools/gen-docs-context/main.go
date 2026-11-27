@@ -276,6 +276,7 @@ var (
 // and a screenshot's alt text repeats what the paragraph beside it says.
 var dropped = map[string]bool{
 	"kx-children": true,
+	"kx-listing":  true,
 	"kx-shot":     true,
 	"kx-terminal": true,
 	"kx-themes":   true,

@@ -12,6 +12,7 @@ import (
 	"github.com/jzills/kx/internal/scanner"
 	"github.com/jzills/kx/internal/state"
 	"github.com/jzills/kx/internal/theme"
+	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 )
 
@@ -381,6 +382,27 @@ func TestEllipsize(t *testing.T) {
 		if got := ellipsize(tc.text, tc.n); got != tc.want {
 			t.Errorf("ellipsize(%q, %d) = %q, want %q", tc.text, tc.n, got, tc.want)
 		}
+	}
+}
+
+// In a CJK locale go-runewidth measures the ellipsis, an East Asian
+// ambiguous character, as two columns. A cut that left room for one made
+// the cell a column wider than the width it was cut to, so every row
+// carrying it was wider than the table its count was taken from, and a
+// live redraw left a line behind each time that column wrapped. The
+// default, narrow measure is the control: TestEllipsize above.
+func TestEllipsizeFitsAWideEllipsis(t *testing.T) {
+	previous := runewidth.DefaultCondition
+	t.Cleanup(func() { runewidth.DefaultCondition = previous })
+	runewidth.DefaultCondition = runewidth.NewCondition()
+	runewidth.DefaultCondition.EastAsianWidth = true
+	if width("…") != 2 {
+		t.Fatalf("width of the ellipsis = %d under EastAsianWidth, want 2", width("…"))
+	}
+
+	got := ellipsize("this is far too long", 10)
+	if got != "this is …" || width(got) != 10 {
+		t.Errorf("ellipsize = %q (%d columns), want %q in 10", got, width(got), "this is …")
 	}
 }
 

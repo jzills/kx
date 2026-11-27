@@ -6,23 +6,11 @@
  * without anyone editing it.
  */
 
-/* The site's typefaces, declared in custom/head-end.html. Hextra reads the
-   two --hx-default-* properties for everything it draws, prose and code
-   blocks included, and the kx rules below read --kx-font-mono. The system
-   stacks stay behind each one for a reader whose browser blocks web fonts. */
+/* The typefaces are the ones every project docs site shares: see
+   assets/css/oss-chrome.css and _partials/oss/fonts.html. The kx rules below
+   read --kx-font-mono. */
 :root {
-  --kx-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --kx-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --hx-default-font-family: var(--kx-font-sans);
-  --hx-default-mono-font-family: var(--kx-font-mono);
-}
-
-/* Inter is drawn for screens at text sizes and runs loose at display sizes;
-   a slight negative tracking on headings is what its own specimen sets. */
-h1,
-h2,
-h3 {
-  letter-spacing: -0.02em;
+  --kx-font-mono: var(--oss-font-mono);
 }
 
 html {
@@ -114,8 +102,21 @@ body {
   padding-bottom: 5rem;
 }
 
-.kx-band + * {
-  margin-top: 5rem;
+/* The air between two sections is 7rem, and a band's padding is part of it:
+   given the same margin as an unbanded section, a band sat nearly twice as
+   far from its neighbors as they sit from each other. Its margin is what is
+   left of the 7rem after the padding, on both sides.
+
+   The .kx-home prefix is what carries these past the per-section margins
+   further down the file. Those are as specific as a bare .kx-band and come
+   later, which is why the rule this replaces — .kx-band + *, written for
+   the same purpose — never applied to a single one of them. */
+.kx-home .kx-band {
+  margin-top: 2rem;
+}
+
+.kx-home .kx-band + * {
+  margin-top: 2rem;
 }
 
 html.kx-motion [data-kx-reveal] {
@@ -137,7 +138,7 @@ html.kx-motion [data-kx-reveal].is-revealed {
 
 .kx-home p {
   color: var(--kx-muted);
-  line-height: 1.65;
+  line-height: var(--oss-leading-prose);
 }
 
 .kx-home a:not(.kx-button) {
@@ -187,13 +188,13 @@ html.kx-motion [data-kx-reveal].is-revealed {
 }
 
 .kx-hero__logo svg {
-  height: clamp(3.25rem, 8vw, 4.5rem);
+  height: var(--oss-hero-mark);
   width: auto;
   display: block;
 }
 
 .kx-hero__title {
-  font-size: clamp(2.4rem, 6.5vw, 4rem);
+  font-size: var(--oss-type-hero);
   font-weight: 750;
   line-height: 1.05;
   margin: 0;
@@ -201,7 +202,7 @@ html.kx-motion [data-kx-reveal].is-revealed {
 }
 
 .kx-hero__lede {
-  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  font-size: var(--oss-type-lede);
   max-width: 40rem;
   margin: 1.25rem 0 0;
   text-wrap: pretty;
@@ -220,7 +221,19 @@ html.kx-motion [data-kx-reveal].is-revealed {
   margin: 0.85rem 0 0;
 }
 
-.kx-hero__alt a::after {
+/* The link out of the hero sits on its own line, as every other section's
+   does: those are an element after their paragraph rather than a phrase
+   inside one, and this reads as part of the sentence above it otherwise. */
+.kx-hero__more {
+  display: inline-block;
+  /* The size and the gap a section's link carries further down the page.
+     The paragraph above this one is set smaller than theirs, and the link
+     had been matching that instead of the links it sits in a row with. */
+  margin-top: 1.125rem;
+  font-size: 1rem;
+}
+
+.kx-hero__more::after {
   content: " →";
 }
 
@@ -258,8 +271,8 @@ html.kx-motion [data-kx-reveal].is-revealed {
 
 /* The install command under the buttons, with its copy button. */
 
-/* A command a reader is meant to copy: the hero's, the install panel's and
-   the footer's. An edge tinted with the accent and a soft glow of it set
+/* A command a reader is meant to copy: the hero's and the install panel's.
+   An edge tinted with the accent and a soft glow of it set
    them apart from the inline code around them, which shares their surface
    and border and so, untinted, read as more of the same. color-mix keeps it
    per palette, light ones included. On a white page the glow at the dark
@@ -287,15 +300,16 @@ html.dark {
   box-shadow: var(--kx-command-glow);
 }
 
+/* One line, scrolling sideways on a phone. It wrapped here once, so that none of it would be out of sight; but the wrap
+   broke the URL mid-word and grew the box to three lines, which pushed the
+   hero's buttons under the fold. */
 .kx-command .kx-install__command {
   flex: 1;
   min-width: 0;
   text-align: left;
   font-size: 0.95rem;
-  /* On a phone the command wraps rather than scrolling inside its box,
-     which hid the half that matters. */
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 /* Windows: a terminal capture in a frame, so it reads as the product rather
@@ -329,25 +343,14 @@ html.dark {
   box-shadow: var(--kx-lift), var(--kx-lift-glow);
 }
 
-.kx-window__bar {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid var(--kx-border);
-}
-
-.kx-window__bar span {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 999px;
-  background-color: var(--kx-border);
-}
-
-/* The capture inside a window drops its own frame: the window is the frame. */
+/* The capture inside a window drops its own frame: the window is the frame.
+   The radius is inherited rather than dropped, because the capture is the
+   element that scrolls: clipped square inside a rounded window, its corners
+   showed as a straight edge cutting across the curve. */
 .kx-window .kx-terminal {
   max-width: none;
   border: 0;
-  border-radius: 0;
+  border-radius: inherit;
 }
 
 /* What kx does: six cards, three to a row at desktop width. Each card is
@@ -359,7 +362,10 @@ html.dark {
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 1rem;
   max-width: 66rem;
-  margin: 5rem auto 0;
+  /* 7rem, as between every other pair of sections. The hero's capture above
+     keeps its own 1rem, because it belongs to the hero rather than standing
+     between the two. */
+  margin: 7rem auto 0;
 }
 
 .kx-home a.kx-feature {
@@ -404,14 +410,14 @@ html.dark {
 }
 
 .kx-feature__title {
-  font-size: 1.05rem;
+  font-size: var(--oss-type-card-title);
   font-weight: 600;
   margin: 0;
 }
 
 .kx-feature p {
   margin: 0.6rem 0 0;
-  font-size: 0.93rem;
+  font-size: var(--oss-type-card-body);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -445,7 +451,7 @@ html.dark {
 .kx-showcase h2,
 .kx-split h2,
 .kx-closing h2 {
-  font-size: clamp(1.6rem, 3.2vw, 2.1rem);
+  font-size: var(--oss-type-section);
   font-weight: 700;
   margin: 0;
 }
@@ -511,7 +517,13 @@ html.dark .kx-shot--wide .kx-media {
   padding: 0.75rem;
 }
 
-/* Words beside what they describe; stacked on narrow screens. */
+/* Words beside what they describe; stacked on narrow screens. The words are
+   centered as every other section's are: left-ranged, this was the one green
+   link on the page hanging off a margin of its own. */
+
+.kx-split__text {
+  text-align: center;
+}
 
 .kx-split {
   display: grid;
@@ -523,7 +535,7 @@ html.dark .kx-shot--wide .kx-media {
 }
 
 .kx-split .kx-themes {
-  justify-content: flex-start;
+  justify-content: center;
   margin: 0;
 }
 
@@ -777,17 +789,77 @@ html.dark .kx-shot--wide .kx-media {
   overflow-x: auto;
   font-family: var(--kx-font-mono);
   font-size: 0.88rem;
-  line-height: 1.55;
+  /* A terminal's leading, not a paragraph's. The site's prose setting put
+     half a line of air between rows, which is what a docs page gives a code
+     block — and kx's output is a table, whose columns stop reading as rows
+     at that distance. The same capture in a real terminal is 1.125; this
+     keeps a little more than that, because the page is read further away
+     than a terminal is. */
+  line-height: 1.3;
 }
 
-.kx-terminal pre {
+.kx-terminal pre,
+.content .kx-terminal pre {
   margin: 0;
+  border: 0;
+  border-radius: 0;
   /* Hextra styles pre with vertical padding only, so the capture's first
      line sat flush against the left edge. Inline padding only: the vertical
      is the theme's and is fine. */
   padding-inline: 0.85rem;
   color: var(--kx-body);
   background: none;
+}
+
+/* The row the swap line under the capture spends. Tinted rather than boxed:
+   the capture is a table, and a border inside one reads as a column rule. */
+.kx-row--spent {
+  background-color: color-mix(in srgb, var(--kx-accent) 12%, transparent);
+}
+
+/* The swap: what the listing above is for. The old command is struck
+   through rather than labelled, so the two lines need no heading between
+   them, and the name in it is long on purpose — it is the thing the index
+   replaces. Generated with the capture (tools/gen-site-terminal), which is
+   what keeps that name the one the highlighted row carries. */
+.kx-swap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+  margin: 0 1.15rem 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--kx-border);
+  font-family: var(--kx-font-mono);
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.kx-swap__was {
+  color: var(--kx-muted);
+  text-decoration: line-through;
+  /* The name is the point, so it may scroll rather than wrap: broken across
+     two lines it stops reading as one unwieldy argument. */
+  white-space: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.kx-swap__now {
+  color: var(--kx-body);
+  white-space: nowrap;
+}
+
+.kx-swap__sign {
+  color: var(--kx-accent);
+}
+
+.kx-swap__index {
+  color: var(--kx-accent);
+  font-weight: 700;
+  background-color: color-mix(in srgb, var(--kx-accent) 16%, transparent);
+  border-radius: 0.2rem;
+  padding: 0.05em 0.3em;
 }
 
 .kx-terminal .c-accent { color: var(--kx-accent); }
@@ -797,127 +869,19 @@ html.dark .kx-shot--wide .kx-media {
 .kx-terminal .c-bad    { color: var(--kx-status-bad); }
 
 /* Footer
- * ------------------------------------------------------------------ */
+ * ------------------------------------------------------------------
+ * The footer and the light/dark button are shared by every project docs
+ * site: their styles are assets/css/oss-footer.css and oss-chrome.css. These
+ * map them onto the active palette, so they follow all ten. Every palette
+ * sets its --kx-* properties on <html>, which is :root, so each var() here
+ * resolves under whichever palette is active. */
 
-.kx-footer {
-  padding: 3rem 0 2.5rem;
-  color: var(--kx-muted);
-  font-size: 0.9rem;
-}
-
-.kx-footer a {
-  color: var(--kx-muted);
-  transition: color 0.15s;
-}
-
-.kx-footer a:hover {
-  color: var(--kx-body);
-}
-
-/* The brand column and the links stack on a phone and sit side by side from
-   a tablet up, the links pushed to the right edge. */
-.kx-footer__top {
-  display: flex;
-  flex-direction: column;
-  gap: 2.5rem;
-}
-
-@media (min-width: 900px) {
-  .kx-footer__top {
-    flex-direction: row;
-    justify-content: space-between;
-    gap: 4rem;
-  }
-}
-
-.kx-footer__about {
-  max-width: 31rem;
-}
-
-/* Two classes, to outrank the muted ".kx-footer a" the links take. */
-.kx-footer .kx-footer__mark {
-  display: inline-block;
-  color: var(--kx-accent);
-}
-
-.kx-footer__mark svg {
-  height: 2rem;
-  width: auto;
-}
-
-.kx-footer__tagline {
-  margin-top: 1rem;
-  line-height: 1.6;
-}
-
-.kx-footer__command {
-  margin-top: 1.25rem;
-}
-
-/* One line, scrolling if it must, where the hero's copy wraps: in a column
-   this narrow, wrapping broke the URL mid-word. */
-.kx-footer__command .kx-install__command {
-  font-size: 0.78rem;
-  white-space: nowrap;
-  overflow-x: auto;
-}
-
-.kx-footer__cols {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2rem 1.5rem;
-}
-
-@media (min-width: 640px) {
-  .kx-footer__cols {
-    grid-template-columns: repeat(3, minmax(0, auto));
-    gap: 2rem 4rem;
-  }
-}
-
-.kx-footer__heading {
-  margin-bottom: 0.75rem;
-  color: var(--kx-body);
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.kx-footer__col li + li {
-  margin-top: 0.5rem;
-}
-
-.kx-footer__wordmark {
-  margin-top: 3.5rem;
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  user-select: none;
-}
-
-/* The copyright line and the profiles share a row, pushed to opposite ends,
-   and stack on a phone, where the two don't fit side by side. */
-.kx-footer__bottom {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem 2rem;
-  margin-top: 0.85rem;
-}
-
-.kx-footer__connect {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-}
-
-.kx-footer__connect span {
-  font-weight: 600;
-}
-
-.kx-footer__connect a {
-  display: inline-flex;
+:root {
+  --oss-text: var(--kx-body);
+  --oss-muted: var(--kx-muted);
+  --oss-accent: var(--kx-accent);
+  --oss-border: var(--kx-border);
+  --oss-page: var(--kx-background);
 }
 
 /* Theme picker
@@ -983,38 +947,6 @@ html.dark .kx-shot--wide .kx-media {
   display: block;
 }
 
-/* Light/dark toggle
- * ------------------------------------------------------------------
- * The navbar and sidebar control; see layouts/_partials/theme-toggle.html.
- * It shows what a click switches to: the sun on a dark page, the moon on a
- * light one. */
-
-.kx-mode {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--kx-muted);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.kx-mode:hover {
-  color: var(--kx-accent);
-}
-
-.kx-mode__icon--moon,
-html.dark .kx-mode__icon--sun {
-  display: block;
-}
-
-.kx-mode__icon--sun,
-html.dark .kx-mode__icon--moon {
-  display: none;
-}
-
 /* Hextra chrome
  * ------------------------------------------------------------------
  * The theme derives its accent ramp from the --primary-* properties the
@@ -1050,24 +982,6 @@ html.dark .kx-mode__icon--moon {
   border-color: var(--kx-border);
 }
 
-/* The footer band takes the palette's background, and its top edge is a line
-   of the accent fading out at both ends, which marks the footer as a section
-   of its own rather than more of the page. */
-.hextra-footer {
-  position: relative;
-  background-color: var(--kx-background);
-}
-
-.hextra-footer::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--kx-accent), transparent);
-  opacity: 0.35;
-}
-
-.hextra-search-results {
   background-color: var(--kx-surface);
   border-color: var(--kx-border);
   color: var(--kx-body);
@@ -1190,6 +1104,23 @@ html.dark .kx-mode__icon--moon {
 .hextra-toc {
   color: var(--kx-muted);
   border-color: var(--kx-border);
+}
+
+/* A docs section index has no headings of its own, so the theme's table of
+   contents renders as an empty 16rem column held open to the right of the
+   page. :has() is what asks whether anything was put in it; a browser
+   without :has() matches neither rule and keeps the column, which is what
+   the page does today.
+
+   The reading width is pinned as the column goes, because the content is
+   free to grow into the space otherwise — 64rem of prose is a line too long
+   to read comfortably. At its own width it centers in what is left. */
+.hextra-toc:not(:has(ul)) {
+  display: none;
+}
+
+.hextra-toc:not(:has(ul)) ~ article #content {
+  max-width: 48rem;
 }
 
 /* Section index cards; see layouts/shortcodes/kx-children.html. */

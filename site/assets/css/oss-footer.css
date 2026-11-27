@@ -1,0 +1,231 @@
+/* The footer of every project docs site.
+ *
+ * Shared, byte for byte, by kx, snoop, action-cache and hmac-manager: change
+ * it in one, copy it to all four. Linked from custom/head-end.html rather than
+ * @import-ed from custom.css, which Hextra's Tailwind build would leave as a
+ * literal @import of a URL nothing publishes.
+ *
+ * No colors here. Each site's custom.css maps these onto its own palette:
+ *
+ *   --oss-text     headings, the project name, the z.//s mark
+ *   --oss-muted    body text and links
+ *   --oss-accent   the brand mark, the z.//s dot, the top hairline
+ *   --oss-border   the divider in the z.//s row
+ *   --oss-page     the footer band's background
+ *
+ * and may set --oss-brand-mark-height when the mark sits beside the name
+ * rather than standing alone (default: the whole 2rem slot).
+ */
+
+/* The band takes the page's background, and its top edge is a line of the
+   accent fading out at both ends, which marks it as a section of its own. */
+.hextra-footer {
+  position: relative;
+  background-color: var(--oss-page);
+}
+
+.hextra-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--oss-accent), transparent);
+  opacity: 0.35;
+}
+
+/* The footer's width and side padding are zills.io's (max-w-[1200px] px-5
+   sm:px-7), not this page's: every zills site's footer starts at the same
+   x, so the z.//s row stays put as a reader moves between them. The safe
+   area still wins on a phone with a notch. */
+.oss-footer__frame {
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-left: max(env(safe-area-inset-left), 1.25rem);
+  padding-right: max(env(safe-area-inset-right), 1.25rem);
+}
+
+@media (min-width: 640px) {
+  .oss-footer__frame {
+    padding-left: max(env(safe-area-inset-left), 1.75rem);
+    padding-right: max(env(safe-area-inset-right), 1.75rem);
+  }
+}
+
+.oss-footer {
+  padding: 3rem 0 2.5rem;
+  color: var(--oss-muted);
+  font-size: 0.9rem;
+}
+
+.oss-footer a {
+  color: var(--oss-muted);
+  transition: color 0.15s;
+}
+
+.oss-footer a:hover {
+  color: var(--oss-text);
+}
+
+/* The brand column and the links sit side by side, the links pushed to the
+   right edge, only once both fit at full width: about 1100px of content,
+   which is where the footer's frame stops growing. Below that they stack.
+   Side by side any narrower, the links' columns were squeezed until their
+   labels wrapped or overlapped. */
+.oss-footer__top {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+@media (min-width: 1200px) {
+  .oss-footer__top {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 4rem;
+  }
+}
+
+.oss-footer__about {
+  max-width: 31rem;
+  min-width: 0;
+}
+
+/* The brand is a 2rem slot on every site, whatever the mark's shape, so the
+   tagline under it starts at the same height everywhere. Two classes, to
+   outrank the muted ".oss-footer a". */
+/* A block, not inline: an inline brand sat on a line of text, which added a
+   descender's gap beneath it on some sites and not others. */
+.oss-footer .oss-footer__brand {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.6rem;
+  height: 2rem;
+  color: var(--oss-accent);
+}
+
+.oss-footer__brand svg {
+  display: block;
+  flex: none;
+  height: var(--oss-brand-mark-height, 100%);
+  width: auto;
+}
+
+.oss-footer__name {
+  color: var(--oss-text);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.oss-footer__tagline {
+  margin-top: 1rem;
+  line-height: 1.6;
+}
+
+.oss-footer__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .oss-footer__cols {
+    grid-template-columns: repeat(3, minmax(0, auto));
+    gap: 2rem 4rem;
+  }
+}
+
+/* Line heights are stated, not inherited, for the tagline, headings and
+   links: each site's prose styles set their own, and a few pixels of
+   difference there made the footers different heights. */
+.oss-footer__heading {
+  margin-bottom: 0.75rem;
+  color: var(--oss-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+}
+
+.oss-footer__col li {
+  line-height: 1.5rem;
+}
+
+/* A label never wraps: one that did grew its column by a line, and with it
+   the footer, on some sites at some widths and not others. Labels are kept
+   short enough (about 19 characters) to fit a phone's two columns. */
+.oss-footer__col a {
+  white-space: nowrap;
+}
+
+.oss-footer__col li + li {
+  margin-top: 0.5rem;
+}
+
+/* The row that closes every zills site: the z.//s mark, a hairline, and the
+   way back to zills.io. Sizes follow the zills.io sites' own footer
+   (text-sm mark, 11px mono link) so it reads as the same row there and here. */
+.oss-footer__zills {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-top: 3rem;
+}
+
+/* Inter, as on the zills.io sites. Its lowercase sits low in the line box:
+   at 14px the x-height's middle is about 1.2px below the box's, so centered
+   on the divider the mark read as sitting under it. Lifted 1px, the middle
+   of "z" and "s" meets the middle of the divider. A whole pixel, not an em:
+   every offset in the row is then whole, so the browser rounds it the same
+   way on every site. Measured from screenshots of the row. */
+.oss-footer .oss-zmark {
+  position: relative;
+  top: -1px;
+  font-family: var(--oss-font-sans);
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.25rem;
+  color: var(--oss-text);
+  transition: opacity 0.15s;
+}
+
+.oss-footer .oss-zmark:hover {
+  color: var(--oss-text);
+  opacity: 0.8;
+}
+
+.oss-zmark__dot {
+  display: inline-block;
+  width: 0.17em;
+  height: 0.17em;
+  margin: 0 0.05em;
+  border-radius: 9999px;
+  background-color: var(--oss-accent);
+}
+
+.oss-zmark__slashes {
+  margin-right: 0.08em;
+  font-weight: 700;
+  letter-spacing: -0.12em;
+  opacity: 0.55;
+}
+
+.oss-footer__divider {
+  width: 1px;
+  height: 0.875rem;
+  background-color: var(--oss-border);
+}
+
+/* Lifted 1px for the same reason as the mark: JetBrains Mono's lowercase
+   sits about 0.9px below the middle of its 16px line, so "zills.io" read
+   low against the divider. The line height is stated so the lift is the
+   same on every site. */
+.oss-footer .oss-footer__hub {
+  position: relative;
+  top: -1px;
+  font-family: var(--oss-font-mono);
+  font-size: 11px;
+  line-height: 1rem;
+}

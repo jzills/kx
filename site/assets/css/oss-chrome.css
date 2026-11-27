@@ -1,0 +1,100 @@
+/* The chrome every project docs site shares: the typefaces and the
+ * light/dark button in the navbar.
+ *
+ * Shared, byte for byte, by kx, snoop, action-cache and hmac-manager: change
+ * it in one, copy it to all four. Linked from custom/head-end.html rather
+ * than @import-ed from custom.css, which Hextra's Tailwind build would leave
+ * as a literal @import of a URL nothing publishes.
+ *
+ * Colors come from the --oss-* properties each site's custom.css maps onto
+ * its own palette (see oss-footer.css for the list).
+ */
+
+/* Inter and JetBrains Mono, declared in _partials/oss/fonts.html. Hextra
+   reads the two --hx-default-* properties for everything it draws, prose and
+   code blocks included. The system stacks stay behind each one for a reader
+   whose browser blocks web fonts. */
+:root {
+  --oss-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --oss-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --hx-default-font-family: var(--oss-font-sans);
+  --hx-default-mono-font-family: var(--oss-font-mono);
+}
+
+/* A landing page's backdrops and bands reach the viewport's edges with
+   100vw, which on Windows, with a classic scrollbar, is the page plus the
+   scrollbar: snoop's page scrolled sideways by that much. clip, not hidden:
+   it trims the overhang without making the body a scroll container, which
+   would break the sticky navbar. */
+body {
+  overflow-x: clip;
+}
+
+/* The landing pages' type scale, kx's, shared so the four read as one
+   family: a hero title, the lede under it, section headings, and the
+   titles and text of feature cards. Each site's own classes read these
+   rather than restating the sizes, so they can't drift apart. */
+:root {
+  --oss-type-hero: clamp(2.4rem, 6.5vw, 4rem);
+  --oss-type-lede: clamp(1.05rem, 2vw, 1.2rem);
+  --oss-type-section: clamp(1.6rem, 3.2vw, 2.1rem);
+  --oss-type-card-title: 1.05rem;
+  --oss-type-card-body: 0.93rem;
+  --oss-leading-prose: 1.65;
+  /* The mark above the hero's title: kx's logo, snoop's wordmark, and the
+     pixel wordmarks of action-cache and hmac-manager, all this tall. */
+  --oss-hero-mark: clamp(3.25rem, 8vw, 4.5rem);
+}
+
+/* Inter is drawn for screens at text sizes and runs loose at display sizes;
+   a slight negative tracking on headings is what its own specimen sets. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+
+/* The light/dark button; see layouts/_partials/theme-toggle.html. It shows
+   what a click switches to: the sun on a dark page, the moon on a light one. */
+.oss-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--oss-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+/* Hover and keyboard focus stay neutral, as the navbar's links do. In the
+   accent, the button lit up after a click on one site and not another,
+   since the accents differ so much in strength; Hextra's focus ring is the
+   site's primary color too, so it is replaced here with the same gray. */
+.oss-mode:hover {
+  color: var(--oss-text);
+}
+
+.oss-mode:focus-visible {
+  box-shadow: 0 0 0 2px var(--oss-muted);
+}
+
+.oss-mode__icon--moon,
+html.dark .oss-mode__icon--sun {
+  display: block;
+}
+
+.oss-mode__icon--sun,
+html.dark .oss-mode__icon--moon {
+  display: none;
+}
+
+/* The navbar link for the section you're in keeps the others' weight.
+   Hextra sets it in font-medium, which widens the word by a pixel and, since
+   the links are pushed to the right, moves every link to its left: moving
+   between a landing page and a docs page, "Documentation" jumped. Its color,
+   the page's text color against the others' gray, still marks it. */
+.hextra-nav-container nav a.hx\:font-medium {
+  font-weight: 400;
+}
