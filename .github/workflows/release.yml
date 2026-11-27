@@ -186,11 +186,22 @@ jobs:
       # RELEASE_PAT. The build job's condition stops that run by this
       # message's prefix, so keep the two in step. No [skip ci]: this commit
       # heads the merge-back PR, and [skip ci] would skip its checks.
+      #
+      # A run that failed after this step has already pushed the bump, and
+      # re-running it checks out the commit before the bump, so the same
+      # push is rejected. Retry by pushing a commit to the release branch
+      # instead: that run starts from a pyproject.toml that carries the
+      # version, commits nothing, and goes on to the upload, whose
+      # --skip-existing leaves the wheels already on PyPI alone.
       - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml
+          if git diff --cached --quiet; then
+            echo "pyproject.toml already carries ${{ needs.build.outputs.version }}"
+            exit 0
+          fi
           git commit -m "chore: bump version to ${{ needs.build.outputs.version }}"
           git push origin "${{ github.ref_name }}"
 
