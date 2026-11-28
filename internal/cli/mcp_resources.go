@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jzills/kx/internal/docs"
 	"github.com/jzills/kx/internal/state"
@@ -182,6 +183,9 @@ func (d mcpDeps) listingResource(context.Context, *mcp.ReadResourceRequest) (*mc
 	// The same conversion kx state --json makes, so the two cannot disagree
 	// about a row's namespace or the query's spelling.
 	full := stateJSONOf(entry, 0, 0)
+	if full.Query != nil {
+		full.Query.Args = withoutCredentials(full.Query.Args)
+	}
 	listing := &listingEntryJSON{
 		Context: full.Context, Namespace: full.Namespace, AllNamespaces: full.AllNamespaces,
 		Query: full.Query, ByAgent: full.ByAgent, Resources: full.Resources,
@@ -194,6 +198,38 @@ func (d mcpDeps) listingResource(context.Context, *mcp.ReadResourceRequest) (*mc
 			entry.Context, document.Context)
 	}
 	return jsonResource(resourceListingURI, document)
+}
+
+// credentialFlags are kubectl's flags whose value is a secret rather than a
+// name or a path. kx forwards them and saves them in the query an entry is
+// rerun from, so a listing taken with --token carries the token.
+var credentialFlags = []string{"--token", "--password"}
+
+// redactedValue stands in for a credential flag's value.
+const redactedValue = "REDACTED"
+
+// withoutCredentials is args with every credential flag's value replaced,
+// in either spelling, --token=value or --token value. The listing goes into
+// an agent's context, and from there to its model provider, while the saved
+// query stays as typed so a refresh still reruns it. A copy, so the entry the
+// caller holds is left alone.
+func withoutCredentials(args []string) []string {
+	redacted := append([]string(nil), args...)
+	if args != nil && len(redacted) == 0 {
+		redacted = []string{}
+	}
+	for i := 0; i < len(redacted); i++ {
+		for _, flag := range credentialFlags {
+			switch {
+			case strings.HasPrefix(redacted[i], flag+"="):
+				redacted[i] = flag + "=" + redactedValue
+			case redacted[i] == flag && i+1 < len(redacted):
+				i++
+				redacted[i] = redactedValue
+			}
+		}
+	}
+	return redacted
 }
 
 // docsResource is one documentation page, as the Markdown it was written in

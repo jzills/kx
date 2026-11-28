@@ -56,7 +56,7 @@ In Claude Code, type `@` and pick one; it lands in your message as `@kx:` follow
 
 | Resource | Holds |
 | --- | --- |
-| `kx://listing` | Your current kx listing: the command that made it, its context and namespace, and its rows in order, each with its index. |
+| `kx://listing` | Your current kx listing: the command that made it, its context and namespace, and its rows in order, each with its index. The value of a `--token` or `--password` in that command reads REDACTED. |
 | `kx://context` | The context and namespace the next tool call reaches, and the kx version serving it. |
 | `kx://marks` | Every mark, as `list_marks` returns them. |
 | `kx://docs/…` | One page of these docs per resource, such as `kx://docs/concepts/marks`. |

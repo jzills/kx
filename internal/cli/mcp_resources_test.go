@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -219,5 +220,49 @@ func TestEveryDocsTopicIsAResource(t *testing.T) {
 	text := readResource(t, session, resourceDocsPrefix+page.Slug())
 	if !strings.HasPrefix(text, "# "+page.Title+"\n") || !strings.Contains(text, page.URL) {
 		t.Errorf("%s = %.200q, want the page under its title and its URL", page.Slug(), text)
+	}
+}
+
+// A listing taken with a credential on the command line saves it in the
+// query it is rerun from, and kx://listing goes into an agent's context, so a
+// bearer token typed into kx get reached the model provider. Both spellings
+// are redacted; the other flags, and the saved entry itself, are left as
+// typed, which is the control that the args are there to be read at all.
+func TestListingResourceRedactsCredentials(t *testing.T) {
+	typed := []string{"--token=eyJsecret", "--password", "hunter2", "-l", "app=api", "--username=admin"}
+	deps := mcpTestDeps(t, &recordingKubectl{})
+	if err := deps.State.Save(state.State{
+		Resources: state.NewOrderedResources([]state.Resource{
+			{Name: "api", Kind: kinds.Pod, Namespace: "default"},
+		}),
+		Namespace: "default",
+		Context:   "test",
+		Query:     &state.Query{Resource: "pods", Args: typed},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	text := readResource(t, connectMCP(t, deps), resourceListingURI)
+	var document listingDocument
+	if err := json.Unmarshal([]byte(text), &document); err != nil {
+		t.Fatalf("%v\n%s", err, text)
+	}
+	if document.Listing == nil || document.Listing.Query == nil {
+		t.Fatalf("listing = %+v, want the seeded query", document.Listing)
+	}
+	want := []string{"--token=REDACTED", "--password", "REDACTED", "-l", "app=api", "--username=admin"}
+	if got := document.Listing.Query.Args; !slices.Equal(got, want) {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+	for _, secret := range []string{`eyJsecret`, `"hunter2"`} {
+		if strings.Contains(text, secret) {
+			t.Errorf("resource carries %s:\n%s", secret, text)
+		}
+	}
+	entry, err := deps.State.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !slices.Equal(entry.Query.Args, typed) {
+		t.Errorf("saved args = %q, want them as typed, %q", entry.Query.Args, typed)
 	}
 }
