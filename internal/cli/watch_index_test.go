@@ -560,3 +560,47 @@ func TestWatchTickerStopWaitsForARunningTick(t *testing.T) {
 		t.Fatal("stop never returned after the tick finished")
 	}
 }
+
+// Another cluster's watch is drawn unnumbered, and ran no ticker, so a
+// resize while that cluster was quiet left the old frame rewrapped on screen
+// until the next event. A tick after a resize redraws it; the same tick with
+// no resize is the control, and draws nothing.
+func TestCrossClusterWatchRedrawsOnResize(t *testing.T) {
+	lines := []string{
+		"EVENT    NAME   READY   STATUS    RESTARTS   AGE",
+		"ADDED    api    1/1     Running   0          5d",
+	}
+	for _, resized := range []bool{false, true} {
+		var tick func()
+		previousTicker := watchTicker
+		watchTicker = func(f func()) func() { tick = f; return func() {} }
+		previous := watchResized
+		watchResized = func(render.Frame) bool { return resized }
+		kube := interleavedKubectl{fakeKubectl: &fakeKubectl{namespace: "prod", watchLines: lines}, at: 1}
+		services := switchServices(t, kube)
+		kube.between = func() {
+			if tick == nil {
+				t.Errorf("resized=%v: another cluster's watch started no ticker", resized)
+				return
+			}
+			tick()
+		}
+		services.Kubectl = kube
+		var term terminalBuffer
+		render.SetOutput(&term, &bytes.Buffer{}, "github-dark")
+		err := executeArgv(newGetCommand(services), []string{"pods", "-w", "--context=b"})
+		watchResized, watchTicker = previous, previousTicker
+		if err != nil {
+			t.Fatal(err)
+		}
+		// One frame for the row, one for the tick between it and the end,
+		// and one for the tick a watch ends on.
+		want := 1
+		if resized {
+			want = 3
+		}
+		if frames := framesOf(term.String()); len(frames) != want {
+			t.Errorf("resized=%v: %d frames, want %d:\n%q", resized, len(frames), want, term.String())
+		}
+	}
+}

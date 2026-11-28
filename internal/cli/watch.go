@@ -489,12 +489,13 @@ func (s *watchSession) line(line string) error {
 func (s *watchSession) tick() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.listing == nil || s.headers == nil {
+	if s.headers == nil {
 		return
 	}
-	// Evaluated apart, so a resize cannot skip the save.
-	saved := s.listing.tick(s.numbered, s.rows.Entries())
-	if saved || render.Resized(s.frame) {
+	// Evaluated apart, so a resize cannot skip the save. A watch with no
+	// listing, another cluster's, still ticks for the resize.
+	saved := s.listing != nil && s.listing.tick(s.numbered, s.rows.Entries())
+	if saved || watchResized(s.frame) {
 		_ = s.redraw()
 	}
 }
@@ -544,11 +545,18 @@ func runWatch(services Services, resource string, extra []string, scope, match, 
 	if !render.Redrawing() {
 		render.Caption(watchNote)
 	}
-	switch {
-	case clusterFlagIn(extra) != "":
+	crossCluster := clusterFlagIn(extra) != ""
+	if crossCluster {
 		session.footer = crossClusterWatchNote
-	case render.Redrawing():
-		session.listing = newWatchListing(services, resource, match, sortSpec, scope, extra)
+	}
+	// Every redrawn watch ticks, numbered or not: the tick is also what
+	// redraws a quiet watch for a new terminal size, and another cluster's
+	// watch, redrawn only on its events, kept the old frame rewrapped and
+	// garbled until the next one.
+	if render.Redrawing() {
+		if !crossCluster {
+			session.listing = newWatchListing(services, resource, match, sortSpec, scope, extra)
+		}
 		stop := watchTicker(session.tick)
 		// A watch kubectl ends saves what it numbered since the last tick.
 		// Ctrl-C ends kx with it, so at most a second's new rows go unsaved.
@@ -557,3 +565,7 @@ func runWatch(services Services, resource string, extra []string, scope, match, 
 	}
 	return services.Kubectl.Watch(args, session.line)
 }
+
+// watchResized is render.Resized, a variable so a test can resize a
+// terminal it can't give a size.
+var watchResized = render.Resized
