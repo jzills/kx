@@ -442,13 +442,20 @@ func (r *Renderer) redrawTable(
 	}
 	switch {
 	case previous.Lines == 0:
-	case previous.Width != termWidth || previous.Height != termHeight:
-		// Resized since the last frame. Most terminals rewrap what is on
-		// screen to the new width, so that frame no longer takes the lines
-		// it was counted at: moving up the old count overshot into the
-		// output above the watch and erased it on widening, and fell short
-		// on narrowing. Nothing says where the frame now starts, so the
-		// screen is cleared and the frame drawn from its top.
+	case previous.Width != termWidth:
+		// Made wider or narrower since the last frame. Most terminals
+		// rewrap what is on screen to the new width, so that frame no
+		// longer takes the lines it was counted at: moving up the old count
+		// overshot into the output above the watch and erased it on
+		// widening, and fell short on narrowing. Nothing says where the
+		// frame now starts, so the screen is cleared and the frame drawn
+		// from its top.
+		//
+		// A height change alone rewraps nothing and takes the default
+		// case: the frame is still its count above the cursor. Clearing
+		// from the top there erased the shell output above the watch. On a
+		// terminal made shorter than the frame, the move up stops at the
+		// top line, which is where a clear from the top would start too.
 		fmt.Fprint(r.out, "\x1b[H\x1b[J")
 	default:
 		fmt.Fprintf(r.out, "\x1b[%dA\x1b[J", previous.Lines)
@@ -496,7 +503,9 @@ func (r *Renderer) redrawTable(
 // A frame taller than the terminal can't be cleared: the cursor-up stops at
 // the top of the screen, and every redraw pushed the part above it into
 // scrollback as another copy of the table (#732). The first rows are the ones
-// kept, since they carry the lowest indexes and the sort's head.
+// kept: the head of the sort, and with no --sort the lowest indexes. Under a
+// --sort a hidden row can carry a low index; it stays saved, so the index
+// still resolves, and a taller terminal shows it again.
 //
 // One line is held back from the height: the frame's last line ends in a
 // newline, and on the bottom line of the screen that scrolls the whole frame

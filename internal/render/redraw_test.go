@@ -240,12 +240,15 @@ func TestRedrawTableDrawsRowsThatExactlyFit(t *testing.T) {
 	}
 }
 
-// A terminal resized since the last frame has rewrapped it, so the count it
-// was drawn at no longer says where it starts: moving up that many lines
-// after widening overshot into the output above the watch and erased it.
-// A resize clears the screen and draws from its top instead. The same
-// previous frame at an unchanged size is the control, cleared by its count.
-func TestRedrawTableClearsTheScreenAfterAResize(t *testing.T) {
+// A terminal made wider or narrower since the last frame has rewrapped it,
+// so the count it was drawn at no longer says where it starts: moving up
+// that many lines after widening overshot into the output above the watch
+// and erased it. A width change clears the screen and draws from its top
+// instead. A height change rewraps nothing, so the frame is still its count
+// above the cursor, and clearing from the top erased the shell output above
+// the watch for no reason: it is cleared by its count, as the same frame at
+// an unchanged size is.
+func TestRedrawTableClearsTheScreenAfterAWidthChange(t *testing.T) {
 	previous := Frame{Lines: 43, Width: 80, Height: 50}
 	for _, tc := range []struct {
 		name          string
@@ -255,7 +258,8 @@ func TestRedrawTableClearsTheScreenAfterAResize(t *testing.T) {
 		{"same size", 80, 50, "\x1b[43A\x1b[J"},
 		{"wider", 140, 50, "\x1b[H\x1b[J"},
 		{"narrower", 60, 50, "\x1b[H\x1b[J"},
-		{"shorter", 80, 30, "\x1b[H\x1b[J"},
+		{"shorter", 80, 30, "\x1b[43A\x1b[J"},
+		{"taller", 80, 70, "\x1b[43A\x1b[J"},
 	} {
 		var out bytes.Buffer
 		r := newWithProfile(&out, &out, "github-dark", termenv.Ascii)
