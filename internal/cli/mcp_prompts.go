@@ -122,6 +122,10 @@ func promptTarget(req *mcp.GetPromptRequest) (target string, index bool, err err
 	switch {
 	case word == "":
 		return "", false, errors.New("A target is needed — give kind/name such as deploy/api, a mark such as @api, or an index.")
+	case word == "@":
+		// Refused here, where the user typed it: passed on, the agent's
+		// first call was refused with a sentence about kind/name.
+		return "", false, errors.New("A mark needs a name — give one such as @api.")
 	case strings.HasPrefix(word, "@"):
 		value.Mark = word
 	case strings.Contains(word, "/"):
