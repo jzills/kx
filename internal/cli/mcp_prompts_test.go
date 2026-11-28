@@ -108,6 +108,10 @@ func TestPromptArgumentsAreOneWord(t *testing.T) {
 			`"api" is not a target — give kind/name such as deploy/api, a mark such as @api, or an index.`},
 		{"rollout", map[string]string{"target": "deploy/"},
 			`"deploy/" is not kind/name — give one such as deploy/api.`},
+		// A bare @ passed the prompt, and the agent's first call was refused
+		// with a sentence about kind/name instead.
+		{"explain", map[string]string{"target": "@"},
+			"A mark needs a name — give one such as @api."},
 		{"explain", map[string]string{"target": "0"},
 			`"0" is not a target — give kind/name such as deploy/api, a mark such as @api, or an index.`},
 		{"explain", map[string]string{"target": "@api", "namespace": "prod"},
